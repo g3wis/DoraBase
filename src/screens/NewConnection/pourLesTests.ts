@@ -22,6 +22,7 @@ export const REGLAGES: ConnectionSettings = {
   password: null,
   sslMode: 'prefer',
   caCertificate: null,
+  authDatabase: null,
   readOnly: true,
   reconnectOnStartup: false,
   tunnel: null,

@@ -13,8 +13,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::config::{ConnectionSettings, SslMode};
-use crate::engine::postgres::PostgresAdapter;
-use crate::engine::{EngineAdapter, EngineError};
+use crate::engine::{AnyEngine, EngineError};
 use crate::secrets::Secret;
 
 /// Ce que `A2` affiche après un test réussi.
@@ -50,6 +49,17 @@ pub struct ConnectionTest {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "engine.ts")]
 pub struct ConnectionRequest {
+    /// **Le moteur à interroger, et non celui qu'on suppose.**
+    ///
+    /// Il manquait. `tester` appelait `PostgresAdapter` en dur, donc « Tester la connexion »
+    /// parlait PostgreSQL à un `mongod` : le pilote envoie sa demande de démarrage, le serveur
+    /// documentaire n'y répond rien qu'il sache lire, et **l'appel reste pendu** — le bouton
+    /// affichait « Test en cours… » indéfiniment, ce qui se lit exactement comme un clic sans
+    /// effet. C'est le pire des symptômes possibles : ni verdict, ni échec, ni message.
+    ///
+    /// Le moteur est une propriété du brouillon depuis `05a` — l'écran le fait choisir en
+    /// premier. Il n'y a donc rien à deviner ici, seulement à transmettre.
+    pub engine: crate::config::Engine,
     pub variant: ConnectionSettings,
     pub password: Option<String>,
 }
@@ -86,7 +96,12 @@ pub async fn test_connection(request: ConnectionRequest) -> Result<ConnectionTes
     // Entrée du pont, côté Rust. `host` et `port` seulement : le nom d'utilisateur suffirait
     // à identifier une personne, et un mot de passe n'a jamais sa place dans un journal.
     log::info!(
-        "test_connection ← {}:{} (ssl {:?}, tunnel {})",
+        "test_connection ← {} {}:{} (ssl {:?}, tunnel {})",
+        // **Le moteur d'abord.** Le journal disait l'hôte et le port, jamais le moteur — donc la
+        // trace d'un test pendu contre `localhost:27017` ressemblait trait pour trait à celle
+        // d'un test réussi contre `localhost:5432`, et rien n'y montrait que le mauvais pilote
+        // avait été employé.
+        crate::engine::nom_du_moteur(request.engine),
         request.variant.host,
         request.variant.port,
         request.variant.ssl_mode,
@@ -98,7 +113,7 @@ pub async fn test_connection(request: ConnectionRequest) -> Result<ConnectionTes
     );
 
     let secret = request.password.as_deref().map(Secret::new);
-    let resultat = tester(&request.variant, secret.as_ref()).await;
+    let resultat = tester(request.engine, &request.variant, secret.as_ref()).await;
 
     match &resultat {
         Ok(test) => log::info!(
@@ -119,11 +134,19 @@ pub async fn test_connection(request: ConnectionRequest) -> Result<ConnectionTes
     resultat
 }
 
+/// Ouvre, sonde, referme — **avec l'adaptateur du moteur déclaré**.
+///
+/// `AnyEngine::connect_via` et non `PostgresAdapter::connect` : c'est le même répartiteur que
+/// celui du registre (`09`), donc le test et l'ouverture réelle passent désormais par le même
+/// `match`. Deux voies de connexion — une pour tester, une pour ouvrir — c'est exactement ce
+/// qui a permis à celle-ci de rester en arrière d'un moteur, puis de trois.
 async fn tester(
+    moteur: crate::config::Engine,
     variante: &ConnectionSettings,
     secret: Option<&Secret>,
 ) -> Result<ConnectionTest, EngineError> {
-    let adaptateur = PostgresAdapter::connect(variante, secret).await?;
+    let adaptateur =
+        AnyEngine::connect_via(moteur, variante, secret, &known_hosts_utilisateur()).await?;
     let sonde = adaptateur.probe().await?;
     let tunnel_local_port = adaptateur.port_local_tunnel();
 
@@ -152,6 +175,7 @@ mod tests {
             password: None,
             ssl_mode: SslMode::Prefer,
             ca_certificate: None,
+            auth_database: None,
             read_only: false,
             reconnect_on_startup: false,
             tunnel: None,
@@ -175,6 +199,7 @@ mod tests {
         // Le front envoie du camelCase ; un désaccord de convention ferait échouer l'appel
         // avec une erreur de désérialisation illisible plutôt qu'un champ manquant.
         let json = serde_json::json!({
+            "engine": "postgresql",
             "variant": {
                 "environment": "dev",
                 "host": "db.internal",
@@ -191,6 +216,10 @@ mod tests {
         });
 
         let requete: ConnectionRequest = serde_json::from_value(json).expect("désérialisation");
+        // **Le moteur en premier** : c'est le champ dont l'absence rendait le test de connexion
+        // muet, et un désaccord de nom ou de casse entre les deux côtés du pont le ramènerait
+        // — sous la forme d'une erreur de désérialisation, cette fois, donc visible.
+        assert_eq!(requete.engine, crate::config::Engine::PostgreSql);
         assert_eq!(requete.variant.host, "db.internal");
         assert_eq!(requete.variant.ssl_mode, SslMode::VerifyFull);
         assert_eq!(requete.password.as_deref(), Some("s3cr3t"));
@@ -226,9 +255,13 @@ mod tests {
         // remonte au front.
         v.port = 1;
 
-        let erreur = tester(&v, Some(&Secret::new(sentinelle)))
-            .await
-            .expect_err("un port fermé doit échouer");
+        let erreur = tester(
+            crate::config::Engine::PostgreSql,
+            &v,
+            Some(&Secret::new(sentinelle)),
+        )
+        .await
+        .expect_err("un port fermé doit échouer");
 
         // Contrôle positif : la sentinelle est bien celle qu'on a passée.
         assert_eq!(Secret::new(sentinelle).expose(), sentinelle);
@@ -602,3 +635,6 @@ fn known_hosts_utilisateur() -> std::path::PathBuf {
         .join(".ssh")
         .join("known_hosts")
 }
+
+
+

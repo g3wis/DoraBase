@@ -470,6 +470,7 @@ mod tests_db {
             password: None,
             ssl_mode: SslMode::Disable,
             ca_certificate: None,
+            auth_database: None,
             read_only: false,
             reconnect_on_startup: false,
             tunnel: None,

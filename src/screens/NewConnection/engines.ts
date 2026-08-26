@@ -1,4 +1,5 @@
-import type { Engine } from '../../domain/config'
+import type { Engine, SslMode } from '../../domain/config'
+import { SSL_MODE_ORDER } from './environments'
 
 /**
  * Le sélecteur de moteur de `A2` : libellé, monogramme, couleur.
@@ -100,4 +101,101 @@ export const PORT_PAR_DEFAUT: Record<Engine, string | null> = {
 export function portSuivant(precedent: Engine, portAffiche: string, suivant: Engine): string {
   const saisiALaMain = portAffiche !== '' && portAffiche !== PORT_PAR_DEFAUT[precedent]
   return saisiALaMain ? portAffiche : (PORT_PAR_DEFAUT[suivant] ?? '')
+}
+
+/**
+ * Les modes SSL que **chaque moteur sait réellement exprimer**.
+ *
+ * **Pourquoi cette table existe : il n'y a plus de promotion silencieuse.** Les six modes étaient
+ * offerts pour les sept moteurs, et le code des adaptateurs ne testait que « le chiffrement est-il
+ * demandé ». Conséquence mesurée le 26 août 2026 : un test MongoDB en `prefer` — la valeur *par
+ * défaut* du formulaire — exigeait le TLS, échouait après cinq secondes contre un `mongod` sans
+ * TLS, et rendait « vérifiez l'hôte, le port », qui accuse ce qui va bien. L'écran promettait
+ * « TLS si possible, clair en repli » ; le pilote faisait « TLS obligatoire ».
+ *
+ * Deux réponses étaient possibles, et une seule est honnête : offrir le mode et le trahir, ou ne
+ * pas l'offrir. Un mode absent de la liste se voit ; un mode remplacé en silence ne se voit
+ * jamais.
+ *
+ * **Ce que chaque exclusion coûte**, pour qu'on ne les « corrige » pas :
+ *
+ * - `allow` et `prefer` demandent une **négociation dans le protocole** : le client propose, le
+ *   serveur accepte ou non, et le clair reste possible. Seul PostgreSQL l'a — `tokio-postgres`
+ *   porte un `PgSslMode::Prefer` qui replie vraiment. Les pilotes MongoDB et MySQL ne reçoivent
+ *   qu'un drapeau : TLS ou rien, sans repli. Le mode n'y est donc pas exprimable, pas « pas encore
+ *   branché ».
+ * - `verify-ca` — vérifier la chaîne sans vérifier le nom — n'existe que pour PostgreSQL, seul
+ *   pilote des trois à accepter une `ClientConfig` de `rustls`. Les deux autres refusaient déjà ce
+ *   mode avec leur raison ; le refuser *et* le proposer était l'incohérence restante.
+ * - SQLite n'a aucun transport à chiffrer : sa liste est vide, et le champ disparaît déjà pour un
+ *   moteur de fichier (`estUnFichier`).
+ *
+ * **Typé `Record<Engine, …>` pour la raison d'`ENGINES`** : un huitième moteur en Rust fait échouer
+ * la compilation ici. Et le côté Rust **refuse** un mode qu'il ne sait pas exprimer, au lieu de le
+ * remplacer : une configuration enregistrée par une version antérieure, ou écrite à la main, ne
+ * peut donc pas rétablir la promotion en passant derrière l'écran.
+ */
+export const SSL_MODES_PAR_MOTEUR: Record<Engine, readonly SslMode[]> = {
+  postgresql: SSL_MODE_ORDER,
+  mysql: ['disable', 'require', 'verify-full'],
+  // Aucun transport : la liste est vide, et l'écran ne montre pas le champ.
+  sqlite: [],
+  mongodb: ['disable', 'require', 'verify-full'],
+  // **Les trois moteurs sans adaptateur gardent les six modes.** Ce n'est pas un oubli : rien ne
+  // *sait* encore ce que leurs pilotes expriment, et restreindre au hasard inventerait une limite.
+  // Leur connexion est refusée bien avant le TLS — voir `raison_du_refus` côté Rust.
+  redis: SSL_MODE_ORDER,
+  snowflake: SSL_MODE_ORDER,
+  bigquery: SSL_MODE_ORDER,
+}
+
+/**
+ * Les modes SSL offerts pour ce moteur, **dans l'ordre croissant d'exigence**.
+ *
+ * L'ordre vient de `SSL_MODE_ORDER` et n'est pas recopié dans la table : une seconde liste
+ * ordonnée divergerait au premier mode ajouté, et l'ordre — de « aucun chiffrement » à « identité
+ * vérifiée » — est ce qui rend la liste déroulante lisible.
+ */
+export function modesSslDisponibles(engine: Engine): readonly SslMode[] {
+  const offerts = SSL_MODES_PAR_MOTEUR[engine]
+  return SSL_MODE_ORDER.filter((mode) => offerts.includes(mode))
+}
+
+/**
+ * Le mode à retenir quand on change de moteur : celui en place s'il est offert, sinon le
+ * **plus proche vers le haut**.
+ *
+ * **Vers le haut, jamais vers le bas.** Passer de `prefer` à `require` resserre une exigence et se
+ * *voit* dans la liste déroulante, qui affiche alors `require` — donc rien n'est promu en silence,
+ * c'est le point de tout ce changement. Descendre à `disable` retirerait le chiffrement d'une
+ * connexion pour laquelle on l'avait demandé, et un réglage de sécurité ne doit pas se relâcher
+ * parce qu'on a cliqué sur un autre moteur.
+ *
+ * Le repli final est le mode le plus exigeant offert : pour un moteur sans aucun mode (SQLite), le
+ * mode en place est **gardé tel quel**, puisque le champ n'est pas affiché et que rien ne le lira.
+ */
+export function modeSslPourLeMoteur(engine: Engine, actuel: SslMode): SslMode {
+  const offerts = modesSslDisponibles(engine)
+  if (offerts.length === 0 || offerts.includes(actuel)) return actuel
+
+  const rang = SSL_MODE_ORDER.indexOf(actuel)
+  return offerts.find((mode) => SSL_MODE_ORDER.indexOf(mode) > rang) ?? offerts.at(-1) ?? actuel
+}
+
+/**
+ * Les moteurs dont l'utilisateur peut habiter une **autre base** que celle qu'on ouvre.
+ *
+ * MongoDB seul. Un utilisateur y appartient à une base, et le pilote s'authentifie contre celle-là
+ * — donc l'utilisateur racine d'un conteneur officiel, qui vit dans `admin`, était **injoignable**
+ * dès qu'on voulait ouvrir une autre base. Constaté le 26 août 2026.
+ *
+ * PostgreSQL et MySQL n'ont rien de tel : leurs rôles sont globaux au serveur. Afficher le champ
+ * pour eux ferait chercher à quoi il sert, et la réponse serait « à rien » — c'est la règle des
+ * cinq champs masqués pour un moteur de fichier, prise par l'autre bout.
+ */
+export const ENGINES_A_BASE_D_AUTHENTIFICATION: readonly Engine[] = ['mongodb']
+
+/** Vrai quand ce moteur déclare ses utilisateurs dans une base, et non au niveau du serveur. */
+export function authentifieParBase(engine: Engine): boolean {
+  return ENGINES_A_BASE_D_AUTHENTIFICATION.includes(engine)
 }

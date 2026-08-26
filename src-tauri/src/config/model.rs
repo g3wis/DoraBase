@@ -284,6 +284,25 @@ pub struct ConnectionSettings {
     /// champ, et `None` est exactement l'état correct. Même arbitrage qu'en `12f` et `15a`.
     #[serde(default)]
     pub ca_certificate: Option<String>,
+    /// La base contre laquelle **s'authentifier**, quand elle diffère de celle qu'on ouvre.
+    ///
+    /// **MongoDB seul en a besoin, et c'est une propriété du serveur, pas du produit.** Un
+    /// utilisateur MongoDB appartient à une base, et le pilote s'authentifie contre celle-là. `18b`
+    /// avait tranché « la base déclarée, jamais `admin` » — supposer `admin` ferait échouer tous ceux
+    /// qui sont déclarés dans la leur. La décision tient ; ce qui manquait, c'est le cas inverse :
+    /// l'utilisateur racine que l'image Docker officielle crée (`MONGO_INITDB_ROOT_USERNAME`) vit
+    /// dans `admin` et n'a **aucun** moyen d'être joint, puisque la base qu'on veut ouvrir n'est pas
+    /// celle où il est déclaré. Constaté le 26 août 2026 sur un conteneur `mongo:8` : « SCRAM
+    /// failure: Authentication failed », sans rien à corriger dans le formulaire.
+    ///
+    /// `None` garde le comportement de `18b` — la base déclarée fait foi. Le champ n'est donc pas
+    /// un réglage de plus à comprendre : il ne sert qu'à ceux dont l'utilisateur habite ailleurs.
+    ///
+    /// **`serde(default)` plutôt qu'un cran de migration** : un champ *ajouté* n'en demande pas, et
+    /// `None` est exactement l'état d'une configuration écrite avant. Même arbitrage que
+    /// `ca_certificate` ci-dessus.
+    #[serde(default)]
+    pub auth_database: Option<String>,
     /// Réglage **saisi** dans `A2`. L'état effectif d'une base ouverte compose ce
     /// réglage, la préférence globale de `A10` et l'environnement courant : c'est une
     /// règle, pas une donnée, et elle appartient à l'édition inline.
@@ -696,6 +715,7 @@ mod tests {
             password: None,
             ssl_mode: SslMode::Require,
             ca_certificate: None,
+            auth_database: None,
             read_only: true,
             reconnect_on_startup: false,
             tunnel: None,

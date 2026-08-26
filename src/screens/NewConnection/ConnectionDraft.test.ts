@@ -1,4 +1,5 @@
-import { emptyDraft, emptyProxy, emptyTunnel } from './ConnectionDraft'
+import type { ConnectionSettings, Database, SslMode } from '../../domain/config'
+import { draftDepuisLaVariante, emptyDraft, emptyProxy, emptyTunnel } from './ConnectionDraft'
 
 test('un tunnel neuf est SSH, sur le port 22', () => {
   const tunnel = emptyTunnel('ssh')
@@ -41,4 +42,69 @@ test('les deux sortes de proxy portent exactement leurs champs, et pas ceux de l
     'username',
   ])
   expect(Object.keys(emptyProxy('cloud-sql')).sort()).toEqual(['instanceConnectionName', 'kind'])
+})
+
+// --- Le mode SSL d'une connexion déjà enregistrée ---
+
+/** Une variante enregistrée, dont seul le mode SSL nous intéresse ici. */
+function varianteEnregistree(sslMode: SslMode): ConnectionSettings {
+  return {
+    host: 'localhost',
+    port: 27017,
+    defaultDatabase: 'atelier_ventes',
+    username: 'lecture',
+    password: null,
+    sslMode,
+    caCertificate: null,
+    authDatabase: null,
+    readOnly: false,
+    reconnectOnStartup: false,
+    tunnel: null,
+  }
+}
+
+function baseMongo(sslMode: SslMode): Database {
+  return {
+    name: 'ventes',
+    engine: 'mongodb',
+    environment: 'dev',
+    connection: varianteEnregistree(sslMode),
+    consoles: [],
+  }
+}
+
+test('une connexion MongoDB enregistrée en « prefer » s’ouvre sur « require »', () => {
+  // **Le mode lui était offert jusqu'au 26 août 2026, et son pilote le remplaçait par `require`
+  // sans le dire.** Il ne figure plus dans la liste : sans ce report, la liste déroulante afficherait
+  // un champ **vide** — sa valeur n'étant aucune de ses options —, ce qui est le piège du sélecteur
+  // contrôlé déjà rencontré sur le projet. `require` est ce qui s'appliquait déjà ; l'écran le dit.
+  const draft = draftDepuisLaVariante('atelier', baseMongo('prefer'), varianteEnregistree('prefer'))
+  expect(draft.sslMode).toBe('require')
+})
+
+test('un mode que le moteur exprime est repris tel quel', () => {
+  // Contrôle négatif : sans lui, le report se lirait « toute connexion s’ouvre sur require ».
+  const draft = draftDepuisLaVariante(
+    'atelier',
+    baseMongo('disable'),
+    varianteEnregistree('disable'),
+  )
+  expect(draft.sslMode).toBe('disable')
+})
+
+test('une connexion enregistrée sans base d’authentification garde le champ vide', () => {
+  // **Le préremplissage ne vaut que pour un brouillon neuf.** Écrire `admin` ici changerait le
+  // comportement d'une connexion qui marche, au premier enregistrement — et sans que personne l'ait
+  // demandé.
+  const draft = draftDepuisLaVariante(
+    'atelier',
+    baseMongo('disable'),
+    varianteEnregistree('disable'),
+  )
+  expect(draft.sslMode).toBe('disable')
+  expect(draft.authDatabase).toBe('')
+})
+
+test('un brouillon neuf porte « admin »', () => {
+  expect(emptyDraft().authDatabase).toBe('admin')
 })

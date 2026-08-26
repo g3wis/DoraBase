@@ -1,5 +1,6 @@
 import type { ConnectionRequest } from '../../domain/engine'
 import type { ConnectionDraft } from './ConnectionDraft'
+import { authentifieParBase } from './engines'
 import { tunnelDraftToTunnel } from './tunnelDraftToTunnel'
 
 /**
@@ -20,6 +21,12 @@ export function draftToRequest(draft: ConnectionDraft): ConnectionRequest {
   const port = Number.parseInt(draft.port, 10)
 
   return {
+    // **Le moteur voyage, il n'est plus supposé.** Il manquait, et `test_connection` appelait
+    // l'adaptateur PostgreSQL quel que soit le choix de l'écran : tester une base MongoDB
+    // faisait parler le protocole PostgreSQL à un `mongod`, qui n'y répond rien — l'appel
+    // restait pendu, et « Tester la connexion » n'aboutissait jamais. Un clic sans effet
+    // visible, donc le symptôme le plus difficile à rapporter.
+    engine: draft.engine,
     // **Pas d'environnement ici.** `ConnectionRequest` sert au *test* de connexion (`08d`) : il ne
     // persiste rien, donc il n'a pas besoin de savoir à quel environnement la connexion appartiendra.
     // C'est `SaveDatabaseRequest` qui le porte (`enregistrerLaBase`).
@@ -35,10 +42,28 @@ export function draftToRequest(draft: ConnectionDraft): ConnectionRequest {
       // Le vide devient `null` : « aucune autorité déclarée » se dit par l'absence,
       // et une chaîne vide dans le fichier de configuration se lirait comme un chemin.
       caCertificate: draft.caCertificate.trim() === '' ? null : draft.caCertificate.trim(),
+      authDatabase: baseDAuthentificationAEnvoyer(draft),
       readOnly: draft.readOnly,
       reconnectOnStartup: draft.reconnectOnStartup,
       tunnel: tunnelDraftToTunnel(draft.tunnel),
     },
     password: draft.password === '' ? null : draft.password,
   }
+}
+
+/**
+ * La base d'authentification à envoyer, **selon le moteur**.
+ *
+ * Le brouillon neuf porte `admin` (voir `emptyDraft`), et ce préremplissage n'a de sens que pour
+ * MongoDB : seul moteur dont les utilisateurs habitent une base. Sans ce filtre, chaque connexion
+ * PostgreSQL enregistrerait une base d'authentification `admin` que rien ne lit — du bruit dans le
+ * fichier de configuration, et une affirmation fausse sur la connexion.
+ *
+ * Le vide devient `null` : c'est la convention du certificat d'autorité juste à côté, et un `''`
+ * ferait s'authentifier MongoDB contre une base nommée « », qui n'existe pas.
+ */
+export function baseDAuthentificationAEnvoyer(draft: ConnectionDraft): string | null {
+  if (!authentifieParBase(draft.engine)) return null
+  const saisie = draft.authDatabase.trim()
+  return saisie === '' ? null : saisie
 }

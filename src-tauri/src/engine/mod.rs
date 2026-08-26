@@ -158,9 +158,17 @@ pub enum AnyEngine {
 impl AnyEngine {
     /// Ouvre l'adaptateur que le moteur déclaré désigne.
     ///
-    /// **Le `match` est ce qui rend l'oubli impossible** : déclarer un septième moteur dans `05a`
-    /// fait échouer la compilation ici tant qu'aucun adaptateur ne lui répond. C'est ce que `06a`
-    /// attendait de l'énumération, et `18` est le premier moteur à le vérifier.
+    /// **Le `match` ne rend pas l'oubli impossible, contrairement à ce qui était écrit ici.** La
+    /// phrase valait « déclarer un septième moteur fait échouer la compilation tant qu'aucun
+    /// adaptateur ne lui répond » — vrai d'un `match` exhaustif par énumération de ses bras, faux
+    /// dès qu'un bras attrape le reste. Le refus par défaut, ajouté pour donner un message utile
+    /// aux moteurs non livrés, a **absorbé** SQLite et MySQL : leurs adaptateurs existaient, les
+    /// six autres `match` de ce fichier les répartissaient, et ici ils recevaient « DoraBase ne
+    /// sait pas encore parler à MySQL ». Rien n'a échoué — ni la compilation, ni les tests, qui
+    /// appellent les adaptateurs en direct.
+    ///
+    /// Ce qui garde ce `match` honnête est donc un test, pas le compilateur :
+    /// `chacun_des_moteurs_livres_joint_son_pilote`.
     pub async fn connect_via(
         moteur: crate::config::Engine,
         variante: &crate::config::ConnectionSettings,
@@ -174,6 +182,22 @@ impl AnyEngine {
             )),
             Engine::MongoDb => Ok(Self::MongoDb(
                 mongo::MongoAdapter::connect_via(variante, mot_de_passe, known_hosts).await?,
+            )),
+            // **Ces deux-là étaient tombés dans le refus par omission.** Leurs adaptateurs
+            // existent, leurs variantes d'`AnyEngine` existent, et les six autres `match` de ce
+            // fichier les répartissent — mais celui-ci, le seul qui *construit*, ne les nommait
+            // pas : SQLite et MySQL étaient donc injoignables depuis l'application, avec le
+            // message « DoraBase ne sait pas encore parler à MySQL » d'un moteur non livré.
+            //
+            // Ce que la garantie annoncée plus haut n'attrape pas : le bras `autre` **rend le
+            // `match` exhaustif**, donc ajouter une variante ne fait plus rien échouer ici. C'est
+            // le prix du message de refus, et la raison pour laquelle l'oubli n'a fait aucun
+            // bruit — ni à la compilation, ni aux tests, qui appellent les adaptateurs en direct.
+            Engine::Sqlite => Ok(Self::Sqlite(
+                sqlite::SqliteAdapter::connect_via(variante, mot_de_passe, known_hosts).await?,
+            )),
+            Engine::MySql => Ok(Self::MySql(
+                mysql::MysqlAdapter::connect_via(variante, mot_de_passe, known_hosts).await?,
             )),
             // **Refusé, avec ce qui manque — pas seulement un numéro de spec.** La règle de `09f`
             // appliquée à un moteur : un message qui nomme l'échéance vaut mieux qu'un échec de
@@ -415,21 +439,110 @@ mod tests_refus {
         }
     }
 
-    #[test]
-    fn les_deux_moteurs_livres_ne_passent_pas_par_un_refus() {
-        // Un refus rendu pour PostgreSQL ou MongoDB signifierait que le `match` de `connect_via` a
-        // perdu une branche — panne silencieuse, puisque le message serait plausible.
-        for moteur in [Engine::PostgreSql, Engine::MongoDb] {
-            assert_eq!(
-                spec_du_moteur(moteur),
-                if moteur == Engine::PostgreSql {
-                    "06"
-                } else {
-                    "18"
+    /// **Chacun des quatre moteurs livrés joint son propre pilote.**
+    ///
+    /// Ce test remplace un contrôle qui comparait des numéros de spec : il affirmait que
+    /// PostgreSQL et MongoDB « ne passent pas par un refus » en vérifiant `spec_du_moteur`, une
+    /// fonction que `connect_via` n'appelle pas. Il est resté vert pendant que SQLite et MySQL
+    /// étaient refusés faute de branche, et pendant que le test de connexion parlait PostgreSQL à
+    /// tous les moteurs. Un test qui ne touche pas le sujet ne peut pas tomber avec lui.
+    ///
+    /// Aucun serveur n'est requis : on vise ce qui ne peut pas répondre — un port fermé, un
+    /// chemin de fichier inexistant. Ce qu'on mesure est **la nature de l'échec** : un refus de
+    /// moteur non livré est rendu *sans rien tenter*, alors qu'un pilote joint échoue sur le
+    /// réseau ou sur le fichier. La distinction est exactement celle qui manquait.
+    #[tokio::test]
+    async fn chacun_des_moteurs_livres_joint_son_pilote() {
+        let known_hosts = std::path::Path::new("/inexistant/known_hosts");
+
+        for moteur in [
+            Engine::PostgreSql,
+            Engine::MongoDb,
+            Engine::Sqlite,
+            Engine::MySql,
+        ] {
+            let mut variante = variante_injoignable();
+            if moteur == Engine::Sqlite {
+                // Un moteur de fichier ne se joint pas par un port : sa base *est* le chemin.
+                variante.default_database = "/inexistant/aucune-base.sqlite".into();
+            }
+
+            // `expect_err` demanderait `Debug` sur `AnyEngine`, que les adaptateurs refusent
+            // délibérément (`05c` : un dérivé exposerait la configuration, donc le mot de passe).
+            let erreur = match AnyEngine::connect_via(moteur, &variante, None, known_hosts).await {
+                Ok(adaptateur) => {
+                    adaptateur.close().await;
+                    panic!(
+                        "{} s'est connecté à un port fermé — le décor du test ne mesure rien",
+                        nom_du_moteur(moteur)
+                    );
                 }
+                Err(erreur) => erreur,
+            };
+
+            // Le contrôle : le message de `raison_du_refus` ne doit **pas** apparaître. C'est le
+            // seul message qu'un moteur sans branche puisse produire, et il est reconnaissable.
+            assert!(
+                !erreur.message.contains("ne sait pas encore parler"),
+                "{} a été refusé au lieu d'être joint : {}",
+                nom_du_moteur(moteur),
+                erreur.message
             );
         }
     }
+
+    /// Les trois moteurs sans adaptateur, eux, doivent **toujours** être refusés.
+    ///
+    /// Contrôle négatif du test précédent : sans lui, on pourrait le satisfaire en retirant le
+    /// bras `autre`, ce qui ferait joindre un pilote qui n'existe pas.
+    #[tokio::test]
+    async fn les_moteurs_sans_adaptateur_sont_refuses_sans_rien_tenter() {
+        for moteur in [Engine::Redis, Engine::Snowflake, Engine::BigQuery] {
+            let erreur = match AnyEngine::connect_via(
+                moteur,
+                &variante_injoignable(),
+                None,
+                std::path::Path::new("/inexistant/known_hosts"),
+            )
+            .await
+            {
+                Ok(adaptateur) => {
+                    adaptateur.close().await;
+                    panic!(
+                        "{} n'a pas d'adaptateur et s'est pourtant connecté",
+                        nom_du_moteur(moteur)
+                    );
+                }
+                Err(erreur) => erreur,
+            };
+
+            assert!(
+                erreur.message.contains(nom_du_moteur(moteur)),
+                "le refus doit nommer le moteur : {}",
+                erreur.message
+            );
+        }
+    }
+
+    /// Une variante que rien ne peut joindre : le port 1 est réservé et personne n'y écoute.
+    fn variante_injoignable() -> crate::config::ConnectionSettings {
+        crate::config::ConnectionSettings {
+            host: "127.0.0.1".into(),
+            port: 1,
+            default_database: "atelier_ventes".into(),
+            username: String::new(),
+            password: None,
+            // `disable` : un `prefer` ferait négocier du TLS à des pilotes qui n'ont rien en
+            // face, ce qui allongerait le test sans rien mesurer de plus.
+            ssl_mode: crate::config::SslMode::Disable,
+            ca_certificate: None,
+            auth_database: None,
+            read_only: false,
+            reconnect_on_startup: false,
+            tunnel: None,
+        }
+    }
+
 }
 
 #[cfg(test)]

@@ -38,7 +38,13 @@ function journal(ecrire: (message: string) => Promise<void>, message: string): v
 export async function testerLaConnexion(request: ConnectionRequest): Promise<ConnectionTest> {
   // Ni mot de passe ni nom d'utilisateur ici : l'hôte et le port suffisent à reconnaître
   // l'appel dans la console, et un journal est un fichier comme un autre.
-  journal(debug, `invoke test_connection → ${request.variant.host}:${request.variant.port}`)
+  // Le moteur est dans la ligne : sans lui, la trace d'un test qui emploie le mauvais pilote est
+  // indiscernable de celle d'un test normal — c'est ce qui a laissé passer un `test_connection`
+  // qui parlait PostgreSQL à toutes les bases.
+  journal(
+    debug,
+    `invoke test_connection → ${request.engine} ${request.variant.host}:${request.variant.port}`,
+  )
 
   try {
     const resultat = await invoke<ConnectionTest>('test_connection', { request })

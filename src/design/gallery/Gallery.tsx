@@ -1332,6 +1332,7 @@ const REGLAGES_DE_GALERIE = {
   password: null,
   sslMode: 'prefer' as const,
   caCertificate: null,
+  authDatabase: null,
   readOnly: true,
   reconnectOnStartup: false,
   tunnel: null,

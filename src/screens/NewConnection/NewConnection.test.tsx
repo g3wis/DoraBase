@@ -86,9 +86,70 @@ test('choisir un moteur sans adaptateur le dit, au lieu de le masquer', async ()
 // `Record<T, …>`, donc ajouter une variante en Rust fait échouer `tsc` jusqu'à ce qu'elle soit
 // traitée. Vérifié par sabotage (ajout d'un `SslMode` en Rust → erreur TS2741). Ces tests
 // vérifient le complément que le type ne dit pas : que l'écran rend bien *toutes* les options.
-test('les six modes SSL du modèle sont proposés', async () => {
+test('les six modes SSL du modèle sont proposés — pour PostgreSQL', async () => {
   monter()
+  // **PostgreSQL est le seul à les avoir tous.** Le test disait « les six modes du modèle sont
+  // proposés » sans nommer de moteur, ce qui était vrai de l'écran et faux du produit : deux
+  // pilotes n'en savent exprimer que trois, et les six leur étaient offerts quand même.
   expect(await optionsDeLaListe('Mode SSL')).toEqual([...SSL_MODE_ORDER])
+})
+
+// --- La base d'authentification, pour MongoDB seul ---
+
+// **Le cas qui n'avait aucune issue.** Un utilisateur MongoDB appartient à une base, et le pilote
+// s'authentifie contre celle-là : l'utilisateur racine d'un conteneur officiel, qui vit dans
+// `admin`, était injoignable dès qu'on voulait ouvrir une autre base — « authentification
+// refusée » sur un formulaire où rien n'était faux. Constaté le 26 août 2026.
+test('le champ « base d’authentification » n’apparaît que pour MongoDB', async () => {
+  monter()
+  // PostgreSQL déclare ses rôles au niveau du serveur : le champ n'aurait rien à régler, et
+  // l'afficher ferait chercher à quoi il sert.
+  expect(screen.queryByLabelText('Base d’authentification')).toBeNull()
+
+  await choisirLeMoteur('MongoDB')
+  expect(screen.getByLabelText('Base d’authentification')).toBeInTheDocument()
+
+  await choisirLeMoteur('MySQL')
+  expect(screen.queryByLabelText('Base d’authentification')).toBeNull()
+})
+
+// --- Les modes SSL sont ceux du moteur, et rien de plus ---
+
+// **Le défaut retiré ici.** Les six modes étaient offerts aux sept moteurs, et les adaptateurs ne
+// testaient que « le chiffrement est-il demandé » : `prefer` — la valeur *par défaut* du formulaire
+// — devenait `require` pour MongoDB et MySQL. Contre un serveur sans TLS, la connexion échouait
+// après cinq secondes en accusant l'hôte et le port, qui allaient bien. Un mode offert puis trahi
+// est pire qu'un mode absent : l'absence se voit.
+test.each([
+  ['MongoDB', ['disable', 'require', 'verify-full']],
+  ['MySQL', ['disable', 'require', 'verify-full']],
+])('%s ne propose que les modes SSL que son pilote exprime', async (moteur, attendus) => {
+  monter()
+  await choisirLeMoteur(moteur)
+  expect(await optionsDeLaListe('Mode SSL')).toEqual(attendus)
+})
+
+test('changer de moteur emmène le mode SSL vers le plus proche **offert**', async () => {
+  monter()
+  // Le brouillon part sur `prefer`, que MongoDB n'exprime pas.
+  expect(screen.getByRole('combobox', { name: 'Mode SSL' })).toHaveTextContent('prefer')
+
+  await choisirLeMoteur('MongoDB')
+
+  // **`require` et non `disable`** : on resserre, on ne relâche pas. Descendre retirerait le
+  // chiffrement d'une connexion pour laquelle il avait été demandé, sur un simple clic de moteur.
+  // Et surtout la liste **l'affiche** — c'est ce qui distingue ce report d'une promotion en
+  // silence, qui est exactement ce que le pilote faisait avant.
+  expect(screen.getByRole('combobox', { name: 'Mode SSL' })).toHaveTextContent('require')
+})
+
+test('un mode que le nouveau moteur exprime est **gardé**', async () => {
+  monter()
+  await choisirDansLaListe('Mode SSL', 'disable')
+  await choisirLeMoteur('MongoDB')
+  // Sans cette garde, le report se lirait « changer de moteur remet le mode SSL à sa valeur la
+  // plus stricte », ce qui écraserait un choix explicite.
+  expect(screen.getByRole('combobox', { name: 'Mode SSL' })).toHaveTextContent('disable')
 })
 
 test('sans aucun projet, aucun environnement n’est proposé', () => {
@@ -159,6 +220,19 @@ test('choisir un moteur amène son port', async () => {
   expect(screen.getByLabelText('Port')).toHaveValue('3306')
   await userEvent.click(screen.getByRole('radio', { name: 'MongoDB' }))
   expect(screen.getByLabelText('Port')).toHaveValue('27017')
+})
+
+test('un seul clic de moteur emmène le port **et** le mode SSL', async () => {
+  // **L'interaction que la fusion de deux correctifs a créée.** Le port suivant et le mode SSL
+  // suivant sont arrivés par deux chantiers séparés, chacun avec sa fonction et ses tests — et
+  // chacun ne mesurait que son champ. Or les deux vivent dans la même transition d'état : un
+  // `setDraft` qui en oublierait un laisserait l'autre juste, donc les deux suites vertes.
+  //
+  // Ce test tient ce que ni l'un ni l'autre ne tient : les deux effets du même clic.
+  monter([{ id: 'print', name: 'Atelier Nord', environments: TRIO_DE_TEST }])
+  await userEvent.click(screen.getByRole('radio', { name: 'MongoDB' }))
+  expect(screen.getByLabelText('Port')).toHaveValue('27017')
+  expect(screen.getByRole('combobox', { name: 'Mode SSL' })).toHaveTextContent('require')
 })
 
 test('un port saisi à la main n’est pas emporté par le moteur', async () => {

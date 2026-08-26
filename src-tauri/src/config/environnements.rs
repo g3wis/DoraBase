@@ -403,6 +403,7 @@ mod tests {
                 password: secret.map(SecretRef::new),
                 ssl_mode: SslMode::Prefer,
                 ca_certificate: None,
+                auth_database: None,
                 read_only: true,
                 reconnect_on_startup: false,
                 tunnel: None,

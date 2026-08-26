@@ -5,7 +5,7 @@ use std::time::Duration;
 use mysql_async::{Opts, OptsBuilder, Pool, SslOpts};
 
 use crate::config::ConnectionSettings;
-use crate::engine::tls::Exigences;
+use crate::engine::tls::{Chiffrement, Exigences};
 use crate::engine::EngineError;
 use crate::secrets::Secret;
 
@@ -63,6 +63,30 @@ pub fn preparer(
     // CA et des drapeaux, et c'est précisément ce qui a décidé du choix de `rustls` — voir `06f`. Les
     // exigences sont donc traduites en drapeaux, un par un.
     let exigences = Exigences::de(variante.ssl_mode);
+    // **`allow` et `prefer` ne sont pas exprimables ici, et le refus remplace une promotion
+    // silencieuse.** Ces deux modes veulent dire « TLS si le serveur l'offre, clair en repli » —
+    // une négociation *dans le protocole*, que seul PostgreSQL a (`PgSslMode::Prefer`, qui replie
+    // vraiment). `mysql_async` ne reçoit qu'un `SslOpts` : TLS ou rien — le serveur qui n'annonce
+    // pas `CLIENT_SSL` fait échouer la connexion, il ne la laisse pas passer en clair. Le code ne
+    // testait que `chiffre()`, donc les deux modes devenaient `require` sans que personne le
+    // sache. **Le symptôme n'a été mesuré que pour MongoDB** (le 26 août 2026 : cinq secondes
+    // d'attente puis « vérifiez l'hôte, le port », qui accuse ce qui va bien) ; ici le pilote est
+    // seulement lu, pas observé contre un serveur sans TLS. Ce qui est certain est la substitution,
+    // qui se lit dans le code ; ce qui reste à voir est le message qu'elle produit.
+    //
+    // C'est le même refus que pour `verify-ca` juste en dessous, pour la même raison : un réglage
+    // remplacé en silence fait croire à un comportement qui n'a pas lieu. L'écran n'offre plus ces
+    // deux modes pour ce moteur (`SSL_MODES_PAR_MOTEUR`) ; ce refus est ce qui tient quand la
+    // configuration ne vient **pas** de l'écran — un fichier écrit à la main, ou enregistré par une
+    // version antérieure.
+    if matches!(exigences.chiffrement, Chiffrement::SiPossible) {
+        return Err(EngineError::local(
+            "le pilote MySQL ne sait pas négocier le TLS : « allow » et « prefer » — chiffrer si \
+             le serveur l'offre, en clair sinon — n'y sont pas disponibles. Employez « disable » \
+             pour une connexion en clair, ou « require » pour exiger le chiffrement",
+        ));
+    }
+
     if exigences.chiffre() {
         let mut ssl = SslOpts::default();
         if let Some(ca) = variante.ca_certificate.as_deref() {
@@ -158,8 +182,14 @@ mod tests {
             default_database: "dorabase_test".into(),
             username: "dorabase".into(),
             password: None,
-            ssl_mode: SslMode::Prefer,
+            // **`disable`, et non `prefer`.** Ces variantes servent à mesurer l'hôte, le port et
+            // les identifiants, pas le TLS — et `prefer` n'est plus exprimable par ce pilote, donc
+            // le décor refusait avant d'avoir rien préparé. Que le fixture ait porté `prefer` est
+            // ce qui montrait la promotion silencieuse : le mode ne changeait rien, donc rien ne
+            // disait qu'il n'était pas honoré.
+            ssl_mode: SslMode::Disable,
             ca_certificate: None,
+            auth_database: None,
             read_only: false,
             reconnect_on_startup: false,
             tunnel: None,
@@ -187,6 +217,40 @@ mod tests {
         assert_eq!(options.ip_or_hostname(), "localhost");
         assert_eq!(options.tcp_port(), 3306);
         assert_eq!(options.db_name(), Some("dorabase_test"));
+    }
+
+    /// **`allow` et `prefer` sont refusés, non promus.**
+    ///
+    /// Le contrôle qui manquait : le pilote ne sait pas négocier le TLS, et le code se contentait
+    /// de `chiffre()` — donc les deux modes devenaient `require` sans rien dire. Aucun test ne
+    /// pouvait tomber, puisque rien n'observait le mode : les préparations réussissaient et les
+    /// tests sur base réelle employaient `disable`.
+    ///
+    /// Le message doit **nommer les deux voies** : sans elles, un utilisateur lit « pas
+    /// disponible » et n'a aucun geste à faire.
+    #[test]
+    fn allow_et_prefer_sont_refuses_avec_la_manoeuvre() {
+        for mode in [SslMode::Allow, SslMode::Prefer] {
+            let mut v = variante();
+            v.ssl_mode = mode;
+            let erreur = preparer(&v, None, None).expect_err("ce mode n'est pas exprimable");
+            assert!(erreur.message.contains("négocier le TLS"), "{}", erreur.message);
+            assert!(erreur.message.contains("disable"), "{}", erreur.message);
+            assert!(erreur.message.contains("require"), "{}", erreur.message);
+        }
+    }
+
+    /// Contrôle négatif du précédent : les trois modes que ce pilote **sait** exprimer passent.
+    ///
+    /// Sans lui, on satisfait le test ci-dessus en refusant tout mode chiffré, ce qui serait une
+    /// régression bien pire que la promotion qu'on retire.
+    #[test]
+    fn les_trois_modes_offerts_se_preparent() {
+        for mode in [SslMode::Disable, SslMode::Require, SslMode::VerifyFull] {
+            let mut v = variante();
+            v.ssl_mode = mode;
+            preparer(&v, None, None).unwrap_or_else(|e| panic!("{mode:?} doit passer : {e}"));
+        }
     }
 
     #[test]

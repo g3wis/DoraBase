@@ -46,6 +46,7 @@ function base(nom: string, environnement: EnvironmentId): Project['databases'][n
       password: null,
       sslMode: 'prefer',
       caCertificate: null,
+      authDatabase: null,
       readOnly: true,
       reconnectOnStartup: false,
       tunnel: null,

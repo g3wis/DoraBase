@@ -80,6 +80,106 @@ test('un mode SSL sans vérification n’affiche pas la mention', async () => {
   expect(screen.queryByText(/TLS non vérifié/)).not.toBeInTheDocument()
 })
 
+// --- Le moteur, qui doit voyager avec la requête ---
+
+// **Le défaut que ce test attrape.** La requête ne portait pas le moteur, et la commande Rust
+// appelait l'adaptateur PostgreSQL en dur : tester une base MongoDB faisait parler le protocole
+// PostgreSQL à un `mongod`, qui ne répond rien qu'un pilote PostgreSQL sache lire — l'appel restait
+// **pendu**, sans verdict ni message. Vu de l'écran, un clic sans effet.
+//
+// Ce qui a manqué n'est pas un test de plus sur le résultat, mais un test sur **ce qui part**.
+// Chacun des quatre moteurs livrés est vérifié, et non le seul MongoDB : le défaut n'était pas
+// propre à un moteur, il était propre au champ absent.
+test.each([
+  ['MongoDB', 'mongodb'],
+  ['MySQL', 'mysql'],
+  ['SQLite', 'sqlite'],
+  ['PostgreSQL', 'postgresql'],
+])('le moteur choisi (%s) part dans la requête de test', async (libelle, attendu) => {
+  const requetes: ConnectionRequest[] = []
+  monter(async (request) => {
+    requetes.push(request)
+    return REUSSI
+  })
+
+  // Le sélecteur de moteur est un groupe de boutons radio : on le choisit comme l'utilisateur.
+  await userEvent.click(screen.getByRole('radio', { name: new RegExp(`^${libelle}$`) }))
+  await tester()
+
+  await waitFor(() => expect(requetes).toHaveLength(1))
+  expect(requetes[0]?.engine).toBe(attendu)
+})
+
+// **La base d'authentification voyage, et le vide se dit par l'absence.** Un `''` traversant l'IPC
+// ferait s'authentifier MongoDB contre une base nommée « », qui n'existe pas — donc un échec dont le
+// message n'apprendrait rien.
+test('un brouillon neuf part sur « admin » pour MongoDB', async () => {
+  const requetes: ConnectionRequest[] = []
+  monter(async (request) => {
+    requetes.push(request)
+    return REUSSI
+  })
+
+  await userEvent.click(screen.getByRole('radio', { name: /^MongoDB$/ }))
+  // **Préremplie, et non devinée** : la valeur est dans le champ, donc visible et effaçable. C'est
+  // ce qui la distingue du défaut `admin` que `18b` avait refusé côté moteur.
+  expect(screen.getByLabelText('Base d’authentification')).toHaveValue('admin')
+
+  await tester()
+  await waitFor(() => expect(requetes).toHaveLength(1))
+  expect(requetes[0]?.variant.authDatabase).toBe('admin')
+})
+
+test('le champ vidé rend la main à la base déclarée', async () => {
+  const requetes: ConnectionRequest[] = []
+  monter(async (request) => {
+    requetes.push(request)
+    return REUSSI
+  })
+
+  await userEvent.click(screen.getByRole('radio', { name: /^MongoDB$/ }))
+  await userEvent.clear(screen.getByLabelText('Base d’authentification'))
+  await tester()
+
+  // `null` et non `''` : c'est ce qui fait retomber le moteur sur la décision de `18b`, au lieu de
+  // s'authentifier contre une base nommée « », qui n'existe pas.
+  await waitFor(() => expect(requetes).toHaveLength(1))
+  expect(requetes[0]?.variant.authDatabase).toBeNull()
+})
+
+test('un espace de trop dans le nom est élagué', async () => {
+  const requetes: ConnectionRequest[] = []
+  monter(async (request) => {
+    requetes.push(request)
+    return REUSSI
+  })
+
+  await userEvent.click(screen.getByRole('radio', { name: /^MongoDB$/ }))
+  await userEvent.clear(screen.getByLabelText('Base d’authentification'))
+  await userEvent.type(screen.getByLabelText('Base d’authentification'), '  comptes  ')
+  await tester()
+
+  // Un espace de bord dans un nom de base est une faute de frappe, pas une intention.
+  await waitFor(() => expect(requetes).toHaveLength(1))
+  expect(requetes[0]?.variant.authDatabase).toBe('comptes')
+})
+
+test('un moteur qui authentifie au niveau du serveur n’envoie aucune base d’authentification', async () => {
+  const requetes: ConnectionRequest[] = []
+  monter(async (request) => {
+    requetes.push(request)
+    return REUSSI
+  })
+
+  // **Le brouillon porte `admin` quel que soit le moteur** — c'est un seul état, et le champ
+  // n'apparaît que pour MongoDB. Sans ce filtre, chaque connexion PostgreSQL enregistrerait une
+  // base d'authentification que rien ne lit : du bruit dans le fichier, et une affirmation fausse.
+  await tester()
+  await waitFor(() => expect(requetes).toHaveLength(1))
+  expect(requetes[0]?.engine).toBe('postgresql')
+  expect(requetes[0]?.variant.authDatabase).toBeNull()
+})
+
 // --- Attente ---
 
 test('pendant le test, le bouton le dit et ne se reclique pas', async () => {

@@ -12,6 +12,7 @@ import type {
   UpdateVariantRequest,
 } from '../../domain/config'
 import type { ConnectionDraft } from './ConnectionDraft'
+import { baseDAuthentificationAEnvoyer } from './draftToRequest'
 import { tunnelDraftToTunnel } from './tunnelDraftToTunnel'
 
 /**
@@ -125,6 +126,7 @@ export function draftToSaveRequest(draft: ConnectionDraft): SaveDatabaseRequest 
       // Le vide devient `null` : « aucune autorité déclarée » se dit par l'absence,
       // et une chaîne vide dans le fichier de configuration se lirait comme un chemin.
       caCertificate: draft.caCertificate.trim() === '' ? null : draft.caCertificate.trim(),
+      authDatabase: baseDAuthentificationAEnvoyer(draft),
       readOnly: draft.readOnly,
       reconnectOnStartup: draft.reconnectOnStartup,
       tunnel: tunnelDraftToTunnel(draft.tunnel),

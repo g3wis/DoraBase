@@ -24,7 +24,7 @@ import { ConnectionFailure } from './ConnectionFailure'
 import { ConnectionForm } from './ConnectionForm'
 import { draftToRequest } from './draftToRequest'
 import { EngineSelector } from './EngineSelector'
-import { ENGINES, IMPLEMENTED_ENGINES, portSuivant } from './engines'
+import { ENGINES, IMPLEMENTED_ENGINES, modeSslPourLeMoteur, portSuivant } from './engines'
 import {
   draftToSaveRequest,
   draftToUpdateRequest,
@@ -227,20 +227,29 @@ export function NewConnection({
    * déclarant un proxy qu'on n'a pas ouvert.
    */
   /**
-   * Changer de moteur emmène le port avec lui.
+   * Changer de moteur emmène le port **et le mode SSL** avec lui.
    *
    * **Le port par défaut appartient au moteur, pas au formulaire** : `5432` devant une connexion
    * MySQL échoue à l'ouverture sans dire pourquoi, et le champ est le dernier endroit où l'on
    * regarderait. `portSuivant` tranche le seul cas ambigu — un port saisi à la main reste.
    *
-   * **`setDraft` et non `patch` en deux appels** : le port suivant se calcule sur le moteur
-   * *précédent*, donc les deux champs doivent changer dans la même transition d'état.
+   * **Le mode SSL suit pour une raison différente, et c'est ce qui justifie une seule fonction pour
+   * les deux.** Les moteurs n'expriment pas les mêmes modes — `allow` et `prefer` demandent une
+   * négociation que seul PostgreSQL a dans son protocole. Laisser le brouillon sur `prefer` en
+   * passant à MongoDB donnerait une liste déroulante dont la valeur n'est aucune de ses options : le
+   * piège du sélecteur contrôlé, déjà rencontré sur le projet. `modeSslPourLeMoteur` remonte au mode
+   * offert le plus proche **vers le haut**, donc la liste affiche ce qui s'appliquera — le contraire
+   * de la promotion silencieuse qu'on retire.
+   *
+   * **Deux transitions séparées seraient un défaut**, pas une maladresse : le port suivant se calcule
+   * sur le moteur *précédent*, donc `setDraft` une seule fois, et non `patch` deux fois.
    */
   function changerMoteur(engine: Engine) {
     setDraft((precedent) => ({
       ...precedent,
       engine,
       port: portSuivant(precedent.engine, precedent.port, engine),
+      sslMode: modeSslPourLeMoteur(engine, precedent.sslMode),
     }))
   }
 

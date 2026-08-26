@@ -39,6 +39,7 @@ mod tests {
             password: None,
             ssl_mode: SslMode::Require,
             ca_certificate: None,
+            auth_database: None,
             read_only: true,
             reconnect_on_startup: false,
             tunnel: None,

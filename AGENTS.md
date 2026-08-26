@@ -258,6 +258,58 @@ d'écran et deux chemins à tester. Piège associé : `tokio-postgres` échoue *
 l'application configure donc une chaîne **vide**, comme `psql` où l'on valide l'invite
 sans rien saisir ; un secret enregistré gagne toujours.
 
+**Un mode SSL qu'un pilote ne sait pas exprimer n'est pas offert — et il est refusé s'il arrive
+quand même.** Les six modes étaient proposés pour les sept moteurs, et les adaptateurs ne
+testaient que « le chiffrement est-il demandé » : `allow` et `prefer` — « TLS si le serveur
+l'offre, clair en repli » — devenaient donc `require` pour MongoDB et MySQL, sans que rien le
+dise. Or `prefer` est la valeur **par défaut** du formulaire : contre un `mongod` local sans TLS,
+le test échouait après cinq secondes sur « vérifiez l'hôte, le port », qui accuse ce qui va bien
+(mesuré le 26 août 2026). La négociation est une propriété du **protocole**, et seul PostgreSQL
+l'a — `tokio-postgres` porte un `PgSslMode::Prefer` qui replie vraiment ; les deux autres pilotes
+ne reçoivent qu'un drapeau. Deux conséquences à ne pas défaire :
+
+- la liste déroulante est **par moteur** (`SSL_MODES_PAR_MOTEUR`) : PostgreSQL a les six,
+  MongoDB et MySQL en ont trois (`disable`, `require`, `verify-full`), SQLite aucun. Un mode
+  absent se voit ; un mode remplacé en silence ne se voit jamais ;
+- changer de moteur reporte le mode en place vers le plus proche **offert, vers le haut** —
+  `prefer` devient `require`, jamais `disable`. Ce n'est pas une promotion silencieuse pour la
+  seule raison qui compte : la liste **affiche** le nouveau mode. Descendre relâcherait un
+  réglage de sécurité sur un clic de moteur.
+
+Et le refus côté Rust est ce qui tient quand la configuration ne vient pas de l'écran — un
+fichier écrit à la main, ou enregistré par une version antérieure. **L'écran qui cache et le
+moteur qui refuse ne sont pas une redondance** : ils gardent deux chemins différents.
+
+**MongoDB s'authentifie contre la base déclarée, et un champ existe pour dire laquelle.** La
+décision d'origine — « la base déclarée, jamais `admin` » — était juste et le reste : un
+utilisateur MongoDB appartient à une base, et supposer `admin` ferait échouer tous ceux qui sont
+déclarés dans la leur. Ce qui manquait était le **cas inverse, sans issue** : l'utilisateur racine
+que l'image Docker officielle crée (`MONGO_INITDB_ROOT_USERNAME`) vit dans `admin`, donc vouloir
+ouvrir une autre base le rendait injoignable — « SCRAM failure: Authentication failed » sur un
+formulaire où rien n'était faux. Mesuré le 26 août 2026 contre un `mongo:8`.
+
+`auth_database` est donc `Option<String>`, `#[serde(default)]` — un champ **ajouté** ne demande pas
+de cran de migration —, et vide il ne change rien. Trois points à ne pas défaire :
+
+- **le champ n'apparaît que pour MongoDB** (`ENGINES_A_BASE_D_AUTHENTIFICATION`) : PostgreSQL et
+  MySQL déclarent leurs rôles au niveau du serveur, donc il n'y aurait rien à régler, et
+  l'afficher ferait chercher à quoi il sert ;
+- **une valeur vide ou blanche vaut absente**, côté Rust comme côté écran. L'écran envoie `null`,
+  mais un fichier écrit à la main peut porter `""` — et `.source("")` échouerait sur une base qui
+  n'existe pas, avec le message le moins utile possible ;
+- le défaut reste la base déclarée, donc **rien ne bouge** pour les configurations existantes.
+
+**Et le champ est préremplié à `admin` sur un brouillon neuf** (26 août 2026, à la demande, après
+essai). Le critère du projet pour préremplir est « vrai pour la quasi-totalité des cas » — celui du
+port 22 d'un bastion —, et un utilisateur MongoDB vit dans `admin` presque toujours. **Ce n'est pas
+le défaut que `18b` avait refusé** : la valeur est *dans le champ*, donc visible et effaçable, et
+c'est toute la différence. Vidé, le comportement de `18b` revient. Deux garde-fous à ne pas perdre :
+le préremplissage ne vaut que pour un brouillon **neuf** — reprendre une connexion enregistrée sans
+base d'authentification laisse le champ vide, sinon le premier enregistrement changerait une
+connexion qui marche —, et ce que l'écran **envoie** est filtré par moteur
+(`baseDAuthentificationAEnvoyer`), sans quoi chaque connexion PostgreSQL persisterait un `admin` que
+rien ne lit.
+
 **Convention Rust à 4 espaces**, pas de `rustfmt.toml` alignant Rust sur le JS du projet.
 
 ### La publication : un tag, et rien d'autre
@@ -691,6 +743,26 @@ anecdotes.
     qu'après l'effet — l'en-tête qui « n'a pas bougé » —, la placer **après** l'attente qui
     prouve l'effet.
 
+14. **Un `match` à bras attrape-tout ne garantit plus rien, et le commentaire qui promet le
+    contraire survit à la garantie.** `AnyEngine::connect_via` portait « le `match` rend l'oubli
+    impossible : ajouter un moteur fait échouer la compilation ». Vrai à l'écriture ; faux dès
+    qu'un bras `autre =>` a été ajouté pour donner un message aux moteurs non livrés. Il a
+    **absorbé** SQLite et MySQL, dont les adaptateurs existaient et que les six autres `match` du
+    fichier répartissaient : l'application les refusait avec « DoraBase ne sait pas encore parler
+    à MySQL ». Le test censé garder ce point comparait des numéros de spec — une fonction que le
+    sujet n'appelle pas —, donc il est resté vert. **Quand une garantie passe du compilateur à un
+    test, le commentaire doit le dire, et le test doit toucher le sujet** : ici, joindre chaque
+    moteur livré contre un port fermé et vérifier que l'échec n'est pas un refus.
+
+15. **Deux voies pour un même acte en laissent une en arrière.** « Tester la connexion » ouvrait
+    par `PostgresAdapter::connect`, l'ouverture réelle par le répartiteur — donc le test parlait
+    PostgreSQL à tous les moteurs, et sa requête ne portait même pas le moteur. Contre un `mongod`,
+    le pilote reste **pendu** : ni verdict, ni erreur, un bouton « Test en cours… » indéfini, ce
+    qui se rapporte comme « rien ne se passe ». Les deux voies passent désormais par le même
+    `match`. À retenir pour l'enquête : **un clic sans effet visible est plus souvent un appel
+    pendu qu'un appel absent**, et le journal ne le disait pas parce qu'il n'imprimait pas le
+    moteur.
+
 **Et la méthode qui a le plus payé** : mesurer le rendu dans un navigateur plutôt que lire
 des valeurs déclarées, et comparer deux captures **côte à côte**. Une mesure vérifie une
 hypothèse ; un inventaire visuel en révèle l'absence.
@@ -904,7 +976,8 @@ Aucun de ces points ne bloque le code en place.
 - **`verify-ca` — vérifier la chaîne sans vérifier le nom — n'est disponible que pour
   PostgreSQL.** Les pilotes MySQL et MongoDB ne savent pas l'exprimer, et le premier a même
   un drapeau silencieusement sans effet. Les deux **refusent avec leur raison** plutôt que
-  de remplacer le mode en silence.
+  de remplacer le mode en silence, et depuis le 26 août 2026 l'écran ne le leur propose plus
+  — proposer un mode *et* le refuser était l'incohérence restante.
 - **Le chemin heureux Cloud SQL contre une vraie instance n'a jamais été exercé.** Tout le
   pilotage du sous-processus est couvert par un faux binaire en shell, mais aucun test n'a
   parlé à Google. Le test se déverrouille avec `DORABASE_TEST_CLOUDSQL_INSTANCE`,

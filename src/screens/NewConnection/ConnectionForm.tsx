@@ -1,14 +1,14 @@
 import { useState } from 'react'
 import { Icon } from '../../design/icons/Icon'
-import type { EnvironmentDeclaration, EnvironmentId, SslMode } from '../../domain/config'
+import type { Engine, EnvironmentDeclaration, EnvironmentId, SslMode } from '../../domain/config'
 import { Badge } from '../../ui/Badge/Badge'
 import { cx } from '../../ui/cx'
 import { Field } from '../../ui/Field/Field'
 import { RadioGroup } from '../../ui/RadioGroup/RadioGroup'
 import { Select } from '../../ui/Select/Select'
 import type { ConnectionDraft } from './ConnectionDraft'
-import { estUnFichier } from './engines'
-import { authentifie, SSL_MODE_ORDER, SSL_MODES } from './environments'
+import { authentifieParBase, estUnFichier, modesSslDisponibles } from './engines'
+import { authentifie, SSL_MODES } from './environments'
 import styles from './NewConnection.module.css'
 import { ToggleWithLabel } from './ToggleWithLabel'
 
@@ -68,7 +68,17 @@ type ConnectionFormProps = {
   verrouille?: boolean
 }
 
-const OPTIONS_SSL = SSL_MODE_ORDER.map((mode) => ({ value: mode, label: SSL_MODES[mode].label }))
+/**
+ * Les options de la liste « Mode SSL », **pour le moteur choisi**.
+ *
+ * Ce n'est plus une constante de module : la liste des six modes était offerte à tous les moteurs,
+ * dont deux n'en savent exprimer que trois — voir `SSL_MODES_PAR_MOTEUR`. Un mode qu'un pilote
+ * remplace en silence est pire qu'un mode absent : l'écran affirmait « clair en repli » là où la
+ * connexion exigeait le TLS.
+ */
+function optionsSsl(engine: Engine) {
+  return modesSslDisponibles(engine).map((mode) => ({ value: mode, label: SSL_MODES[mode].label }))
+}
 
 /**
  * Les entrées du groupe d'environnements, **construites depuis les déclarations du projet** (`23d`).
@@ -252,6 +262,24 @@ export function ConnectionForm({
         />
       )}
 
+      {/* **La base d'authentification, pour MongoDB seul.** Un utilisateur MongoDB appartient à une
+          base, et le pilote s'authentifie contre celle-là : sans ce champ, l'utilisateur racine d'un
+          conteneur officiel — qui vit dans `admin` — était injoignable dès qu'on ouvrait une autre
+          base, avec un « authentification refusée » qui n'accusait rien de faux dans le formulaire.
+
+          **Placé après le mot de passe et avant le TLS** : il appartient à l'authentification, et
+          c'est là qu'on le cherche. Le laisser vide garde le comportement d'avant — la base par
+          défaut fait foi —, ce que le texte de substitution dit plutôt qu'une infobulle. */}
+      {!fichier && authentifieParBase(draft.engine) && (
+        <Field
+          label="Base d’authentification"
+          mono
+          value={draft.authDatabase}
+          placeholder="vide : la base par défaut — « admin » pour un utilisateur racine"
+          onChange={(event) => onChange({ authDatabase: event.target.value })}
+        />
+      )}
+
       {/* Rangée pleine largeur : mode SSL à gauche, les deux bascules à droite, alignées en
           bas avec un décalage de 5px pour tomber sur la ligne de base des champs.
 
@@ -276,7 +304,7 @@ export function ConnectionForm({
         {!fichier && (
           <Select
             label="Mode SSL"
-            options={OPTIONS_SSL}
+            options={optionsSsl(draft.engine)}
             value={draft.sslMode}
             onValueChange={(sslMode) => onChange({ sslMode: sslMode as SslMode })}
           />

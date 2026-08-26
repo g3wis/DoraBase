@@ -25,6 +25,7 @@ const BASE: Database = {
     password: 'Atelier/analytics/prod' as SecretRef,
     sslMode: 'prefer',
     caCertificate: null,
+    authDatabase: null,
     readOnly: true,
     reconnectOnStartup: false,
     tunnel: null,

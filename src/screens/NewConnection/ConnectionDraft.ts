@@ -6,7 +6,7 @@ import type {
   SslMode,
   Tunnel,
 } from '../../domain/config'
-import { PORT_PAR_DEFAUT } from './engines'
+import { modeSslPourLeMoteur, PORT_PAR_DEFAUT } from './engines'
 
 /**
  * L'état saisi dans `A2`, avant tout enregistrement.
@@ -48,6 +48,13 @@ export type ConnectionDraft = {
    * type obligerait chaque champ à dire laquelle il suit.
    */
   caCertificate: string
+  /**
+   * La base contre laquelle **s'authentifier**, quand elle diffère de celle qu'on ouvre.
+   *
+   * MongoDB seul : un utilisateur y appartient à une base, et le pilote s'authentifie contre
+   * celle-là. Vide — le cas de presque tout le monde — la base par défaut fait foi.
+   */
+  authDatabase: string
   readOnly: boolean
   reconnectOnStartup: boolean
   /**
@@ -169,6 +176,19 @@ export function emptyDraft(): ConnectionDraft {
     password: '',
     sslMode: 'prefer',
     caCertificate: '',
+    // **`admin` d'emblée, et c'est le seul champ préremplié avec le port SSH du bastion.** Le
+    // critère du projet pour préremplir est « vrai pour la quasi-totalité des cas » : l'utilisateur
+    // d'un serveur MongoDB vit dans `admin` presque toujours — c'est là que l'image Docker
+    // officielle crée le sien, et là que les administrateurs déclarent les leurs.
+    //
+    // **Ce n'est pas une supposition silencieuse**, et c'est ce qui distingue ce préremplissage du
+    // défaut que `18b` a refusé : la valeur est **dans le champ**, visible et effaçable. Vidé, le
+    // comportement de `18b` revient — la base déclarée fait foi (voir `auth_database` côté Rust).
+    //
+    // Il n'est posé que sur un brouillon **neuf**. Reprendre une connexion enregistrée sans base
+    // d'authentification laisse le champ vide : y écrire `admin` changerait le comportement d'une
+    // connexion qui marche, au premier enregistrement.
+    authDatabase: 'admin',
     readOnly: true,
     reconnectOnStartup: false,
     // Pas de tunnel par défaut : le panneau de `A2` s'ouvre replié et sans badge.
@@ -239,8 +259,18 @@ export function draftDepuisLaVariante(
     defaultDatabase: variant.defaultDatabase,
     username: variant.username,
     password: '',
-    sslMode: variant.sslMode,
+    // **Ramené dans ce que le moteur exprime.** Une connexion MongoDB ou MySQL enregistrée avant le
+    // 26 août 2026 peut porter `allow` ou `prefer` : ces modes lui étaient offerts, et son pilote les
+    // remplaçait par `require` sans le dire. Ils ne sont plus dans la liste, et une liste déroulante
+    // dont la valeur n'est aucune de ses options affiche un champ **vide** — le piège du sélecteur
+    // contrôlé, déjà rencontré sur le projet. Afficher `require` dit ce qui s'appliquera, ce que le
+    // fichier disait déjà sans qu'on puisse le lire ; rien n'est réécrit sur le disque tant que
+    // l'utilisateur n'enregistre pas.
+    sslMode: modeSslPourLeMoteur(database.engine, variant.sslMode),
     caCertificate: variant.caCertificate ?? '',
+    // Le vide de l'écran et l'absence du modèle sont la même chose, dans les deux sens : c'est la
+    // convention que ce fichier applique déjà au certificat d'autorité juste au-dessus.
+    authDatabase: variant.authDatabase ?? '',
     readOnly: variant.readOnly,
     reconnectOnStartup: variant.reconnectOnStartup,
     tunnel: variant.tunnel === null ? null : brouillonDeProxy(variant.tunnel),

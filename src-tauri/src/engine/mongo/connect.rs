@@ -6,7 +6,7 @@ use mongodb::options::{ClientOptions, Credential, ServerAddress, Tls, TlsOptions
 use mongodb::Client;
 
 use crate::config::ConnectionSettings;
-use crate::engine::tls::Exigences;
+use crate::engine::tls::{Chiffrement, Exigences};
 use crate::engine::EngineError;
 use crate::secrets::Secret;
 
@@ -72,11 +72,23 @@ pub fn preparer(
         options.credential = Some(
             Credential::builder()
                 .username(variante.username.clone())
-                // **La base d'authentification est celle déclarée, pas `admin`.** Un utilisateur
+                // **La base déclarée par défaut, et jamais `admin` d'office.** Un utilisateur
                 // MongoDB appartient à une base ; supposer `admin` ferait échouer tous ceux qui
                 // sont déclarés dans la leur, avec un message d'authentification refusée qui
-                // n'aiderait personne.
-                .source(variante.default_database.clone())
+                // n'aiderait personne. C'est la décision de `18b`, et elle tient.
+                //
+                // **Ce qui manquait était le cas inverse, et il n'avait aucune issue.** L'utilisateur
+                // racine que l'image Docker officielle crée vit dans `admin` ; ouvrir la base `test`
+                // le rendait injoignable — « SCRAM failure: Authentication failed », sans rien à
+                // corriger dans le formulaire. `auth_database` le rend atteignable **sans** changer
+                // le défaut : renseigné, il fait foi ; vide, rien ne bouge.
+                .source(
+                    variante
+                        .auth_database
+                        .clone()
+                        .filter(|base| !base.trim().is_empty())
+                        .unwrap_or_else(|| variante.default_database.clone()),
+                )
                 .password(secret.expose().to_owned())
                 .build(),
         );
@@ -100,6 +112,28 @@ pub fn preparer(
     // sa surface est un chemin de CA et deux drapeaux. C'est le second des deux faits qui ont décidé
     // du choix de `rustls` — voir `06f`.
     let exigences = Exigences::de(variante.ssl_mode);
+    // **`allow` et `prefer` ne sont pas exprimables ici, et le refus remplace une promotion
+    // silencieuse.** Ces deux modes veulent dire « TLS si le serveur l'offre, clair en repli » —
+    // une négociation *dans le protocole*, que seul PostgreSQL a (`PgSslMode::Prefer`, qui replie
+    // vraiment). Le pilote MongoDB ne reçoit qu'un drapeau : TLS ou rien. Le code ne
+    // testait que `chiffre()`, donc les deux modes devenaient `require` sans que personne le
+    // sache — et contre un serveur sans TLS, l'échec arrivait après cinq secondes sous la forme
+    // « aucun serveur n'a répondu : vérifiez l'hôte, le port », qui accuse ce qui va bien.
+    // Mesuré le 26 août 2026.
+    //
+    // C'est le même refus que pour `verify-ca` juste en dessous, pour la même raison : un réglage
+    // remplacé en silence fait croire à un comportement qui n'a pas lieu. L'écran n'offre plus ces
+    // deux modes pour ce moteur (`SSL_MODES_PAR_MOTEUR`) ; ce refus est ce qui tient quand la
+    // configuration ne vient **pas** de l'écran — un fichier écrit à la main, ou enregistré par une
+    // version antérieure.
+    if matches!(exigences.chiffrement, Chiffrement::SiPossible) {
+        return Err(EngineError::local(
+            "le pilote MongoDB ne sait pas négocier le TLS : « allow » et « prefer » — chiffrer si \
+             le serveur l'offre, en clair sinon — n'y sont pas disponibles. Employez « disable » \
+             pour une connexion en clair, ou « require » pour exiger le chiffrement",
+        ));
+    }
+
     if exigences.chiffre() {
         let mut tls = TlsOptions::default();
         if let Some(ca) = variante.ca_certificate.as_deref() {
@@ -152,9 +186,35 @@ pub fn preparer(
 /// est ce qui connecte, donc c'est `hello` — qui sert de toute façon à lire le déploiement — qui
 /// vérifie que la connexion tient.
 pub async fn ouvrir(options: ClientOptions) -> Result<(Client, Deploiement), EngineError> {
+    // **Retenu avant de céder les options**, pour qualifier l'échec plus bas.
+    let tls_exige = options.tls.is_some();
     let client = Client::with_options(options).map_err(|e| traduire(&e))?;
-    let deploiement = lire_le_deploiement(&client).await?;
+    let deploiement = lire_le_deploiement(&client)
+        .await
+        .map_err(|erreur| qualifier_le_tls(erreur, tls_exige))?;
     Ok((client, deploiement))
+}
+
+/// Nomme le TLS quand c'est lui, le plus probablement, qui a fait taire le serveur.
+///
+/// **Le message du pilote accuse ce qui va bien.** Un `mongod` sans TLS à qui l'on parle en TLS ne
+/// répond rien d'exploitable : le pilote épuise sa sélection de serveur — cinq secondes — et rend
+/// « aucun serveur n'a répondu : vérifiez l'hôte, le port, et que le service écoute ». L'hôte, le
+/// port et le service sont pourtant exacts, et on part vérifier un pare-feu.
+///
+/// La qualification reste **prudente** : un hôte réellement injoignable produit la même erreur, donc
+/// la phrase ajoute une piste sans retirer la première. C'est la règle de `06e` appliquée au TLS
+/// plutôt qu'au tunnel — un message qui distingue deux causes vaut mieux qu'un message qui en
+/// affirme une.
+fn qualifier_le_tls(erreur: EngineError, tls_exige: bool) -> EngineError {
+    if !tls_exige || !erreur.message.contains("aucun serveur MongoDB n'a répondu") {
+        return erreur;
+    }
+    EngineError::local(format!(
+        "{} — ou que le serveur accepte bien le TLS, que le mode SSL choisi exige (un serveur sans \
+         TLS ne répond pas à une poignée de main chiffrée, et le pilote conclut à un serveur muet)",
+        erreur.message
+    ))
 }
 
 /// `hello`, dont trois champs suffisent à distinguer les trois déploiements.
@@ -208,8 +268,14 @@ mod tests {
             default_database: "atelier_ventes".into(),
             username: String::new(),
             password: None,
-            ssl_mode: SslMode::Prefer,
+            // **`disable`, et non `prefer`.** Ces variantes servent à mesurer l'hôte, le port et
+            // les identifiants, pas le TLS — et `prefer` n'est plus exprimable par ce pilote, donc
+            // le décor refusait avant d'avoir rien préparé. Que le fixture ait porté `prefer` est
+            // ce qui montrait la promotion silencieuse : le mode ne changeait rien, donc rien ne
+            // disait qu'il n'était pas honoré.
+            ssl_mode: SslMode::Disable,
             ca_certificate: None,
+            auth_database: None,
             read_only: false,
             reconnect_on_startup: false,
             tunnel: None,
@@ -227,6 +293,109 @@ mod tests {
             }]
         );
         assert_eq!(options.direct_connection, Some(true));
+    }
+
+    /// **`allow` et `prefer` sont refusés, non promus.**
+    ///
+    /// Le contrôle qui manquait : le pilote ne sait pas négocier le TLS, et le code se contentait
+    /// de `chiffre()` — donc les deux modes devenaient `require` sans rien dire. Aucun test ne
+    /// pouvait tomber, puisque rien n'observait le mode : les préparations réussissaient et les
+    /// tests sur base réelle employaient `disable`.
+    ///
+    /// Le message doit **nommer les deux voies** : sans elles, un utilisateur lit « pas
+    /// disponible » et n'a aucun geste à faire.
+    /// **Le TLS est nommé quand le serveur se tait.** Contrôle du piège de `qualifier_le_tls` : sans
+    /// lui, le message envoie vérifier l'hôte et le port d'un serveur qui écoute très bien.
+    #[test]
+    fn un_serveur_muet_en_tls_voit_le_tls_nomme() {
+        let brut = EngineError::local(
+            "aucun serveur MongoDB n'a répondu : Server selection timeout. Vérifiez l'hôte, le \
+             port, et que le service écoute",
+        );
+        let qualifie = qualifier_le_tls(brut, true);
+        assert!(qualifie.message.contains("accepte bien le TLS"), "{}", qualifie.message);
+        // La première piste reste : un hôte réellement injoignable donne la même erreur.
+        assert!(qualifie.message.contains("Vérifiez l'hôte"), "{}", qualifie.message);
+    }
+
+    #[test]
+    fn sans_tls_le_message_du_pilote_passe_intact() {
+        // Contrôle négatif : sinon la phrase s'ajouterait à un échec en clair, où elle serait fausse.
+        let brut = EngineError::local("aucun serveur MongoDB n'a répondu : Server selection timeout");
+        assert_eq!(qualifier_le_tls(brut.clone(), false).message, brut.message);
+    }
+
+    #[test]
+    fn une_autre_erreur_n_est_pas_qualifiee() {
+        // Une authentification refusée en TLS n'a rien à voir avec le TLS : le serveur a répondu.
+        let brut = EngineError::local("authentification refusée : SCRAM failure");
+        assert_eq!(qualifier_le_tls(brut.clone(), true).message, brut.message);
+    }
+
+    /// **La base d'authentification renseignée fait foi, sans toucher au défaut.**
+    ///
+    /// Le cas qui n'avait aucune issue : l'utilisateur racine d'un conteneur `mongo` officiel vit
+    /// dans `admin`, et ouvrir la base `test` le rendait injoignable. Mesuré le 26 août 2026 —
+    /// « SCRAM failure: Authentication failed », sur un formulaire où rien n'était faux.
+    #[test]
+    fn la_base_d_authentification_renseignee_remplace_la_base_declaree() {
+        let mut v = variante();
+        v.default_database = "atelier_ventes".into();
+        v.auth_database = Some("admin".into());
+        let options = preparer(&v, Some(&Secret::new("mdp")), None).expect("préparable");
+        let credential = options.credential.expect("un secret, donc un credential");
+        assert_eq!(credential.source.as_deref(), Some("admin"));
+    }
+
+    /// Contrôle négatif : sans valeur, la décision de `18b` s'applique toujours.
+    #[test]
+    fn sans_base_d_authentification_la_base_declaree_fait_foi() {
+        let mut v = variante();
+        v.default_database = "atelier_ventes".into();
+        assert_eq!(v.auth_database, None);
+        let options = preparer(&v, Some(&Secret::new("mdp")), None).expect("préparable");
+        let credential = options.credential.expect("un secret, donc un credential");
+        assert_eq!(credential.source.as_deref(), Some("atelier_ventes"));
+    }
+
+    /// Un champ **laissé vide** n'est pas une base nommée « ».
+    ///
+    /// L'écran envoie `null` pour un champ vide, mais un fichier écrit à la main peut porter `""` —
+    /// et `.source("")` ferait échouer l'authentification sur une base qui n'existe pas, avec le
+    /// message le moins utile possible.
+    #[test]
+    fn une_base_d_authentification_vide_vaut_absente() {
+        let mut v = variante();
+        v.default_database = "atelier_ventes".into();
+        v.auth_database = Some("   ".into());
+        let options = preparer(&v, Some(&Secret::new("mdp")), None).expect("préparable");
+        let credential = options.credential.expect("un secret, donc un credential");
+        assert_eq!(credential.source.as_deref(), Some("atelier_ventes"));
+    }
+
+    #[test]
+    fn allow_et_prefer_sont_refuses_avec_la_manoeuvre() {
+        for mode in [SslMode::Allow, SslMode::Prefer] {
+            let mut v = variante();
+            v.ssl_mode = mode;
+            let erreur = preparer(&v, None, None).expect_err("ce mode n'est pas exprimable");
+            assert!(erreur.message.contains("négocier le TLS"), "{}", erreur.message);
+            assert!(erreur.message.contains("disable"), "{}", erreur.message);
+            assert!(erreur.message.contains("require"), "{}", erreur.message);
+        }
+    }
+
+    /// Contrôle négatif du précédent : les trois modes que ce pilote **sait** exprimer passent.
+    ///
+    /// Sans lui, on satisfait le test ci-dessus en refusant tout mode chiffré, ce qui serait une
+    /// régression bien pire que la promotion qu'on retire.
+    #[test]
+    fn les_trois_modes_offerts_se_preparent() {
+        for mode in [SslMode::Disable, SslMode::Require, SslMode::VerifyFull] {
+            let mut v = variante();
+            v.ssl_mode = mode;
+            preparer(&v, None, None).unwrap_or_else(|e| panic!("{mode:?} doit passer : {e}"));
+        }
     }
 
     #[test]
