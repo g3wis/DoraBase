@@ -61,17 +61,18 @@ pub async fn schemas(client: &Client, projet: &str) -> Result<Vec<SchemaInfo>, E
 }
 
 fn est_une_vue(genre: &Option<String>) -> bool {
-    matches!(
-        genre.as_deref(),
-        Some("VIEW") | Some("MATERIALIZED_VIEW")
-    )
+    matches!(genre.as_deref(), Some("VIEW") | Some("MATERIALIZED_VIEW"))
 }
 
 /// Les tables et vues d'un jeu de données — le tableau de `A4`.
 ///
 /// **Un `table.get` par table** pour le compte de lignes et la taille : `table.list` ne les rend pas
 /// (`TableListTables` est une réponse allégée). Même arbitrage que `schemas` ci-dessus.
-pub async fn objects(client: &Client, projet: &str, jeu: &str) -> Result<Vec<TableSummary>, EngineError> {
+pub async fn objects(
+    client: &Client,
+    projet: &str,
+    jeu: &str,
+) -> Result<Vec<TableSummary>, EngineError> {
     let liste = client
         .table()
         .list(projet, jeu, Default::default())
@@ -109,12 +110,18 @@ fn resume_de(table: &Table) -> TableSummary {
             .and_then(|n| n.parse::<i64>().ok())
             .map(|value| RowCount::Estimated { value })
             .unwrap_or(RowCount::Unknown),
-        size_bytes: table.num_bytes.as_deref().and_then(|n| n.parse::<u64>().ok()),
+        size_bytes: table
+            .num_bytes
+            .as_deref()
+            .and_then(|n| n.parse::<u64>().ok()),
         column_count: colonnes.len() as u32,
         // Voir le commentaire de tête : aucune clé primaire déclarée n'est modélisée par la crate.
         primary_key: None,
         last_analyze: table.last_modified_time.clone(),
-        comment: table.description.clone().or_else(|| table.friendly_name.clone()),
+        comment: table
+            .description
+            .clone()
+            .or_else(|| table.friendly_name.clone()),
     }
 }
 
@@ -147,7 +154,10 @@ pub async fn detail(
             .and_then(|n| n.parse::<i64>().ok())
             .map(|value| RowCount::Estimated { value })
             .unwrap_or(RowCount::Unknown),
-        size_bytes: table_bq.num_bytes.as_deref().and_then(|n| n.parse::<u64>().ok()),
+        size_bytes: table_bq
+            .num_bytes
+            .as_deref()
+            .and_then(|n| n.parse::<u64>().ok()),
         comment: table_bq.description.clone(),
         ddl: ddl_reconstruit(projet, jeu, table, &champs),
         columns: colonnes,
@@ -185,7 +195,11 @@ fn ddl_reconstruit(projet: &str, jeu: &str, table: &str, champs: &[TableFieldSch
     let mut lignes: Vec<String> = champs
         .iter()
         .map(|champ| {
-            let mut ligne = format!("  {} {}", super::rows::citer(&champ.name), valeurs::nom_du_type(champ));
+            let mut ligne = format!(
+                "  {} {}",
+                super::rows::citer(&champ.name),
+                valeurs::nom_du_type(champ)
+            );
             if champ.mode.as_deref() == Some("REQUIRED") {
                 ligne.push_str(" NOT NULL");
             }
@@ -239,7 +253,10 @@ mod tests {
                 champ("statut", FieldType::String, false),
             ],
         );
-        assert!(ddl.starts_with("CREATE TABLE `mon-projet.jeu.commandes` ("), "{ddl}");
+        assert!(
+            ddl.starts_with("CREATE TABLE `mon-projet.jeu.commandes` ("),
+            "{ddl}"
+        );
         assert!(ddl.contains("`id` INT64 NOT NULL,"), "{ddl}");
         assert!(ddl.contains("`statut` STRING"), "{ddl}");
         assert!(!ddl.contains("`statut` STRING NOT NULL"), "{ddl}");

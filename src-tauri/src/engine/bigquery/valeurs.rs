@@ -108,7 +108,9 @@ pub fn valeur(brute: Option<Json>, champ: &TableFieldSchema) -> Value {
         // formaté par l'API — les reformater serait le travail que `introspection.rs` refuse de
         // faire pour les autres moteurs.
         FieldType::Timestamp => horodatage_depuis_epoch(&texte),
-        FieldType::Date | FieldType::Time | FieldType::Datetime => Value::Timestamp { value: texte },
+        FieldType::Date | FieldType::Time | FieldType::Datetime => {
+            Value::Timestamp { value: texte }
+        }
         FieldType::Record | FieldType::Struct | FieldType::Json => Value::Json { value: texte },
     }
 }
@@ -199,7 +201,10 @@ mod tests {
     fn une_date_n_est_pas_reinterpretee_comme_un_epoch() {
         // **La distinction du commentaire de tête** : seul TIMESTAMP est en epoch. DATE arrive déjà
         // en texte ; le convertir depuis un epoch produirait une valeur absurde.
-        let v = valeur(Some(Json::String("2024-03-01".into())), &champ(FieldType::Date));
+        let v = valeur(
+            Some(Json::String("2024-03-01".into())),
+            &champ(FieldType::Date),
+        );
         assert_eq!(
             v,
             Value::Timestamp {
@@ -211,7 +216,10 @@ mod tests {
     #[test]
     fn une_cellule_nulle_reste_nulle() {
         assert_eq!(valeur(None, &champ(FieldType::String)), Value::Null);
-        assert_eq!(valeur(Some(Json::Null), &champ(FieldType::String)), Value::Null);
+        assert_eq!(
+            valeur(Some(Json::Null), &champ(FieldType::String)),
+            Value::Null
+        );
     }
 
     #[test]
@@ -230,7 +238,10 @@ mod tests {
         assert_eq!(categorie(&champ(FieldType::Bytes)), TypeCategory::Binary);
         assert_eq!(categorie(&champ(FieldType::Int64)), TypeCategory::Number);
         assert_eq!(categorie(&champ(FieldType::Bool)), TypeCategory::Boolean);
-        assert_eq!(categorie(&champ(FieldType::Timestamp)), TypeCategory::Timestamp);
+        assert_eq!(
+            categorie(&champ(FieldType::Timestamp)),
+            TypeCategory::Timestamp
+        );
         assert_eq!(categorie(&champ(FieldType::Struct)), TypeCategory::Json);
     }
 }

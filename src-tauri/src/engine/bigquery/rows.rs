@@ -50,10 +50,7 @@ fn parametre_texte(rang: usize, valeur: &str) -> QueryParameter {
 /// Le `select` d'une fenêtre de lignes, paramétré.
 pub fn requete_de(projet: &str, jeu: &str, query: &RowQuery) -> (String, Vec<QueryParameter>) {
     let mut parametres = Vec::new();
-    let mut sql = format!(
-        "select * from {}",
-        citer_table(projet, jeu, &query.table)
-    );
+    let mut sql = format!("select * from {}", citer_table(projet, jeu, &query.table));
 
     let conditions: Vec<String> = query
         .filters
@@ -101,13 +98,19 @@ fn condition_de(filtre: &Filter, parametres: &mut Vec<QueryParameter>) -> String
     let colonne = colonne_en_texte(&filtre.column);
     match filtre.operator {
         FilterOperator::Eq => {
-            let param = parametre_texte(parametres.len() + 1, &filtre.value.clone().unwrap_or_default());
+            let param = parametre_texte(
+                parametres.len() + 1,
+                &filtre.value.clone().unwrap_or_default(),
+            );
             let nom = param.name.clone().unwrap();
             parametres.push(param);
             format!("{colonne} = @{nom}")
         }
         FilterOperator::Ne => {
-            let param = parametre_texte(parametres.len() + 1, &filtre.value.clone().unwrap_or_default());
+            let param = parametre_texte(
+                parametres.len() + 1,
+                &filtre.value.clone().unwrap_or_default(),
+            );
             let nom = param.name.clone().unwrap();
             parametres.push(param);
             format!("{colonne} <> @{nom}")
@@ -133,7 +136,10 @@ fn condition_de(filtre: &Filter, parametres: &mut Vec<QueryParameter>) -> String
             }
         }
         FilterOperator::Matches => {
-            let motif = format!("%{}%", echapper_pour_like(&filtre.value.clone().unwrap_or_default()));
+            let motif = format!(
+                "%{}%",
+                echapper_pour_like(&filtre.value.clone().unwrap_or_default())
+            );
             let param = parametre_texte(parametres.len() + 1, &motif);
             let nom = param.name.clone().unwrap();
             parametres.push(param);
@@ -168,7 +174,13 @@ pub fn avec_limite(sql: &str, limite: RowLimit) -> (String, Option<u32>) {
 }
 
 /// Une ligne rendue en `INSERT` exécutable — ce que `10f` copie.
-pub fn insert_de(projet: &str, jeu: &str, table: &str, colonnes: &[String], valeurs: &[Value]) -> String {
+pub fn insert_de(
+    projet: &str,
+    jeu: &str,
+    table: &str,
+    colonnes: &[String],
+    valeurs: &[Value],
+) -> String {
     let noms: Vec<String> = colonnes.iter().map(|nom| citer(nom)).collect();
     let litteraux: Vec<String> = valeurs.iter().map(litteral_de).collect();
     format!(
@@ -236,7 +248,12 @@ mod tests {
         assert!(!sql.contains("drop table"), "{sql}");
         assert!(sql.contains("= @p1"), "{sql}");
         assert_eq!(
-            parametres[0].parameter_value.as_ref().unwrap().value.as_deref(),
+            parametres[0]
+                .parameter_value
+                .as_ref()
+                .unwrap()
+                .value
+                .as_deref(),
             Some("'; drop table commandes; --")
         );
     }
@@ -252,7 +269,12 @@ mod tests {
         let (sql, parametres) = requete_de("p", "jeu", &r);
         assert!(sql.contains("lower("), "{sql}");
         assert_eq!(
-            parametres[0].parameter_value.as_ref().unwrap().value.as_deref(),
+            parametres[0]
+                .parameter_value
+                .as_ref()
+                .unwrap()
+                .value
+                .as_deref(),
             Some("%100\\_\\%%")
         );
     }

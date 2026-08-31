@@ -53,7 +53,8 @@ impl std::fmt::Debug for BigQueryAdapter {
 }
 
 /// Refusé, avec la raison — voir le point 3 du commentaire de tête.
-const REFUS_ECRITURE: &str = "BigQuery ne prend pas en charge la modification ou l'ajout de lignes \
+const REFUS_ECRITURE: &str =
+    "BigQuery ne prend pas en charge la modification ou l'ajout de lignes \
     depuis la grille de DoraBase : les DML sont facturés au volume de données parcouru, et ce \
     moteur ne connaît pas de clé primaire déclarée pour garantir le même contrôle de conflit que \
     les autres moteurs. Utilisez la console SQL pour un UPDATE, un INSERT ou un DELETE explicite.";
@@ -197,7 +198,13 @@ impl EngineAdapter for BigQueryAdapter {
     ) -> Result<String, EngineError> {
         let detail = introspect::detail(&self.client, &self.projet, schema, table).await?;
         let colonnes: Vec<String> = detail.columns.into_iter().map(|c| c.name).collect();
-        Ok(rows::insert_de(&self.projet, schema, table, &colonnes, values))
+        Ok(rows::insert_de(
+            &self.projet,
+            schema,
+            table,
+            &colonnes,
+            values,
+        ))
     }
 
     async fn preview_updates(&self, _plan: &UpdatePlan) -> Result<String, EngineError> {

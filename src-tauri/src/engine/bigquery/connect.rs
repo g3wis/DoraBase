@@ -63,7 +63,10 @@ mod tests {
 
     #[test]
     fn le_projet_vient_de_la_base_par_defaut() {
-        assert_eq!(projet_de(&variante("mon-projet-gcp")).unwrap(), "mon-projet-gcp");
+        assert_eq!(
+            projet_de(&variante("mon-projet-gcp")).unwrap(),
+            "mon-projet-gcp"
+        );
     }
 
     #[test]
@@ -74,6 +77,9 @@ mod tests {
 
     #[test]
     fn le_projet_est_debarrasse_de_ses_espaces() {
-        assert_eq!(projet_de(&variante("  mon-projet  ")).unwrap(), "mon-projet");
+        assert_eq!(
+            projet_de(&variante("  mon-projet  ")).unwrap(),
+            "mon-projet"
+        );
     }
 }
