@@ -97,12 +97,7 @@ impl SshTunnel {
             verdict: Arc::clone(&verdict),
         };
 
-        let config = Arc::new(client::Config {
-            // Sans délai, un bastion injoignable pend jusqu'au délai TCP du système — une
-            // minute et plus sur macOS. `A3` attend un échec lisible, pas une attente muette.
-            inactivity_timeout: Some(Duration::from_secs(30)),
-            ..client::Config::default()
-        });
+        let config = Arc::new(configuration());
 
         let adresse = format!("{}:{}", proxy.bastion_host, proxy.bastion_port);
         let mut session = client::connect(config, adresse.as_str(), verificateur)
@@ -226,6 +221,37 @@ impl Drop for SshTunnel {
     }
 }
 
+/// La configuration de session passée à `russh`.
+///
+/// **Nommée plutôt qu'écrite en ligne dans `ouvrir`** : ses deux écarts au défaut sont des
+/// décisions mesurées, et un littéral au milieu d'une fonction de cinquante lignes ne peut
+/// pas être vérifié par un test.
+///
+/// **`nodelay` est le remède d'une latence mesurée** (31 août 2026). `russh` laisse
+/// l'algorithme de Nagle **actif** sur la socket de la session — `nodelay: false` dans son
+/// `Default`, contrairement à `ssh`, qui pose `TCP_NODELAY` de lui-même. Le tunnel écrit de
+/// petits paquets : un message du protocole PostgreSQL tient dans quelques dizaines d'octets,
+/// et Nagle retient une petite écriture jusqu'à l'acquittement de la précédente. Sur un
+/// bastion distant, cela coûte **un aller-retour de plus par échange**.
+///
+/// Mesuré contre un bastion à ~50 ms, quinze ouvertures de canal suivies d'un aller-retour
+/// chacune : médiane **217 ms** avant, **115 ms** après, quand `ssh -L 15432:cible ...` sur la
+/// même machine et au même instant donne 121 ms. Autrement dit le tunnel était **deux fois
+/// plus lent que la référence**, et il est désormais à égalité. Ce n'est pas une optimisation :
+/// c'était un défaut, invisible en local — sur la boucle locale, l'aller-retour retenu ne coûte
+/// rien, donc aucun décor de test de ce dépôt ne pouvait le montrer.
+///
+/// L'`inactivity_timeout`, lui, est là depuis `06e` : sans délai, un bastion injoignable pend
+/// jusqu'au délai TCP du système — une minute et plus sur macOS. `A3` attend un échec lisible,
+/// pas une attente muette.
+fn configuration() -> client::Config {
+    client::Config {
+        inactivity_timeout: Some(Duration::from_secs(30)),
+        nodelay: true,
+        ..client::Config::default()
+    }
+}
+
 /// Accepte les connexions locales et les fait passer par le bastion.
 ///
 /// Une connexion locale = un canal `direct-tcpip`, et non un canal partagé : c'est ce que
@@ -245,6 +271,13 @@ async fn transferer(
                 return;
             }
         };
+
+        // **Nagle désactivé sur la connexion locale aussi.** Le pilote PostgreSQL écrit de
+        // petits messages ; sur la boucle locale l'effet est faible, mais la mesure porte sur
+        // la chaîne entière et rien ne justifie de laisser un délai là où il ne sert à rien.
+        if let Err(erreur) = flux_local.set_nodelay(true) {
+            log::debug!("TCP_NODELAY refusé sur la connexion locale du tunnel : {erreur}");
+        }
 
         let canal = session
             .channel_open_direct_tcpip(
@@ -380,6 +413,38 @@ mod tests {
             22,
         );
         assert!(erreur.message.contains("délai"), "{erreur}");
+    }
+
+    /// Que Nagle soit désactivé sur la session, et que ce ne soit **pas** ce que `russh`
+    /// donne par défaut.
+    ///
+    /// Le second `assert` est ce qui rend le premier utile : le jour où `russh` changerait
+    /// son défaut, ce test cesserait de garder quoi que ce chose — il dirait « vrai » sans
+    /// que notre code y soit pour rien. Il tombe alors, et le commentaire de `configuration`
+    /// est à relire plutôt qu'à conserver.
+    ///
+    /// **Ce que ce test ne mesure pas** : la latence. Un aller-retour retenu par Nagle ne
+    /// coûte rien sur la boucle locale, donc le décor `bastion-test.sh` ne peut pas montrer
+    /// le défaut — les chiffres qui l'ont établi sont dans le commentaire de `configuration`,
+    /// pris contre un bastion réel.
+    #[test]
+    fn la_session_desactive_nagle_ce_que_russh_ne_fait_pas() {
+        assert!(
+            configuration().nodelay,
+            "sans TCP_NODELAY, chaque message du protocole coûte un aller-retour de plus"
+        );
+        assert!(
+            !client::Config::default().nodelay,
+            "russh a changé son défaut : ce test ne garde plus rien, et `configuration` est à relire"
+        );
+    }
+
+    #[test]
+    fn la_session_porte_un_delai_d_inactivite() {
+        assert!(
+            configuration().inactivity_timeout.is_some(),
+            "sans délai, un bastion muet pend jusqu'au délai TCP du système"
+        );
     }
 }
 

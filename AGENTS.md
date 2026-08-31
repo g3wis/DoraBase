@@ -839,6 +839,15 @@ manière de reprendre des données sans que `serde` les efface en silence.
 - **Un sous-processus dont personne ne lit la sortie se bloque en écriture** : le tampon du
   système se remplit et l'enfant s'arrête au milieu d'un `write`. Une tâche de drain n'est
   pas un raffinement, c'est une condition de fonctionnement.
+- **`russh` laisse l'algorithme de Nagle actif** — `nodelay: false` dans son `Default`, là où
+  `ssh` pose `TCP_NODELAY` de lui-même. Le tunnel écrit de petits paquets, et Nagle retient une
+  petite écriture jusqu'à l'acquittement de la précédente : cela coûte **un aller-retour de plus
+  par échange**. Mesuré le 31 août 2026 contre un bastion à ~50 ms — médiane de 217 ms par canal
+  ouvert plus un aller-retour, contre 121 ms pour `ssh -L` au même instant. Le tunnel était deux
+  fois plus lent que sa référence. **Invisible en local** : sur la boucle locale l'aller-retour
+  retenu ne coûte rien, donc aucun décor de ce dépôt ne pouvait le montrer — d'où un test qui
+  garde le réglage et non la durée (règle n° 3 : un test calé sur une durée réelle est un tirage
+  au sort).
 - **`JoinHandle::abort` n'est pas synchrone** : il *planifie* l'annulation, et au retour la
   tâche tient encore ses ressources — dont son port local.
 - **Les feux tricolores de macOS sont hors d'atteinte du CSS** sous
