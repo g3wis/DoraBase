@@ -58,31 +58,22 @@
  * qui peut passer à deux si la fenêtre rétrécit). Sans lui, les champs se décaleraient
  * verticalement les uns par rapport aux autres. */
 /*
- * La rangée d'identité : le nom de la base, et ses environnements.
+ * La rangée d'identité : l'environnement, seul depuis le retrait du champ « Nom » (1er septembre
+ * 2026).
  *
- * **`1fr auto`, et la piste de 196px a disparu** (26 août 2026) : elle portait le projet, monté depuis
- * dans l'en-tête de la modale. Le nom de la base prend la place rendue — c'est la valeur la plus longue
- * de la rangée, et la seule que l'utilisateur *nomme* au lieu de la transcrire.
+ * **Pleine largeur, `grid-column: 1 / -1`** : un champ qui ne s'apparie plus prend la rangée
+ * entière plutôt que de rester seul avec un trou à sa droite — la règle du formulaire d'`A2`
+ * (voir AGENTS.md). Le nom de la base n'est plus saisi ici : c'est un identifiant technique
+ * calculé par `draftToSaveRequest`.
  */
 .rowIdentity {
-  display: grid;
   grid-column: 1 / -1;
-  grid-template-columns: 1fr auto;
-  gap: 12px;
-  align-items: end;
 }
 
 /* Le champ « Nom du nouveau projet » (08f), sur sa propre rangée pleine largeur. Le handoff ne
    le maquette pas : il n'a pas de sélecteur de création. */
 .newProjectRow {
   grid-column: 1 / -1;
-}
-
-/* Le nom de la base est en Nunito 12.5px là où les valeurs techniques sont en 12px.
- * Écart d'un demi-pixel relevé sur le mockup, et non arrondi : c'est la seule valeur du
- * formulaire que l'utilisateur *nomme* au lieu de la *transcrire*. */
-.nameField {
-  font-size: var(--text-body);
 }
 
 /* Le port est collé à l'hôte : gap 8px, contre les 18px de la grille principale. */

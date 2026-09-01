@@ -114,9 +114,11 @@ export function draftToSaveRequest(draft: ConnectionDraft): SaveDatabaseRequest 
 
   return {
     project: draft.project,
-    // **Vide, le nom devient l'abréviation du moteur** (27 août 2026) : « psql », « mongo »… — le
-    // champ « Nom » n'est plus obligatoire, et une base sans nom saisi doit tout de même désigner
-    // quelque chose dans le registre.
+    // **`name` n'est plus un champ du formulaire** (1er septembre 2026) : sur un brouillon neuf
+    // il est toujours vide, et devient l'abréviation du moteur — « psql », « mongo »… — qui reste
+    // aussi le titre par défaut affiché dans l'explorateur tant qu'aucun libellé ne le remplace
+    // (voir `arbre.ts`). `draft.name.trim() ||` protège l'édition, où le brouillon porte le nom
+    // existant de la base qu'on modifie.
     database: draft.name.trim() || NOM_PAR_DEFAUT[draft.engine],
     engine: draft.engine,
     // Hors des réglages : l'environnement appartient à la connexion (`23b`).

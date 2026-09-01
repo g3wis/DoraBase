@@ -8,13 +8,7 @@ import { Field } from '../../ui/Field/Field'
 import { RadioGroup } from '../../ui/RadioGroup/RadioGroup'
 import { Select } from '../../ui/Select/Select'
 import type { ConnectionDraft } from './ConnectionDraft'
-import {
-  authentifieParBase,
-  estUnFichier,
-  estUnProjet,
-  modesSslDisponibles,
-  NOM_PAR_DEFAUT,
-} from './engines'
+import { authentifieParBase, estUnFichier, estUnProjet, modesSslDisponibles } from './engines'
 import { authentifie, SSL_MODES } from './environments'
 import styles from './NewConnection.module.css'
 import { ToggleWithLabel } from './ToggleWithLabel'
@@ -43,11 +37,12 @@ type ConnectionFormProps = {
    */
   environnements: readonly EnvironmentDeclaration[]
   /**
-   * Verrouille les champs qui **désignent** la base : son nom et son environnement.
+   * Verrouille le champ qui **désigne** la base : son environnement.
    *
    * Le triplet `projet/base/environnement` est la clé du registre (`09b`) et la référence du secret
    * (`08e`) : en changer un élément demanderait de déplacer le secret et de fermer la connexion
-   * ouverte. Voir `08g`.
+   * ouverte. Voir `08g`. `name` n'est plus un champ du formulaire depuis le 1er septembre 2026 : il
+   * n'y a donc plus rien à verrouiller de ce côté.
    */
   verrouille?: boolean
 }
@@ -149,42 +144,26 @@ export function ConnectionForm({
 
   return (
     <div className={styles.form}>
-      {/* Rangée pleine largeur : `1fr auto`, alignée en bas — les étiquettes n'ont pas
-          toutes la même hauteur, et sans `align-items: end` les champs se décaleraient.
+      {/* Rangée pleine largeur : depuis le retrait du champ « Nom » (1er septembre 2026), il ne
+          reste que l'environnement — un champ seul prend la rangée entière (`grid-column: 1 / -1`),
+          comme la règle de `A2` le demande pour tout champ qui ne s'apparie pas (voir AGENTS.md).
 
-          **La piste de 196px a disparu avec le projet** (26 août 2026) : il vivait ici, entre le nom
-          de la base et les environnements, et il est monté dans l'en-tête de la modale. Il n'était pas
-          un champ du formulaire mais son **cadre** — et un sélecteur à côté proposait d'en changer,
-          c'est-à-dire de déplacer une connexion d'un projet à l'autre, geste qui n'existe pas. */}
+          `name` n'est plus saisi : c'est un identifiant technique, calculé par
+          `draftToSaveRequest` à partir de l'abréviation du moteur. Le titre affiché dans
+          l'explorateur reste cette abréviation par défaut, et `label` — en fin de formulaire —
+          le remplace dès qu'il est renseigné. */}
       <div className={styles.rowIdentity}>
-        {/* **Verrouillé en édition, et la raison est dite.** Un champ désactivé sans explication
-            fait croire à un bug — la leçon de `09f`. Le `title` porte l'explication : `Field` n'a
-            pas d'infobulle, et lui en ajouter une pour trois champs serait disproportionné. */}
-        <Field
-          label={t('newConnection.form.nameLabel')}
-          className={styles.nameField}
-          value={draft.name}
-          // **Plus obligatoire** (27 août 2026) : vide, `draftToSaveRequest` substitue l'abréviation
-          // du moteur. Le repli s'affiche en `placeholder`, jamais en valeur — sinon l'utilisateur
-          // croirait l'avoir saisi, et le vider ne rendrait plus le défaut.
-          placeholder={NOM_PAR_DEFAUT[draft.engine]}
+        {/* « Environnement », et non plus « Variante d'environnement » : le mot décrivait le modèle
+            à variantes, que `23b` a retiré. */}
+        <div className={styles.label}>{t('newConnection.form.environmentLabel')}</div>
+        <RadioGroup
+          label={t('newConnection.form.environmentLabel')}
+          options={optionsDEnvironnement(environnements)}
+          value={draft.environment}
           disabled={verrouille}
-          title={verrouille ? t('newConnection.form.reasons.lockName') : undefined}
-          onChange={(event) => onChange({ name: event.target.value })}
+          title={verrouille ? t('newConnection.form.reasons.lock') : undefined}
+          onValueChange={(environment) => onChange({ environment: environment as EnvironmentId })}
         />
-        <div>
-          {/* « Environnement », et non plus « Variante d'environnement » : le mot décrivait le modèle
-              à variantes, que `23b` a retiré. */}
-          <div className={styles.label}>{t('newConnection.form.environmentLabel')}</div>
-          <RadioGroup
-            label={t('newConnection.form.environmentLabel')}
-            options={optionsDEnvironnement(environnements)}
-            value={draft.environment}
-            disabled={verrouille}
-            title={verrouille ? t('newConnection.form.reasons.lock') : undefined}
-            onValueChange={(environment) => onChange({ environment: environment as EnvironmentId })}
-          />
-        </div>
       </div>
 
       {/* **Un moteur de fichier n'a ni hôte ni port** (`17a`). Les afficher ferait remplir cinq

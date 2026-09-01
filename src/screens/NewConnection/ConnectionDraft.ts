@@ -23,9 +23,11 @@ export type ConnectionDraft = {
    * Nom de la base. **L'identité de la connexion**, avec l'environnement : c'est ce qui vit dans
    * la clé du registre et la référence du secret (`05a`, `08e`).
    *
-   * **Peut être laissé vide depuis le 27 août 2026** : `draftToSaveRequest` y substitue alors
-   * l'abréviation du moteur (« psql », « mongo »… ), tirée de `NOM_PAR_DEFAUT`. Le champ affiche
-   * ce défaut en `placeholder`, jamais en valeur — sinon l'utilisateur croirait l'avoir saisi.
+   * **N'est plus un champ du formulaire depuis le 1er septembre 2026** : c'est un identifiant
+   * technique, jamais saisi. Sur un brouillon neuf il reste vide, et `draftToSaveRequest` y
+   * substitue l'abréviation du moteur (« psql », « mongo »… ), tirée de `NOM_PAR_DEFAUT`. En
+   * édition, il porte le nom existant — inchangé, `08g` ne le renvoie que pour désigner la base
+   * qu'on modifie ; le renommer reste le geste sur place de la ligne d'arbre (« Renommer… »).
    */
   name: string
   /**

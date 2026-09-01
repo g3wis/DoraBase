@@ -200,7 +200,6 @@ test('le formulaire ouvre vide, pas rempli des valeurs du mockup', () => {
   // Le mockup montre « analytics » et « db-analytics.internal » : c'est une illustration,
   // pas un état initial. Les y coller mettrait une fausse connexion sous les yeux de
   // l'utilisateur à chaque ouverture.
-  expect(screen.getByLabelText('Nom de la base')).toHaveValue('')
   expect(screen.getByLabelText('Hôte')).toHaveValue('')
   expect(screen.getByLabelText('Utilisateur')).toHaveValue('')
 })
@@ -417,9 +416,10 @@ test('tout le formulaire est atteignable au clavier', async () => {
     'PostgreSQL', // groupe de moteurs : une seule entrée
     // **Le panneau proxy / tunnel vient en deuxième** (24 août 2026) : il précède désormais le
     // formulaire, parce que le choix du proxy change les champs qui suivent. Son en-tête est un
-    // bouton, donc il entre dans l'ordre de tabulation avant « Nom de la base ».
+    // bouton, donc il entre dans l'ordre de tabulation avant l'environnement.
     'Proxy / tunnel',
-    'Nom de la base',
+    // **« Nom de la base » n'est plus dans le parcours** (1er septembre 2026) : le champ est
+    // parti, `name` étant désormais un identifiant technique généré, jamais saisi.
     // **« Projet » n'est plus dans le parcours** (26 août 2026) : le sélecteur est parti, le projet
     // s'annonçant en tête de la modale. Une indication n'est pas un contrôle, donc elle ne tabule pas.
     'dev', // groupe d'environnements : une seule entrée

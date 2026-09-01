@@ -67,14 +67,14 @@ async function boite(page: import('@playwright/test').Page, etiquette: string) {
 
 test('les champs du formulaire font 30 px', async ({ page }) => {
   const hauteurs = await Promise.all(
-    ['Nom de la base', 'Hôte', 'Port', 'Base par défaut', 'Utilisateur', 'Mot de passe'].map(
+    ['Hôte', 'Port', 'Base par défaut', 'Utilisateur', 'Mot de passe'].map(
       async (nom) => (await boite(page, nom))?.hauteur,
     ),
   )
   // 30 px de contenu plus 1 px de bordure de chaque côté, comme le mockup. `Field` est en
   // `border-box` avec la hauteur explicitée : voir la note de `Field.module.css`, réécrite
   // après avoir mesuré un débordement de largeur.
-  expect(hauteurs).toEqual([32, 32, 32, 32, 32, 32])
+  expect(hauteurs).toEqual([32, 32, 32, 32, 32])
 })
 
 // **Ce test a trouvé le défaut le plus sérieux de `08b`.** En `content-box`, `width: 100%`
@@ -150,22 +150,6 @@ test('un nom de projet long ne pousse pas la croix hors de la bande', async ({ p
   })
   expect(coupe.coupe).toBe(true)
   expect(coupe.replie).toBe(false)
-})
-
-test('les deux cellules de la rangée d’identité s’alignent en bas', async ({ page }) => {
-  const bas = await page.evaluate(() => {
-    const rangee = document.querySelector('[class*=rowIdentity]')
-    if (!rangee) return null
-    // **Deux, et non trois** : le nom de la base et le groupe d'environnements. Les **boîtes
-    // visibles**, pas les contrôles nus — une première version mesurait le `<select>` lui-même et
-    // trouvait 16 px de haut dans une boîte de 32, ce qui a révélé un autre défaut.
-    const controles = [rangee.querySelector('input'), rangee.querySelector('fieldset label')]
-    return controles.map((c) => (c ? Math.round(c.getBoundingClientRect().bottom) : null))
-  })
-
-  // `align-items: end` : les étiquettes n'ont pas la même hauteur, donc sans lui les
-  // contrôles se décaleraient verticalement les uns par rapport aux autres.
-  expect(new Set(bas)).toHaveProperty('size', 1)
 })
 
 // L'autre défaut trouvé à la mesure : le `<select>` gardait sa hauteur intrinsèque de 16 px

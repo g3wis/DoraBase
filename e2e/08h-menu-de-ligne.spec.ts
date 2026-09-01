@@ -126,6 +126,7 @@ test('« Modifier… » sur une base ouvre la modale de modification, prérempli
   const modale = page.getByRole('dialog', { name: /Modifier/ })
   await expect(modale).toBeVisible()
   // Préremplie sur **cette** base : une modale vide, ou remplie d'une autre base, serait pire que
-  // pas de chemin du tout.
-  await expect(modale.getByLabel('Nom de la base')).toHaveValue('analytics')
+  // pas de chemin du tout. Le nom n'est plus un champ du formulaire (1er septembre 2026) : c'est
+  // le titre de la modale elle-même — « Modifier analytics » — qui porte cette garantie.
+  await expect(page.getByRole('dialog', { name: 'Modifier analytics' })).toBeVisible()
 })

@@ -121,14 +121,10 @@ describe('modifier une connexion (08g)', () => {
     expect(screen.getByLabelText('Mot de passe')).toHaveValue('')
   })
 
-  it('les deux champs d’identité sont verrouillés, avec leur raison', () => {
+  it('le champ d’identité restant est verrouillé, avec sa raison', () => {
+    // **Un seul champ désormais** (1er septembre 2026) : « Nom » n'est plus dans le formulaire,
+    // donc plus rien à y verrouiller. L'environnement reste la seule identité qui s'y affiche.
     monter()
-    const nom = screen.getByLabelText('Nom de la base')
-    expect(nom).toBeDisabled()
-    // Un contrôle désactivé sans explication passe pour un bug — la leçon de `09f`. Et depuis `26`,
-    // l'infobulle du nom **nomme le geste** au lieu de dire « supprimez et redéclarez » : le
-    // renommage existe, dans le menu « … » de la ligne d'arbre.
-    expect(nom).toHaveAttribute('title', expect.stringContaining('Renommer…'))
     expect(screen.getByRole('radio', { name: /prod/ })).toBeDisabled()
   })
 

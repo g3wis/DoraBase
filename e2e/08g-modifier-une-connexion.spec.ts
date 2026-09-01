@@ -48,8 +48,9 @@ test('le « … » d’une connexion ouvre sa modale, préremplie', async ({ pag
   })
   expect(auPoint).toBe(true)
   // Préremplie sur **cette** connexion : une modale vide, ou remplie d'une autre, serait pire que pas
-  // de chemin du tout.
-  await expect(modale.getByLabel('Nom de la base')).toHaveValue('analytics')
+  // de chemin du tout. Le port distingue `analytics` (PostgreSQL, 5432) d'`evenements` (MongoDB,
+  // 27017) — le nom n'est plus un champ du formulaire depuis le 1er septembre 2026.
+  await expect(modale.getByLabel('Port')).toHaveValue('5432')
 })
 
 test('les deux connexions de l’environnement sont sous lui, et pas ailleurs', async ({ page }) => {
@@ -87,7 +88,7 @@ test('la modale désigne la connexion dont on a ouvert le menu, pas sa voisine',
   // mauvaise se verrait au moteur, au port, et au nom.
   const modale = page.getByRole('dialog', { name: 'Modifier evenements' })
   await expect(modale).toBeVisible()
-  await expect(modale.getByLabel('Nom de la base')).toHaveValue('evenements')
+  await expect(modale.getByLabel('Port')).toHaveValue('27017')
   await expect(page.getByRole('dialog', { name: 'Modifier analytics' })).toBeHidden()
 })
 

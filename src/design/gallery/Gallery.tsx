@@ -1053,7 +1053,7 @@ function ModalGallery() {
           }
         >
           <div style={{ padding: 16, display: 'grid', gap: 12 }}>
-            <Field label="Nom de la base" defaultValue="analytics" />
+            <Field label="Libellé" defaultValue="analytics" />
             <Field label="Hôte" mono defaultValue="db-analytics.internal" />
           </div>
         </Modal>

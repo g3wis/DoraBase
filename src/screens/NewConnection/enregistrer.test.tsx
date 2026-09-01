@@ -104,11 +104,12 @@ test('cliquer enregistre, puis ferme la modale', async () => {
   const fermer = vi.fn()
   const espion = monter({ onClose: fermer })
 
-  await userEvent.type(screen.getByLabelText('Nom de la base'), 'analytics')
   await userEvent.click(enregistrer())
 
   await waitFor(() => expect(espion.requetes).toHaveLength(1))
-  expect(espion.requetes[0]?.database).toBe('analytics')
+  // Le champ « Nom » n'existe plus (1er septembre 2026) : `database` est l'abréviation du
+  // moteur par défaut, PostgreSQL — « psql ».
+  expect(espion.requetes[0]?.database).toBe('psql')
   // Le projet est celui que le `Select` **affiche**, pas la chaîne vide du brouillon neuf :
   // c'est le piège du select contrôlé, corrigé dans `NewConnection`.
   expect(espion.requetes[0]?.project).toBe('Atelier Nord')
@@ -176,7 +177,6 @@ test('un refus n’empêche pas de corriger puis de réessayer', async () => {
   await waitFor(() => expect(screen.getByText('nom déjà pris')).toBeInTheDocument())
 
   refuse = false
-  await userEvent.type(screen.getByLabelText('Nom de la base'), 'analytics2')
   await userEvent.click(enregistrer())
   await waitFor(() => expect(espion.requetes).toHaveLength(1))
 })
@@ -284,7 +284,6 @@ test('la ligne d’information nomme le projet créé et le chemin de retour', (
 test('la connexion est enregistrée dans le projet du cadre', async () => {
   const utilisateur = userEvent.setup()
   const espion = monter({ projet: 'Data science', projects: PROJETS })
-  await utilisateur.type(screen.getByLabelText('Nom de la base'), 'analytics')
   await utilisateur.click(enregistrer())
 
   await waitFor(() => expect(espion.requetes).toHaveLength(1))
@@ -301,7 +300,6 @@ test('un échec d’enregistrement dit que le projet est gardé', async () => {
       throw new Error('la base « analytics » existe déjà dans ce projet')
     },
   })
-  await utilisateur.type(screen.getByLabelText('Nom de la base'), 'analytics')
   await utilisateur.click(enregistrer())
 
   // **Sans cette précision, le défaut se produirait à coup sûr** : l'utilisateur ferme, recommence par

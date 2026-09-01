@@ -262,6 +262,21 @@ se redéfait : `ExplorerSidebar` faisait voyager `noeud.label` comme identité v
 IPC (`onCreer`, `onEditDatabase`, `demanderLeRetrait`) — vrai tant que `label === name`, faux dès
 que l'un diverge de l'autre. C'est `noeud.database` qui doit y voyager.
 
+**Et le champ « Nom » a fini par disparaître du formulaire** (1er septembre 2026) — le doublon
+qu'il formait avec « Libellé » n'avait plus de raison d'être une fois `name` devenu facultatif :
+deux champs qui font presque la même chose, l'un obligeant l'autre à exister « au cas où », sont
+un doublon plutôt qu'un choix. `A2` ne montre donc plus que l'environnement dans sa rangée
+d'identité, et `name` devient un identifiant purement technique, jamais saisi : vide sur un
+brouillon neuf, `draftToSaveRequest` y substitue toujours l'abréviation du moteur — ce n'est plus
+un repli parmi d'autres, c'est la seule voie. Le titre par défaut de l'explorateur reste donc
+cette abréviation, et `label`, en fin de formulaire, continue de le remplacer dès qu'il est
+renseigné (`arbre.ts` : `base.label?.trim() || base.name`) — la règle n'a pas changé, seul le
+champ qui la contredisait est parti. **Une collision reste un refus, pas une génération de
+suffixe** : `Project::valider` refuse déjà deux bases de même `name` dans le même environnement
+(`ModelError::ConnexionEnDouble`), et c'est le bon comportement — deviner un suffixe unique
+masquerait la collision plutôt que de la dire, quand `label` existe déjà pour désigner deux
+connexions du même moteur dans le même environnement.
+
 **Le cache de l'arbre suit le registre, qui est la seule vérité sur ce qui est ouvert** (31 août
 2026). `connection_states` lit le registre ; l'arbre ne le relisait qu'au `finally` de son propre
 chargement. Or **six commandes de configuration ferment des connexions** — renommer un projet,

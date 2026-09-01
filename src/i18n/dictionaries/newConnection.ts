@@ -22,12 +22,9 @@ export const newConnectionFr: Dictionnaire = {
       passwordCloudSql:
         "L'authentification est celle de Cloud SQL IAM : le proxy présente un jeton à la place d'un mot de passe. L'utilisateur est un principal IAM — une adresse.",
       lock: 'Ces champs identifient la connexion : les changer déplacerait son mot de passe et fermerait sa connexion.',
-      lockName:
-        'Le nom identifie la connexion. Pour le changer : menu « … » de sa ligne dans l’arbre, puis « Renommer… ».',
       hostKubernetes:
         "Une base qui vit dans un cluster n'a pas d'adresse joignable depuis ce poste : c'est la ressource déclarée dans le panneau « Proxy / tunnel » qui la désigne. La connexion se fait sur le bout local du transfert de port, d'où 127.0.0.1.",
     },
-    nameLabel: 'Nom de la base',
     environmentLabel: 'Environnement',
     hostLabel: 'Hôte',
     portLabel: 'Port',
@@ -128,12 +125,9 @@ export const newConnectionEn: Dictionnaire = {
       passwordCloudSql:
         'Authentication is Cloud SQL IAM: the proxy presents a token instead of a password. The user is an IAM principal — an email address.',
       lock: 'These fields identify the connection: changing them would move its password and close the open connection.',
-      lockName:
-        'The name identifies the connection. To change it: the “…” menu on its row in the tree, then “Rename…”.',
       hostKubernetes:
         'A database living in a cluster has no address reachable from this machine: the resource declared in the “Proxy / tunnel” panel is what locates it. The connection is made to the local end of the port forward, hence 127.0.0.1.',
     },
-    nameLabel: 'Database name',
     environmentLabel: 'Environment',
     hostLabel: 'Host',
     portLabel: 'Port',
