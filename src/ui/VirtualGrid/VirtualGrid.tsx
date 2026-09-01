@@ -481,15 +481,24 @@ function EnTete<Row>({
           >
             {colonne.header}
             {onColumnResize && colonne.resizable !== false && (
-              // Poignée de redimensionnement : le même langage que celle de `SplitPane` — un
-              // trait de `--divider`, épaissi au survol et au focus, avec une zone de saisie en
-              // débord. Elle ne s'étend qu'**à gauche**, dans la colonne elle-même, plutôt que de
-              // chevaucher la colonne voisine comme `SplitPane` le fait entre deux panneaux : le
-              // `.th` qui la porte coupe son propre débordement pour l'ellipse du texte, et un
-              // débord à droite y serait rogné (défaut n° 34, ici même famille).
+              // Poignée de redimensionnement : le même langage visuel que celle de `SplitPane` —
+              // un trait, épaissi au survol et au focus, avec une zone de saisie en débord. Elle
+              // ne s'étend qu'**à gauche**, dans la colonne elle-même, plutôt que de chevaucher la
+              // colonne voisine comme `SplitPane` le fait entre deux panneaux : le `.th` qui la
+              // porte coupe son propre débordement pour l'ellipse du texte, et un débord à droite
+              // y serait rogné (défaut n° 34, ici même famille).
+              //
+              // **`role="slider"`, jamais `separator`.** Toute la suite Playwright mesure les
+              // poignées de `SplitPane` par `[role=separator]`, en comptant, en indexant ou en
+              // filtrant sur ce seul sélecteur — une convention établie dans une dizaine de
+              // specs. Une poignée de colonne partageant ce rôle s'y serait glissée, décalant
+              // les index et faussant les comptes sans qu'aucun test ne nomme la vraie cause. Le
+              // motif WAI-ARIA de la « fenêtre à onglets redimensionnable » convient d'ailleurs
+              // mieux ici : c'est une valeur bornée qu'on fait varier par glissement, exactement
+              // ce que `slider` décrit — `aria-valuenow`/`min` restent les mêmes attributs.
               <div
-                role="separator"
-                aria-orientation="vertical"
+                role="slider"
+                aria-orientation="horizontal"
                 aria-label={colonne.resizeLabel}
                 aria-valuenow={colonne.width}
                 aria-valuemin={colonne.minWidth ?? LARGEUR_MIN_PAR_DEFAUT}

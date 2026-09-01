@@ -192,13 +192,13 @@ describe('VirtualGrid', () => {
   describe('redimensionnement des colonnes', () => {
     it('sans onColumnResize, aucune poignée ne se rend', () => {
       grille({ rows: lignes(3) })
-      expect(screen.queryByRole('separator')).not.toBeInTheDocument()
+      expect(screen.queryByRole('slider')).not.toBeInTheDocument()
     })
 
     it('une poignée par colonne redimensionnable, aucune sur celle qui ne l’est pas', () => {
       grille({ rows: lignes(3), onColumnResize: () => {} })
       // `id` porte `resizable: false` : une seule poignée doit exister, celle de `nom`.
-      expect(screen.getAllByRole('separator')).toHaveLength(1)
+      expect(screen.getAllByRole('slider')).toHaveLength(1)
       expect(screen.getByLabelText('Redimensionner nom')).toBeInTheDocument()
       expect(screen.queryByLabelText('Redimensionner id')).not.toBeInTheDocument()
     })
