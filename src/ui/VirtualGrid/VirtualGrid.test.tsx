@@ -10,13 +10,22 @@ const lignes = (combien: number): Ligne[] =>
   Array.from({ length: combien }, (_, i) => ({ id: i, nom: `ligne ${i}` }))
 
 const COLONNES: GridColumn<Ligne>[] = [
-  { key: 'id', header: 'id', width: 64, numeric: true, cell: (l) => l.id },
+  {
+    key: 'id',
+    header: 'id',
+    width: 64,
+    numeric: true,
+    cell: (l) => l.id,
+    resizable: false,
+    resizeLabel: 'Redimensionner id',
+  },
   {
     key: 'nom',
     header: 'nom',
     width: 120,
     cell: (l) => l.nom,
     filter: <input aria-label="filtre nom" />,
+    resizeLabel: 'Redimensionner nom',
   },
 ]
 
@@ -178,5 +187,65 @@ describe('VirtualGrid', () => {
     grille({ rows: [], empty: 'Aucune ligne' })
     expect(screen.getByText('Aucune ligne')).toBeInTheDocument()
     expect(screen.getAllByRole('row')).toHaveLength(1)
+  })
+
+  describe('redimensionnement des colonnes', () => {
+    it('sans onColumnResize, aucune poignée ne se rend', () => {
+      grille({ rows: lignes(3) })
+      expect(screen.queryByRole('separator')).not.toBeInTheDocument()
+    })
+
+    it('une poignée par colonne redimensionnable, aucune sur celle qui ne l’est pas', () => {
+      grille({ rows: lignes(3), onColumnResize: () => {} })
+      // `id` porte `resizable: false` : une seule poignée doit exister, celle de `nom`.
+      expect(screen.getAllByRole('separator')).toHaveLength(1)
+      expect(screen.getByLabelText('Redimensionner nom')).toBeInTheDocument()
+      expect(screen.queryByLabelText('Redimensionner id')).not.toBeInTheDocument()
+    })
+
+    it('glisser la poignée redimensionne, et onColumnResize n’est appelé qu’au relâchement', () => {
+      const largeurs: Array<[string, number]> = []
+      grille({ rows: lignes(3), onColumnResize: (cle, largeur) => largeurs.push([cle, largeur]) })
+
+      const poignee = screen.getByLabelText('Redimensionner nom')
+      fireEvent.pointerDown(poignee, { clientX: 200, pointerId: 1 })
+      fireEvent.pointerMove(poignee, { clientX: 230, pointerId: 1 })
+      // Pendant le geste, rien n'est encore remonté à l'appelant.
+      expect(largeurs).toEqual([])
+
+      fireEvent.pointerUp(poignee, { clientX: 230, pointerId: 1 })
+      // La colonne `nom` faisait 120 px ; +30 px de glissement.
+      expect(largeurs).toEqual([['nom', 150]])
+    })
+
+    it('le glissement ne descend pas sous la largeur minimale', () => {
+      const largeurs: Array<[string, number]> = []
+      grille({ rows: lignes(3), onColumnResize: (cle, largeur) => largeurs.push([cle, largeur]) })
+
+      const poignee = screen.getByLabelText('Redimensionner nom')
+      fireEvent.pointerDown(poignee, { clientX: 200, pointerId: 1 })
+      fireEvent.pointerMove(poignee, { clientX: -1000, pointerId: 1 })
+      fireEvent.pointerUp(poignee, { clientX: -1000, pointerId: 1 })
+
+      // `minWidth` n'est pas fourni sur la colonne : le plancher par défaut est 60.
+      expect(largeurs).toEqual([['nom', 60]])
+    })
+
+    it('les flèches du clavier redimensionnent par pas de 8 px, et remontent aussitôt', async () => {
+      const utilisateur = userEvent.setup()
+      const largeurs: Array<[string, number]> = []
+      grille({ rows: lignes(3), onColumnResize: (cle, largeur) => largeurs.push([cle, largeur]) })
+
+      const poignee = screen.getByLabelText('Redimensionner nom')
+      poignee.focus()
+      await utilisateur.keyboard('{ArrowRight}')
+      expect(largeurs).toEqual([['nom', 128]])
+
+      await utilisateur.keyboard('{ArrowLeft}')
+      expect(largeurs).toEqual([
+        ['nom', 128],
+        ['nom', 112],
+      ])
+    })
   })
 })

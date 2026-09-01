@@ -180,6 +180,10 @@ export function TableView({
   // Les colonnes **masquées**, et non les visibles : une table dont on n'a rien masqué a un
   // ensemble vide, quel que soit le nombre de colonnes qu'elle finira par avoir.
   const [masquees, setMasquees] = useState<ReadonlySet<string>>(new Set())
+  // Les largeurs redimensionnées, par nom de colonne — une colonne absente d'ici garde
+  // `LARGEUR_COLONNE`. Comme `masquees`, seul l'écart au défaut est tenu : changer de table ne
+  // demande aucune remise à zéro, le composant tout entier étant remonté par sa `key` d'onglet.
+  const [largeurs, setLargeurs] = useState<Record<string, number>>({})
   const [enEdition, setEnEdition] = useState<EnEdition | null>(null)
   // Le document ouvert dans l'éditeur JSON (`18g`) : une ligne existante à éditer, ou `'creer'` pour
   // le geste du `+` sur une base NoSQL. Un seul état — les deux ne peuvent pas être ouverts ensemble.
@@ -372,6 +376,8 @@ export function TableView({
         key: '#',
         header: '#',
         width: moteur === 'mongodb' ? LARGEUR_GOUTTIERE_MONGO : LARGEUR_GOUTTIERE,
+        // Rien à redimensionner dans la gouttière : elle n'a que le rang et deux icônes d'action.
+        resizable: false,
         // **`+2` plutôt qu'un rang** : une ligne ajoutée n'a pas de place dans la table, seulement
         // un ordre d'arrivée. Lui donner un rang la ferait passer pour la 501ᵉ ligne lue.
         //
@@ -491,7 +497,8 @@ export function TableView({
                 )}
               </button>
             ),
-            width: LARGEUR_COLONNE,
+            width: largeurs[colonne.name] ?? LARGEUR_COLONNE,
+            resizeLabel: t('tableView.grid.resizeColumn', { column: colonne.name }),
             // L'alignement suit la **valeur**, pas le nom de la colonne : une colonne numérique
             // dont une cellule est `NULL` garde son `NULL` à gauche, comme le mockup le montre.
             numeric: colonne.category === 'number',
@@ -598,6 +605,7 @@ export function TableView({
       operateurs,
       appliquerFiltre,
       masquees,
+      largeurs,
       attente,
       enEdition,
       edition,
@@ -659,6 +667,9 @@ export function TableView({
             // lue partagent le rang 1, et deux lignes de même identité feraient sauter la sélection
             // de l'une à l'autre.
             rowId={(ligne) => (ligne.sorte === 'ajoutee' ? ligne.cle : String(ligne.rang))}
+            onColumnResize={(cle, largeur) =>
+              setLargeurs((precedent) => ({ ...precedent, [cle]: largeur }))
+            }
             {...(edition
               ? {
                   // Les teintes de `11b`/`A6` : une ligne qui porte une modification, une marque de

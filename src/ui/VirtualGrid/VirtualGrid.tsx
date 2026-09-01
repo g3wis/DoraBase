@@ -13,10 +13,23 @@
 // biome-ignore-all lint/a11y/useFocusableInteractive: voir ci-dessus
 // biome-ignore-all lint/a11y/useKeyWithClickEvents: voir ci-dessus
 
-import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react'
+import {
+  type KeyboardEvent,
+  type ReactNode,
+  type PointerEvent as ReactPointerEvent,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from 'react'
 import { flushSync } from 'react-dom'
 import { cx } from '../cx'
 import styles from './VirtualGrid.module.css'
+
+/** Pas du redimensionnement au clavier, en pixels — même valeur que `SplitPane`. */
+const PAS_CLAVIER = 8
+/** Largeur minimale d'une colonne redimensionnée, faute d'un `minWidth` par colonne. */
+const LARGEUR_MIN_PAR_DEFAUT = 60
 
 export type GridColumn<Row> = {
   /** Clé stable, employée pour le rendu et l'association en-tête ↔ cellule. */
@@ -31,6 +44,20 @@ export type GridColumn<Row> = {
   cell: (row: Row, index: number) => ReactNode
   /** Cellule de la seconde ligne d'en-tête, quand `filterRow` est demandée. */
   filter?: ReactNode
+  /**
+   * Retire la poignée de redimensionnement de cette colonne, quand `onColumnResize` est fourni à
+   * la grille. La gouttière `#` de `A5` n'a rien à redimensionner : elle n'a pas de contenu dont
+   * la largeur varie.
+   */
+  resizable?: boolean
+  /** Largeur minimale que le glissement ou les flèches peuvent atteindre. `60` par défaut. */
+  minWidth?: number
+  /**
+   * Nom accessible de la poignée de redimensionnement de cette colonne. Requis dès que
+   * `onColumnResize` est fourni et que la colonne n'est pas exclue par `resizable: false` — une
+   * poignée anonyme serait illisible à la voix, comme la grille elle-même (voir `label`).
+   */
+  resizeLabel?: string
 }
 
 type VirtualGridProps<Row> = {
@@ -64,6 +91,17 @@ type VirtualGridProps<Row> = {
   overscan?: number
   /** Rend la seconde ligne d'en-tête, celle des filtres de `10d`. */
   filterRow?: boolean
+  /**
+   * Redimensionnement des colonnes à la poignée, posée sur le bord droit de chaque en-tête.
+   *
+   * Absente, aucune poignée ne se rend — c'est le cas de la console de `A7`, dont les colonnes
+   * n'ont pas encore ce geste. Appelée au relâchement du geste ou à une flèche du clavier
+   * seulement, jamais à chaque `pointermove` : la largeur affichée pendant le glissement reste un
+   * état interne de la grille, comme la taille de `SplitPane` pendant sa propre poignée — la
+   * relever à chaque trame referait retraverser toute la fenêtre visible chez l'appelant pour
+   * rien.
+   */
+  onColumnResize?: (key: string, width: number) => void
   selectedId?: string | null
   onSelect?: (row: Row, index: number) => void
   /**
@@ -118,6 +156,7 @@ export function VirtualGrid<Row>({
   rowTint,
   cellTint,
   empty,
+  onColumnResize,
 }: VirtualGridProps<Row>) {
   const [scrollTop, setScrollTop] = useState(0)
   const viewport = useRef<HTMLDivElement>(null)
@@ -125,13 +164,34 @@ export function VirtualGrid<Row>({
   // qui doit donc être unique même avec deux grilles montées côte à côte.
   const idGrille = useId()
 
+  // La largeur en cours de glissement, tenue **hors** de la prop `columns` : la remonter à chaque
+  // `pointermove` referait recalculer et retraverser tout ce que l'appelant dérive des colonnes —
+  // filtres, tri, colonnes effectives de `A5` — à chaque trame. `onColumnResize` n'est appelé
+  // qu'au relâchement ou à une flèche, avec la largeur finale.
+  const [enRedimensionnement, setEnRedimensionnement] = useState<{
+    key: string
+    width: number
+  } | null>(null)
+
   const lignesDEnTete = filterRow ? 2 : 1
   const premiere = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan)
   const visibles = Math.ceil(viewportHeight / rowHeight) + overscan * 2
   const derniere = Math.min(rows.length, premiere + visibles)
   const fenetre = rows.slice(premiere, derniere)
 
-  const gabarit = columns.map((colonne) => `${colonne.width}px`).join(' ')
+  // Colonnes telles qu'affichées : celle qu'on glisse porte sa largeur provisoire, jamais encore
+  // remontée à l'appelant. Seul l'en-tête en a besoin — les cellules de donnée ne lisent jamais
+  // `colonne.width`, la mise en page venant entièrement du gabarit ci-dessous.
+  const colonnesAffichees =
+    enRedimensionnement === null
+      ? columns
+      : columns.map((colonne) =>
+          colonne.key === enRedimensionnement.key
+            ? { ...colonne, width: enRedimensionnement.width }
+            : colonne,
+        )
+
+  const gabarit = colonnesAffichees.map((colonne) => `${colonne.width}px`).join(' ')
   /**
    * La largeur du **contenu**, somme des colonnes.
    *
@@ -140,7 +200,59 @@ export function VirtualGrid<Row>({
    * disparaissait dès qu'on défilait horizontalement. Constaté à l'écran le 10 août 2026, sur une
    * table de trente-quatre colonnes.
    */
-  const largeurContenu = columns.reduce((somme, colonne) => somme + colonne.width, 0)
+  const largeurContenu = colonnesAffichees.reduce((somme, colonne) => somme + colonne.width, 0)
+
+  /** Point de départ commun au glissement et aux flèches : la largeur minimale d'une colonne. */
+  function largeurMin(colonne: GridColumn<Row>) {
+    return colonne.minWidth ?? LARGEUR_MIN_PAR_DEFAUT
+  }
+
+  function debuterLeRedimensionnement(
+    evenement: ReactPointerEvent<HTMLDivElement>,
+    colonne: GridColumn<Row>,
+  ) {
+    // Sans `stopPropagation`, le clic remonterait au bouton de tri qui enveloppe l'en-tête sur les
+    // navigateurs où `pointerdown` précède un `click` de synthèse — la poignée doit redimensionner,
+    // jamais trier.
+    evenement.stopPropagation()
+    evenement.preventDefault()
+    const origineX = evenement.clientX
+    const largeurOrigine = colonne.width
+    const poignee = evenement.currentTarget
+    poignee.setPointerCapture?.(evenement.pointerId)
+    document.body.classList.add(styles.pendantLeRedimensionnement as string)
+
+    let derniereLargeur = largeurOrigine
+
+    function onMove(moveEvent: PointerEvent) {
+      const delta = moveEvent.clientX - origineX
+      derniereLargeur = Math.max(largeurMin(colonne), largeurOrigine + delta)
+      setEnRedimensionnement({ key: colonne.key, width: derniereLargeur })
+    }
+
+    function onUp() {
+      poignee.removeEventListener('pointermove', onMove)
+      poignee.removeEventListener('pointerup', onUp)
+      poignee.removeEventListener('pointercancel', onUp)
+      document.body.classList.remove(styles.pendantLeRedimensionnement as string)
+      setEnRedimensionnement(null)
+      onColumnResize?.(colonne.key, derniereLargeur)
+    }
+
+    poignee.addEventListener('pointermove', onMove)
+    poignee.addEventListener('pointerup', onUp)
+    poignee.addEventListener('pointercancel', onUp)
+  }
+
+  function redimensionnerAuClavier(
+    evenement: KeyboardEvent<HTMLDivElement>,
+    colonne: GridColumn<Row>,
+  ) {
+    if (evenement.key !== 'ArrowLeft' && evenement.key !== 'ArrowRight') return
+    evenement.preventDefault()
+    const pas = evenement.key === 'ArrowRight' ? PAS_CLAVIER : -PAS_CLAVIER
+    onColumnResize?.(colonne.key, Math.max(largeurMin(colonne), colonne.width + pas))
+  }
 
   // Ramener la ligne sélectionnée dans la fenêtre visible : sans cela, `↓` déplacerait une
   // sélection invisible dès qu'elle sort du bas de l'écran.
@@ -243,10 +355,13 @@ export function VirtualGrid<Row>({
             filtre en cours et un popover ouvert étaient perdus à cet instant. Attrapé par les tests
             de `10d`, pas par l'œil. */}
         <EnTete
-          columns={columns}
+          columns={colonnesAffichees}
           gabarit={gabarit}
           largeur={largeurContenu}
           filterRow={filterRow}
+          onColumnResize={onColumnResize}
+          onPoigneeDown={debuterLeRedimensionnement}
+          onPoigneeKeyDown={redimensionnerAuClavier}
         />
         {rows.length === 0 && empty !== undefined ? (
           <div className={styles.empty}>{empty}</div>
@@ -333,11 +448,17 @@ function EnTete<Row>({
   gabarit,
   largeur,
   filterRow,
+  onColumnResize,
+  onPoigneeDown,
+  onPoigneeKeyDown,
 }: {
   columns: readonly GridColumn<Row>[]
   gabarit: string
   largeur: number
   filterRow: boolean
+  onColumnResize?: (key: string, width: number) => void
+  onPoigneeDown: (evenement: ReactPointerEvent<HTMLDivElement>, colonne: GridColumn<Row>) => void
+  onPoigneeKeyDown: (evenement: KeyboardEvent<HTMLDivElement>, colonne: GridColumn<Row>) => void
 }) {
   return (
     <div className={styles.head} role="rowgroup" style={{ width: largeur }}>
@@ -359,6 +480,25 @@ function EnTete<Row>({
             )}
           >
             {colonne.header}
+            {onColumnResize && colonne.resizable !== false && (
+              // Poignée de redimensionnement : le même langage que celle de `SplitPane` — un
+              // trait de `--divider`, épaissi au survol et au focus, avec une zone de saisie en
+              // débord. Elle ne s'étend qu'**à gauche**, dans la colonne elle-même, plutôt que de
+              // chevaucher la colonne voisine comme `SplitPane` le fait entre deux panneaux : le
+              // `.th` qui la porte coupe son propre débordement pour l'ellipse du texte, et un
+              // débord à droite y serait rogné (défaut n° 34, ici même famille).
+              <div
+                role="separator"
+                aria-orientation="vertical"
+                aria-label={colonne.resizeLabel}
+                aria-valuenow={colonne.width}
+                aria-valuemin={colonne.minWidth ?? LARGEUR_MIN_PAR_DEFAUT}
+                tabIndex={0}
+                className={styles.resizeHandle}
+                onPointerDown={(evenement) => onPoigneeDown(evenement, colonne)}
+                onKeyDown={(evenement) => onPoigneeKeyDown(evenement, colonne)}
+              />
+            )}
           </div>
         ))}
       </div>

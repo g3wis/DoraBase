@@ -61,6 +61,7 @@
 }
 
 .th {
+  position: relative;
   height: var(--rowh);
   padding: 0 8px;
   font-size: var(--text-label);
@@ -73,6 +74,74 @@
   display: flex;
   align-items: center;
   gap: var(--space-1);
+}
+
+/*
+ * La poignée de redimensionnement d'une colonne (`onColumnResize`) : même langage que la poignée
+ * de `SplitPane` — un trait d'un pixel, `--divider` implicite (transparent ici, le filet bas de
+ * l'en-tête suffit à séparer les colonnes visuellement), épaissi au survol et au focus par un
+ * pseudo-élément qui déborde sans participer à la mise en page.
+ *
+ * **Le débord ne va qu'à gauche**, dans la colonne elle-même. `SplitPane` déborde des deux côtés
+ * parce que sa poignée est un frère des deux panneaux, non contenu par l'un ou l'autre ; ici la
+ * poignée est un enfant du `.th`, qui coupe son propre débordement pour l'ellipse du texte — un
+ * débord à droite y serait rogné, même défaut que les panneaux flottants ancrés dans le flux.
+ */
+.resizeHandle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 1px;
+  cursor: col-resize;
+  background: transparent;
+}
+
+.resizeHandle::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -6px;
+  right: 0;
+}
+
+.resizeHandle::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: -3px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--ink-3);
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+
+.resizeHandle:hover::after,
+.resizeHandle:focus-visible::after {
+  opacity: 1;
+}
+
+.resizeHandle:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+/* Posée sur `<body>` le temps du glissement — même raison que `SplitPane` : `preventDefault` sur
+   `pointerdown` n'arrête pas une sélection de texte déjà en cours ni les moteurs qui la relancent
+   au mouvement. */
+:global(body).pendantLeRedimensionnement {
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: col-resize;
+}
+
+:global(body).pendantLeRedimensionnement * {
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: col-resize;
 }
 
 .filterRow {
