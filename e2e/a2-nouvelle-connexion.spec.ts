@@ -806,3 +806,72 @@ test('le bouton désactivé porte l’habillage du handoff, pas seulement l’at
   expect(styles?.texte).toBe('rgba(35, 32, 28, 0.4)')
   expect(styles?.curseur).toBe('not-allowed')
 })
+
+// --- Une fenêtre plus courte que la modale.
+//
+// Le formulaire d'`A2` mesure plus de 600 px, et la coquille n'avait aucun plafond : sur une
+// fenêtre courte, la bande de pied sortait **par le bas**, donc « Enregistrer » et « Annuler »
+// devenaient inatteignables — la racine ne défilant pas (`geometrie-reelle`), rien ne venait
+// les rattraper. C'est le corps qui doit céder et défiler, jamais l'en-tête ni le pied.
+test.describe('sur une fenêtre trop courte pour la modale', () => {
+  test.use({ viewport: { width: 1360, height: 520 } })
+
+  test('la coquille tient dans la fenêtre, et le corps défile', async ({ page }) => {
+    const mesures = await page.evaluate(() => {
+      const coquille = document.querySelector('[role=dialog]')
+      const corps = document.querySelector('[data-testid=modal-body]')
+      const pied = document.querySelector('[data-testid=modal-footer]')
+      const entete = corps?.previousElementSibling
+      if (!(coquille && corps && pied && entete)) return null
+      return {
+        hauteurEntete: Math.round(entete.getBoundingClientRect().height),
+        basCoquille: Math.round(coquille.getBoundingClientRect().bottom),
+        basPied: Math.round(pied.getBoundingClientRect().bottom),
+        hauteurPied: Math.round(pied.getBoundingClientRect().height),
+        contenuDuCorps: corps.scrollHeight,
+        visibleDuCorps: corps.clientHeight,
+        fenetre: window.innerHeight,
+        racineDefile: document.documentElement.scrollHeight > document.documentElement.clientHeight,
+      }
+    })
+
+    expect(mesures?.basCoquille).toBeLessThanOrEqual(mesures?.fenetre as number)
+    expect(mesures?.basPied).toBeLessThanOrEqual(mesures?.fenetre as number)
+    // Et le décor débordait vraiment, sinon les deux mesures ci-dessus ne prouvent rien
+    // (règle n° 5) : c'est le corps qui a cédé, et il a de quoi défiler.
+    expect(mesures?.contenuDuCorps).toBeGreaterThan(mesures?.visibleDuCorps as number)
+    // L'en-tête garde ses 44px (filet compris) : c'est le corps qui cède, pas lui.
+    expect(mesures?.hauteurEntete).toBe(45)
+    // Le pied garde sa hauteur : c'est le corps qui cède, pas lui. `A2` en « projet imposé »
+    // porte une seconde ligne sous les boutons, d'où la hauteur **minimale** et non une égalité.
+    expect(mesures?.hauteurPied).toBeGreaterThanOrEqual(57)
+    // Et rien n'est reporté sur la racine, qui ne défile pas.
+    expect(mesures?.racineDefile).toBe(false)
+  })
+
+  test('les boutons du pied restent sous le pointeur', async ({ page }) => {
+    // **`elementFromPoint`, et non une assertion de visibilité** : c'est la seule mesure qui
+    // distingue « présent dans la mise en page » de « réellement atteignable » — un pied sorti
+    // par le bas de la fenêtre reste « visible » au sens de Playwright.
+    const pied = page.getByTestId('modal-footer')
+    for (const bouton of await pied.getByRole('button').all()) {
+      const cadre = await bouton.boundingBox()
+      expect(cadre).not.toBeNull()
+      const atteignable = await page.evaluate(
+        ({ x, y }) => {
+          // `elementFromPoint` rend `null` hors de la fenêtre, et `null?.closest(…)` vaut
+          // `undefined` — donc un `!== null` sur l'enchaînement optionnel serait **vrai** pour
+          // un bouton sorti de l'écran, c'est-à-dire vert sous sabotage. Le test doit constater
+          // qu'il y a bien un élément, puis que c'est ce bouton.
+          const cible = document.elementFromPoint(x, y)
+          return cible !== null && cible.closest('button') !== null
+        },
+        {
+          x: (cadre?.x ?? 0) + (cadre?.width ?? 0) / 2,
+          y: (cadre?.y ?? 0) + (cadre?.height ?? 0) / 2,
+        },
+      )
+      expect(atteignable, `bouton « ${await bouton.textContent()} » sous le pointeur`).toBe(true)
+    }
+  })
+})

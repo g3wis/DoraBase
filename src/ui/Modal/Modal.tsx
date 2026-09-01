@@ -237,7 +237,7 @@ export function Modal({
           )}
         </div>
 
-        <div ref={corps} className={styles.body}>
+        <div ref={corps} className={styles.body} data-testid="modal-body">
           {children}
         </div>
 

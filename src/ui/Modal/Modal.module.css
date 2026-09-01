@@ -43,6 +43,21 @@
   /* La fenêtre descend à 960px de large (minWidth de tauri.conf.json). 820px y tient,
    * mais sans marge : `max-width` évite que la modale déborde si la contrainte bouge. */
   max-width: calc(100% - 2 * var(--space-6));
+  /* **La coquille ne dépasse jamais la fenêtre, et c'est le corps qui défile.** Une modale a une
+   * hauteur dictée par son contenu — le formulaire d'`A2` avec un panneau proxy déplié en fait
+   * plus de 700px —, et sur une fenêtre courte la bande de pied sortait par le bas : les boutons
+   * « Enregistrer » et « Annuler » devenaient inatteignables, sans aucun défilement pour les
+   * rattraper, la racine ne défilant pas (`geometrie-reelle`).
+   *
+   * 34px, la même valeur que le remplissage haut du voile : la modale garde en bas la marge
+   * qu'elle a en haut. Le pourcentage se résout sur la boîte de contenu du voile, déjà amputée de
+   * ce remplissage — la coquille est donc plafonnée à `100vh - 68px`.
+   *
+   * Sans effet tant que la fenêtre est assez haute : la coquille garde alors la hauteur de son
+   * contenu, et aucune capture de fidélité ne bouge. */
+  max-height: calc(100% - 34px);
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius-window);
@@ -59,6 +74,11 @@
   display: flex;
   align-items: center;
   gap: 9px;
+  /* L'en-tête ne se comprime pas quand le corps déborde : c'est le corps qui cède et défile.
+   * Sans ce `flex: none`, ses 44px tombent à 32 sur une fenêtre courte — mesuré. Le pied, lui,
+   * n'en a pas besoin : sa `min-height` l'en empêche déjà, et une déclaration qui ne s'applique
+   * à rien ne se dénonce pas. */
+  flex: none;
   height: 44px;
   padding: 0 var(--space-7);
   border-bottom: 1px solid var(--divider);
@@ -145,6 +165,15 @@
    * sélecteur de moteur, 16px pour la grille, 0 16px pour le panneau proxy). Un padding
    * commun forcerait chaque bloc à le compenser. */
   padding: 0;
+  /* Le corps est la seule partie qui cède quand la fenêtre est trop courte, et la seule qui
+   * défile. **`overflow-y` suffit, et aucun `min-height: 0` ne l'accompagne** : la hauteur
+   * minimale automatique d'un élément de flex vaut celle de son contenu — ce qui l'empêcherait
+   * de se comprimer — *sauf* pour un conteneur de défilement, qu'elle exempte. Le mettre
+   * quand même aurait été une déclaration inerte, et une inerte ne se dénonce pas plus tard.
+   *
+   * Les panneaux flottants (listes déroulantes) sont en `position: fixed` et ne sont donc pas
+   * rognés par ce défilement — c'est le remède du défaut n° 35, déjà en place. */
+  overflow-y: auto;
 }
 
 .footer {

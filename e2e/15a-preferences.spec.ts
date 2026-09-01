@@ -168,3 +168,47 @@ test('les six sections sont atteignables au clavier', async ({ page }) => {
   await page.keyboard.press('ArrowUp')
   await expect(modale.getByRole('tab', { name: 'Mises à jour' })).toBeFocused()
 })
+
+// --- Une fenêtre trop courte pour la modale.
+//
+// `A10` porte le corps le plus haut du produit — un plancher de 340px, plus l'en-tête et le pied.
+// Sur une fenêtre courte, la coquille est plafonnée par `Modal` : ce qui doit céder est la zone à
+// deux colonnes, dont le panneau de droite a déjà son propre défilement — et non le corps de la
+// modale, dont le défilement emporterait la bande de sections avec lui.
+test.describe('sur une fenêtre trop courte', () => {
+  test.use({ viewport: { width: 1360, height: 420 } })
+
+  test('le pied et les sections restent en vue, et le corps de la modale ne défile pas', async ({
+    page,
+  }) => {
+    await ouvrirLesPreferences(page)
+
+    const mesures = await page.evaluate(() => {
+      const modale = document.querySelector('[role=dialog]')
+      const pied = document.querySelector('[data-testid=modal-footer]')
+      const corpsDeLaModale = document.querySelector('[data-testid=modal-body]')
+      // La zone à deux colonnes, désignée par le panneau qu'elle contient plutôt que par une
+      // classe engendrée.
+      const deuxColonnes = document.querySelector('[role=tabpanel]')?.parentElement
+      const derniereSection = [...document.querySelectorAll('[role=tab]')].at(-1)
+      if (!(modale && pied && corpsDeLaModale && deuxColonnes && derniereSection)) return null
+      return {
+        basModale: Math.round(modale.getBoundingClientRect().bottom),
+        basPied: Math.round(pied.getBoundingClientRect().bottom),
+        basDerniereSection: Math.round(derniereSection.getBoundingClientRect().bottom),
+        hauteurDesColonnes: Math.round(deuxColonnes.getBoundingClientRect().height),
+        modaleDefile: corpsDeLaModale.scrollHeight > corpsDeLaModale.clientHeight,
+        fenetre: window.innerHeight,
+      }
+    })
+
+    expect(mesures?.basModale).toBeLessThanOrEqual(mesures?.fenetre as number)
+    expect(mesures?.basPied).toBeLessThanOrEqual(mesures?.fenetre as number)
+    // La bande de sections tient entièrement : c'est ce que le plancher de 340px lui coûtait.
+    expect(mesures?.basDerniereSection).toBeLessThanOrEqual(mesures?.fenetre as number)
+    // La zone à deux colonnes est passée **sous** son plancher de 340px : c'est elle qui a cédé,
+    // et le panneau de droite défile déjà de lui-même.
+    expect(mesures?.hauteurDesColonnes).toBeLessThan(340)
+    expect(mesures?.modaleDefile).toBe(false)
+  })
+})

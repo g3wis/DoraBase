@@ -10,7 +10,12 @@
 
 .corps {
   display: flex;
-  min-height: 340px;
+  /* **La hauteur minimale cède devant une fenêtre courte.** Écrite en dur, elle l'emportait sur le
+   * `max-height` juste en dessous : le corps gardait ses 340px, débordait de la coquille — désormais
+   * plafonnée à la fenêtre — et c'était le corps *de la modale* qui défilait, emportant la bande de
+   * sections hors de vue en plus du panneau, qui a déjà son propre défilement. Le `min` la borne à
+   * la même place que le maximum : au-dessus de ~540px de fenêtre, rien ne change. */
+  min-height: min(340px, calc(100vh - 200px));
   max-height: min(560px, calc(100vh - 200px));
 }
 

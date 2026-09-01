@@ -174,6 +174,17 @@ qu'il portait et que le rendu ne dit pas.
   modale. Redessiné en rouage à huit dents le 26 août 2026. Quatre captures de fidélité en
   dépendaient : une icône du sprite est un décor partagé, et la changer périme tout écran qui la
   montre.
+- **Une modale ne dépasse jamais la fenêtre, et c'est son corps qui défile** (1er septembre 2026). La
+  coquille n'avait aucun plafond : le formulaire d'`A2` en fait plus de 600px, donc sur une fenêtre
+  courte la bande de pied sortait **par le bas** et « Enregistrer » devenait inatteignable — la
+  racine ne défilant pas, rien ne venait le rattraper. Le plafond est `100% - 34px`, la marge du
+  haut rendue au bas, et l'en-tête porte un `flex: none` : sans lui ses 44px tombent à 32, mesuré.
+  Le pied n'en a pas besoin — sa `min-height` l'en empêche déjà —, et le corps n'a pas besoin de
+  `min-height: 0` : un conteneur de défilement est exempté de la hauteur minimale automatique.
+  **Deux déclarations inertes de moins**, sur le motif du `grid-column` mort du 31 août. Corollaire
+  chez `A10`, la seule modale à porter son propre plancher de hauteur : celui-ci l'emportait sur son
+  propre maximum, donc le corps de la modale défilait et emportait la bande de sections avec lui — un
+  `min()` le borne au même endroit que le maximum.
 - **`esc` dans un champ rend le focus, il ne ferme pas la modale.** Un second `esc` ferme ;
   depuis un bouton, la fermeture est immédiate — il n'y a pas de saisie à abandonner.
 - **Aucune correction automatique dans les champs.** macOS transformait `localhost` en
