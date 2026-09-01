@@ -74,6 +74,16 @@ test('↑↓ navigue dans la liste', async ({ page }) => {
   expect(second).not.toBe(premier)
 })
 
+test('sans alias, l’unique table citée propose aussi ses colonnes', async ({ page }) => {
+  // Le cas du mockup : `where sta` doit suggérer `status` sans écrire `orders.` ou `o.` — écrire le
+  // qualifiant à chaque fois serait pénible sur une requête à une seule table, le cas le plus courant.
+  await page.keyboard.insertText('select * from orders where sta')
+
+  const liste = page.locator('.cm-tooltip-autocomplete')
+  await expect(liste).toBeVisible()
+  await expect(liste).toContainText('status')
+})
+
 test('un alias inconnu n’ouvre aucune liste de colonnes', async ({ page }) => {
   await page.keyboard.insertText('select x.sta')
   await page.keyboard.type('t')

@@ -33,6 +33,14 @@ export function cleDeStructure(cle: DatabaseKey, schema: string, table: string):
 }
 
 /**
+ * L'identité de la **liste des objets** d'un schéma en cache — un cran au-dessus de
+ * `cleDeStructure`, qui identifie une table précise.
+ */
+export function cleDeSchema(cle: DatabaseKey, schema: string): string {
+  return `${cle.project}/${cle.database}/${cle.environment}::${schema}`
+}
+
+/**
  * Ce que la file de préchauffage a à faire.
  *
  * **Deux sortes plutôt qu'une liste de tables** : au dépliage d'une connexion, on ne connaît que ses
@@ -58,6 +66,15 @@ function idDe(cle: DatabaseKey): string {
 export type Structures = {
   /** La structure d'une table, si elle est déjà là. */
   detail: (cle: DatabaseKey, schema: string, table: string) => TableDetail | undefined
+  /**
+   * Les objets d'un schéma, si la cascade de préchauffage (ou un dépliage) les a déjà lus —
+   * **n'importe quel schéma de la connexion**, pas seulement celui que l'écran affiche.
+   *
+   * `prechauffer` liste tous les schémas dès l'ouverture de la connexion, avant même de décrire
+   * leurs tables : c'est ce qui rend l'autocomplétion d'un schéma qualifié (`sch.`) possible sans
+   * que l'utilisateur l'ait déplié dans l'arbre.
+   */
+  objetsDuSchema: (cle: DatabaseKey, schema: string) => readonly TableSummary[] | undefined
   /** Pose ce qu'un écran a chargé lui-même : sinon la même table se redemande à chaque ouverture. */
   poser: (cle: DatabaseKey, schema: string, table: string, detail: TableDetail) => void
   /** Oublie une table — ce que « Rafraîchir » fait de la table ouverte. */
@@ -110,6 +127,15 @@ export function useStructures(
 ): Structures {
   const [table, setTable] = useState<Readonly<Record<string, TableDetail>>>({})
   const courant = useRef<Readonly<Record<string, TableDetail>>>({})
+  /**
+   * Les objets d'un schéma, une fois listés — **tous les schémas de la connexion**, pas seulement
+   * celui affiché à l'écran. `list_objects` étant déjà appelé pour chaque schéma par la cascade (pour
+   * en déduire les tables à décrire), le garder ici ne coûte rien de plus et rend un schéma qualifié
+   * (`sch.`) complétable sans dépliage.
+   */
+  const [objetsSchema, setObjetsSchema] = useState<
+    Readonly<Record<string, readonly TableSummary[]>>
+  >({})
   /**
    * Le numéro de génération, par connexion.
    *
@@ -181,6 +207,10 @@ export function useStructures(
               continue
             }
             if (generations.current.get(id) !== tache.generation) continue
+            setObjetsSchema((precedent) => ({
+              ...precedent,
+              [cleDeSchema(tache.cle, tache.schema)]: objets,
+            }))
             // **En tête de sa propre file**, et non à la queue : on finit le schéma courant avant
             // de lister le suivant, sinon les structures n'arriveraient qu'après tous les
             // `list_objects` de la base. En tête du *fond* si la tâche venait du fond — sans quoi
@@ -227,6 +257,11 @@ export function useStructures(
     [table],
   )
 
+  const objetsDuSchema = useCallback(
+    (cle: DatabaseKey, schema: string) => objetsSchema[cleDeSchema(cle, schema)],
+    [objetsSchema],
+  )
+
   const poser = useCallback(
     (cle: DatabaseKey, schema: string, nom: string, valeur: TableDetail) => {
       ecrire({ ...courant.current, [cleDeStructure(cle, schema, nom)]: valeur })
@@ -247,6 +282,7 @@ export function useStructures(
     // reposerait ce qu'on vient d'effacer.
     for (const [id, numero] of generations.current) generations.current.set(id, numero + 1)
     ecrire({})
+    setObjetsSchema({})
   }, [ecrire])
 
   const oublierLaConnexion = useCallback(
@@ -258,6 +294,9 @@ export function useStructures(
         Object.entries(courant.current).filter(([nom]) => !nom.startsWith(prefixe)),
       )
       ecrire(reste)
+      setObjetsSchema((precedent) =>
+        Object.fromEntries(Object.entries(precedent).filter(([nom]) => !nom.startsWith(prefixe))),
+      )
     },
     [ecrire],
   )
@@ -343,6 +382,7 @@ export function useStructures(
   return useMemo(
     () => ({
       detail,
+      objetsDuSchema,
       poser,
       oublier,
       vider,
@@ -350,6 +390,15 @@ export function useStructures(
       prechauffer,
       prechaufferLeSchema,
     }),
-    [detail, poser, oublier, vider, oublierLaConnexion, prechauffer, prechaufferLeSchema],
+    [
+      detail,
+      objetsDuSchema,
+      poser,
+      oublier,
+      vider,
+      oublierLaConnexion,
+      prechauffer,
+      prechaufferLeSchema,
+    ],
   )
 }

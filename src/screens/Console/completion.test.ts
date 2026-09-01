@@ -11,6 +11,13 @@ const CATALOGUE: Catalogue = {
       { name: 'counter_signup', typeName: 'int4' },
     ],
   },
+  schemas: ['public', 'archives'],
+  tablesParSchema: {
+    // `public` n'a pas d'entrée : c'est le schéma courant, déjà couvert par `tables` — un schéma
+    // jamais déplié comme un autre n'en a pas non plus, et `archives` ci-dessous en a une pour le
+    // distinguer.
+    archives: ['orders_2024', 'orders_2023'],
+  },
 }
 
 /**
@@ -83,13 +90,56 @@ describe('l’autocomplétion (`12d`)', () => {
     expect(labels.indexOf('orders')).toBeLessThan(labels.indexOf('where'))
   })
 
+  it('sans qualifiant, une unique table citée propose aussi ses colonnes', () => {
+    // `where ema` doit suggérer `country`/`counter_signup` d'`users`, sans taper `users.` : écrire le
+    // qualifiant à chaque fois serait pénible sur une requête à une seule table.
+    const resultat = proposer('select * from users where cou')
+    const labels = resultat?.options.map((o) => o.label) ?? []
+    expect(labels).toContain('country')
+    expect(labels).toContain('counter_signup')
+    // Les colonnes d'abord : c'est ce qu'on cherche après `where`.
+    expect(labels.indexOf('country')).toBeLessThan(labels.indexOf('users'))
+    expect(resultat?.options.find((o) => o.label === 'country')?.detail).toBe('char(2)')
+  })
+
+  it('deux tables citées ne proposent aucune colonne nue', () => {
+    // `id` ne dit pas de laquelle des deux tables il vient : rien plutôt qu'un choix arbitraire.
+    const resultat = proposer('select * from users join orders on true where cou')
+    const labels = resultat?.options.map((o) => o.label) ?? []
+    expect(labels).not.toContain('country')
+  })
+
+  it('sans qualifiant, propose aussi les autres schémas de la connexion', () => {
+    const resultat = proposer('select * from arch')
+    const labels = resultat?.options.map((o) => o.label) ?? []
+    expect(labels).toContain('archives')
+  })
+
+  it('un schéma qualifié propose ses tables', () => {
+    const resultat = proposer('select * from archives.ord')
+    const labels = resultat?.options.map((o) => o.label) ?? []
+    expect(labels).toEqual(['orders_2024', 'orders_2023'])
+    // Le pied de la liste dit d'où vient la suggestion, comme pour une colonne qualifiée.
+    expect(resultat?.options[0]?.info).toBe('archives.orders_2024')
+  })
+
+  it('un schéma connu mais jamais déplié ne propose aucune table', () => {
+    // `public` est un schéma connu (il est dans `schemas`), mais `tablesParSchema` n'en dit rien : le
+    // même compromis que pour une table jamais ouverte s'applique.
+    expect(proposer('select * from public.ord')).toBeNull()
+  })
+
+  it('un qualifiant qui n’est ni un alias ni un schéma ne propose rien', () => {
+    expect(proposer('select * from xyz.abc')).toBeNull()
+  })
+
   it('n’ouvre pas la liste sur un curseur sans mot commencé', () => {
     // Trente entrées dès le premier clic dans un éditeur vide seraient du bruit.
     expect(proposer('select * from ')).toBeNull()
   })
 
   it('un catalogue vide se replie sur les mots-clés, toujours sûrs', () => {
-    const resultat = proposer('sel', { tables: [], colonnes: {} })
+    const resultat = proposer('sel', { tables: [], colonnes: {}, schemas: [], tablesParSchema: {} })
     expect(resultat?.options.map((o) => o.label)).toContain('select')
   })
 })

@@ -1021,6 +1021,267 @@ describe('la console SQL (`12a`)', () => {
     expect(screen.queryByLabelText('Requête SQL')).not.toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /orders/ })).toHaveAttribute('aria-selected', 'true')
   })
+
+  /**
+   * L'autocomplétion propose les colonnes d'une table que le **préchauffage** a lue, sans que
+   * personne ne l'ait ouverte à l'écran — la lacune que `colonnesPrechauffees` comble.
+   *
+   * `order_items` n'apparaît jamais dans un clic de ce test : seule `ouvrirUneConsole` déplie le
+   * schéma, ce qui suffit à lancer la cascade de fond. `waitFor` sur le compte d'appels est le
+   * signal de complétude — pas un délai, qui daterait la frappe du mauvais instant (règle n° 15).
+   *
+   * **`connectionStates` doit dire que la base est ouverte.** Le décor par défaut de ce fichier le
+   * rend `[]` : juste après « Nouvelle console », qui change `projects`, la synchronisation avec le
+   * registre (`useArbre`) purge alors *tout* ce que `charge.objets` tient, faute d'y trouver `analytics`
+   * — pas un défaut de `colonnesPrechauffees`, mais du décor de ce test, exposé par lui.
+   */
+  it('l’autocomplétion propose les colonnes d’une table préchauffée mais jamais ouverte', async () => {
+    const utilisateur = userEvent.setup()
+    const { structures } = monter({
+      passerelle: {
+        openDatabase: async () => ({
+          kind: 'connected' as const,
+          serverVersion: 'PostgreSQL 17.6',
+          tunnelLocalPort: null,
+        }),
+        closeDatabase: async () => {},
+        connectionStates: async () => [
+          {
+            key: { project: 'Atelier Nord', database: 'analytics', environment: 'prod' as const },
+            state: {
+              kind: 'connected' as const,
+              serverVersion: 'PostgreSQL 17.6',
+              tunnelLocalPort: null,
+            },
+          },
+        ],
+        listSchemas: async () => SCHEMAS,
+        listObjects: async () => [objet('orders'), objet('order_items')],
+      },
+    })
+    await ouvrirUneConsole(utilisateur)
+    // Les deux tables du décor (`orders`, `order_items`) sont en mémoire ; aucune n'a été cliquée.
+    await waitFor(() => expect(structures.describeTable).toHaveBeenCalledTimes(2))
+
+    await saisir(utilisateur, 'select oi. from order_items oi')
+    for (let i = 0; i < ' from order_items oi'.length; i++) {
+      await utilisateur.keyboard('{ArrowLeft}')
+    }
+    await utilisateur.keyboard('i')
+
+    await waitFor(() => {
+      expect(document.querySelector('.cm-tooltip-autocomplete')?.textContent).toContain('id')
+    })
+  })
+
+  /**
+   * L'autocomplétion propose les tables d'un **autre** schéma que celui affiché à l'écran, dès que
+   * ce schéma a été déplié une fois — même compromis que les colonnes d'une table préchauffée : ce
+   * que l'écran a déjà lu, pas une devinette.
+   */
+  it('un schéma déplié, même si ce n’est pas le schéma courant, propose ses tables', async () => {
+    const utilisateur = userEvent.setup()
+    monter({
+      passerelle: {
+        openDatabase: async () => ({
+          kind: 'connected' as const,
+          serverVersion: 'PostgreSQL 17.6',
+          tunnelLocalPort: null,
+        }),
+        closeDatabase: async () => {},
+        connectionStates: async () => [
+          {
+            key: { project: 'Atelier Nord', database: 'analytics', environment: 'prod' as const },
+            state: {
+              kind: 'connected' as const,
+              serverVersion: 'PostgreSQL 17.6',
+              tunnelLocalPort: null,
+            },
+          },
+        ],
+        listSchemas: async () => [
+          ...SCHEMAS,
+          { name: 'archives', counts: { tables: 1, views: 0, functions: 0, indexes: 0 } },
+        ],
+        listObjects: async (_cle, schema) =>
+          schema === 'archives' ? [objet('orders_2024')] : [objet('orders'), objet('order_items')],
+      },
+    })
+    // `public`, le schéma courant, est déplié par `ouvrirLArbreJusquAuSchema` ; `archives` l'est en
+    // plus, explicitement — c'est ce dépliage qui rend ses tables connues.
+    await ouvrirLArbreJusquAuSchema(utilisateur)
+    await utilisateur.dblClick(await screen.findByRole('treeitem', { name: 'archives' }))
+    await waitFor(() => expect(screen.getAllByRole('treeitem').length).toBeGreaterThan(0))
+    await ouvrirUneConsole(utilisateur)
+
+    await saisir(utilisateur, 'select * from archives.ord')
+
+    await waitFor(() => {
+      const liste = document.querySelector('.cm-tooltip-autocomplete')?.textContent
+      expect(liste).toContain('orders_2024')
+      // Et pas les tables de `public` : `archives.` ne qualifie que les siennes.
+      expect(liste).not.toContain('order_items')
+    })
+  })
+
+  /**
+   * Même chose, mais sans que personne n'ait déplié `archives` dans l'arbre : seul le préchauffage de
+   * fond (`useStructures.prechauffer`, lancé à l'ouverture de la connexion) l'a lu. C'est le cas réel
+   * qui manquait — un schéma qu'on connaît par son nom sans jamais être allé le regarder.
+   */
+  it('un schéma jamais déplié propose ses tables dès que le préchauffage de fond l’a lu', async () => {
+    const utilisateur = userEvent.setup()
+    const listObjects = vi.fn(async (_cle: unknown, schema: string) =>
+      schema === 'archives' ? [objet('orders_2024')] : [objet('orders'), objet('order_items')],
+    )
+    const describeTable = vi.fn(async () => DETAIL)
+    monter({
+      passerelle: {
+        openDatabase: async () => ({
+          kind: 'connected' as const,
+          serverVersion: 'PostgreSQL 17.6',
+          tunnelLocalPort: null,
+        }),
+        closeDatabase: async () => {},
+        connectionStates: async () => [
+          {
+            key: { project: 'Atelier Nord', database: 'analytics', environment: 'prod' as const },
+            state: {
+              kind: 'connected' as const,
+              serverVersion: 'PostgreSQL 17.6',
+              tunnelLocalPort: null,
+            },
+          },
+        ],
+        listSchemas: async () => [
+          ...SCHEMAS,
+          { name: 'archives', counts: { tables: 1, views: 0, functions: 0, indexes: 0 } },
+        ],
+        listObjects,
+      },
+      // La même liste, côté préchauffage : dans l'application ce sont la même commande — un décor qui
+      // les dédoublerait rendrait des tables différentes selon le chemin, une divergence que la
+      // réalité n'a pas.
+      passerelleStructures: { listObjects, describeTable },
+    })
+    // Ni dblclick ni clic sur `archives` : seule `ouvrirUneConsole` déplie `public`, le schéma
+    // courant. `archives` n'est connu que du préchauffage de fond.
+    await ouvrirUneConsole(utilisateur)
+    // `describeTable` suit `listObjects` dans la même cascade (`useStructures`) : attendre `archives`
+    // ici, plutôt qu'un délai, date la frappe qui suit du bon instant (règle n° 15).
+    await waitFor(() =>
+      expect(describeTable).toHaveBeenCalledWith(expect.anything(), 'archives', 'orders_2024'),
+    )
+
+    await saisir(utilisateur, 'select * from archives.ord')
+
+    await waitFor(() => {
+      expect(document.querySelector('.cm-tooltip-autocomplete')?.textContent).toContain(
+        'orders_2024',
+      )
+    })
+  })
+
+  /**
+   * Le pendant pour les **colonnes** : une table d'un schéma jamais déplié, une fois préchauffée,
+   * propose ses colonnes — pas seulement son nom. `colonnesPrechauffees` ne parcourait que les tables
+   * du schéma courant (`objets`) ; une table d'un *autre* schéma restait sans colonnes proposées même
+   * une fois sa structure lue par la cascade de fond.
+   */
+  it('une colonne d’une table jamais ouverte, dans un schéma jamais déplié, est proposée une fois préchauffée', async () => {
+    const utilisateur = userEvent.setup()
+    const listObjects = vi.fn(async (_cle: unknown, schema: string) =>
+      schema === 'archives' ? [objet('orders_2024')] : [objet('orders'), objet('order_items')],
+    )
+    const describeTable = vi.fn(async () => DETAIL)
+    monter({
+      passerelle: {
+        openDatabase: async () => ({
+          kind: 'connected' as const,
+          serverVersion: 'PostgreSQL 17.6',
+          tunnelLocalPort: null,
+        }),
+        closeDatabase: async () => {},
+        connectionStates: async () => [
+          {
+            key: { project: 'Atelier Nord', database: 'analytics', environment: 'prod' as const },
+            state: {
+              kind: 'connected' as const,
+              serverVersion: 'PostgreSQL 17.6',
+              tunnelLocalPort: null,
+            },
+          },
+        ],
+        listSchemas: async () => [
+          ...SCHEMAS,
+          { name: 'archives', counts: { tables: 1, views: 0, functions: 0, indexes: 0 } },
+        ],
+        listObjects,
+      },
+      passerelleStructures: { listObjects, describeTable },
+    })
+    // Ni la table ni le schéma ne sont jamais cliqués : seule la cascade de fond les lit.
+    await ouvrirUneConsole(utilisateur)
+    await waitFor(() =>
+      expect(describeTable).toHaveBeenCalledWith(expect.anything(), 'archives', 'orders_2024'),
+    )
+
+    await saisir(utilisateur, 'select * from archives.orders_2024 o where o.stat')
+
+    await waitFor(() => {
+      // `status` vient de `DETAIL`, la structure que la cascade a lue pour `orders_2024`.
+      expect(document.querySelector('.cm-tooltip-autocomplete')?.textContent).toContain('status')
+    })
+  })
+
+  /**
+   * Le défaut réel qui manquait : une console ouverte **sans être jamais passée par un schéma** —
+   * un simple clic sur la connexion, puis « Nouvelle console » depuis son menu, sans dépliage.
+   *
+   * `contexte` (dérivé de la sélection de l'arbre) reste alors `null`, et `cle` avec lui : le
+   * catalogue entier — schémas, tables, mots-clés — se retrouvait vide, silencieusement. `cleConsole`
+   * porte l'identité de la console indépendamment de la sélection de l'arbre, et c'est ce qui répare
+   * ce chemin.
+   */
+  it('une console ouverte sans jamais avoir sélectionné de schéma propose quand même son catalogue', async () => {
+    const utilisateur = userEvent.setup()
+    // `connectionStates` doit dire que la base est ouverte — sinon « Nouvelle console » (qui change
+    // `projects`) déclenche la synchronisation avec le registre et purge `charge.schemas`, comme dans
+    // le test du préchauffage ci-dessus.
+    monter({
+      passerelle: {
+        openDatabase: async () => ({
+          kind: 'connected' as const,
+          serverVersion: 'PostgreSQL 17.6',
+          tunnelLocalPort: null,
+        }),
+        closeDatabase: async () => {},
+        connectionStates: async () => [
+          {
+            key: { project: 'Atelier Nord', database: 'analytics', environment: 'prod' as const },
+            state: {
+              kind: 'connected' as const,
+              serverVersion: 'PostgreSQL 17.6',
+              tunnelLocalPort: null,
+            },
+          },
+        ],
+        listSchemas: async () => SCHEMAS,
+        listObjects: async () => [objet('orders'), objet('order_items')],
+      },
+    })
+    await ouvrirLesEnvironnements(utilisateur)
+    // Un clic simple sélectionne et ouvre la connexion, sans déplier aucun schéma.
+    await utilisateur.click(await screen.findByRole('treeitem', { name: /analytics/ }))
+    await utilisateur.click(screen.getByRole('button', { name: 'Actions de analytics' }))
+    await utilisateur.click(screen.getByRole('button', { name: /Nouvelle console/ }))
+
+    await saisir(utilisateur, 'select * from publ')
+
+    await waitFor(() => {
+      expect(document.querySelector('.cm-tooltip-autocomplete')?.textContent).toContain('public')
+    })
+  })
 })
 
 describe('mode édition', () => {

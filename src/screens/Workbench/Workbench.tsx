@@ -19,7 +19,7 @@ import {
   type PasserelleExecution,
   useExecution,
 } from '../Console/useExecution'
-import { idSchema, type Noeud } from '../Explorer/arbre'
+import { idBase, idSchema, type Noeud } from '../Explorer/arbre'
 import { BreadcrumbBar, type TypeObjet } from '../Explorer/BreadcrumbBar'
 import type { CibleDeSuppression } from '../Explorer/DeleteConnectionDialog'
 import { DetailPanel } from '../Explorer/DetailPanel'
@@ -725,9 +725,91 @@ export function Workbench({
     )
   }, [detail])
 
+  /**
+   * Les schémas de la connexion courante, tels que l'arbre les connaît **dès l'ouverture** — pas
+   * seulement celui que l'écran affiche. `listSchemas` les lit tous sans qu'aucun ait été déplié,
+   * ce qui rend `sch.` reconnaissable comme un schéma même si `sch` n'est pas le schéma courant.
+   *
+   * **`cleConsole`, pas `cle`.** `cle` vient de `contexte`, lui-même dérivé de la sélection de
+   * l'arbre — `null` tant qu'aucun schéma n'y a jamais été cliqué. Une console ouverte depuis le menu
+   * de sa connexion, sans être jamais passée par un schéma, se retrouvait alors sans aucun catalogue :
+   * ni schémas, ni tables, ni mots-clés proposés, silencieusement. `cleConsole` porte l'identité de la
+   * connexion **de la console elle-même** (`12a`), déjà employée pour l'exécution par la même raison.
+   */
+  const schemasDeLaConnexion = useMemo(
+    () =>
+      cleConsole
+        ? (charge.schemas[
+            idBase(cleConsole.project, cleConsole.environment, cleConsole.database)
+          ] ?? [])
+        : [],
+    [charge.schemas, cleConsole],
+  )
+
+  /**
+   * Les tables **par schéma** — de l'arbre en priorité (ce que l'utilisateur a déplié lui-même), du
+   * préchauffage sinon.
+   *
+   * `structures.prechauffer` liste **tous** les schémas de la connexion en fond dès son ouverture,
+   * pas seulement celui affiché à l'écran (`useStructures`) : c'est ce qui rend `sch.` complétable
+   * pour un schéma que l'utilisateur n'a jamais déplié dans l'arbre — même principe que
+   * `colonnesPrechauffees` pour les colonnes d'une table. Un schéma que ni l'un ni l'autre n'a encore
+   * lu n'a toujours pas d'entrée : `sch.` ne propose alors rien, plutôt que de deviner.
+   *
+   * `cleConsole`, pour la même raison que `schemasDeLaConnexion` ci-dessus.
+   */
+  const tablesParSchema = useMemo(() => {
+    if (!cleConsole) return {}
+    const par: Record<string, readonly string[]> = {}
+    for (const schema of schemasDeLaConnexion) {
+      const objetsDeLArbre =
+        charge.objets[
+          idSchema(cleConsole.project, cleConsole.environment, cleConsole.database, schema.name)
+        ]
+      const objetsDuSchema = objetsDeLArbre ?? structures.objetsDuSchema(cleConsole, schema.name)
+      if (objetsDuSchema) par[schema.name] = objetsDuSchema.map((objet) => objet.name)
+    }
+    return par
+  }, [cleConsole, schemasDeLaConnexion, charge.objets, structures])
+
+  /**
+   * Les colonnes que le **préchauffage** a déjà lues, sans que l'utilisateur les ait ouvertes —
+   * **toutes les tables de tous les schémas connus** de la connexion, pas seulement celles du schéma
+   * courant.
+   *
+   * **La première version ne parcourait que `objets`** — les tables du schéma affiché à l'écran. Une
+   * table d'un *autre* schéma, atteinte par `sch.table.`, n'avait donc jamais ses colonnes proposées
+   * même une fois lue par la cascade de fond : `structures.detail` la connaissait déjà, mais rien
+   * n'allait la chercher. `tablesParSchema` couvre déjà tous les schémas pour les *noms* de table ;
+   * boucler dessus plutôt que sur `objets` couvre les mêmes schémas pour leurs *colonnes*.
+   *
+   * `useStructures` précharge en fond jusqu'à `PLAFOND` tables par connexion dès son ouverture : la
+   * donnée existe donc souvent déjà en mémoire pour une table que l'utilisateur n'a jamais affichée
+   * dans l'onglet Table ou Structure, et la lui refuser reviendrait à demander un aller-retour réseau
+   * que le cache a déjà payé. `colonnesConnues` garde la priorité — c'est la lecture la plus directe,
+   * celle de la table réellement ouverte — cette source ne comble que ce qu'elle n'a pas.
+   */
+  const colonnesPrechauffees = useMemo(() => {
+    if (!cleConsole) return {}
+    const colonnes: Record<string, readonly { name: string; typeName: string }[]> = {}
+    for (const [schema, tables] of Object.entries(tablesParSchema)) {
+      for (const table of tables) {
+        if (colonnesConnues[table]) continue
+        const lu = structures.detail(cleConsole, schema, table)
+        if (lu) colonnes[table] = lu.columns.map((c) => ({ name: c.name, typeName: c.typeName }))
+      }
+    }
+    return colonnes
+  }, [tablesParSchema, colonnesConnues, structures, cleConsole])
+
   const catalogue = useCallback(
-    () => ({ tables: objets.map((objet) => objet.name), colonnes: colonnesConnues }),
-    [objets, colonnesConnues],
+    () => ({
+      tables: objets.map((objet) => objet.name),
+      colonnes: { ...colonnesPrechauffees, ...colonnesConnues },
+      schemas: schemasDeLaConnexion.map((schema) => schema.name),
+      tablesParSchema,
+    }),
+    [objets, colonnesConnues, colonnesPrechauffees, schemasDeLaConnexion, tablesParSchema],
   )
   // Le texte de chaque console, indexé par l'identité de l'onglet — comme les modifications en
   // attente de `11b`. Fermer une console perd son texte, et c'est `12f` qui donnera le moyen de le

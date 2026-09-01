@@ -96,6 +96,56 @@ test('le préchauffage descend la cascade : les schémas, leurs objets, puis les
   // Et le cache porte ce qui a été lu : c'est tout l'objet de la cascade.
   expect(vu.courant.detail(CLE, 'atelier', 'commandes')?.name).toBe('commandes')
   expect(vu.courant.detail(CLE, 'archives', 'journal')?.name).toBe('journal')
+  // La liste des objets de chaque schéma est gardée aussi — `list_objects` la lit déjà pour savoir
+  // quelles tables décrire, et c'est ce qui rend un schéma qualifié (`sch.`) complétable sans que
+  // l'utilisateur ait déplié `archives` dans l'arbre.
+  expect(vu.courant.objetsDuSchema(CLE, 'atelier')?.map((o) => o.name)).toEqual([
+    'commandes',
+    'paliers',
+  ])
+  expect(vu.courant.objetsDuSchema(CLE, 'archives')?.map((o) => o.name)).toEqual(['journal'])
+})
+
+test('un schéma jamais déplié n’a pas d’objets tant que la cascade ne l’a pas atteint', async () => {
+  const { passerelle } = passerelleDe({ atelier: [objet('commandes')] })
+  const vu = monter(passerelle)
+  expect(vu.courant.objetsDuSchema(CLE, 'atelier')).toBeUndefined()
+
+  await act(async () => {
+    vu.courant.prechauffer(CLE, [schema('atelier')])
+  })
+  expect(vu.courant.objetsDuSchema(CLE, 'atelier')).toBeDefined()
+})
+
+test('vider oublie aussi les objets par schéma', async () => {
+  const { passerelle } = passerelleDe({ atelier: [objet('commandes')] })
+  const vu = monter(passerelle)
+  await act(async () => {
+    vu.courant.prechauffer(CLE, [schema('atelier')])
+  })
+  expect(vu.courant.objetsDuSchema(CLE, 'atelier')).toBeDefined()
+
+  act(() => {
+    vu.courant.vider()
+  })
+  expect(vu.courant.objetsDuSchema(CLE, 'atelier')).toBeUndefined()
+})
+
+test('oublier une connexion emporte les objets de ses schémas, et pas ceux de sa voisine', async () => {
+  const dev: DatabaseKey = { ...CLE, environment: 'dev' }
+  const { passerelle } = passerelleDe({ atelier: [objet('commandes')] })
+  const vu = monter(passerelle)
+
+  await act(async () => {
+    vu.courant.prechauffer(CLE, [schema('atelier')])
+    vu.courant.prechauffer(dev, [schema('atelier')])
+  })
+
+  act(() => {
+    vu.courant.oublierLaConnexion(CLE)
+  })
+  expect(vu.courant.objetsDuSchema(CLE, 'atelier')).toBeUndefined()
+  expect(vu.courant.objetsDuSchema(dev, 'atelier')).toBeDefined()
 })
 
 test('les objets qui ne sont pas des tables ne sont pas décrits', async () => {

@@ -17,7 +17,7 @@ import { type Catalogue, sourceDeCompletion } from './completion'
 import { themeDuHandoff } from './theme'
 
 /** Un catalogue vide : l'autocomplétion se replie alors sur les mots-clés, toujours sûrs. */
-const CATALOGUE_VIDE: Catalogue = { tables: [], colonnes: {} }
+const CATALOGUE_VIDE: Catalogue = { tables: [], colonnes: {}, schemas: [], tablesParSchema: {} }
 
 type SqlEditorProps = {
   /**

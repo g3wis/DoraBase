@@ -17,6 +17,20 @@ export type Catalogue = {
   tables: readonly string[]
   /** Les colonnes connues, par nom de table. Une table absente n'a rien à proposer. */
   colonnes: Readonly<Record<string, readonly { name: string; typeName: string }[]>>
+  /**
+   * Les schémas de la connexion — pas seulement celui qu'affiche l'écran.
+   *
+   * L'arbre les connaît tous dès l'ouverture de la connexion (`listSchemas`), sans dépliage : c'est
+   * ce qui rend `sch.` complétable même si `sch` n'est pas le schéma courant.
+   */
+  schemas: readonly string[]
+  /**
+   * Les tables **par schéma**, pour ce qu'un schéma a été déplié dans l'arbre au moins une fois.
+   *
+   * Un schéma absent d'ici n'a pas été déplié : `sch.` ne propose alors rien, plutôt que de deviner —
+   * même compromis que les colonnes d'une table jamais ouverte.
+   */
+  tablesParSchema: Readonly<Record<string, readonly string[]>>
 }
 
 /**
@@ -62,12 +76,21 @@ const MOTS_CLES = [
 /**
  * La source de complétion de la console (`12d`).
  *
- * **Trois natures, dans cet ordre de priorité** : les colonnes d'un alias résolu, les tables du
- * schéma, les mots-clés. Un alias résolu écarte les deux autres — après `o.`, seules des colonnes ont
- * un sens.
+ * **Cinq natures, dans cet ordre de priorité** : les colonnes d'un alias résolu, les tables d'un
+ * schéma qualifié (`sch.`), les colonnes de l'unique table citée quand elle est seule (`where ema`
+ * doit suggérer `email_verified` d'`account`, pas seulement `account.email_verified` — écrire le
+ * qualifiant à chaque fois serait pénible sur une requête à une seule table, le cas le plus
+ * courant), les tables et les schémas du catalogue, les mots-clés. Un qualifiant résolu (alias ou
+ * schéma) écarte tout le reste — après `o.` ou `sch.`, une seule nature a un sens.
  *
- * **Un alias non résolu ne propose aucune colonne.** Une suggestion fausse produit une requête en
- * erreur que l'utilisateur croira correcte : en cas de doute, la liste ne devine pas.
+ * **Un qualifiant non résolu ne propose rien.** Une suggestion fausse produit une requête en erreur
+ * que l'utilisateur croira correcte : en cas de doute, la liste ne devine pas. `o.` où `o` n'est ni
+ * un alias connu ni un schéma connu ferme la liste, plutôt que de choisir arbitrairement entre les
+ * deux lectures possibles.
+ *
+ * **Deux tables citées ou plus ne proposent aucune colonne nue.** `select * from orders join
+ * order_items on … where id` ne dit pas de laquelle `id` vient : plutôt qu'un choix arbitraire, la
+ * même règle que l'alias inconnu s'applique — rien.
  */
 export function sourceDeCompletion(catalogue: () => Catalogue) {
   return (contexte: CompletionContext): CompletionResult | null => {
@@ -79,33 +102,73 @@ export function sourceDeCompletion(catalogue: () => Catalogue) {
 
     const texte = contexte.state.doc.toString()
     const qualifiant = qualifiantAvant(texte, contexte.pos)
-    const { tables, colonnes } = catalogue()
+    const { tables, colonnes, schemas, tablesParSchema } = catalogue()
 
     if (qualifiant !== null) {
-      const table = tablesCitees(texte).get(qualifiant.toLowerCase())
-      const connues = table ? colonnes[table] : undefined
-      // **Rien plutôt qu'une devinette** : un alias inconnu, ou une table dont les colonnes ne sont
-      // pas chargées, ne donne aucune suggestion. La liste se referme, ce qui est un signal juste.
-      if (!table || !connues) return null
+      const cleQualifiant = qualifiant.toLowerCase()
+      const table = tablesCitees(texte).get(cleQualifiant)
+      if (table) {
+        const connues = colonnes[table]
+        // **Rien plutôt qu'une devinette** : une table dont les colonnes ne sont pas chargées ne
+        // donne aucune suggestion. La liste se referme, ce qui est un signal juste.
+        if (!connues) return null
+        return {
+          from: debutDuMot(texte, contexte.pos),
+          options: connues.map((colonne) => ({
+            label: colonne.name,
+            type: 'property',
+            // Le type est **affiché**, comme dans le mockup : `country char(2)`. C'est ce qui permet
+            // de choisir sans aller voir la structure.
+            detail: colonne.typeName,
+            // Le pied de la liste dit d'où vient la suggestion — `users.country` dans le mockup.
+            info: `${table}.${colonne.name}`,
+          })),
+        }
+      }
+
+      // Pas un alias : peut-être un schéma (`sch.` doit proposer ses tables).
+      const schema = schemas.find((nom) => nom.toLowerCase() === cleQualifiant)
+      if (!schema) return null
+      const tablesDuSchema = tablesParSchema[schema]
+      // Un schéma jamais déplié dans l'arbre n'a pas de tables connues : même compromis que pour les
+      // colonnes d'une table jamais ouverte.
+      if (!tablesDuSchema) return null
       return {
         from: debutDuMot(texte, contexte.pos),
-        options: connues.map((colonne) => ({
-          label: colonne.name,
-          type: 'property',
-          // Le type est **affiché**, comme dans le mockup : `country char(2)`. C'est ce qui permet de
-          // choisir sans aller voir la structure.
-          detail: colonne.typeName,
-          // Le pied de la liste dit d'où vient la suggestion — `users.country` dans le mockup.
-          info: `${table}.${colonne.name}`,
-        })),
+        options: tablesDuSchema.map(
+          (nom): Completion => ({
+            label: nom,
+            type: 'class',
+            detail: 'table',
+            info: `${schema}.${nom}`,
+          }),
+        ),
       }
     }
+
+    // L'unique table citée, sans alias à taper — `tablesCitees` indexe aussi par nom de table pour ce
+    // cas. Deux tables ou plus laissent `tableUnique` absent : voir la garde-fou ci-dessus.
+    const references = [...new Set(tablesCitees(texte).values())]
+    const tableUnique = references.length === 1 ? references[0] : undefined
+    const colonnesSansQualifiant = tableUnique ? (colonnes[tableUnique] ?? []) : []
 
     return {
       from: mot.from,
       options: [
+        ...colonnesSansQualifiant.map(
+          (colonne): Completion => ({
+            label: colonne.name,
+            type: 'property',
+            detail: colonne.typeName,
+            info: tableUnique,
+          }),
+        ),
         ...tables.map(
           (nom): Completion => ({ label: nom, type: 'class', detail: 'table', info: nom }),
+        ),
+        // Les autres schémas de la connexion : taper leur nom insère de quoi continuer en `sch.table`.
+        ...schemas.map(
+          (nom): Completion => ({ label: nom, type: 'namespace', detail: 'schéma', info: nom }),
         ),
         ...MOTS_CLES.map((mot): Completion => ({ label: mot, type: 'keyword' })),
       ],
