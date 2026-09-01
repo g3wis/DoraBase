@@ -35,6 +35,16 @@ describe('les alias de tables (`12d`)', () => {
     expect(tablesCitees('select * from orders as o').get('o')).toBe('orders')
   })
 
+  it('un deuxième `join` sans alias explicite n’est pas avalé par le premier', () => {
+    // Sans alias sur `orders`, le mot réservé `join` qui suit est le candidat naturel du groupe
+    // d'alias — s'il est consommé avant d'être rejeté, le `matchAll` suivant reprend après lui et
+    // rate `join users` entièrement.
+    const par = tablesCitees('select * from orders join users u on u.id = orders.user_id')
+    expect(par.get('orders')).toBe('orders')
+    expect(par.get('users')).toBe('users')
+    expect(par.get('u')).toBe('users')
+  })
+
   it('ignore ce qui est en commentaire', () => {
     // Une table citée dans un commentaire n'est pas dans la requête : proposer ses colonnes
     // produirait une requête en erreur que l'utilisateur croirait correcte.
