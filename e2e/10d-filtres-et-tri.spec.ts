@@ -66,10 +66,9 @@ async function fondDeColonne(page: import('@playwright/test').Page, colonne: str
 }
 
 test('l’en-tête d’une colonne triée reste opaque : rien ne se lit au travers', async ({ page }) => {
-  await page
-    .getByRole('columnheader', { name: /total_cents/ })
-    .first()
-    .click()
+  // **La flèche de tri, pas l'en-tête entier** (`23h`) : le nom de la colonne est désormais la
+  // poignée de réordonnancement, et un clic dessus ne trie plus.
+  await page.getByRole('button', { name: 'Trier par total_cents' }).click()
   // La flèche de tri est une icône du sprite, pas un caractère : c'est la classe de teinte qui dit
   // que le tri a pris.
   await expect(page.getByRole('columnheader', { name: /total_cents/ }).first()).toHaveClass(
