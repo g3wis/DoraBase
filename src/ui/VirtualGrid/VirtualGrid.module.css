@@ -76,6 +76,109 @@
   gap: var(--space-1);
 }
 
+/* Le contenu de l'en-tête proprement dit — ce que l'appelant passe en `header`, qu'il s'agisse du
+   libellé de tri de A5 ou d'un simple texte (la gouttière `#`). `min-width: 0` est ce qui laisse
+   la place à la flèche de tri et à la poignée de redimensionnement sans casser l'ellipse : sans
+   lui, un flex-item de largeur intrinsèque refuse de rétrécir sous son propre contenu, et
+   déborderait plutôt que de tronquer.
+
+   Les propriétés de réinitialisation de bouton (`border`, `background`, `font`…) sont posées ici
+   plutôt que sur `.headerContentGlissable` : un `<span>` n'a par défaut aucune de ces valeurs, les
+   poser sans condition ne change donc rien quand ce n'est pas un bouton. */
+.headerContent {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+}
+
+/*
+ * Le réordonnancement (`onColumnReorder`) : le nom de la colonne devient lui-même la poignée —
+ * `cursor: grab`, révélé au survol par `--hover-row`, même langage que la poignée de
+ * `ProjectEditor` (`23c`) transposée à un en-tête de grille. **Jamais sur la flèche de tri
+ * (`.sortHandle`)**, bouton frère et non enfant : les deux gestes ne se disputent plus la même
+ * zone (`23h`).
+ */
+.headerContentGlissable {
+  cursor: grab;
+}
+
+.headerContentGlissable:hover {
+  background: var(--hover-row);
+}
+
+.headerContentGlissable:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+/* La flèche de tri (`colonne.sort`) : neutre (icône `sort`) tant que la colonne n'est pas le
+   critère actif, encre pleine une fois qu'elle l'est — `.sortHandleActive`. Le même langage que
+   `.resizeHandle` : effacée jusqu'au survol ou au focus, jamais un état inventé de plus. */
+.sortHandle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--ink-4);
+  cursor: pointer;
+}
+
+.sortHandle:hover {
+  background: var(--hover-row);
+  color: var(--ink-2);
+}
+
+.sortHandle:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.sortHandleActive {
+  color: var(--ink-2);
+}
+
+/* La colonne en cours de glissement s'estompe — même arbitrage que `.glissee` de `ProjectEditor`.
+   Les événements pointeur (voir `debuterLeReordonnancement`) ne portent aucun curseur de dépôt
+   dessiné par le navigateur comme le ferait un glisser-déposer HTML5 natif : c'est `.cibleColonne`
+   ci-dessous qui dit où la colonne atterrirait, cette estompe qui dit laquelle on tient. */
+.glisseeColonne {
+  opacity: 0.45;
+}
+
+/* L'indicateur de dépôt : un trait sur le bord **gauche** de l'en-tête survolé, parce que
+   `deposerColonne` insère toujours la colonne glissée *avant* la cible — voir sa doc. Une teinte
+   de l'accent, comme le reste des indicateurs de position interactifs du produit (sélection
+   d'arbre, focus), et non `--ink-3` comme la poignée de redimensionnement : celle-ci ne fait que
+   s'épaissir au survol de sa propre colonne, ceci annonce un effet sur une colonne **différente**
+   de celle qu'on touche, ce qui mérite la couleur qui dit « ça va se passer ici » ailleurs dans
+   l'application. `pointer-events: none` : le trait est purement indicatif, jamais une cible. */
+.cibleColonne::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
 /*
  * La poignée de redimensionnement d'une colonne (`onColumnResize`) : même langage que la poignée
  * de `SplitPane` — un trait d'un pixel, `--divider` implicite (transparent ici, le filet bas de
@@ -142,6 +245,20 @@
   -webkit-user-select: none;
   user-select: none;
   cursor: col-resize;
+}
+
+/* Même raison, pour le réordonnancement : le curseur reste « saisi » sur toute la fenêtre pendant
+   le glissement, pas seulement sur la poignée, et le texte ne se sélectionne pas au passage. */
+:global(body).pendantLeReordonnancement {
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: grabbing;
+}
+
+:global(body).pendantLeReordonnancement * {
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: grabbing;
 }
 
 .filterRow {

@@ -117,6 +117,7 @@ export const tableViewFr: Dictionnaire = {
     sortBy: (p) => `Trier par ${p.column}`,
     modifyColumn: (p) => `Modifier ${p.column}`,
     resizeColumn: (p) => `Redimensionner ${p.column}`,
+    reorderColumn: (p) => `Déplacer ${p.column} (flèches gauche et droite)`,
     noPrimaryKeyReason:
       'Cette table n’a pas de clé primaire : DoraBase ne saurait pas quelle ligne mettre à jour.',
     deletedRowReason: 'Cette ligne est marquée pour suppression : elle ne se modifie plus.',
@@ -257,6 +258,7 @@ export const tableViewEn: Dictionnaire = {
     sortBy: (p) => `Sort by ${p.column}`,
     modifyColumn: (p) => `Modify ${p.column}`,
     resizeColumn: (p) => `Resize ${p.column}`,
+    reorderColumn: (p) => `Move ${p.column} (left and right arrows)`,
     noPrimaryKeyReason:
       'This table has no primary key: DoraBase would not know which row to update.',
     deletedRowReason: 'This row is marked for deletion: it can no longer be modified.',

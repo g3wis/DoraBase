@@ -190,8 +190,11 @@ describe('tri', () => {
     monter()
 
     // Dans l'**en-tête** : « 1 » se trouve aussi dans la gouttière et dans les cellules, où il
-    // ne veut rien dire de tel.
-    const rang = (entete: HTMLElement) => entete.querySelector('[class*="rang"]')
+    // ne veut rien dire de tel. La pastille vit à côté du nom, dans le bouton de glissement
+    // (`23h`) — pas dans le bouton de tri, qui ne porte plus que la flèche — donc la recherche
+    // part de l'en-tête entier (`role="columnheader"`), le seul ancêtre commun aux deux.
+    const rang = (bouton: HTMLElement) =>
+      bouton.closest('[role="columnheader"]')?.querySelector('[class*="rang"]') ?? null
 
     const created = await screen.findByRole('button', { name: 'Trier par created_at' })
     await utilisateur.click(created)

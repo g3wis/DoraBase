@@ -1,4 +1,5 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { Sprite } from '../../design/icons/Sprite'
 import type { ColumnInfo, DatabaseKey, RowWindow, Value } from '../../domain/engine'
@@ -128,6 +129,44 @@ describe('TableView', () => {
     // vue depuis `10f`, ne porte que le verdict.
     expect(await screen.findByText(/la connexion a été fermée/)).toBeInTheDocument()
     expect(screen.queryByText(/ne contient aucune ligne/)).not.toBeInTheDocument()
+  })
+
+  it('réordonner une colonne au clavier change l’affichage, jamais les valeurs des cellules', async () => {
+    const utilisateur = userEvent.setup()
+    monter(
+      fenetre([
+        [
+          { kind: 'int', value: 101 },
+          { kind: 'text', value: 'paid' },
+          { kind: 'text', value: '2024-01-01' },
+        ],
+      ]),
+    )
+
+    const grille = await screen.findByRole('grid', { name: 'Lignes de public.orders' })
+    // **La première ligne seulement** : `filterRow` (`10d`) ajoute une seconde ligne
+    // `role="columnheader"` pour les filtres, que `getAllByRole` sans portée confondrait.
+    const enteteDesNoms = within(grille).getAllByRole('row')[0]
+    if (enteteDesNoms === undefined) throw new Error('ligne d’en-tête introuvable')
+    expect(
+      within(enteteDesNoms)
+        .getAllByRole('columnheader')
+        .map((e) => e.textContent),
+    ).toEqual(['#', 'id', 'status', 'shipped_at'])
+
+    const poignee = screen.getByLabelText('Déplacer status (flèches gauche et droite)')
+    poignee.focus()
+    await utilisateur.keyboard('{ArrowLeft}')
+
+    expect(
+      within(enteteDesNoms)
+        .getAllByRole('columnheader')
+        .map((e) => e.textContent),
+    ).toEqual(['#', 'status', 'id', 'shipped_at'])
+    // **Les valeurs suivent leur colonne, pas la position d'affichage** : c'est le rang d'origine
+    // dans `ligne.valeurs`, calculé avant tout réordonnancement, qui les désigne.
+    const cellules = within(grille).getAllByRole('gridcell')
+    expect(cellules.map((c) => c.textContent)).toEqual(['1', 'paid', '101', '2024-01-01'])
   })
 })
 

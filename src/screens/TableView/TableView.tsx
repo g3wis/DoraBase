@@ -1,5 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  type MouseEvent as ReactMouseEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { Icon } from '../../design/icons/Icon'
+import type { IconName } from '../../design/icons/names'
 import type { Engine } from '../../domain/config'
 import type {
   ColumnInfo,
@@ -185,6 +193,10 @@ export function TableView({
   // `LARGEUR_COLONNE`. Comme `masquees`, seul l'écart au défaut est tenu : changer de table ne
   // demande aucune remise à zéro, le composant tout entier étant remonté par sa `key` d'onglet.
   const [largeurs, setLargeurs] = useState<Record<string, number>>({})
+  // L'ordre d'affichage des colonnes, par nom — `null` tant qu'on n'a rien réordonné, auquel cas
+  // l'ordre est celui de `colonnesEffectives` (le catalogue). Même écart-au-défaut que `masquees`
+  // et `largeurs` : changer de table ne demande aucune remise à zéro.
+  const [ordreColonnes, setOrdreColonnes] = useState<readonly string[] | null>(null)
   const [enEdition, setEnEdition] = useState<EnEdition | null>(null)
   // Le document ouvert dans l'éditeur JSON (`18g`) : une ligne existante à éditer, ou `'creer'` pour
   // le geste du `+` sur une base NoSQL. Un seul état — les deux ne peuvent pas être ouverts ensemble.
@@ -371,6 +383,40 @@ export function TableView({
     return nouvelles.length === 0 ? columns : [...columns, ...nouvelles]
   }, [columns, attente])
 
+  /**
+   * Chaque colonne effective, avec son **rang d'origine** — l'indice dans `colonnesEffectives`,
+   * qui est celui de la valeur dans `ligne.valeurs` (l'ordre de `SELECT *`, jamais celui de
+   * l'affichage). Calculé **avant** `colonnesOrdonnees` : réordonner l'affichage ne doit jamais
+   * changer quel indice désigne quelle colonne dans une ligne lue.
+   */
+  const colonnesAvecRang = useMemo(
+    () => colonnesEffectives.map((colonne, rang) => ({ colonne, rang })),
+    [colonnesEffectives],
+  )
+
+  /**
+   * Les colonnes dans leur ordre d'**affichage** — celui que la poignée de `VirtualGrid` a posé,
+   * ou celui du catalogue tant que rien n'a été glissé.
+   *
+   * Une colonne de `ordreColonnes` absente du catalogue (renommée, retirée depuis) est ignorée ;
+   * une colonne du catalogue absente de `ordreColonnes` (ajoutée depuis, ou une colonne
+   * synthétique de `colonnesEffectives`) est ajoutée en fin — jamais perdue.
+   */
+  const colonnesOrdonnees = useMemo(() => {
+    if (ordreColonnes === null) return colonnesAvecRang
+    const parNom = new Map(colonnesAvecRang.map((entree) => [entree.colonne.name, entree] as const))
+    const connues = new Set<string>()
+    const ordonnees: typeof colonnesAvecRang = []
+    for (const nom of ordreColonnes) {
+      const entree = parNom.get(nom)
+      if (entree === undefined) continue
+      connues.add(nom)
+      ordonnees.push(entree)
+    }
+    const nouvelles = colonnesAvecRang.filter((entree) => !connues.has(entree.colonne.name))
+    return [...ordonnees, ...nouvelles]
+  }, [colonnesAvecRang, ordreColonnes])
+
   const colonnes: GridColumn<Ligne>[] = useMemo(
     () => [
       {
@@ -379,6 +425,8 @@ export function TableView({
         width: moteur === 'mongodb' ? LARGEUR_GOUTTIERE_MONGO : LARGEUR_GOUTTIERE,
         // Rien à redimensionner dans la gouttière : elle n'a que le rang et deux icônes d'action.
         resizable: false,
+        // Rien à réordonner non plus : la gouttière désigne toujours la première colonne.
+        reorderable: false,
         // **`+2` plutôt qu'un rang** : une ligne ajoutée n'a pas de place dans la table, seulement
         // un ordre d'arrivée. Lui donner un rang la ferait passer pour la 501ᵉ ligne lue.
         //
@@ -460,8 +508,7 @@ export function TableView({
       // `columns.length`, il ne désigne plus rien dans `ligne.valeurs` d'une ligne **lue** — une
       // colonne synthétique de `colonnesEffectives` n'existe encore que pour l'ajout en cours, et
       // `valeur === undefined` s'affiche déjà comme une cellule vide.
-      ...colonnesEffectives
-        .map((colonne, rang) => ({ colonne, rang }))
+      ...colonnesOrdonnees
         .filter(({ colonne }) => !masquees.has(colonne.name))
         .map(({ colonne, rang }) => {
           const filtre = filters.find((f) => f.column === colonne.name)
@@ -469,37 +516,38 @@ export function TableView({
           const rangDuTri = rangDeTri(sort, colonne.name)
           return {
             key: colonne.name,
+            // **Le nom seul** : ce n'est plus un bouton de tri (`23h`). Le glissement de
+            // réordonnancement l'enveloppe déjà (`VirtualGrid`, `onColumnReorder`), et un clic dessus
+            // ne doit plus rien déclencher d'autre que ce glissement.
             header: (
-              <button
-                type="button"
-                className={styles.entete}
-                // Le `⌘`-clic empile un second critère : la convention de tous les tableurs et de
-                // tous les clients SQL, que le handoff ne dit pas et qu'inventer autrement serait
-                // gratuit. `aria-sort` porte l'état pour qui n'en voit pas la flèche.
-                onClick={(evenement) =>
-                  setSort((precedent) =>
-                    basculerTri(precedent, colonne.name, evenement.metaKey || evenement.ctrlKey),
-                  )
-                }
-                aria-label={t('tableView.grid.sortBy', { column: colonne.name })}
-              >
+              <>
                 {colonne.name}
-                {critere && (
-                  <Icon
-                    name={critere.direction === 'ascending' ? 'asc' : 'desc'}
-                    size={11}
-                    strokeWidth={2.4}
-                  />
-                )}
                 {/* La pastille de rang n'apparaît qu'à partir de **deux** critères : un « 1 »
                   solitaire sur la seule colonne triée serait du bruit. */}
                 {rangDuTri !== null && sort.length > 1 && (
                   <span className={styles.rang}>{rangDuTri}</span>
                 )}
-              </button>
+              </>
             ),
             width: largeurs[colonne.name] ?? LARGEUR_COLONNE,
             resizeLabel: t('tableView.grid.resizeColumn', { column: colonne.name }),
+            reorderLabel: t('tableView.grid.reorderColumn', { column: colonne.name }),
+            // **Le tri, sur une flèche à part** — jamais sur le nom (`23h`). Le `⌘`-clic empile un
+            // second critère : la convention de tous les tableurs et de tous les clients SQL, que
+            // le handoff ne dit pas et qu'inventer autrement serait gratuit.
+            sort: {
+              label: t('tableView.grid.sortBy', { column: colonne.name }),
+              icon: (critere
+                ? critere.direction === 'ascending'
+                  ? 'asc'
+                  : 'desc'
+                : 'sort') as IconName,
+              active: critere !== undefined,
+              onClick: (evenement: ReactMouseEvent<HTMLButtonElement>) =>
+                setSort((precedent) =>
+                  basculerTri(precedent, colonne.name, evenement.metaKey || evenement.ctrlKey),
+                ),
+            },
             // L'alignement suit la **valeur**, pas le nom de la colonne : une colonne numérique
             // dont une cellule est `NULL` garde son `NULL` à gauche, comme le mockup le montre.
             numeric: colonne.category === 'number',
@@ -600,7 +648,7 @@ export function TableView({
         }),
     ],
     [
-      colonnesEffectives,
+      colonnesOrdonnees,
       filters,
       sort,
       operateurs,
@@ -627,7 +675,7 @@ export function TableView({
         // un seul état, deux commandes.
         onRemoveFilter={(column) => setFilters((precedent) => poserFiltre(precedent, column, null))}
         sort={sort}
-        columns={colonnesEffectives}
+        columns={colonnesOrdonnees.map((entree) => entree.colonne)}
         masquees={masquees}
         onToggleColonne={(name) =>
           setMasquees((precedent) => {
@@ -671,6 +719,7 @@ export function TableView({
             onColumnResize={(cle, largeur) =>
               setLargeurs((precedent) => ({ ...precedent, [cle]: largeur }))
             }
+            onColumnReorder={(ordre) => setOrdreColonnes(ordre)}
             {...(edition
               ? {
                   // Les teintes de `11b`/`A6` : une ligne qui porte une modification, une marque de

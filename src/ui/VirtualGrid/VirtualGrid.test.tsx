@@ -1,8 +1,13 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { type GridColumn, VirtualGrid } from './VirtualGrid'
+
+// jsdom ne définit pas `elementFromPoint` : la production le lit toujours, au relâchement d'un
+// glissement de réordonnancement (voir `debuterLeReordonnancement`). Un bouchon qui rend `null`
+// par défaut suffit à la majorité des tests ; ceux qui déposent réellement le remplacent.
+document.elementFromPoint = vi.fn(() => null)
 
 type Ligne = { id: number; nom: string }
 
@@ -246,6 +251,201 @@ describe('VirtualGrid', () => {
         ['nom', 128],
         ['nom', 112],
       ])
+    })
+  })
+
+  describe('réordonnancement des colonnes', () => {
+    const COLONNES_REORDER: GridColumn<Ligne>[] = [
+      { key: 'id', header: 'id', width: 64, numeric: true, cell: (l) => l.id, reorderable: false },
+      {
+        key: 'nom',
+        header: 'nom',
+        width: 120,
+        cell: (l) => l.nom,
+        reorderLabel: 'Déplacer nom (flèches gauche et droite)',
+      },
+      {
+        key: 'ville',
+        header: 'ville',
+        width: 120,
+        cell: () => 'x',
+        reorderLabel: 'Déplacer ville (flèches gauche et droite)',
+      },
+      {
+        key: 'pays',
+        header: 'pays',
+        width: 120,
+        cell: () => 'x',
+        reorderLabel: 'Déplacer pays (flèches gauche et droite)',
+      },
+    ]
+
+    it('sans onColumnReorder, aucune poignée ne se rend', () => {
+      grille({ columns: COLONNES_REORDER, rows: lignes(3) })
+      expect(screen.queryByLabelText(/^Déplacer /)).not.toBeInTheDocument()
+    })
+
+    it('une poignée par colonne réordonnable, aucune sur celle qui ne l’est pas', () => {
+      grille({ columns: COLONNES_REORDER, rows: lignes(3), onColumnReorder: () => {} })
+      // `id` porte `reorderable: false` : trois poignées doivent exister, une par colonne restante.
+      expect(screen.getAllByLabelText(/^Déplacer /)).toHaveLength(3)
+      expect(screen.queryByLabelText(/Déplacer id/)).not.toBeInTheDocument()
+    })
+
+    it('les flèches du clavier déplacent d’un cran, et remontent l’ordre complet aussitôt', async () => {
+      const utilisateur = userEvent.setup()
+      const ordres: Array<readonly string[]> = []
+      grille({
+        columns: COLONNES_REORDER,
+        rows: lignes(3),
+        onColumnReorder: (ordre) => ordres.push(ordre),
+      })
+
+      const poignee = screen.getByLabelText('Déplacer ville (flèches gauche et droite)')
+      poignee.focus()
+      await utilisateur.keyboard('{ArrowLeft}')
+      // **L'ordre complet des colonnes réordonnables**, `id` exclue puisqu'elle n'y participe pas.
+      expect(ordres).toEqual([['ville', 'nom', 'pays']])
+    })
+
+    it('la première colonne ne recule pas, la dernière n’avance pas', async () => {
+      const utilisateur = userEvent.setup()
+      const ordres: Array<readonly string[]> = []
+      grille({
+        columns: COLONNES_REORDER,
+        rows: lignes(3),
+        onColumnReorder: (ordre) => ordres.push(ordre),
+      })
+
+      screen.getByLabelText('Déplacer nom (flèches gauche et droite)').focus()
+      await utilisateur.keyboard('{ArrowLeft}')
+      screen.getByLabelText('Déplacer pays (flèches gauche et droite)').focus()
+      await utilisateur.keyboard('{ArrowRight}')
+      // Un ordre inchangé remonté referait recalculer toute la grille chez l'appelant pour rien.
+      expect(ordres).toEqual([])
+    })
+
+    it('glisser au pointeur jusqu’à un autre en-tête envoie l’ordre complet au relâchement', () => {
+      const ordres: Array<readonly string[]> = []
+      grille({
+        columns: COLONNES_REORDER,
+        rows: lignes(3),
+        onColumnReorder: (ordre) => ordres.push(ordre),
+      })
+
+      // **Aux événements pointeur, jamais au glisser-déposer HTML5** : WKWebView ne délivre pas
+      // `dragstart` de façon fiable (`23h`). La cible du dépôt est retrouvée par
+      // `elementFromPoint`, que jsdom ne simule pas — on le fait à sa place, exactement comme la
+      // production le lit : l'en-tête réel sous les coordonnées du relâchement.
+      const cible = document.querySelector('[data-colonne="nom"]')
+      if (cible === null) throw new Error('en-tête cible introuvable')
+      vi.mocked(document.elementFromPoint).mockReturnValue(cible as Element)
+
+      const poignee = screen.getByLabelText('Déplacer pays (flèches gauche et droite)')
+      fireEvent.pointerDown(poignee, { clientX: 400, clientY: 10, pointerId: 1 })
+      // Rien n'est encore remonté pendant le geste — seul le relâchement dépose.
+      expect(ordres).toEqual([])
+      fireEvent.pointerUp(poignee, { clientX: 100, clientY: 10, pointerId: 1 })
+
+      expect(ordres).toEqual([['pays', 'nom', 'ville']])
+    })
+
+    it('le déplacement du pointeur marque l’en-tête survolé comme cible du dépôt', () => {
+      grille({ columns: COLONNES_REORDER, rows: lignes(3), onColumnReorder: () => {} })
+
+      const cibleVille = document.querySelector('[data-colonne="ville"]')
+      const ciblePays = document.querySelector('[data-colonne="pays"]')
+      if (cibleVille === null || ciblePays === null) throw new Error('en-têtes introuvables')
+
+      const poignee = screen.getByLabelText('Déplacer nom (flèches gauche et droite)')
+      fireEvent.pointerDown(poignee, { clientX: 100, clientY: 10, pointerId: 1 })
+
+      vi.mocked(document.elementFromPoint).mockReturnValue(cibleVille as Element)
+      fireEvent.pointerMove(poignee, { clientX: 250, clientY: 10, pointerId: 1 })
+      expect(cibleVille.className).toMatch(/cibleColonne/)
+      expect(ciblePays.className).not.toMatch(/cibleColonne/)
+
+      // Le pointeur avance encore : l'indicateur suit, il ne reste pas sur le premier survolé.
+      vi.mocked(document.elementFromPoint).mockReturnValue(ciblePays as Element)
+      fireEvent.pointerMove(poignee, { clientX: 380, clientY: 10, pointerId: 1 })
+      expect(cibleVille.className).not.toMatch(/cibleColonne/)
+      expect(ciblePays.className).toMatch(/cibleColonne/)
+
+      // Et il s'efface au relâchement — rien ne doit rester marqué une fois le geste terminé.
+      fireEvent.pointerUp(poignee, { clientX: 380, clientY: 10, pointerId: 1 })
+      expect(ciblePays.className).not.toMatch(/cibleColonne/)
+    })
+
+    it('survoler sa propre colonne ne montre aucun indicateur', () => {
+      grille({ columns: COLONNES_REORDER, rows: lignes(3), onColumnReorder: () => {} })
+      const cibleNom = document.querySelector('[data-colonne="nom"]')
+      if (cibleNom === null) throw new Error('en-tête introuvable')
+
+      const poignee = screen.getByLabelText('Déplacer nom (flèches gauche et droite)')
+      fireEvent.pointerDown(poignee, { clientX: 100, clientY: 10, pointerId: 1 })
+      vi.mocked(document.elementFromPoint).mockReturnValue(cibleNom as Element)
+      fireEvent.pointerMove(poignee, { clientX: 105, clientY: 10, pointerId: 1 })
+
+      // Un dépôt sur soi-même ne changerait rien : l'indicateur ne doit rien promettre ici.
+      expect(cibleNom.className).not.toMatch(/cibleColonne/)
+    })
+
+    it('un relâchement hors de tout en-tête ne dépose rien', () => {
+      const ordres: Array<readonly string[]> = []
+      grille({
+        columns: COLONNES_REORDER,
+        rows: lignes(3),
+        onColumnReorder: (ordre) => ordres.push(ordre),
+      })
+
+      // Réinitialisé : un test précédent de ce fichier a pu le faire rendre un en-tête.
+      vi.mocked(document.elementFromPoint).mockReturnValue(null)
+
+      const poignee = screen.getByLabelText('Déplacer pays (flèches gauche et droite)')
+      fireEvent.pointerDown(poignee, { clientX: 400, clientY: 10, pointerId: 1 })
+      fireEvent.pointerUp(poignee, { clientX: 4000, clientY: 4000, pointerId: 1 })
+
+      expect(ordres).toEqual([])
+    })
+
+    it('la poignée est le nom même de la colonne, atteignable au clavier', () => {
+      grille({ columns: COLONNES_REORDER, rows: lignes(3), onColumnReorder: () => {} })
+      // **Sans cela, réordonner n'existe pas sans souris.** Le nom accessible annonce la façon de
+      // s'en servir — les flèches, pas un clic, puisque le clic seul active un `<button>`.
+      const poignee = screen.getByLabelText('Déplacer nom (flèches gauche et droite)')
+      expect(poignee.tagName).toBe('BUTTON')
+      expect(poignee).toHaveTextContent('nom')
+    })
+  })
+
+  describe('le tri, séparé du glissement (23h)', () => {
+    it('le clic sur le nom ne trie pas, seule la flèche de tri le fait', async () => {
+      const utilisateur = userEvent.setup()
+      const tris: string[] = []
+      const COLONNES_TRIABLES: GridColumn<Ligne>[] = [
+        {
+          key: 'nom',
+          header: 'nom',
+          width: 120,
+          cell: (l) => l.nom,
+          reorderLabel: 'Déplacer nom (flèches gauche et droite)',
+          sort: {
+            label: 'Trier par nom',
+            icon: 'sort',
+            active: false,
+            onClick: () => tris.push('nom'),
+          },
+        },
+      ]
+      grille({ columns: COLONNES_TRIABLES, rows: lignes(3), onColumnReorder: () => {} })
+
+      // Le clic sur le nom — la poignée de glissement — ne déclenche aucun tri.
+      await utilisateur.click(screen.getByLabelText('Déplacer nom (flèches gauche et droite)'))
+      expect(tris).toEqual([])
+
+      // Seule la flèche dédiée le fait.
+      await utilisateur.click(screen.getByRole('button', { name: 'Trier par nom' }))
+      expect(tris).toEqual(['nom'])
     })
   })
 })

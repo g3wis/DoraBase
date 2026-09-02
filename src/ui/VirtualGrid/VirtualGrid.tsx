@@ -15,6 +15,7 @@
 
 import {
   type KeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
   useEffect,
@@ -23,6 +24,8 @@ import {
   useState,
 } from 'react'
 import { flushSync } from 'react-dom'
+import { Icon } from '../../design/icons/Icon'
+import type { IconName } from '../../design/icons/names'
 import { cx } from '../cx'
 import styles from './VirtualGrid.module.css'
 
@@ -58,6 +61,38 @@ export type GridColumn<Row> = {
    * poignée anonyme serait illisible à la voix, comme la grille elle-même (voir `label`).
    */
   resizeLabel?: string
+  /**
+   * Retire le glissement de cette colonne, quand `onColumnReorder` est fourni à la grille. Même
+   * raison que `resizable: false` : la gouttière `#` de `A5` n'a pas de place à changer, elle
+   * désigne toujours la première.
+   */
+  reorderable?: boolean
+  /**
+   * Nom accessible du glissement de cette colonne. Requis dès que `onColumnReorder` est fourni et
+   * que la colonne n'est pas exclue par `reorderable: false` — le bouton qu'il annonce **est**
+   * `header`, enveloppé pour porter le geste ; sans ce nom, un lecteur d'écran ne dirait plus que
+   * « Déplacer », sans dire quoi.
+   */
+  reorderLabel?: string
+  /**
+   * Le tri, en petite flèche **séparée** du reste de l'en-tête — jamais le même contrôle que le
+   * glissement.
+   *
+   * **Pourquoi une flèche à part, et non le clic sur `header` comme avant `23h`.** Le clic sur le
+   * nom de la colonne servait le tri ; une fois le glissement posé sur ce même clic, les deux
+   * gestes se disputaient la même zone — glisser légèrement un en-tête pouvait déclencher un tri
+   * non voulu, trier pouvait interrompre un glissement. Les deux vivent maintenant côte à côte,
+   * jamais l'un sur l'autre, comme les deux boutons frères d'un onglet de `TabStrip`.
+   */
+  sort?: {
+    /** Nom accessible du bouton — annonce l'action, pas son état (piège n° 4 de `AGENTS.md`). */
+    label: string
+    /** `asc`/`desc` une fois ce critère actif, `sort` (neutre) sinon. */
+    icon: IconName
+    /** Teinte pleine une fois actif ; l'icône seule dit déjà « pas encore trié » sinon. */
+    active: boolean
+    onClick: (evenement: ReactMouseEvent<HTMLButtonElement>) => void
+  }
 }
 
 type VirtualGridProps<Row> = {
@@ -102,6 +137,15 @@ type VirtualGridProps<Row> = {
    * rien.
    */
   onColumnResize?: (key: string, width: number) => void
+  /**
+   * Réordonnancement des colonnes, glissées par leur en-tête ou aux flèches du clavier — même
+   * geste que celui des environnements d'un projet (`23c`), transposé à l'horizontale.
+   *
+   * Absente, aucun en-tête n'est glissable. Appelée avec l'**ordre complet** des clés
+   * réordonnables, jamais un couple d'indices : un ordre partiel se lirait de plusieurs façons,
+   * dont une qui supprime une colonne.
+   */
+  onColumnReorder?: (order: readonly string[]) => void
   selectedId?: string | null
   onSelect?: (row: Row, index: number) => void
   /**
@@ -157,12 +201,21 @@ export function VirtualGrid<Row>({
   cellTint,
   empty,
   onColumnResize,
+  onColumnReorder,
 }: VirtualGridProps<Row>) {
   const [scrollTop, setScrollTop] = useState(0)
   const viewport = useRef<HTMLDivElement>(null)
   // Préfixe des identifiants de ligne : `aria-activedescendant` désigne un `id` du document,
   // qui doit donc être unique même avec deux grilles montées côte à côte.
   const idGrille = useId()
+
+  // La colonne en cours de glissement — même arbitrage que `ProjectEditor` : un état local, pas
+  // remonté avant le dépôt, qui ne sert qu'à estomper la colonne saisie (`.glisseeColonne`).
+  const [colonneGlissee, setColonneGlissee] = useState<string | null>(null)
+  // La colonne survolée pendant le glissement — celle qui recevrait le dépôt. Distincte de
+  // `colonneGlissee` : l'une dit ce qu'on tient, l'autre où ça se poserait. `null` quand le
+  // pointeur n'est au-dessus d'aucun en-tête réordonnable.
+  const [colonneCiblee, setColonneCiblee] = useState<string | null>(null)
 
   // La largeur en cours de glissement, tenue **hors** de la prop `columns` : la remonter à chaque
   // `pointermove` referait recalculer et retraverser tout ce que l'appelant dérive des colonnes —
@@ -211,9 +264,9 @@ export function VirtualGrid<Row>({
     evenement: ReactPointerEvent<HTMLDivElement>,
     colonne: GridColumn<Row>,
   ) {
-    // Sans `stopPropagation`, le clic remonterait au bouton de tri qui enveloppe l'en-tête sur les
-    // navigateurs où `pointerdown` précède un `click` de synthèse — la poignée doit redimensionner,
-    // jamais trier.
+    // Sans `stopPropagation`, le geste remonterait au bouton de glissement qui enveloppe l'en-tête
+    // (`headerContentGlissable`) sur les navigateurs où `pointerdown` bulle avant tout autre
+    // traitement — la poignée doit redimensionner, jamais déclencher un réordonnancement.
     evenement.stopPropagation()
     evenement.preventDefault()
     const origineX = evenement.clientX
@@ -252,6 +305,112 @@ export function VirtualGrid<Row>({
     evenement.preventDefault()
     const pas = evenement.key === 'ArrowRight' ? PAS_CLAVIER : -PAS_CLAVIER
     onColumnResize?.(colonne.key, Math.max(largeurMin(colonne), colonne.width + pas))
+  }
+
+  /** Les clés des colonnes réordonnables, dans leur ordre d'affichage courant. */
+  function clesReordonnables(): string[] {
+    return columns.filter((colonne) => colonne.reorderable !== false).map((colonne) => colonne.key)
+  }
+
+  /**
+   * La colonne réordonnable sous un point de l'écran, ou `null` — le pointeur peut survoler la
+   * gouttière `#`, une poignée de redimensionnement, du vide au-delà de la dernière colonne. Un
+   * dépôt là ne veut rien dire, l'indicateur ne doit pas plus s'y montrer.
+   */
+  function colonneSousLePointeur(x: number, y: number): string | null {
+    const cle = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-colonne]')
+      ?.dataset.colonne
+    if (cle === undefined) return null
+    return clesReordonnables().includes(cle) ? cle : null
+  }
+
+  /** Dépose la colonne `glissee` avant celle qui reçoit, et envoie l'ordre **complet** (`23c`). */
+  function deposerColonne(glissee: string, cible: string) {
+    if (glissee === cible) return
+    const cles = clesReordonnables()
+    const sans = cles.filter((cle) => cle !== glissee)
+    const place = sans.indexOf(cible)
+    if (place === -1) return
+    sans.splice(place, 0, glissee)
+    onColumnReorder?.(sans)
+  }
+
+  /**
+   * Le glissement d'une poignée de réordonnancement, **aux événements pointeur** — jamais au
+   * glisser-déposer HTML5 (`draggable`/`dragstart`/`drop`) que `TabStrip` et `ProjectEditor`
+   * emploient ailleurs dans ce dépôt.
+   *
+   * **WKWebView ne délivre pas `dragstart` de façon fiable pour un élément de page** — constaté à
+   * l'usage le 2 septembre 2026 : le geste fonctionnait dans Chromium (Playwright, un vrai
+   * glissement souris) et restait inerte dans `pnpm tauri dev`, la seule fenêtre qui compte. Le
+   * redimensionnement voisin n'a jamais ce défaut parce qu'il n'a jamais dépendu du DnD natif — il
+   * suit exactement ce même chemin, `setPointerCapture` compris. Le reproduire ici plutôt que de
+   * dépanner le DnD natif est délibéré : les événements pointeur sont ceux que ce fichier a déjà
+   * vérifiés capables de traverser WKWebView.
+   *
+   * La cible est retrouvée par `elementFromPoint`, au déplacement comme au relâchement —
+   * `setPointerCapture` redirige les événements pointeur vers la poignée captée, donc ni l'un ni
+   * l'autre ne dit plus quel en-tête est sous le curseur ; leurs coordonnées, elles, restent
+   * exactes. `colonneCiblee` ne fait que suivre cette lecture pour l'indicateur visuel — c'est
+   * `onUp` qui décide réellement du dépôt, à charge pour lui de la relire une dernière fois.
+   */
+  function debuterLeReordonnancement(
+    evenement: ReactPointerEvent<HTMLButtonElement>,
+    colonne: GridColumn<Row>,
+  ) {
+    evenement.preventDefault()
+    const poignee = evenement.currentTarget
+    poignee.setPointerCapture?.(evenement.pointerId)
+    document.body.classList.add(styles.pendantLeReordonnancement as string)
+    setColonneGlissee(colonne.key)
+
+    function onMove(moveEvent: PointerEvent) {
+      const cible = colonneSousLePointeur(moveEvent.clientX, moveEvent.clientY)
+      setColonneCiblee(cible !== colonne.key ? cible : null)
+    }
+
+    function onUp(upEvent: PointerEvent) {
+      poignee.removeEventListener('pointermove', onMove)
+      poignee.removeEventListener('pointerup', onUp)
+      poignee.removeEventListener('pointercancel', onCancel)
+      document.body.classList.remove(styles.pendantLeReordonnancement as string)
+      setColonneGlissee(null)
+      setColonneCiblee(null)
+      const cible = colonneSousLePointeur(upEvent.clientX, upEvent.clientY)
+      if (cible !== null) deposerColonne(colonne.key, cible)
+    }
+
+    function onCancel() {
+      poignee.removeEventListener('pointermove', onMove)
+      poignee.removeEventListener('pointerup', onUp)
+      poignee.removeEventListener('pointercancel', onCancel)
+      document.body.classList.remove(styles.pendantLeReordonnancement as string)
+      setColonneGlissee(null)
+      setColonneCiblee(null)
+    }
+
+    poignee.addEventListener('pointermove', onMove)
+    poignee.addEventListener('pointerup', onUp)
+    poignee.addEventListener('pointercancel', onCancel)
+  }
+
+  /** Déplace une colonne d'un cran, au clavier — `ArrowLeft`/`ArrowRight`, l'axe de la grille. */
+  function deplacerColonneAuClavier(
+    evenement: KeyboardEvent<HTMLButtonElement>,
+    colonne: GridColumn<Row>,
+  ) {
+    if (evenement.key !== 'ArrowLeft' && evenement.key !== 'ArrowRight') return
+    evenement.preventDefault()
+    const pas = evenement.key === 'ArrowRight' ? 1 : -1
+    const cles = clesReordonnables()
+    const depart = cles.indexOf(colonne.key)
+    const arrivee = depart + pas
+    if (depart === -1 || arrivee < 0 || arrivee >= cles.length) return
+    const suivant = [...cles]
+    const [deplacee] = suivant.splice(depart, 1)
+    if (deplacee === undefined) return
+    suivant.splice(arrivee, 0, deplacee)
+    onColumnReorder?.(suivant)
   }
 
   // Ramener la ligne sélectionnée dans la fenêtre visible : sans cela, `↓` déplacerait une
@@ -362,6 +521,11 @@ export function VirtualGrid<Row>({
           onColumnResize={onColumnResize}
           onPoigneeDown={debuterLeRedimensionnement}
           onPoigneeKeyDown={redimensionnerAuClavier}
+          onColumnReorder={onColumnReorder}
+          colonneGlissee={colonneGlissee}
+          colonneCiblee={colonneCiblee}
+          onReorderPointerDown={debuterLeReordonnancement}
+          onReorderKeyDown={deplacerColonneAuClavier}
         />
         {rows.length === 0 && empty !== undefined ? (
           <div className={styles.empty}>{empty}</div>
@@ -451,6 +615,11 @@ function EnTete<Row>({
   onColumnResize,
   onPoigneeDown,
   onPoigneeKeyDown,
+  onColumnReorder,
+  colonneGlissee,
+  colonneCiblee,
+  onReorderPointerDown,
+  onReorderKeyDown,
 }: {
   columns: readonly GridColumn<Row>[]
   gabarit: string
@@ -459,6 +628,15 @@ function EnTete<Row>({
   onColumnResize?: (key: string, width: number) => void
   onPoigneeDown: (evenement: ReactPointerEvent<HTMLDivElement>, colonne: GridColumn<Row>) => void
   onPoigneeKeyDown: (evenement: KeyboardEvent<HTMLDivElement>, colonne: GridColumn<Row>) => void
+  onColumnReorder?: (order: readonly string[]) => void
+  colonneGlissee: string | null
+  /** La colonne qui recevrait le dépôt là, maintenant — l'indicateur de position (`.cibleColonne`). */
+  colonneCiblee: string | null
+  onReorderPointerDown: (
+    evenement: ReactPointerEvent<HTMLButtonElement>,
+    colonne: GridColumn<Row>,
+  ) => void
+  onReorderKeyDown: (evenement: KeyboardEvent<HTMLButtonElement>, colonne: GridColumn<Row>) => void
 }) {
   return (
     <div className={styles.head} role="rowgroup" style={{ width: largeur }}>
@@ -472,14 +650,51 @@ function EnTete<Row>({
           <div
             key={colonne.key}
             role="columnheader"
+            // **Cible du dépôt, retrouvée par `elementFromPoint`** au relâchement du pointeur — le
+            // dépôt ne passe plus par `onDrop` natif (voir `debuterLeReordonnancement`), donc rien
+            // d'autre ne désigne cet en-tête comme la colonne survolée.
+            data-colonne={onColumnReorder ? colonne.key : undefined}
             className={cx(
               styles.th,
               colonne.numeric && styles.numeric,
               colonne.tint === 'filtered' && styles.filtered,
               colonne.tint === 'sorted' && styles.sorted,
+              colonneGlissee === colonne.key && styles.glisseeColonne,
+              colonneCiblee === colonne.key && styles.cibleColonne,
             )}
           >
-            {colonne.header}
+            {onColumnReorder && colonne.reorderable !== false ? (
+              // **Le nom de la colonne devient lui-même la poignée** — le « reste » de l'en-tête,
+              // celui qui n'est ni la flèche de tri ni la poignée de redimensionnement. Aux
+              // événements pointeur, jamais au glisser-déposer HTML5 (`draggable`/`dragstart`)
+              // que `TabStrip` et `ProjectEditor` emploient ailleurs : WKWebView ne le délivre pas
+              // de façon fiable (voir `debuterLeReordonnancement`).
+              <button
+                type="button"
+                className={cx(styles.headerContent, styles.headerContentGlissable)}
+                aria-label={colonne.reorderLabel}
+                onPointerDown={(evenement) => onReorderPointerDown(evenement, colonne)}
+                onKeyDown={(evenement) => onReorderKeyDown(evenement, colonne)}
+              >
+                {colonne.header}
+              </button>
+            ) : (
+              <span className={styles.headerContent}>{colonne.header}</span>
+            )}
+            {colonne.sort && (
+              // **Bouton frère, pas imbriqué** dans la poignée de glissement — un bouton dans un
+              // bouton est invalide en HTML, même motif que les deux boutons de `TabStrip`. Le tri
+              // n'est donc plus qu'à ce seul endroit : cliquer ailleurs sur l'en-tête glisse, ne
+              // trie plus (`23h`).
+              <button
+                type="button"
+                className={cx(styles.sortHandle, colonne.sort.active && styles.sortHandleActive)}
+                aria-label={colonne.sort.label}
+                onClick={colonne.sort.onClick}
+              >
+                <Icon name={colonne.sort.icon} size={11} strokeWidth={2.4} />
+              </button>
+            )}
             {onColumnResize && colonne.resizable !== false && (
               // Poignée de redimensionnement : le même langage visuel que celle de `SplitPane` —
               // un trait, épaissi au survol et au focus, avec une zone de saisie en débord. Elle
