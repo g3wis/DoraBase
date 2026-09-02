@@ -357,9 +357,7 @@ mod tests {
             }];
             let (sql, parametres) = requete_de("p", "jeu", &r);
             assert!(
-                sql.contains(&format!(
-                    "cast(`montant` as bignumeric) {signe} @p1"
-                )),
+                sql.contains(&format!("cast(`montant` as bignumeric) {signe} @p1")),
                 "{sql}"
             );
             assert_eq!(

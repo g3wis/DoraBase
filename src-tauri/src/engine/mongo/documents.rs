@@ -65,7 +65,11 @@ pub fn critere(filtres: &[Filter], colonnes: &[ColumnInfo]) -> Result<Document, 
 /// **`i64` d'abord, `f64` en repli** : un entier gardé en entier compare exactement, là où passer
 /// systématiquement par `f64` perdrait de la précision au-delà de 2^53 — le même souci que celui qui
 /// a fait garder `Value::Decimal` en texte côté lecture.
-fn valeur_numerique(champ: &str, valeur: &str, colonnes: &[ColumnInfo]) -> Result<Bson, EngineError> {
+fn valeur_numerique(
+    champ: &str,
+    valeur: &str,
+    colonnes: &[ColumnInfo],
+) -> Result<Bson, EngineError> {
     let colonne = colonnes.iter().find(|c| c.name == champ);
     if !matches!(colonne.map(|c| c.category), Some(TypeCategory::Number)) {
         return Err(EngineError::local(format!(
@@ -341,11 +345,8 @@ mod tests {
             (FilterOperator::Lte, "$lte"),
             (FilterOperator::Lt, "$lt"),
         ] {
-            let critere = critere(
-                &[filtre("montant", operateur, Some("42"))],
-                &colonnes(),
-            )
-            .unwrap_or_else(|erreur| panic!("{operateur:?} : {erreur}"));
+            let critere = critere(&[filtre("montant", operateur, Some("42"))], &colonnes())
+                .unwrap_or_else(|erreur| panic!("{operateur:?} : {erreur}"));
             let condition = critere.get_document("montant").unwrap();
             assert_eq!(condition.get_i64(signe).unwrap(), 42, "{condition:?}");
         }

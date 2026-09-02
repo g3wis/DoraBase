@@ -980,8 +980,9 @@ mod tests {
                 operator: operateur,
                 value: Some("10".into()),
             }];
-            let (sql, valeurs) = construire_sql(&r, &colonnes())
-                .unwrap_or_else(|erreur| panic!("{operateur:?} devrait produire du SQL : {erreur}"));
+            let (sql, valeurs) = construire_sql(&r, &colonnes()).unwrap_or_else(|erreur| {
+                panic!("{operateur:?} devrait produire du SQL : {erreur}")
+            });
             assert!(sql.contains("::numeric"), "{sql}");
             assert_eq!(valeurs, vec!["10".to_owned()]);
         }
