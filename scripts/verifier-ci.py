@@ -232,6 +232,7 @@ def verifier_publication() -> None:
 
     workflow = charger(PUBLICATION)
     jobs = workflow.get("jobs", {})
+    etapes_release = etapes_de(jobs, "release", 4, "publication.yml")
     etapes = etapes_de(jobs, "macos", 29, "publication.yml")
 
     sur = declencheurs(workflow)
@@ -264,7 +265,7 @@ def verifier_publication() -> None:
         ("stapler validate", "rien ne vérifierait l'agrafage du ticket de notarisation"),
         ("source=Notarized Developer ID",
          "rien ne vérifierait le verdict que le système rend vraiment au lancement"),
-        ("gh release create", "rien ne publierait le résultat"),
+        ("gh release upload", "rien ne publierait les artefacts macOS"),
         ("verifier-aucun-decor-de-version.sh",
          "la version de décor pourrait partir dans le bundle livré"),
         ("verifier-dmg-monte.sh",
@@ -273,6 +274,37 @@ def verifier_publication() -> None:
         if fragment not in commandes:
             print(f"publication.yml : « {fragment} » a disparu — {raison}", file=sys.stderr)
             raise SystemExit(1)
+
+    # **La release elle-même est créée par le job `release`, une seule fois, avant qu'aucun
+    # bundle ne soit construit** — c'est ce qui laisse `macos` et `windows` tourner en
+    # parallèle plutôt que l'un après l'autre. `macos` et `windows` n'y ajoutent que des
+    # artefacts, jamais une seconde création : deux appels à `gh release create` diviseraient
+    # la décision du titre, des notes et du `--latest` entre deux endroits.
+    commandes_release = commandes_de(etapes_release)
+    if "gh release create" not in commandes_release:
+        print("publication.yml : le job « release » ne crée plus la release — rien ne la "
+              "publierait avant que macOS et Windows n'y téléversent leurs artefacts",
+              file=sys.stderr)
+        raise SystemExit(1)
+    if "gh release create" in commandes:
+        print("publication.yml : le job « macos » crée encore la release — c'est le job "
+              "« release » qui doit le faire, seul, pour que macOS et Windows publient en "
+              "parallèle plutôt que l'un après l'autre", file=sys.stderr)
+        raise SystemExit(1)
+
+    for nom in ("macos", "windows"):
+        if jobs[nom].get("needs") != "release":
+            print(f"publication.yml : le job « {nom} » doit déclarer `needs: release` — il "
+                  "téléverse dans une release que le job « release » crée, et sans l'ordre "
+                  "l'upload court contre la création", file=sys.stderr)
+            raise SystemExit(1)
+    # **Et macOS ne doit plus attendre Windows, ni l'inverse : c'est tout le point.** Deux
+    # jobs qui dépendent tous deux de « release » sans dépendre l'un de l'autre tournent en
+    # parallèle ; un `needs: macos` réapparu sur `windows` les resserialiserait en silence.
+    if jobs["windows"].get("needs") == "macos" or jobs["macos"].get("needs") == "windows":
+        print("publication.yml : macOS et Windows dépendent l'un de l'autre — ils ne "
+              "publieraient plus en parallèle", file=sys.stderr)
+        raise SystemExit(1)
 
     # Même variable, même raison — et ici la conséquence est publique.
     if not any(
@@ -286,22 +318,13 @@ def verifier_publication() -> None:
 
     # ── L'installateur Windows, depuis le 1er septembre 2026 ──────────────────────────────
     #
-    # Il s'attache à une release que le job `macos` a déjà créée. Trois faits le tiennent, et
-    # aucun ne se remarquerait autrement qu'en regardant une release publiée :
+    # Il s'attache à une release que le job `release` a déjà créée, en parallèle du job
+    # `macos` (voir plus haut, 2 septembre 2026). Deux faits le tiennent, et aucun ne se
+    # remarquerait autrement qu'en regardant une release publiée :
     windows = etapes_de(jobs, "windows", 14, "publication.yml")
-
-    # 1. L'ordre. Sans `needs: macos`, `gh release upload` court contre `gh release create` :
-    #    l'upload échoue si la release n'existe pas encore, et il échoue **par intermittence**,
-    #    ce qui est la pire façon d'échouer pour un workflow qui ne tourne que sur un tag.
-    if jobs["windows"].get("needs") != "macos":
-        print("publication.yml : le job « windows » doit déclarer `needs: macos` — il téléverse "
-              "dans une release que le job macOS crée, et sans l'ordre l'upload court contre "
-              "la création", file=sys.stderr)
-        raise SystemExit(1)
-
     commandes_windows = commandes_de(windows)
 
-    # 2. Ce qu'il fait, et ce qu'il vérifie avant de publier.
+    # 1. Ce qu'il fait, et ce qu'il vérifie avant de publier.
     for fragment, raison in (
         ("pnpm proxy:embarquer",
          "toute commande cargo échouerait sur l'`externalBin` absent (défaut n° 111)"),
@@ -320,7 +343,7 @@ def verifier_publication() -> None:
                   file=sys.stderr)
             raise SystemExit(1)
 
-    # 3. **Et surtout : il ne publie pas de mise à jour.** Faute de certificat Authenticode,
+    # 2. **Et surtout : il ne publie pas de mise à jour.** Faute de certificat Authenticode,
     #    rien n'atteste qu'un exécutable téléchargé vient de nous — c'est « rien n'est proposé
     #    qui n'ait été notarié », transposé. Téléverser l'archive `.nsis.zip` ou ajouter
     #    `windows-x86_64` au manifeste ouvrirait cette voie **en silence**, chez des gens qui

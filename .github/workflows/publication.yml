@@ -19,7 +19,148 @@ permissions:
   contents: write
 
 jobs:
+  # ── La release, créée une fois, pour que macOS et Windows publient en parallèle ──────────
+  #
+  # **Avant le 2 septembre 2026**, c'était le job `macos` qui appelait `gh release create` en
+  # toute fin de construction, et `windows` déclarait `needs: macos` pour ne pas courir contre
+  # une release qui n'existait pas encore. Cela tenait, mais ça sérialisait deux constructions
+  # indépendantes : Windows attendait que les quarante minutes de la cible universelle macOS
+  # soient passées avant de commencer les siennes.
+  #
+  # Ce job-ci ne compile rien : il ne fait que ce qui ne dépend d'aucun bundle — vérifier le
+  # tag, écrire les notes, créer la release **sans aucun asset**. `gh release create` sans
+  # fichier joint est une release valide, à laquelle `macos` et `windows` **ajoutent** leurs
+  # artefacts par `gh release upload`, jamais par un second `create` — c'est toujours la même
+  # raison qu'avant : deux appels à `create` divergeraient sur le titre, les notes ou
+  # `--latest`. Les deux jobs de construction déclarent `needs: release` l'un et l'autre, mais
+  # aucun ne dépend de l'autre : ils tournent en parallèle, et un échec de l'un ne retarde plus
+  # le début de l'autre.
+  release:
+    runs-on: ubuntu-latest
+    # Aucune compilation ici — juste du texte et un appel à `gh`. Cinq minutes est déjà large.
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # `git log v(précédent)..v(courant)` a besoin de l'historique et des tags.
+          fetch-depth: 0
+
+      - name: le tag correspond à la version des fichiers
+        run: |
+          set -euo pipefail
+          version=${GITHUB_REF_NAME#v}
+          python3 scripts/verifier-version.py "$version"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      # **Seule la présence du secret décide du texte des notes, pas sa forme.** La validation
+      # complète — UUID, dix caractères, préfixe attendu — reste dans le job `macos`, seul
+      # concerné : elle gagne à échouer vite là où elle coûte quarante minutes de construction,
+      # pas ici où un mauvais verdict ne coûterait qu'une phrase de travers dans les notes.
+      - name: notarise ?
+        env:
+          IDENTITE: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          if [[ -n ${IDENTITE:-} ]]; then
+            echo "NOTARISE=oui" >> "$GITHUB_ENV"
+          else
+            echo "NOTARISE=non" >> "$GITHUB_ENV"
+          fi
+
+      - name: notes de version
+        run: |
+          set -euo pipefail
+          mkdir -p publication
+          precedent=$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' \
+            "$GITHUB_REF_NAME^" 2>/dev/null || true)
+          {
+            echo "## Installation"
+            echo
+            if [[ ${NOTARISE:-non} == oui ]]; then
+              # Notariée : il n'y a rien à expliquer, et surtout aucun contournement à
+              # documenter. Une notice de sécurité qui traîne après avoir cessé d'être vraie
+              # apprend à l'utilisateur à ignorer les notices.
+              echo "Téléchargez \`DoraBase-$VERSION-universal.dmg\` ci-dessous, ouvrez-le, et"
+              echo "glissez **DoraBase** dans **Applications**. C'est tout : l'application est"
+              echo "signée et notariée par Apple."
+              echo
+              # Dit une fois ici plutôt que dans un « et au fait » : c'est la question que se
+              # pose quelqu'un qui a déjà l'application, et il la lit sur cette page.
+              echo "Déjà installée ? Il n'y a rien à télécharger : DoraBase propose la mise à"
+              echo "jour dans sa barre d'état, et se relance seule."
+            else
+              echo "> Cette version n'est **pas notariée** : elle a été construite sans les"
+              echo "> secrets de signature. macOS la refusera au premier lancement."
+              echo
+              echo "Téléchargez le \`.dmg\`, glissez **DoraBase** dans **Applications**, puis :"
+              echo
+              echo '```bash'
+              echo 'xattr -dr com.apple.quarantine /Applications/DoraBase.app'
+              echo '```'
+            fi
+            echo
+            echo "macOS 13 Ventura ou plus récent. Bundle universel : Apple Silicon et Intel."
+            echo
+            # **Windows, et ce qu'il n'a pas.** Dit dans les notes plutôt que découvert au
+            # téléchargement : l'avertissement de SmartScreen ressemble à une application
+            # cassée, et l'absence de mise à jour automatique se remarquerait des semaines
+            # plus tard. Les deux sont des conséquences du même manque — pas de certificat
+            # Authenticode — et il vaut mieux les lire ici qu'ailleurs.
+            echo "### Windows"
+            echo
+            echo "\`DoraBase-$VERSION-x64-setup.exe\` ci-dessous. L'installateur **n'est pas"
+            echo "signé** : Windows affichera un avertissement SmartScreen, à passer par"
+            echo "*Informations complémentaires → Exécuter quand même*."
+            echo
+            echo "Et **les installations Windows ne se mettent pas à jour seules** : il faut"
+            echo "retélécharger l'installateur à chaque version."
+            echo
+            echo "## Changements"
+            echo
+            if [[ -n $precedent ]]; then
+              # Écrit à part **et** repris ici : c'est ce même texte que le manifeste de mise à
+              # jour porte, donc que l'application affiche avant de se remplacer. Deux
+              # générations indépendantes finiraient par ne plus dire la même chose, et celle
+              # que l'utilisateur lit dans l'application est la moins relue des deux.
+              git log --no-merges --pretty='- %s' "$precedent..$GITHUB_REF_NAME" \
+                > publication/changements.md
+              cat publication/changements.md
+              echo
+              # **Accolades obligatoires.** `$precedent…` : bash range les octets non-ASCII de
+              # l'ellipse *dans le nom de variable*, cherche « precedent… », ne le trouve pas, et
+              # `set -u` fait échouer l'étape. La v0.1.0 y avait échappé — sans tag précédent, elle
+              # passait par la branche « première version publiée ». Le défaut n'existait donc que
+              # de la **deuxième** publication, là où plus personne ne relit le script.
+              echo "[Comparer ${precedent}…${GITHUB_REF_NAME}](https://github.com/${GITHUB_REPOSITORY}/compare/${precedent}...${GITHUB_REF_NAME})"
+            else
+              echo "- première version publiée"
+            fi
+          } > publication/notes.md
+          cat publication/notes.md
+
+      # **Créée sans aucun asset.** `macos` et `windows` y ajouteront les leurs par
+      # `gh release upload`, en parallèle l'un de l'autre — c'est tout le point de ce job.
+      - name: créer la release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" \
+            --title "DoraBase $VERSION" \
+            --notes-file publication/notes.md \
+            --latest
+
+      # `changements.md` voyage jusqu'au job `macos`, qui en a besoin pour le champ « notes »
+      # du manifeste de mise à jour — c'est le même texte que celui déjà publié dans la
+      # release, pas une seconde génération : un fichier généré n'a qu'un seul producteur.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: changements
+          path: publication/changements.md
+          retention-days: 1
+
   macos:
+    needs: release
     runs-on: macos-latest
     # Une stalle ne doit pas se déguiser en travail — même raison que le job `engine` de
     # `ci.yml`. Une construction universelle compile la crate deux fois : quarante minutes
@@ -460,76 +601,18 @@ jobs:
           ls -lh publication/
 
       # ── La release ─────────────────────────────────────────────────────────────────────
-
-      - name: notes de version
-        run: |
-          set -euo pipefail
-          precedent=$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' \
-            "$GITHUB_REF_NAME^" 2>/dev/null || true)
-          {
-            echo "## Installation"
-            echo
-            if [[ ${NOTARISE:-non} == oui ]]; then
-              # Notariée : il n'y a rien à expliquer, et surtout aucun contournement à
-              # documenter. Une notice de sécurité qui traîne après avoir cessé d'être vraie
-              # apprend à l'utilisateur à ignorer les notices.
-              echo "Téléchargez \`DoraBase-$VERSION-universal.dmg\` ci-dessous, ouvrez-le, et"
-              echo "glissez **DoraBase** dans **Applications**. C'est tout : l'application est"
-              echo "signée et notariée par Apple."
-              echo
-              # Dit une fois ici plutôt que dans un « et au fait » : c'est la question que se
-              # pose quelqu'un qui a déjà l'application, et il la lit sur cette page.
-              echo "Déjà installée ? Il n'y a rien à télécharger : DoraBase propose la mise à"
-              echo "jour dans sa barre d'état, et se relance seule."
-            else
-              echo "> Cette version n'est **pas notariée** : elle a été construite sans les"
-              echo "> secrets de signature. macOS la refusera au premier lancement."
-              echo
-              echo "Téléchargez le \`.dmg\`, glissez **DoraBase** dans **Applications**, puis :"
-              echo
-              echo '```bash'
-              echo 'xattr -dr com.apple.quarantine /Applications/DoraBase.app'
-              echo '```'
-            fi
-            echo
-            echo "macOS 13 Ventura ou plus récent. Bundle universel : Apple Silicon et Intel."
-            echo
-            # **Windows, et ce qu'il n'a pas.** Dit dans les notes plutôt que découvert au
-            # téléchargement : l'avertissement de SmartScreen ressemble à une application
-            # cassée, et l'absence de mise à jour automatique se remarquerait des semaines
-            # plus tard. Les deux sont des conséquences du même manque — pas de certificat
-            # Authenticode — et il vaut mieux les lire ici qu'ailleurs.
-            echo "### Windows"
-            echo
-            echo "\`DoraBase-$VERSION-x64-setup.exe\` ci-dessous. L'installateur **n'est pas"
-            echo "signé** : Windows affichera un avertissement SmartScreen, à passer par"
-            echo "*Informations complémentaires → Exécuter quand même*."
-            echo
-            echo "Et **les installations Windows ne se mettent pas à jour seules** : il faut"
-            echo "retélécharger l'installateur à chaque version."
-            echo
-            echo "## Changements"
-            echo
-            if [[ -n $precedent ]]; then
-              # Écrit à part **et** repris ici : c'est ce même texte que le manifeste de mise à
-              # jour porte, donc que l'application affiche avant de se remplacer. Deux
-              # générations indépendantes finiraient par ne plus dire la même chose, et celle
-              # que l'utilisateur lit dans l'application est la moins relue des deux.
-              git log --no-merges --pretty='- %s' "$precedent..$GITHUB_REF_NAME" \
-                > publication/changements.md
-              cat publication/changements.md
-              echo
-              # **Accolades obligatoires.** `$precedent…` : bash range les octets non-ASCII de
-              # l'ellipse *dans le nom de variable*, cherche « precedent… », ne le trouve pas, et
-              # `set -u` fait échouer l'étape. La v0.1.0 y avait échappé — sans tag précédent, elle
-              # passait par la branche « première version publiée ». Le défaut n'existait donc que
-              # de la **deuxième** publication, là où plus personne ne relit le script.
-              echo "[Comparer ${precedent}…${GITHUB_REF_NAME}](https://github.com/${GITHUB_REPOSITORY}/compare/${precedent}...${GITHUB_REF_NAME})"
-            else
-              echo "- première version publiée"
-            fi
-          } > publication/notes.md
-          cat publication/notes.md
+      #
+      # **La release existe déjà** : le job `release` l'a créée, avec son titre, ses notes et
+      # `--latest`, avant qu'aucun bundle n'ait été construit — c'est ce qui laisse ce job
+      # tourner en parallèle du job `windows` plutôt qu'attendre l'un après l'autre. Ce qui
+      # reste ici est un fichier que ce job-ci, et lui seul, sait produire :
+      # `changements.md` sert le champ « notes » du manifeste de mise à jour, et c'est le
+      # même texte que celui déjà publié dans la release — récupéré plutôt que régénéré, pour
+      # qu'il n'y ait toujours qu'un seul producteur.
+      - uses: actions/download-artifact@v4
+        with:
+          name: changements
+          path: publication
 
       # ── Le manifeste de mise à jour ────────────────────────────────────────────────────
       #
@@ -587,7 +670,12 @@ jobs:
           print(json.dumps(manifeste, indent=2)[:600])
           FIN
 
-      - name: créer la release
+      # **Téléversé dans la release existante, jamais créé une seconde fois.** Le job
+      # `release` a déjà appelé `gh release create` avec le titre, les notes et `--latest` :
+      # un second `create` échouerait (le tag existe déjà), et de toute façon diviserait la
+      # décision entre deux endroits. `gh release upload` **ajoute** des fichiers à une
+      # release qui existe, sans toucher à son titre ni à ses notes.
+      - name: téléverser les artefacts macOS
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -595,9 +683,6 @@ jobs:
 
           # Le disque et son empreinte sont toujours là ; les trois fichiers de mise à jour
           # n'existent que si la construction était notariée — voir l'étape du manifeste.
-          # **Une liste construite, et non un second `gh release create`** : deux appels
-          # divergeraient sur le titre, les notes ou le `--latest`, et c'est précisément
-          # `--latest` qui décide si les mises à jour sont trouvables.
           assets=(
             "publication/DoraBase-$VERSION-universal.dmg"
             "publication/DoraBase-$VERSION-universal.dmg.sha256"
@@ -613,11 +698,7 @@ jobs:
             echo "  existantes ne verront pas cette version."
           fi
 
-          gh release create "$GITHUB_REF_NAME" \
-            --title "DoraBase $VERSION" \
-            --notes-file publication/notes.md \
-            --latest \
-            "${assets[@]}"
+          gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
 
   # ── L'installateur Windows ───────────────────────────────────────────────────────────
   #
@@ -626,19 +707,18 @@ jobs:
   # seul point de l'installateur ; tout le reste de cette décision tient toujours, et
   # notamment : **aucune mise à jour en place sous Windows**, voir plus bas.
   #
-  # **Pourquoi `needs: macos` plutôt qu'un job parallèle.** La release est créée par le job
-  # macOS, en un seul `gh release create` qui décide du titre, des notes et du `--latest` — et
-  # son commentaire dit pourquoi il doit rester unique. Ce job-ci **ajoute** un asset à la
-  # release existante (`gh release upload`), ce qui n'est pas un second `create` : la remarque
-  # ne s'applique pas.
+  # **`needs: release`, et non `needs: macos` — depuis le 2 septembre 2026.** La release
+  # existe dès que le job `release` a rendu la main, avant qu'aucun bundle ne soit construit :
+  # ce job-ci n'a donc plus besoin d'attendre la fin de la construction macOS pour commencer
+  # la sienne. Les deux tournent en parallèle, chacun ajoutant ses artefacts par
+  # `gh release upload` — jamais par un second `gh release create`, dont l'unicité reste ce
+  # qui décide du titre, des notes et du `--latest`.
   #
-  # La conséquence assumée est un ordre, pas une perte : **un échec de la construction Windows
-  # ne coûte pas la release macOS**, qui est l'artefact soutenu. L'inverse — faire dépendre le
-  # `.dmg` d'un `tauri build` Windows — rendrait la publication macOS tributaire d'une
-  # plateforme qui n'est même pas signée. Contrepartie : le `.exe` paraît quelques minutes
-  # après la release, pas avec elle.
+  # La conséquence assumée est la même qu'avant, seulement plus rapide à se révéler : **un
+  # échec de la construction Windows ne coûte pas la release macOS**, qui est l'artefact
+  # soutenu — les deux jobs sont indépendants l'un de l'autre, pas seulement de leur ordre.
   windows:
-    needs: macos
+    needs: release
     runs-on: windows-latest
     # Pas de construction universelle ici, donc pas de double compilation : vingt-cinq minutes
     # laissent la même marge que les quarante du job macOS.
