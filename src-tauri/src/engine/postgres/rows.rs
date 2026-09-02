@@ -200,6 +200,34 @@ fn condition_de(
 
             Ok(format!("{nom}::text in ({})", places.join(", ")))
         }
+        FilterOperator::Gt | FilterOperator::Gte | FilterOperator::Lte | FilterOperator::Lt => {
+            // Réservé aux colonnes numériques : `>` sur du texte trierait lexicographiquement
+            // (`"9" > "10"`), ce que le signe affiché contredirait. L'écran ne propose ces
+            // opérateurs que pour `TypeCategory::Number` ; ce refus tient si une configuration
+            // écrite à la main les envoie quand même.
+            if colonne.category != TypeCategory::Number {
+                return Err(EngineError::local(format!(
+                    "l'opérateur {:?} n'est proposé que pour une colonne numérique, et « {} » ne l'est pas",
+                    filtre.operator, colonne.name
+                )));
+            }
+            valeurs.push(valeur.clone());
+            let comparaison = match filtre.operator {
+                FilterOperator::Gt => ">",
+                FilterOperator::Gte => ">=",
+                FilterOperator::Lte => "<=",
+                _ => "<",
+            };
+            // `${}::text::numeric` : le paramètre est décrit comme texte — ce que `String` sait
+            // lier —, et c'est le cast *externe*, appliqué après coup, qui le convertit en
+            // numeric à l'exécution. Le premier cast qui touche `$N` décide de son type déclaré ;
+            // sans ce détour, Postgres décrirait le paramètre en `numeric`, type que `ToSql` pour
+            // `String` ne sait pas lier.
+            Ok(format!(
+                "{nom}::numeric {comparaison} ${}::text::numeric",
+                valeurs.len()
+            ))
+        }
         FilterOperator::IsNull => unreachable!("traité plus haut"),
     }
 }
@@ -922,8 +950,11 @@ mod tests {
     }
 
     #[test]
-    fn les_cinq_operateurs_produisent_du_sql() {
+    fn les_operateurs_non_numeriques_produisent_du_sql_sur_une_colonne_texte() {
         for operateur in FilterOperator::tous() {
+            if operateur.est_une_comparaison_numerique() {
+                continue;
+            }
             let mut r = requete();
             r.filters = vec![Filter {
                 column: "statut".into(),
@@ -935,6 +966,37 @@ mod tests {
                 "{operateur:?} devrait produire du SQL"
             );
         }
+    }
+
+    #[test]
+    fn les_quatre_comparaisons_produisent_du_sql_sur_une_colonne_numerique() {
+        for operateur in FilterOperator::tous() {
+            if !operateur.est_une_comparaison_numerique() {
+                continue;
+            }
+            let mut r = requete();
+            r.filters = vec![Filter {
+                column: "id".into(),
+                operator: operateur,
+                value: Some("10".into()),
+            }];
+            let (sql, valeurs) = construire_sql(&r, &colonnes())
+                .unwrap_or_else(|erreur| panic!("{operateur:?} devrait produire du SQL : {erreur}"));
+            assert!(sql.contains("::numeric"), "{sql}");
+            assert_eq!(valeurs, vec!["10".to_owned()]);
+        }
+    }
+
+    #[test]
+    fn une_comparaison_numerique_sur_une_colonne_texte_est_refusee() {
+        let mut r = requete();
+        r.filters = vec![Filter {
+            column: "statut".into(),
+            operator: FilterOperator::Gt,
+            value: Some("10".into()),
+        }];
+        let erreur = construire_sql(&r, &colonnes()).expect_err("doit être refusé");
+        assert!(erreur.message.contains("statut"), "{erreur}");
     }
 
     #[test]

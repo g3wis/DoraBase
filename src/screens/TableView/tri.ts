@@ -67,7 +67,7 @@ export function libelleDeFiltre(filtre: Filter): string {
   return `${filtre.column} ${SIGNES[filtre.operator]} ${filtre.value ?? ''}`
 }
 
-/** Les cinq opérateurs du popover de `A5`, avec leur signe et leur libellé. */
+/** Les cinq opérateurs du popover de `A5`, valables pour toute colonne. */
 export const OPERATEURS: { valeur: FilterOperator; signe: string; libelle: string }[] = [
   { valeur: 'eq', signe: '=', libelle: 'égal' },
   { valeur: 'ne', signe: '≠', libelle: 'différent' },
@@ -76,12 +76,38 @@ export const OPERATEURS: { valeur: FilterOperator; signe: string; libelle: strin
   { valeur: 'isNull', signe: '∅', libelle: 'is null' },
 ]
 
+/**
+ * Les quatre comparaisons, réservées aux colonnes numériques.
+ *
+ * `>` sur du texte trierait lexicographiquement (`"9" > "10"`), ce que le signe affiché
+ * contredirait — c'est pourquoi elles ne rejoignent `OPERATEURS` que pour une colonne dont la
+ * `category` vaut `number` (voir `operateursPour`), jamais pour les autres.
+ */
+export const COMPARAISONS: { valeur: FilterOperator; signe: string; libelle: string }[] = [
+  { valeur: 'gt', signe: '>', libelle: 'supérieur à' },
+  { valeur: 'gte', signe: '≥', libelle: 'supérieur ou égal à' },
+  { valeur: 'lte', signe: '≤', libelle: 'inférieur ou égal à' },
+  { valeur: 'lt', signe: '<', libelle: 'inférieur à' },
+]
+
+/** Les opérateurs proposés par le popover — les cinq de base, et les quatre comparaisons en plus
+ * pour une colonne numérique. */
+export function operateursPour(
+  numeric: boolean,
+): { valeur: FilterOperator; signe: string; libelle: string }[] {
+  return numeric ? [...OPERATEURS, ...COMPARAISONS] : OPERATEURS
+}
+
 const SIGNES: Record<FilterOperator, string> = {
   eq: '=',
   ne: '≠',
   in: 'in',
   matches: '~',
   isNull: '∅',
+  gt: '>',
+  gte: '≥',
+  lte: '≤',
+  lt: '<',
 }
 
 export function signeDe(operator: FilterOperator): string {

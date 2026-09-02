@@ -5,7 +5,7 @@ import { cx } from '../../ui/cx'
 import { SANS_CORRECTION } from '../../ui/Field/Field'
 import { Popover } from '../../ui/Popover/Popover'
 import styles from './FilterCell.module.css'
-import { OPERATEURS, signeDe } from './tri'
+import { operateursPour, signeDe } from './tri'
 
 type FilterCellProps = {
   column: string
@@ -13,6 +13,11 @@ type FilterCellProps = {
   /** La valeur **appliquée**, celle qui est partie au serveur. */
   value: string
   onApply: (operator: FilterOperator, value: string) => void
+  /**
+   * Vrai pour une colonne `category === 'number'` : ajoute les quatre comparaisons au popover.
+   * `>` sur du texte trierait lexicographiquement, donc absent par défaut.
+   */
+  numeric?: boolean
 }
 
 /**
@@ -26,9 +31,10 @@ type FilterCellProps = {
  * chaque caractère enverrait cinq requêtes pour `paid`. Un anti-rebond au jugé aurait demandé
  * une durée que rien ne fonde.
  */
-export function FilterCell({ column, operator, value, onApply }: FilterCellProps) {
+export function FilterCell({ column, operator, value, onApply, numeric = false }: FilterCellProps) {
   const t = useT()
   const [saisie, setSaisie] = useState(value)
+  const operateurs = operateursPour(numeric)
 
   // La valeur appliquée fait autorité : vider un chip de la toolbar (`10e`) doit vider le champ,
   // sans quoi les deux affichages du même filtre divergeraient.
@@ -47,7 +53,7 @@ export function FilterCell({ column, operator, value, onApply }: FilterCellProps
         title={t('tableView.filterCell.operatorTitle', { column })}
         content={(fermer) => (
           <ul className={styles.liste}>
-            {OPERATEURS.map((o) => (
+            {operateurs.map((o) => (
               <li key={o.valeur}>
                 <button
                   type="button"

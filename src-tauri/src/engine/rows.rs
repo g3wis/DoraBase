@@ -45,7 +45,9 @@ impl RowLimit {
     }
 }
 
-/// Les cinq opérateurs du popover de `A5` : `=`, `≠`, `in`, `~`, `is null`.
+/// Les neuf opérateurs du popover de `A5` : `=`, `≠`, `in`, `~`, `is null`, et les quatre
+/// comparaisons `>`, `>=`, `<=`, `<` — réservées aux colonnes numériques (`TypeCategory::Number`),
+/// l'écran ne les proposant que là.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "engine.ts")]
@@ -56,6 +58,10 @@ pub enum FilterOperator {
     /// Correspondance de motif — le `~` du mockup.
     Matches,
     IsNull,
+    Gt,
+    Gte,
+    Lte,
+    Lt,
 }
 
 impl FilterOperator {
@@ -65,8 +71,24 @@ impl FilterOperator {
         !matches!(self, Self::IsNull)
     }
 
-    pub fn tous() -> [Self; 5] {
-        [Self::Eq, Self::Ne, Self::In, Self::Matches, Self::IsNull]
+    /// Les quatre comparaisons n'ont de sens que pour une colonne numérique — `>` sur du texte
+    /// trierait lexicographiquement (`"9" > "10"`), ce qui contredirait le signe affiché.
+    pub fn est_une_comparaison_numerique(self) -> bool {
+        matches!(self, Self::Gt | Self::Gte | Self::Lte | Self::Lt)
+    }
+
+    pub fn tous() -> [Self; 9] {
+        [
+            Self::Eq,
+            Self::Ne,
+            Self::In,
+            Self::Matches,
+            Self::IsNull,
+            Self::Gt,
+            Self::Gte,
+            Self::Lte,
+            Self::Lt,
+        ]
     }
 }
 
@@ -425,8 +447,8 @@ mod tests {
     }
 
     #[test]
-    fn les_cinq_operateurs_de_a5_existent() {
-        assert_eq!(FilterOperator::tous().len(), 5);
+    fn les_neuf_operateurs_de_a5_existent() {
+        assert_eq!(FilterOperator::tous().len(), 9);
     }
 
     #[test]
@@ -439,6 +461,21 @@ mod tests {
                     "{operateur:?} devrait prendre une valeur"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn seules_les_quatre_comparaisons_sont_numeriques() {
+        for operateur in FilterOperator::tous() {
+            let attendu = matches!(
+                operateur,
+                FilterOperator::Gt | FilterOperator::Gte | FilterOperator::Lte | FilterOperator::Lt
+            );
+            assert_eq!(
+                operateur.est_une_comparaison_numerique(),
+                attendu,
+                "{operateur:?}"
+            );
         }
     }
 

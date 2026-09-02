@@ -3,15 +3,24 @@
 
 use mongodb::bson::{doc, Bson, Document};
 
-use crate::engine::{ColumnInfo, Filter, FilterOperator, PendingUpdate, SortDirection, SortKey};
+use crate::engine::{
+    ColumnInfo, EngineError, Filter, FilterOperator, PendingUpdate, SortDirection, SortKey,
+    TypeCategory,
+};
 
 /// Le critère `find` correspondant aux filtres de `06a`.
 ///
-/// **Les cinq opérateurs, et l'échappement de `matches`.** Une valeur tapée devient une expression
+/// **Neuf opérateurs, et l'échappement de `matches`.** Une valeur tapée devient une expression
 /// rationnelle : les caractères de la syntaxe y prendraient un sens que l'utilisateur n'a pas voulu,
 /// et un motif pathologique coûterait un temps déraisonnable au serveur. Le filtre cherche donc une
 /// **sous-chaîne**, comme `ILIKE '%…%'` en `06d`.
-pub fn critere(filtres: &[Filter]) -> Document {
+///
+/// **Les quatre comparaisons exigent une valeur numérique, contrairement aux cinq autres qui restent
+/// du texte.** MongoDB est typé nativement : un `$gt` avec une chaîne contre un champ entier ne
+/// trouverait jamais rien, l'ordre BSON plaçant tous les nombres avant toutes les chaînes. La colonne
+/// doit donc être `TypeCategory::Number` — même refus que Postgres, pour la même raison — et la
+/// valeur saisie est convertie en nombre plutôt que laissée en texte.
+pub fn critere(filtres: &[Filter], colonnes: &[ColumnInfo]) -> Result<Document, EngineError> {
     let mut critere = Document::new();
     for filtre in filtres {
         let champ = filtre.column.clone();
@@ -34,10 +43,41 @@ pub fn critere(filtres: &[Filter]) -> Document {
             // la grille affiche la même cellule vide pour les deux (`18e`). Un filtre qui n'en
             // trouverait que la moitié se lirait comme un défaut de lecture.
             FilterOperator::IsNull => Bson::Document(doc! { "$in": [Bson::Null] }),
+            FilterOperator::Gt | FilterOperator::Gte | FilterOperator::Lte | FilterOperator::Lt => {
+                let numerique = valeur_numerique(&filtre.column, &valeur, colonnes)?;
+                let operateur = match filtre.operator {
+                    FilterOperator::Gt => "$gt",
+                    FilterOperator::Gte => "$gte",
+                    FilterOperator::Lte => "$lte",
+                    _ => "$lt",
+                };
+                Bson::Document(doc! { operateur: numerique })
+            }
         };
         critere.insert(champ, condition);
     }
-    critere
+    Ok(critere)
+}
+
+/// Convertit la valeur saisie en nombre, pour une comparaison — refuse si la colonne n'est pas
+/// numérique, ou si la valeur ne se lit pas comme un nombre.
+///
+/// **`i64` d'abord, `f64` en repli** : un entier gardé en entier compare exactement, là où passer
+/// systématiquement par `f64` perdrait de la précision au-delà de 2^53 — le même souci que celui qui
+/// a fait garder `Value::Decimal` en texte côté lecture.
+fn valeur_numerique(champ: &str, valeur: &str, colonnes: &[ColumnInfo]) -> Result<Bson, EngineError> {
+    let colonne = colonnes.iter().find(|c| c.name == champ);
+    if !matches!(colonne.map(|c| c.category), Some(TypeCategory::Number)) {
+        return Err(EngineError::local(format!(
+            "les comparaisons ne sont proposées que pour un champ numérique, et « {champ} » ne l'est pas"
+        )));
+    }
+    if let Ok(entier) = valeur.parse::<i64>() {
+        return Ok(Bson::Int64(entier));
+    }
+    valeur.parse::<f64>().map(Bson::Double).map_err(|_| {
+        EngineError::local(format!("« {valeur} » n'est pas un nombre pour « {champ} »"))
+    })
 }
 
 /// Le tri `find` correspondant aux clés de tri de `06a`.
@@ -209,9 +249,39 @@ mod tests {
         }
     }
 
+    fn colonne_avec_categorie(nom: &str, categorie: TypeCategory) -> ColumnInfo {
+        ColumnInfo {
+            position: 1,
+            name: nom.into(),
+            type_name: "texte".into(),
+            category: categorie,
+            nullable: true,
+            default: None,
+            identity: None,
+            frequency: None,
+            key: None,
+            comment: None,
+        }
+    }
+
+    /// Un jeu de colonnes couvrant les champs des tests : `montant` numérique, le reste en
+    /// texte — suffisant pour les filtres qui ne portent pas de comparaison.
+    fn colonnes() -> Vec<ColumnInfo> {
+        vec![
+            colonne_avec_categorie("ville", TypeCategory::Text),
+            colonne_avec_categorie("remise", TypeCategory::Text),
+            colonne_avec_categorie("statut", TypeCategory::Text),
+            colonne_avec_categorie("montant", TypeCategory::Number),
+        ]
+    }
+
     #[test]
     fn un_motif_est_echappe_plutot_qu_interprete() {
-        let critere = critere(&[filtre("ville", FilterOperator::Matches, Some("a.*b"))]);
+        let critere = critere(
+            &[filtre("ville", FilterOperator::Matches, Some("a.*b"))],
+            &colonnes(),
+        )
+        .unwrap();
         let regex = critere
             .get_document("ville")
             .unwrap()
@@ -226,7 +296,11 @@ mod tests {
     fn is_null_trouve_le_champ_nul_et_le_champ_absent() {
         // **Le cœur de `18e`** : la grille affiche la même cellule vide pour les deux, donc le
         // filtre doit trouver les deux. `{champ: null}` seul n'en trouverait que la moitié.
-        let critere = critere(&[filtre("remise", FilterOperator::IsNull, None)]);
+        let critere = critere(
+            &[filtre("remise", FilterOperator::IsNull, None)],
+            &colonnes(),
+        )
+        .unwrap();
         let condition = critere.get_document("remise").unwrap();
         assert_eq!(
             condition.get_array("$in").unwrap(),
@@ -237,11 +311,15 @@ mod tests {
 
     #[test]
     fn une_liste_se_coupe_sur_la_virgule_et_se_deleste_des_espaces() {
-        let critere = critere(&[filtre(
-            "statut",
-            FilterOperator::In,
-            Some("payee, expediee"),
-        )]);
+        let critere = critere(
+            &[filtre(
+                "statut",
+                FilterOperator::In,
+                Some("payee, expediee"),
+            )],
+            &colonnes(),
+        )
+        .unwrap();
         assert_eq!(
             critere
                 .get_document("statut")
@@ -253,6 +331,55 @@ mod tests {
                 Bson::String("expediee".into())
             ]
         );
+    }
+
+    #[test]
+    fn une_comparaison_produit_un_operateur_bson_numerique() {
+        for (operateur, signe) in [
+            (FilterOperator::Gt, "$gt"),
+            (FilterOperator::Gte, "$gte"),
+            (FilterOperator::Lte, "$lte"),
+            (FilterOperator::Lt, "$lt"),
+        ] {
+            let critere = critere(
+                &[filtre("montant", operateur, Some("42"))],
+                &colonnes(),
+            )
+            .unwrap_or_else(|erreur| panic!("{operateur:?} : {erreur}"));
+            let condition = critere.get_document("montant").unwrap();
+            assert_eq!(condition.get_i64(signe).unwrap(), 42, "{condition:?}");
+        }
+    }
+
+    #[test]
+    fn une_comparaison_garde_la_precision_d_un_flottant() {
+        let critere = critere(
+            &[filtre("montant", FilterOperator::Gt, Some("4.5"))],
+            &colonnes(),
+        )
+        .unwrap();
+        let condition = critere.get_document("montant").unwrap();
+        assert_eq!(condition.get_f64("$gt").unwrap(), 4.5, "{condition:?}");
+    }
+
+    #[test]
+    fn une_comparaison_sur_un_champ_non_numerique_est_refusee() {
+        let erreur = critere(
+            &[filtre("statut", FilterOperator::Gt, Some("42"))],
+            &colonnes(),
+        )
+        .expect_err("doit être refusé");
+        assert!(erreur.message.contains("statut"), "{erreur}");
+    }
+
+    #[test]
+    fn une_comparaison_sans_valeur_numerique_est_refusee() {
+        let erreur = critere(
+            &[filtre("montant", FilterOperator::Gt, Some("pas un nombre"))],
+            &colonnes(),
+        )
+        .expect_err("doit être refusé");
+        assert!(erreur.message.contains("pas un nombre"), "{erreur}");
     }
 
     #[test]

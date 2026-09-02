@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { Filter } from '../../domain/engine'
-import { basculerTri, filtreDe, libelleDeFiltre, poserFiltre, rangDeTri } from './tri'
+import {
+  basculerTri,
+  filtreDe,
+  libelleDeFiltre,
+  operateursPour,
+  poserFiltre,
+  rangDeTri,
+  signeDe,
+} from './tri'
 
 describe('tri', () => {
   it('parcourt trois états : croissant, décroissant, plus de tri', () => {
@@ -74,5 +82,23 @@ describe('filtres', () => {
     expect(libelleDeFiltre({ column: 'shipped_at', operator: 'isNull', value: null })).toBe(
       'shipped_at is null',
     )
+    expect(libelleDeFiltre({ column: 'total_cents', operator: 'gt', value: '5000' })).toBe(
+      'total_cents > 5000',
+    )
+  })
+
+  it('les quatre comparaisons ne rejoignent le popover que pour une colonne numérique', () => {
+    expect(operateursPour(false)).toHaveLength(5)
+    expect(operateursPour(true)).toHaveLength(9)
+    expect(operateursPour(true).map((o) => o.valeur)).toEqual(
+      expect.arrayContaining(['gt', 'gte', 'lte', 'lt']),
+    )
+  })
+
+  it('chaque opérateur a un signe, y compris les comparaisons', () => {
+    expect(signeDe('gt')).toBe('>')
+    expect(signeDe('gte')).toBe('≥')
+    expect(signeDe('lte')).toBe('≤')
+    expect(signeDe('lt')).toBe('<')
   })
 })

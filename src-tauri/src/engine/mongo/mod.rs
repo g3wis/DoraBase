@@ -144,7 +144,7 @@ impl EngineAdapter for MongoAdapter {
     async fn rows(&self, query: &RowQuery) -> Result<RowWindow, EngineError> {
         let debut = Instant::now();
         let colonnes = self.colonnes(&query.schema, &query.table).await?;
-        let critere = documents::critere(&query.filters);
+        let critere = documents::critere(&query.filters, &colonnes)?;
         let tri = documents::tri(&query.sort);
         let limite = i64::from(query.limit.value());
 

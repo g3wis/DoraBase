@@ -105,6 +105,26 @@ fn condition_de(filtre: &Filter, parametres: &mut Vec<String>) -> String {
             format!("{colonne} like ? escape '\\\\'")
         }
         FilterOperator::IsNull => format!("{colonne} is null"),
+        // Réservées aux colonnes numériques — l'écran ne les propose que là. Aucun transtypage :
+        // MySQL compare une colonne numérique à une chaîne en la convertissant lui-même en nombre
+        // (« dans tous les autres cas, les arguments sont comparés comme des flottants »), à
+        // l'inverse de PostgreSQL, strict sur les types.
+        FilterOperator::Gt => {
+            parametres.push(valeur);
+            format!("{colonne} > ?")
+        }
+        FilterOperator::Gte => {
+            parametres.push(valeur);
+            format!("{colonne} >= ?")
+        }
+        FilterOperator::Lte => {
+            parametres.push(valeur);
+            format!("{colonne} <= ?")
+        }
+        FilterOperator::Lt => {
+            parametres.push(valeur);
+            format!("{colonne} < ?")
+        }
     }
 }
 
@@ -516,6 +536,26 @@ mod tests {
         let (sql, parametres) = requete_de(&r);
         assert!(sql.contains("0 = 1"), "{sql}");
         assert!(parametres.is_empty());
+    }
+
+    #[test]
+    fn les_quatre_comparaisons_produisent_un_parametre_jamais_du_texte_interpole() {
+        for (operateur, signe) in [
+            (FilterOperator::Gt, ">"),
+            (FilterOperator::Gte, ">="),
+            (FilterOperator::Lte, "<="),
+            (FilterOperator::Lt, "<"),
+        ] {
+            let mut r = requete();
+            r.filters = vec![Filter {
+                column: "capacite".into(),
+                operator: operateur,
+                value: Some("10".into()),
+            }];
+            let (sql, parametres) = requete_de(&r);
+            assert!(sql.contains(&format!("`capacite` {signe} ?")), "{sql}");
+            assert_eq!(parametres, vec!["10".to_owned()]);
+        }
     }
 
     #[test]

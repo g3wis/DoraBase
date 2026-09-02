@@ -178,9 +178,11 @@ export type Filter = { column: string, operator: FilterOperator,
 value: string | null, };
 
 /**
- * Les cinq opérateurs du popover de `A5` : `=`, `≠`, `in`, `~`, `is null`.
+ * Les neuf opérateurs du popover de `A5` : `=`, `≠`, `in`, `~`, `is null`, et les quatre
+ * comparaisons `>`, `>=`, `<=`, `<` — réservées aux colonnes numériques (`TypeCategory::Number`),
+ * l'écran ne les proposant que là.
  */
-export type FilterOperator = "eq" | "ne" | "in" | "matches" | "isNull";
+export type FilterOperator = "eq" | "ne" | "in" | "matches" | "isNull" | "gt" | "gte" | "lte" | "lt";
 
 /**
  * Les deux formes d'identité de la norme SQL, que PostgreSQL distingue.

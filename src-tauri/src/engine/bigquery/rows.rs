@@ -94,6 +94,38 @@ fn colonne_en_texte(nom: &str) -> String {
     format!("cast({} as string)", citer(nom))
 }
 
+/// Cite la colonne, transtypée en `bignumeric` — pour les quatre comparaisons, réservées aux
+/// colonnes numériques.
+///
+/// **Pas `colonne_en_texte`** : BigQuery est aussi strict que PostgreSQL sur les types, et
+/// comparer deux `string` avec `>` trierait lexicographiquement (`"9" > "10"`), ce que le signe
+/// affiché contredirait. `bignumeric` plutôt que `float64` pour garder la précision exacte d'un
+/// entier — la même raison que le `numeric` de PostgreSQL.
+fn colonne_en_numerique(nom: &str) -> String {
+    format!("cast({} as bignumeric)", citer(nom))
+}
+
+/// Un paramètre `BIGNUMERIC`, pour les quatre comparaisons.
+///
+/// La valeur reste transmise en texte : c'est ainsi que l'API REST de BigQuery représente tout
+/// paramètre, quel que soit son type déclaré — seul `r#type` change entre `parametre_texte` et
+/// celui-ci.
+fn parametre_numerique(rang: usize, valeur: &str) -> QueryParameter {
+    QueryParameter {
+        name: Some(format!("p{rang}")),
+        parameter_type: Some(QueryParameterType {
+            array_type: None,
+            struct_types: None,
+            r#type: "BIGNUMERIC".to_owned(),
+        }),
+        parameter_value: Some(QueryParameterValue {
+            array_values: None,
+            struct_values: None,
+            value: Some(valeur.to_owned()),
+        }),
+    }
+}
+
 fn condition_de(filtre: &Filter, parametres: &mut Vec<QueryParameter>) -> String {
     let colonne = colonne_en_texte(&filtre.column);
     match filtre.operator {
@@ -148,6 +180,22 @@ fn condition_de(filtre: &Filter, parametres: &mut Vec<QueryParameter>) -> String
             format!("lower({colonne}) like lower(@{nom}) escape '\\\\'")
         }
         FilterOperator::IsNull => format!("{} is null", citer(&filtre.column)),
+        FilterOperator::Gt | FilterOperator::Gte | FilterOperator::Lte | FilterOperator::Lt => {
+            let colonne = colonne_en_numerique(&filtre.column);
+            let param = parametre_numerique(
+                parametres.len() + 1,
+                &filtre.value.clone().unwrap_or_default(),
+            );
+            let nom = param.name.clone().unwrap();
+            parametres.push(param);
+            let comparaison = match filtre.operator {
+                FilterOperator::Gt => ">",
+                FilterOperator::Gte => ">=",
+                FilterOperator::Lte => "<=",
+                _ => "<",
+            };
+            format!("{colonne} {comparaison} @{nom}")
+        }
     }
 }
 
@@ -289,6 +337,36 @@ mod tests {
         }];
         let (sql, _) = requete_de("p", "jeu", &r);
         assert!(sql.contains("0 = 1"), "{sql}");
+    }
+
+    #[test]
+    fn les_quatre_comparaisons_transtypent_en_bignumeric_plutot_qu_en_string() {
+        // **Pas `colonne_en_texte`** : deux `string` comparés par `>` trieraient
+        // lexicographiquement (`"9" > "10"`), ce que le signe affiché contredirait.
+        for (operateur, signe) in [
+            (FilterOperator::Gt, ">"),
+            (FilterOperator::Gte, ">="),
+            (FilterOperator::Lte, "<="),
+            (FilterOperator::Lt, "<"),
+        ] {
+            let mut r = requete();
+            r.filters = vec![Filter {
+                column: "montant".into(),
+                operator: operateur,
+                value: Some("10".into()),
+            }];
+            let (sql, parametres) = requete_de("p", "jeu", &r);
+            assert!(
+                sql.contains(&format!(
+                    "cast(`montant` as bignumeric) {signe} @p1"
+                )),
+                "{sql}"
+            );
+            assert_eq!(
+                parametres[0].parameter_type.as_ref().unwrap().r#type,
+                "BIGNUMERIC"
+            );
+        }
     }
 
     #[test]

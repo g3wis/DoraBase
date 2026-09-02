@@ -30,6 +30,10 @@ export const tableViewFr: Dictionnaire = {
       in: 'dans la liste…',
       matches: 'contient',
       isNull: 'is null',
+      gt: 'supérieur à',
+      gte: 'supérieur ou égal à',
+      lte: 'inférieur ou égal à',
+      lt: 'inférieur à',
     },
   },
   editableCell: {
@@ -170,6 +174,10 @@ export const tableViewEn: Dictionnaire = {
       in: 'in list…',
       matches: 'contains',
       isNull: 'is null',
+      gt: 'greater than',
+      gte: 'greater than or equal to',
+      lte: 'less than or equal to',
+      lt: 'less than',
     },
   },
   editableCell: {

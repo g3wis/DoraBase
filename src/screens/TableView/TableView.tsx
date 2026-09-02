@@ -510,6 +510,7 @@ export function TableView({
                 operator={operateurs[colonne.name] ?? 'eq'}
                 value={filtre?.value ?? ''}
                 onApply={(operator, saisie) => appliquerFiltre(colonne.name, operator, saisie)}
+                numeric={colonne.category === 'number'}
               />
             ),
             cell: (ligne: Ligne) => {

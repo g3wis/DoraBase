@@ -104,6 +104,25 @@ fn condition_de(filtre: &Filter, parametres: &mut Vec<String>) -> String {
             format!("{colonne} like ?{} escape '\\'", parametres.len())
         }
         FilterOperator::IsNull => format!("{colonne} is null"),
+        // Réservées aux colonnes numériques — l'écran ne les propose que là. Aucun transtypage :
+        // l'affinité de type de SQLite convertit d'elle-même un paramètre texte en numérique
+        // dès que la colonne comparée a une affinité INTEGER, REAL ou NUMERIC.
+        FilterOperator::Gt => {
+            parametres.push(valeur);
+            format!("{colonne} > ?{}", parametres.len())
+        }
+        FilterOperator::Gte => {
+            parametres.push(valeur);
+            format!("{colonne} >= ?{}", parametres.len())
+        }
+        FilterOperator::Lte => {
+            parametres.push(valeur);
+            format!("{colonne} <= ?{}", parametres.len())
+        }
+        FilterOperator::Lt => {
+            parametres.push(valeur);
+            format!("{colonne} < ?{}", parametres.len())
+        }
     }
 }
 
@@ -447,6 +466,26 @@ mod tests {
         let (sql, _) = requete_de(&r);
         // `in ()` est une erreur de syntaxe en SQLite. Une condition fausse est ce qui a été demandé.
         assert!(sql.contains("0 = 1"), "{sql}");
+    }
+
+    #[test]
+    fn les_quatre_comparaisons_produisent_un_parametre_jamais_du_texte_interpole() {
+        for (operateur, signe) in [
+            (FilterOperator::Gt, ">"),
+            (FilterOperator::Gte, ">="),
+            (FilterOperator::Lte, "<="),
+            (FilterOperator::Lt, "<"),
+        ] {
+            let mut r = requete();
+            r.filters = vec![Filter {
+                column: "montant".into(),
+                operator: operateur,
+                value: Some("10".into()),
+            }];
+            let (sql, parametres) = requete_de(&r);
+            assert!(sql.contains(&format!("\"montant\" {signe} ?1")), "{sql}");
+            assert_eq!(parametres, vec!["10".to_owned()]);
+        }
     }
 
     #[test]
