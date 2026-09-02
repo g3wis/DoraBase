@@ -97,8 +97,8 @@ describe('Popover', () => {
 
   // **La décision, faute de mise en page** : jsdom ne calcule rien, donc ce qui est mesurable ici
   // est le sens choisi, pas le panneau posé. Ce que ce sens *produit* — un panneau réellement dans
-  // la fenêtre — est hors de portée de Vitest, et hors de portée de Playwright pour le seul
-  // appelant concerné, `MiseAJour` ne rendant rien hors de la webview. C'est dit dans les réserves.
+  // la fenêtre — reste hors de portée de Vitest. Le seul appelant de `'haut'` a disparu le
+  // 2 septembre 2026 avec l'annonce de mise à jour ; voir la prop, qui dit pourquoi elle reste.
   it('s’ouvre vers le bas par défaut', async () => {
     const utilisateur = userEvent.setup()
     monter()

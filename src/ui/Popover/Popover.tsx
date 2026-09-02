@@ -26,12 +26,14 @@ type PopoverProps = {
    *
    * **Explicite, et non mesuré, délibérément.** La bascule horizontale se mesure parce qu'elle
    * dépend de la largeur du contenu — donc de la fenêtre, du texte, des polices chargées. La
-   * verticale, elle, est **structurelle** chez le seul appelant qui en a besoin : un déclencheur
-   * dans la barre d'état est dans les 26 derniers pixels de la fenêtre, il n'aura jamais la place
-   * en dessous, et aucune mesure ne changera cela. Une prop se vérifie sous Vitest ; une mesure de
-   * plus ne se vérifierait que dans un vrai navigateur, or `MiseAJour` ne rend rien hors de la
-   * webview — donc ni la galerie, ni Playwright ne pourraient l'atteindre. Le jour où un appelant
-   * a un déclencheur qui *peut* manquer de place selon le contenu, la bascule mesurée se
+   * verticale, elle, était **structurelle** chez le seul appelant qui en avait besoin : un
+   * déclencheur dans la barre d'état est dans les 26 derniers pixels de la fenêtre, il n'aura
+   * jamais la place en dessous, et aucune mesure ne changera cela.
+   *
+   * **Cet appelant n'existe plus** (2 septembre 2026) : l'annonce de mise à jour a quitté les
+   * barres d'état pour une notification en bas à droite, qui n'est pas un popover. `'haut'` n'a
+   * donc aujourd'hui aucun appelant, et la prop reste pour la raison qui l'a fait écrire — c'est le
+   * jour où un déclencheur *peut* manquer de place selon le contenu que la bascule mesurée se
    * rajoutera ici, à côté de l'horizontale.
    */
   ouvertureVers?: 'haut' | 'bas'
@@ -176,7 +178,7 @@ export function Popover({
           /* Le sens d'ouverture, dans le DOM. **Ce n'est pas qu'un crochet de test** : c'est la
              seule trace lisible d'une propriété que jsdom ne calcule pas et qu'une classe de CSS
              module ne nomme qu'en `string | undefined`. Un panneau ouvert hors de la fenêtre est
-             invisible *et* indistinguable d'un panneau bien posé — voir `MiseAJour`. */
+             invisible *et* indistinguable d'un panneau bien posé. */
           data-ouverture={ouvertureVers}
           className={cx(
             styles.panel,

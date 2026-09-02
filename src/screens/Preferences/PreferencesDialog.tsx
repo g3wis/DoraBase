@@ -39,6 +39,21 @@ type PreferencesDialogProps = {
    */
   chercherMiseAJour?: () => Promise<AvailableUpdate | null>
   installerMiseAJour?: () => Promise<void>
+  /**
+   * La section ouverte au montage. Par défaut « Apparence », la seule du mockup qui ait du contenu.
+   *
+   * **Elle existe pour la notification de mise à jour** (2 septembre 2026) : son bouton « Installer »
+   * mène ici, et ouvrir sur « Apparence » obligerait à chercher la section qu'on vient de demander.
+   */
+  sectionInitiale?: Section
+  /**
+   * Une recherche de mise à jour **déjà faite ailleurs**, reprise telle quelle.
+   *
+   * Sans elle, arriver depuis la notification demanderait de recliquer « Rechercher » pour réafficher
+   * ce que la notification venait de dire — et de refaire une requête pour une réponse connue.
+   * `null` laisse la section sur « pas encore cherché », qui n'est pas « à jour ».
+   */
+  majDejaTrouvee?: AvailableUpdate | null
 }
 
 /**
@@ -48,7 +63,7 @@ type PreferencesDialogProps = {
  * portaient qu'une phrase « à venir », et sans date à laquelle ce contenu arrive. Elles
  * reviendront quand il y aura quelque chose à y régler.
  */
-type Section = 'general' | 'apparence' | 'grille' | 'connexions' | 'securite' | 'maj'
+export type Section = 'general' | 'apparence' | 'grille' | 'connexions' | 'securite' | 'maj'
 
 /**
  * L'écran de préférences de `A10` (`15a` → `15d`).
@@ -64,6 +79,8 @@ export function PreferencesDialog({
   version,
   chercherMiseAJour = checkUpdate,
   installerMiseAJour = installUpdate,
+  sectionInitiale = 'apparence',
+  majDejaTrouvee = null,
 }: PreferencesDialogProps) {
   const t = useT()
 
@@ -81,8 +98,9 @@ export function PreferencesDialog({
   ]
 
   // Le mockup ouvre sur « Apparence » : c'est la section qui a du contenu, et ouvrir sur « Général »
-  // montrerait d'abord une section qui annonce ce qu'elle portera.
-  const [section, setSection] = useState<Section>('apparence')
+  // montrerait d'abord une section qui annonce ce qu'elle portera. C'est le défaut de la prop, que
+  // seule la notification de mise à jour remplace aujourd'hui.
+  const [section, setSection] = useState<Section>(sectionInitiale)
   const [aReinitialiser, setAReinitialiser] = useState(false)
 
   const regler = (partiel: Partial<Preferences>) => onChange(borner({ ...preferences, ...partiel }))
@@ -176,7 +194,11 @@ export function PreferencesDialog({
             <GardeFous guards={preferences.guards} onRegler={reglerUnGardeFou} />
           )}
           {section === 'maj' && (
-            <MisesAJour chercher={chercherMiseAJour} installer={installerMiseAJour} />
+            <MisesAJour
+              chercher={chercherMiseAJour}
+              installer={installerMiseAJour}
+              dejaTrouvee={majDejaTrouvee}
+            />
           )}
           {section === 'general' && <General preferences={preferences} onRegler={regler} />}
           {section === 'connexions' && (
@@ -482,9 +504,12 @@ function GardeFou({
 function MisesAJour({
   chercher,
   installer,
+  dejaTrouvee,
 }: {
   chercher: () => Promise<AvailableUpdate | null>
   installer: () => Promise<void>
+  /** Voir `majDejaTrouvee` : une recherche faite par la notification, reprise sans en refaire une. */
+  dejaTrouvee: AvailableUpdate | null
 }) {
   const t = useT()
   // Quatre états, et « pas encore cherché » n'est pas « à jour » — c'est la même distinction que
@@ -495,7 +520,7 @@ function MisesAJour({
     | { quoi: 'aJour' }
     | { quoi: 'disponible'; maj: AvailableUpdate }
     | { quoi: 'echec'; raison: string }
-  >({ quoi: 'repos' })
+  >(dejaTrouvee === null ? { quoi: 'repos' } : { quoi: 'disponible', maj: dejaTrouvee })
   const [installation, setInstallation] = useState(false)
   const [echecInstallation, setEchecInstallation] = useState<string | null>(null)
 

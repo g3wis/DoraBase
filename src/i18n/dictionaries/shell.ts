@@ -2,14 +2,12 @@ import type { Dictionnaire } from '../types'
 
 // Rempli par l'écran « shell ». Voir dictionaries/index.ts pour l'assemblage.
 export const shellFr: Dictionnaire = {
-  miseAJour: {
-    popoverTitle: (p) => `Version ${p.version}`,
-    trigger: (p) => `${p.version} disponible`,
-    noNotes: "Cette version n'a pas de notes.",
-    install: 'Installer et redémarrer',
-    installing: 'Téléchargement…',
-    installFailed: "l'installation n'a pas abouti",
-    warning: 'DoraBase se relance seul. Les consoles non enregistrées ne sont pas conservées.',
+  annonceMaj: {
+    ariaLabel: 'Mise à jour disponible',
+    avant: 'La version',
+    apres: 'est disponible',
+    installer: 'Installer',
+    ecarter: 'Écarter la notification',
   },
   selectionIndicator: {
     prod: 'PROD',
@@ -35,14 +33,12 @@ export const shellFr: Dictionnaire = {
   },
 }
 export const shellEn: Dictionnaire = {
-  miseAJour: {
-    popoverTitle: (p) => `Version ${p.version}`,
-    trigger: (p) => `${p.version} available`,
-    noNotes: 'This version has no release notes.',
-    install: 'Install and restart',
-    installing: 'Downloading…',
-    installFailed: 'the installation did not complete',
-    warning: 'DoraBase restarts on its own. Unsaved consoles are not kept.',
+  annonceMaj: {
+    ariaLabel: 'Update available',
+    avant: 'Version',
+    apres: 'is available',
+    installer: 'Install',
+    ecarter: 'Dismiss notification',
   },
   selectionIndicator: {
     prod: 'PROD',

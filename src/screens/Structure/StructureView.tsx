@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react'
 import { Icon } from '../../design/icons/Icon'
 import type { ColumnInfo, TableDetail } from '../../domain/engine'
 import { useT } from '../../i18n/LanguageContext'
-import { MiseAJour } from '../../shell/MiseAJour/MiseAJour'
 import { type Column, DataTable } from '../../ui/DataTable/DataTable'
 import { ABSENT, formatBytes, formatRowCount } from '../../ui/format'
 import styles from './StructureView.module.css'
@@ -355,11 +354,6 @@ export function StructureStatusBar({ detail }: { detail: TableDetail }) {
           {morceau}
         </span>
       ))}
-      {/* Voir `TableStatusBar` : l'annonce vit dans les trois barres d'état. L'espace n'existait
-          pas — cette barre n'avait rien à pousser à droite — et il ne pousse toujours rien tant
-          qu'aucune version n'est trouvée, ce qui est le cas de tous les décors. */}
-      <span className={styles.piedEspace} />
-      <MiseAJour />
     </div>
   )
 }

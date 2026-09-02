@@ -1,0 +1,76 @@
+/*
+ * La notification de mise à jour, en bas à droite.
+ *
+ * Elle emprunte tout au panneau flottant du produit — rayon `--radius-panel`, bordure 1px
+ * `--border`, ombre `--shadow-popover` — parce que c'en est un : ce qui la distingue d'un popover
+ * est qu'aucun déclencheur ne l'a ouverte, pas son dessin. Inventer une surface pour elle aurait
+ * été inventer un décor que le handoff ne décrit pas.
+ */
+
+.annonce {
+  /* **`fixed`, et c'est ce qui la rend indépendante des écrans.** L'ancienne annonce vivait dans
+   * une barre d'état, donc n'existait que sur les écrans qui en rendent une — un onglet de console
+   * n'en a aucune. Ancrée à la fenêtre, elle n'a plus de composition à réclamer. Et rien ne la
+   * rogne : elle n'est enfant d'aucun conteneur en `overflow: hidden` (défaut n° 35). */
+  position: fixed;
+  right: var(--space-7);
+  /* Au-dessus de la barre d'état, qui court sous les trois colonnes : posée à même le bas, elle
+   * couvrirait le numéro de version, seule chose que cette barre dise encore des versions. */
+  bottom: calc(var(--h-statusbar) + var(--space-4));
+  /* Au-dessus du contenu, **sous le voile d'une modale** (100) : quand `A10` s'ouvre, la
+   * notification a fini son travail et n'a pas à passer devant. */
+  z-index: 90;
+
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-5);
+  /* Une largeur fixe, comme le panneau de l'ancienne annonce : la phrase porte un numéro de version
+   * dont la longueur varie, et un `max-content` ferait sauter la boîte d'une release à l'autre.
+   * **C'est la largeur du contenu**, ce fichier n'ayant pas de `box-sizing` (voir `reset.css`, qui
+   * refuse le reset global) : mesurée, la boîte fait 248 px avec ses remplissages et sa bordure. Une
+   * version à deux chiffres de plus passe à deux lignes, ce que la colonne absorbe. */
+  width: 208px;
+  /* À droite, la place de la croix en plus du remplissage : sans elle, un numéro long passerait
+   * dessous. */
+  padding: var(--space-6) calc(var(--space-6) + var(--space-8)) var(--space-6) var(--space-6);
+
+  border-radius: var(--radius-panel);
+  border: 1px solid var(--border);
+  background: var(--paper-bright);
+  box-shadow: var(--shadow-popover);
+  font-family: var(--font-ui);
+}
+
+.texte {
+  margin: 0;
+  font-size: var(--text-body);
+  line-height: var(--leading-ui);
+  color: var(--ink);
+}
+
+/*
+ * **Aucun état de survol.** Les quatre du produit sont les lignes d'arbre, les lignes de tableau, le
+ * bouton secondaire et les actions de la bande en tête de sidebar ; en inventer un ici serait une
+ * valeur qui n'est ni dans les jetons ni dans une maquette. Le `:focus-visible` en est l'inverse —
+ * il ne s'invente pas, il rend au clavier ce que la souris a déjà.
+ */
+.fermer {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-1);
+  border: none;
+  background: none;
+  color: var(--ink-4);
+  cursor: pointer;
+}
+
+.fermer:focus-visible {
+  outline: none;
+  border-radius: var(--radius-badge-2);
+  box-shadow: var(--shadow-focus);
+}

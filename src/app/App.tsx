@@ -9,6 +9,7 @@ import {
 import { useConfiguration } from '../data/useConfiguration'
 import { Sprite } from '../design/icons/Sprite'
 import type { Database, EnvironmentId, Preferences, Project } from '../domain/config'
+import type { AvailableUpdate } from '../domain/maj'
 import { LanguageProvider, langueAppliquee } from '../i18n/LanguageContext'
 import { DumpDialogs, type SensDuDump } from '../screens/Dump/DumpDialogs'
 import {
@@ -23,6 +24,7 @@ import { PreferencesDialog } from '../screens/Preferences/PreferencesDialog'
 import { jetonsDe, PREFERENCES_PAR_DEFAUT, themeApplique } from '../screens/Preferences/preferences'
 import { WelcomeScreen } from '../screens/Welcome/WelcomeScreen'
 import { Workbench } from '../screens/Workbench/Workbench'
+import { AnnonceMiseAJour } from '../shell/AnnonceMiseAJour/AnnonceMiseAJour'
 import { useClicDroitDesactive } from '../shell/useClicDroit'
 import { useZoom } from '../shell/useZoom'
 import { BarresDeDefilement } from '../ui/BarresDeDefilement/BarresDeDefilement'
@@ -104,6 +106,14 @@ export function App() {
    */
   const [preferences, setPreferences] = useState<Preferences>(PREFERENCES_PAR_DEFAUT)
   const [preferencesOuvertes, setPreferencesOuvertes] = useState(false)
+  /**
+   * La mise à jour que la notification a trouvée, quand c'est elle qui a ouvert les préférences.
+   *
+   * **Deux états et non un**, parce qu'ils ne disent pas la même chose : `preferencesOuvertes` dit
+   * que la modale est là, celui-ci d'où l'on vient. Les fondre ferait que fermer puis rouvrir par
+   * l'engrenage rouvrirait sur « Mises à jour » avec un résultat périmé.
+   */
+  const [majAInstaller, setMajAInstaller] = useState<AvailableUpdate | null>(null)
 
   /**
    * Ce que `⇧⌘E` et `⇧⌘I` ouvrent (`22a`–`22c`).
@@ -371,10 +381,30 @@ export function App() {
         <PreferencesDialog
           preferences={preferences}
           onChange={appliquer}
-          onClose={() => setPreferencesOuvertes(false)}
+          onClose={() => {
+            setPreferencesOuvertes(false)
+            setMajAInstaller(null)
+          }}
           version={VERSION_AFFICHEE}
+          {...(majAInstaller === null
+            ? {}
+            : { sectionInitiale: 'maj' as const, majDejaTrouvee: majAInstaller })}
         />
       )}
+      {/* **Montée ici, une seule fois, et hors des deux branches d'écran** (2 septembre 2026). Elle
+          a d'abord été une ligne des barres d'état, ce qui la faisait dépendre de l'écran affiché :
+          absente d'un onglet de console, qui n'a aucune barre au niveau de l'écran, et présente sur
+          l'accueil, où elle se lisait comme une invitation glissée sous le compte de projets. Au
+          niveau de l'application, elle ne dépend plus d'aucune composition.
+
+          Elle n'installe rien : elle mène à la section « Mises à jour » d'`A10`, en lui passant la
+          recherche qu'elle vient de faire. */}
+      <AnnonceMiseAJour
+        onInstaller={(maj) => {
+          setMajAInstaller(maj)
+          setPreferencesOuvertes(true)
+        }}
+      />
     </LanguageProvider>
   )
 }

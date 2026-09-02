@@ -238,10 +238,6 @@
   color: var(--ink-8);
 }
 
-.piedEspace {
-  flex: 1;
-}
-
 .piedPoint {
   margin-right: var(--space-3);
   color: var(--ink-3);

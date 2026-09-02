@@ -755,23 +755,55 @@ l'installation attend un clic. Une session dure l'après-midi : une requête tou
 ferait qu'annoncer plus tôt une release que le redémarrage suivant aurait trouvée de toute
 façon.
 
-**L'annonce vit dans la barre d'état, et ne rend rien par défaut.** Une mise à jour n'est pas un
-événement — elle attend, et un bandeau qui prend une bande de l'écran pour attendre coûte plus
-que ce qu'il annonce. Propriété qui en découle et qu'il faut garder : hors de la webview
-(galerie, `?demo`, tout Playwright) la recherche est rejetée, l'état reste nul, le composant ne
-rend rien — donc **aucune capture de fidélité ne bouge et il n'y a pas de variante de décor à
-maintenir**. Le silence sur rejet est le comportement voulu, pas un oubli.
+**L'annonce est une notification en bas à droite, et ne rend rien par défaut** (2 septembre 2026).
+La propriété centrale n'a pas bougé : hors de la webview (galerie, `?demo`, tout Playwright) la
+recherche est rejetée, l'état reste nul, le composant ne rend rien — donc **aucune capture de
+fidélité ne bouge et il n'y a pas de variante de décor à maintenir**. Le silence sur rejet est le
+comportement voulu, pas un oubli.
 
-**Et une seconde voie, demandée à la main, dans les préférences** (26 août 2026). La barre d'état
+**Ce qui a changé, c'est l'endroit**, et c'est le troisième essai. L'annonce a d'abord été une ligne
+de `shell/StatusBar` (26 août), puis des **trois** barres d'état, celle de l'accueil ne servant que
+l'écran où personne ne travaille. Deux choses ont fini par la faire partir de là :
+
+- **un onglet de console n'a aucune barre au niveau de l'écran** — son pied vit dans le panneau
+  central —, donc le montage en trois exemplaires laissait un trou qu'un quatrième n'aurait pas
+  comblé sans changer une composition ;
+- **sur l'écran d'accueil, elle se lisait comme une invitation.** Rapporté à l'usage : la seule
+  phrase de la barre qui ne *décrivait* pas l'application y demandait quelque chose, glissée entre le
+  compte de projets et le numéro de version. Une bande de 26 px n'a pas la place de distinguer ce
+  qui décrit de ce qui demande.
+
+`shell/AnnonceMiseAJour` est donc montée **une fois, au niveau de l'application**, en
+`position: fixed` : elle ne dépend plus d'aucune composition d'écran. Quatre points à ne pas
+défaire :
+
+- **elle n'installe pas, elle mène** — « Installer » ouvre la section « Mises à jour » d'`A10` en lui
+  passant la recherche déjà faite (`sectionInitiale`, `majDejaTrouvee`). L'installation demande les
+  notes de la release, un avertissement de redémarrage et un état d'échec : trois choses que `A10`
+  porte déjà, et qu'un coin d'écran redirait moins bien ;
+- **arriver là ne relance pas de recherche.** Sans la recherche transmise, il faudrait recliquer
+  « Rechercher » pour réafficher ce que la notification venait de dire, et refaire une requête pour
+  une réponse connue. `null` laisse la section sur « pas encore cherché », qui n'est pas « à jour » ;
+- **écartée, elle ne revient pas de la session, et rien n'est persisté.** La recherche n'a lieu qu'au
+  démarrage : le prochain lancement la refera de toute façon, et se souvenir d'un refus reviendrait à
+  taire une version que l'utilisateur n'a toujours pas installée ;
+- **elle passe sous le voile d'une modale** (`z-index: 90` contre 100). Quand `A10` s'ouvre, elle a
+  fini son travail — elle s'efface d'ailleurs en y menant, sans quoi la retrouver en fermant la
+  modale redemanderait ce qu'on vient d'aller faire.
+
+Ce qui reste vrai de l'arbitrage d'origine : **une mise à jour n'est pas un événement.** Elle
+attend. Pas de modale, pas de bandeau qui prend une bande de l'écran, pas de recherche périodique.
+
+**Et une seconde voie, demandée à la main, dans les préférences** (26 août 2026). La notification
 annonce ce qu'elle a trouvé au démarrage ; elle ne répond pas à « et maintenant ? », qui est la
 question qu'on se pose en attendant un correctif. La section « Mises à jour » de `A10` porte donc un
 bouton qui cherche, et le résultat qui s'ensuit. Trois points à ne pas défaire :
 
 - **rien n'est cherché à l'ouverture de la modale.** Une recherche au montage ferait dépendre le
   rendu de `A10` d'une réponse réseau, donc de l'instant, et toute capture de fidélité de cet écran
-  deviendrait instable. C'est le même arbitrage que « la barre d'état ne rend rien par défaut »,
+  deviendrait instable. C'est le même arbitrage que « la notification ne rend rien par défaut »,
   pour la même raison ;
-- **ici l'échec se dit**, à l'inverse de la barre d'état qui l'avale. La règle n'a pas changé : on ne
+- **ici l'échec se dit**, à l'inverse de la notification qui l'avale. La règle n'a pas changé : on ne
   dérange pas quelqu'un pour une requête qu'il n'a pas demandée. Celle-ci, il l'a demandée, et un
   bouton qui retombe en silence se lit comme une panne (défaut n° 36) ;
 - **« pas encore cherché » n'est pas « à jour »**, exactement comme « jamais tentée » n'est pas
