@@ -19,7 +19,6 @@ export const PREFERENCES_PAR_DEFAUT: Preferences = {
     pendingBeforeWrite: true,
     prodReadOnly: true,
     refuseUnrestrictedWrites: true,
-    keepInversePatch: true,
   },
 }
 

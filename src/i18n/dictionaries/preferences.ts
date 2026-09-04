@@ -80,11 +80,6 @@ export const preferencesFr: Dictionnaire = {
       detail:
         'Dans la console comme dans la grille. Éteint, la confirmation subsiste — mais elle se clique, là où un refus oblige à écrire la clause.',
     },
-    keepInversePatch: {
-      libelle: 'Garder le patch inverse 24 h',
-      detail:
-        'Le patch inverse existe pendant la session et se copie depuis le panneau des modifications. Le conserver au-delà demande de décider où l’écrire et ce qu’il advient d’un patch dont la base a changé : ce n’est pas encore tranché.',
-    },
   },
   maj: {
     titre: 'Mises à jour',
@@ -111,7 +106,7 @@ export const preferencesFr: Dictionnaire = {
     confirmer: 'Remettre les valeurs d’origine',
     corpsAvant:
       'Le thème, l’accent, la densité et la police reviendront aux valeurs du produit, et',
-    corpsGras: 'les quatre garde-fous d’écriture seront réactivés',
+    corpsGras: 'les trois garde-fous d’écriture seront réactivés',
     note: 'Aucune connexion et aucune requête enregistrée n’est touchée.',
   },
 }
@@ -194,11 +189,6 @@ export const preferencesEn: Dictionnaire = {
       detail:
         'In the console as in the grid. Off, the confirmation stays — but it’s a click, where a refusal forces the clause to be written.',
     },
-    keepInversePatch: {
-      libelle: 'Keep the inverse patch for 24 h',
-      detail:
-        'The inverse patch exists for the session and can be copied from the changes panel. Keeping it longer requires deciding where to write it and what happens to a patch whose database has since changed: not yet settled.',
-    },
   },
   maj: {
     titre: 'Updates',
@@ -223,7 +213,7 @@ export const preferencesEn: Dictionnaire = {
     annuler: 'Cancel',
     confirmer: 'Restore the original values',
     corpsAvant: 'The theme, accent, density, and font will return to the product’s values, and',
-    corpsGras: 'the four write guardrails will be turned back on',
+    corpsGras: 'the three write guardrails will be turned back on',
     note: 'No connection and no saved query is touched.',
   },
 }

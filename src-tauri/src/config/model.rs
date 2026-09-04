@@ -697,7 +697,7 @@ pub struct Preferences {
     /// `12.5` parfois, `12.499999` ailleurs selon le sérialiseur, et la valeur relue ne serait plus
     /// celle qu'on a choisie. Un entier n'a pas ce défaut.
     pub code_font_tenths: u16,
-    /// Les quatre garde-fous d'écriture (`15d`), **actifs par défaut**.
+    /// Les trois garde-fous d'écriture (`15d`), **actifs par défaut**.
     pub guards: Guards,
 }
 
@@ -815,7 +815,7 @@ pub enum Accent {
     Violette,
 }
 
-/// Les quatre garde-fous d'écriture (`15d`).
+/// Les trois garde-fous d'écriture (`15d`).
 ///
 /// **Tous à `true` par défaut, y compris pour une installation existante.** `serde(default)` rend
 /// `Default::default()`, et un défaut à `false` transformerait une mise à jour de DoraBase en levée
@@ -830,8 +830,6 @@ pub struct Guards {
     pub prod_read_only: bool,
     /// `DELETE`/`UPDATE` sans `WHERE` sont **refusés**, et non simplement confirmés.
     pub refuse_unrestricted_writes: bool,
-    /// Le patch inverse est conservé 24 h.
-    pub keep_inverse_patch: bool,
 }
 
 impl Default for Guards {
@@ -840,7 +838,6 @@ impl Default for Guards {
             pending_before_write: true,
             prod_read_only: true,
             refuse_unrestricted_writes: true,
-            keep_inverse_patch: true,
         }
     }
 }

@@ -227,24 +227,15 @@
 
 /* --- Garde-fous -------------------------------------------------------- */
 
-.gardeFou,
-.gardeFouInerte {
+.gardeFou {
   display: flex;
   align-items: flex-start;
   gap: var(--space-5);
   padding: var(--space-5) 0;
 }
 
-.gardeFou + .gardeFou,
-.gardeFou + .gardeFouInerte,
-.gardeFouInerte + .gardeFou {
+.gardeFou + .gardeFou {
   border-top: 1px solid var(--divider-2);
-}
-
-/* Un garde-fou indisponible s'atténue **entièrement**, interrupteur compris : un interrupteur net
- * au-dessus d'un texte gris se lirait comme réglable. */
-.gardeFouInerte {
-  opacity: 0.55;
 }
 
 .gardeFouTexte {

@@ -407,7 +407,7 @@ function Grille({
   )
 }
 
-/** Les quatre garde-fous d'écriture (`15d`). */
+/** Les trois garde-fous d'écriture (`15d`). */
 function GardeFous({
   guards,
   onRegler,
@@ -443,16 +443,6 @@ function GardeFous({
         checked={guards.refuseUnrestrictedWrites}
         onCheckedChange={(refuseUnrestrictedWrites) => onRegler({ refuseUnrestrictedWrites })}
       />
-      {/* **Désactivé avec sa raison**, et non allumé sans effet : `11c` et `11d` avaient annoncé
-          cette promesse puis l'avaient retirée, faute de persister le patch. La leçon du défaut
-          n° 36 tranche — un réglage qui ne fait rien est pire qu'un réglage absent. */}
-      <GardeFou
-        libelle={t('preferences.securite.keepInversePatch.libelle')}
-        detail={t('preferences.securite.keepInversePatch.detail')}
-        checked={false}
-        onCheckedChange={() => {}}
-        indisponible
-      />
     </section>
   )
 }
@@ -462,22 +452,15 @@ function GardeFou({
   detail,
   checked,
   onCheckedChange,
-  indisponible,
 }: {
   libelle: string
   detail: string
   checked: boolean
   onCheckedChange: (checked: boolean) => void
-  indisponible?: boolean
 }) {
   return (
-    <div className={indisponible ? styles.gardeFouInerte : styles.gardeFou}>
-      <Toggle
-        checked={checked}
-        onCheckedChange={onCheckedChange}
-        label={libelle}
-        disabled={indisponible}
-      />
+    <div className={styles.gardeFou}>
+      <Toggle checked={checked} onCheckedChange={onCheckedChange} label={libelle} />
       <div className={styles.gardeFouTexte}>
         <span className={styles.gardeFouLibelle}>{libelle}</span>
         <span className={styles.gardeFouDetail}>{detail}</span>

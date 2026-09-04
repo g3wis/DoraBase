@@ -278,7 +278,7 @@ production: boolean, };
 export type EnvironmentId = string;
 
 /**
- * Les quatre garde-fous d'écriture (`15d`).
+ * Les trois garde-fous d'écriture (`15d`).
  *
  * **Tous à `true` par défaut, y compris pour une installation existante.** `serde(default)` rend
  * `Default::default()`, et un défaut à `false` transformerait une mise à jour de DoraBase en levée
@@ -296,11 +296,7 @@ prodReadOnly: boolean,
 /**
  * `DELETE`/`UPDATE` sans `WHERE` sont **refusés**, et non simplement confirmés.
  */
-refuseUnrestrictedWrites: boolean, 
-/**
- * Le patch inverse est conservé 24 h.
- */
-keepInversePatch: boolean, };
+refuseUnrestrictedWrites: boolean, };
 
 /**
  * La langue de l'interface (26 août 2026).
@@ -345,7 +341,7 @@ rowHeight: number,
  */
 codeFontTenths: number, 
 /**
- * Les quatre garde-fous d'écriture (`15d`), **actifs par défaut**.
+ * Les trois garde-fous d'écriture (`15d`), **actifs par défaut**.
  */
 guards: Guards, };
 

@@ -41,7 +41,7 @@ struct ConfigFile {
     ///
     /// **`serde(default)` plutôt qu'une montée de version.** Une configuration écrite avant `15a`
     /// n'a pas ce champ : `serde` le remplit par `Preferences::default()`, qui est exactement l'état
-    /// correct — les valeurs du handoff, et les quatre garde-fous actifs. Monter la version aurait
+    /// correct — les valeurs du handoff, et les trois garde-fous actifs. Monter la version aurait
     /// forcé une migration qui ne migre rien, le même arbitrage qu'en `12f`.
     #[serde(default)]
     preferences: Preferences,
@@ -690,7 +690,7 @@ mod tests_preferences {
     }
 
     #[test]
-    fn les_quatre_garde_fous_sont_actifs_sur_une_configuration_anterieure() {
+    fn les_trois_garde_fous_sont_actifs_sur_une_configuration_anterieure() {
         let dossier = tempdir().unwrap();
         let chemin = dossier.path().join("config.json");
         fs::write(&chemin, AVANT_15A).unwrap();
@@ -704,7 +704,6 @@ mod tests_preferences {
         assert!(g.pending_before_write, "{g:?}");
         assert!(g.prod_read_only, "{g:?}");
         assert!(g.refuse_unrestricted_writes, "{g:?}");
-        assert!(g.keep_inverse_patch, "{g:?}");
     }
 
     #[test]

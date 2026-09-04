@@ -191,11 +191,11 @@ describe('la grille et le code (`15c`)', () => {
 })
 
 describe('les garde-fous (`15d`)', () => {
-  it('les quatre apparaissent, et chacun dit ce qu’il protège', async () => {
+  it('les trois apparaissent, et chacun dit ce qu’il protège', async () => {
     monter()
     await allerA('Sécurité & écriture')
     const switches = screen.getAllByRole('switch')
-    expect(switches).toHaveLength(4)
+    expect(switches).toHaveLength(3)
     // Chaque bascule dit **ce qu'elle protège**, pas comment elle marche — et ce qui arrive quand on
     // l'éteint, ce que `11d` réclamait avant de les rendre réglables.
     expect(screen.getByText(/part directement dans la base/)).toBeInTheDocument()
@@ -213,25 +213,14 @@ describe('les garde-fous (`15d`)', () => {
     )
   })
 
-  it('« Garder le patch inverse » est désactivé avec sa raison, pas allumé sans effet', async () => {
-    monter()
-    await allerA('Sécurité & écriture')
-    const bascule = screen.getByRole('switch', { name: /patch inverse/ })
-    // **La leçon du défaut n° 36** : un réglage qui ne fait rien est pire qu'un réglage absent.
-    // `11c` et `11d` avaient annoncé cette promesse puis l'avaient retirée, faute de persister.
-    expect(bascule).toBeDisabled()
-    expect(screen.getByText(/ce n’est pas encore tranché/)).toBeInTheDocument()
-  })
-
-  it('les quatre sont actifs sur des préférences neuves', async () => {
+  it('les trois sont actifs sur des préférences neuves', async () => {
     monter()
     await allerA('Sécurité & écriture')
     const actifs = screen
       .getAllByRole('switch')
       .filter((bascule) => bascule.getAttribute('aria-checked') === 'true')
-    // Trois allumés, le quatrième désactivé : le défaut du modèle est `true` pour les quatre, et
-    // c'est ce qui compte — un défaut à `false` transformerait une mise à jour en levée
-    // silencieuse des garde-fous.
+    // Les trois allumés : le défaut du modèle est `true` pour chacun, et c'est ce qui compte — un
+    // défaut à `false` transformerait une mise à jour en levée silencieuse des garde-fous.
     expect(actifs).toHaveLength(3)
   })
 })
