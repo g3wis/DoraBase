@@ -24,6 +24,10 @@ export const consoleFr: Dictionnaire = {
     json: 'JSON',
     messages: 'Messages',
     grilleLabel: (p) => `Résultat de la requête, ${p.n} ligne${Number(p.n) > 1 ? 's' : ''}`,
+    // Mot pour mot les libellés d'`A5` (`tableView.grid.resizeColumn`/`reorderColumn`) : le même
+    // geste sur la même grille ne doit pas se dire de deux façons.
+    redimensionnerLaColonne: (p) => `Redimensionner ${p.colonne}`,
+    deplacerLaColonne: (p) => `Déplacer ${p.colonne} (flèches gauche et droite)`,
     menuDeLaValeur: (p) => `Actions sur la valeur de ${p.colonne}`,
     copierLaValeur: 'Copier la valeur',
     menuDeLaColonne: (p) => `Actions sur la colonne ${p.colonne}`,
@@ -119,6 +123,8 @@ export const consoleEn: Dictionnaire = {
     json: 'JSON',
     messages: 'Messages',
     grilleLabel: (p) => `Query result, ${p.n} row${Number(p.n) > 1 ? 's' : ''}`,
+    redimensionnerLaColonne: (p) => `Resize ${p.colonne}`,
+    deplacerLaColonne: (p) => `Move ${p.colonne} (left and right arrows)`,
     menuDeLaValeur: (p) => `Actions on the value of ${p.colonne}`,
     copierLaValeur: 'Copy the value',
     menuDeLaColonne: (p) => `Actions on column ${p.colonne}`,

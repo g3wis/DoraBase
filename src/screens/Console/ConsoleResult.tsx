@@ -75,6 +75,12 @@ export function ConsoleResult({
   // nouvelle exécution : corriger sa requête ne doit pas défaire la mise en page qu'on vient de
   // régler, et un nom absent du nouveau résultat est simplement sans effet.
   const [masquees, setMasquees] = useState<ReadonlySet<string>>(new Set())
+  // Les largeurs posées à la main, par nom — elles l'emportent sur l'ajustement, comme dans `A5` :
+  // ce qu'on a réglé soi-même ne bouge plus. Même survie que `masquees`, pour la même raison.
+  const [largeurs, setLargeurs] = useState<Record<string, number>>({})
+  // L'ordre d'affichage des colonnes, par nom — `null` tant que rien n'a été glissé, auquel cas
+  // l'ordre est celui du résultat. Même écart-au-défaut que `masquees` et `largeurs`.
+  const [ordre, setOrdre] = useState<readonly string[] | null>(null)
   /**
    * La largeur ajustée de chaque colonne, par nom (`ajustement.ts`).
    *
@@ -132,10 +138,24 @@ export function ConsoleResult({
   // des noms et des valeurs ; la largeur et l'alignement se déduisent donc du résultat lui-même.
   // Ce qui reste affiché : la liste de référence des deux entrées du menu d'en-tête — l'une refuse
   // de masquer la dernière, l'autre ne paraît que s'il y a de quoi rendre.
+  //
+  // **Les gestes de mise en page d'`A5` — masquer, ajuster, redimensionner, déplacer — sans le tri
+  // ni les filtres, et c'est délibéré** : dans `A5` un tri ou un filtre repartent au serveur en
+  // recomposant la requête, et la console exécute ce que l'utilisateur a **écrit**. Réécrire sa
+  // requête n'est pas un geste de grille ; c'est l'éditeur au-dessus qui le porte.
   const visibles = resultat.columns.filter((nom) => !masquees.has(nom))
+
+  // L'ordre d'affichage : celui que la poignée a posé, ou celui du résultat tant que rien n'a été
+  // glissé. Un nom de `ordre` absent du résultat est ignoré ; un nom du résultat absent de `ordre`
+  // (la requête a changé depuis) reste affiché, en fin — jamais perdu. Même tolérance que dans
+  // `A5`, par un tri **stable** : deux colonnes homonymes gardent leur ordre relatif, là où une
+  // table de correspondance en perdrait une.
+  const rangs = new Map((ordre ?? []).map((nom, rang) => [nom, rang] as const))
+  const enBout = Number.MAX_SAFE_INTEGER
 
   const colonnes: GridColumn<readonly Value[]>[] = resultat.columns
     .map((nom, index) => ({ nom, index }))
+    .sort((a, b) => (rangs.get(a.nom) ?? enBout) - (rangs.get(b.nom) ?? enBout))
     .filter(({ nom }) => !masquees.has(nom))
     .map(({ nom, index }) => ({
       key: nom,
@@ -143,9 +163,11 @@ export function ConsoleResult({
       // Le nom de la colonne, et **lui seul** : sans cela, la poignée de redimensionnement voisine
       // ajoute son propre libellé au nom de la cellule d'en-tête.
       headerLabel: nom,
-      // Ajustée au contenu, et à défaut la largeur unique de `12c` — celle d'une colonne dont
-      // l'échantillon ne dit rien.
-      width: largeursAjustees[nom] ?? LARGEUR_PAR_DEFAUT,
+      // La largeur posée à la main d'abord, puis l'ajustement au contenu, et à défaut la largeur
+      // unique de `12c` — celle d'une colonne dont l'échantillon ne dit rien.
+      width: largeurs[nom] ?? largeursAjustees[nom] ?? LARGEUR_PAR_DEFAUT,
+      resizeLabel: t('console.resultat.redimensionnerLaColonne', { colonne: nom }),
+      reorderLabel: t('console.resultat.deplacerLaColonne', { colonne: nom }),
       // L'alignement suit le **genre de la première valeur**, seule information disponible pour une
       // colonne calculée : `count(*)` n'existe dans aucun catalogue.
       numeric: estNumerique(resultat.rows[0]?.[index] ?? { kind: 'null' }),
@@ -220,6 +242,10 @@ export function ConsoleResult({
           selectedId={rangChoisi === null ? null : String(rangChoisi)}
           onSelect={(_, index) => setRangChoisi(index)}
           viewportHeight={320}
+          onColumnResize={(cle, largeur) =>
+            setLargeurs((precedent) => ({ ...precedent, [cle]: largeur }))
+          }
+          onColumnReorder={(nouvelOrdre) => setOrdre(nouvelOrdre)}
           onHeaderContextMenu={(cle, position) =>
             setMenu({ sorte: 'entete', colonne: cle, ...position })
           }

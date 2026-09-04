@@ -27,6 +27,7 @@ import { flushSync } from 'react-dom'
 import { Icon } from '../../design/icons/Icon'
 import type { IconName } from '../../design/icons/names'
 import { cx } from '../cx'
+import { vitesseAuBord } from './defilementAuBord'
 import styles from './VirtualGrid.module.css'
 
 /** Pas du redimensionnement au clavier, en pixels — même valeur que `SplitPane`. */
@@ -171,8 +172,8 @@ type VirtualGridProps<Row> = {
   /**
    * Redimensionnement des colonnes à la poignée, posée sur le bord droit de chaque en-tête.
    *
-   * Absente, aucune poignée ne se rend — c'est le cas de la console de `A7`, dont les colonnes
-   * n'ont pas encore ce geste. Appelée au relâchement du geste ou à une flèche du clavier
+   * Absente, aucune poignée ne se rend — c'est le cas des vitrines de la galerie, qui montrent la
+   * grille sans ses gestes de colonne. Appelée au relâchement du geste ou à une flèche du clavier
    * seulement, jamais à chaque `pointermove` : la largeur affichée pendant le glissement reste un
    * état interne de la grille, comme la taille de `SplitPane` pendant sa propre poignée — la
    * relever à chaque trame referait retraverser toute la fenêtre visible chez l'appelant pour
@@ -411,6 +412,10 @@ export function VirtualGrid<Row>({
    * l'autre ne dit plus quel en-tête est sous le curseur ; leurs coordonnées, elles, restent
    * exactes. `colonneCiblee` ne fait que suivre cette lecture pour l'indicateur visuel — c'est
    * `onUp` qui décide réellement du dépôt, à charge pour lui de la relire une dernière fois.
+   *
+   * Et près d'un bord, la grille défile d'elle-même (`defilerAuBord`) : le dépôt demandant un
+   * en-tête rendu sous le pointeur, sans cela une colonne ne se déposerait jamais au-delà de
+   * celles que la fenêtre montre.
    */
   function debuterLeReordonnancement(
     evenement: ReactPointerEvent<HTMLButtonElement>,
@@ -426,15 +431,52 @@ export function VirtualGrid<Row>({
     document.body.classList.add(styles.pendantLeReordonnancement as string)
     setColonneGlissee(colonne.key)
 
-    function onMove(moveEvent: PointerEvent) {
-      const cible = colonneSousLePointeur(moveEvent.clientX, moveEvent.clientY)
+    // Dernières coordonnées connues du pointeur : le défilement au bord doit continuer pendant
+    // qu'il ne bouge plus — une souris posée contre le bord n'émet plus aucun `pointermove`, et
+    // c'est précisément là qu'on veut avancer.
+    let derniereX = evenement.clientX
+    let derniereY = evenement.clientY
+    let trame: number | null = null
+
+    /** Relit la colonne sous le pointeur et fait suivre l'indicateur de dépôt. */
+    function suivreLaCible() {
+      const cible = colonneSousLePointeur(derniereX, derniereY)
       setColonneCiblee(cible !== colonne.key ? cible : null)
+    }
+
+    // Un pas de défilement par trame, tant que le pointeur reste dans la marge d'un bord. La
+    // marge et la vitesse — proportionnelle à l'enfoncement — vivent dans `defilementAuBord.ts`,
+    // pures, où Vitest peut les juger.
+    function defilerAuBord() {
+      trame = null
+      const zone = viewport.current
+      if (zone === null) return
+      const bords = zone.getBoundingClientRect()
+      const vitesse = vitesseAuBord(derniereX, bords.left, bords.right)
+      if (vitesse === 0) return
+      const avant = zone.scrollLeft
+      zone.scrollLeft = avant + vitesse
+      // Au bout de la course, le navigateur borne l'écriture et la position ne bouge plus : la
+      // boucle s'arrête au lieu de tourner à vide — un `pointermove` la relancera au besoin.
+      if (zone.scrollLeft === avant) return
+      // Les colonnes viennent de glisser sous un pointeur peut-être immobile : la cible du dépôt
+      // se relit ici, aucun `pointermove` ne viendra le faire.
+      suivreLaCible()
+      trame = requestAnimationFrame(defilerAuBord)
+    }
+
+    function onMove(moveEvent: PointerEvent) {
+      derniereX = moveEvent.clientX
+      derniereY = moveEvent.clientY
+      suivreLaCible()
+      if (trame === null) trame = requestAnimationFrame(defilerAuBord)
     }
 
     function onUp(upEvent: PointerEvent) {
       poignee.removeEventListener('pointermove', onMove)
       poignee.removeEventListener('pointerup', onUp)
       poignee.removeEventListener('pointercancel', onCancel)
+      if (trame !== null) cancelAnimationFrame(trame)
       document.body.classList.remove(styles.pendantLeReordonnancement as string)
       setColonneGlissee(null)
       setColonneCiblee(null)
@@ -446,6 +488,7 @@ export function VirtualGrid<Row>({
       poignee.removeEventListener('pointermove', onMove)
       poignee.removeEventListener('pointerup', onUp)
       poignee.removeEventListener('pointercancel', onCancel)
+      if (trame !== null) cancelAnimationFrame(trame)
       document.body.classList.remove(styles.pendantLeReordonnancement as string)
       setColonneGlissee(null)
       setColonneCiblee(null)

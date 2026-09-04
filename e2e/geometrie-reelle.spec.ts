@@ -297,6 +297,51 @@ test('la grille défile horizontalement au lieu d’écraser ses colonnes', asyn
     .toBeGreaterThan(0)
 })
 
+test('glisser un en-tête dans la marge du bord fait défiler la grille, et le dépôt porte au-delà', async ({
+  page,
+}) => {
+  await ouvrirUneTable(page)
+
+  // La zone défilante réelle (voir le test précédent), et l'ordre de départ des en-têtes. Les
+  // mesures de Vitest bouchonnent les bords et les trames (`VirtualGrid.test.tsx`) : c'est ici que
+  // la géométrie réelle — bords mesurés, vrai `requestAnimationFrame`, vraie borne de course —
+  // rencontre le geste pour la première fois.
+  const zone = page.locator('[role=grid] > [role=presentation]')
+  const placeDeStatus = () =>
+    page
+      .locator('[role=columnheader][data-colonne]')
+      .evaluateAll((les) => les.findIndex((e) => e.getAttribute('data-colonne') === 'status'))
+  const depart = await placeDeStatus()
+
+  const poignee = await page
+    .getByRole('button', { name: 'Déplacer status (flèches gauche et droite)' })
+    .boundingBox()
+  const cadre = await zone.boundingBox()
+  if (poignee === null || cadre === null) throw new Error('poignée ou grille introuvable')
+
+  await page.mouse.move(poignee.x + poignee.width / 2, poignee.y + poignee.height / 2)
+  await page.mouse.down()
+  // Dans la marge du bord droit, à hauteur d'en-tête — **peu enfoncé** : la vitesse est
+  // proportionnelle à l'enfoncement (`defilementAuBord.ts`), et une course lente laisse aux deux
+  // lectures ci-dessous le temps de mesurer avant la fin de la course.
+  await page.mouse.move(cadre.x + cadre.width - 25, poignee.y + poignee.height / 2, { steps: 4 })
+
+  const lireLeDefilement = () => zone.evaluate((e) => e.scrollLeft)
+  await expect.poll(lireLeDefilement).toBeGreaterThan(0)
+  // **Sans autre mouvement du pointeur** : une souris posée contre le bord n'émet plus aucun
+  // `pointermove`, et c'est précisément là que le défilement doit continuer — un pas par
+  // événement, le sabotage naturel, s'arrêterait ici.
+  const enCours = await lireLeDefilement()
+  await expect.poll(lireLeDefilement).toBeGreaterThan(enCours + 40)
+
+  await page.mouse.up()
+
+  // Le dépôt a bien porté au-delà du point de départ : `status` a reculé dans l'ordre des
+  // en-têtes. La colonne exacte qui reçoit dépend de l'instant du relâchement ; l'exigence — on
+  // peut déposer plus loin que ce que la fenêtre montrait — n'en dépend pas.
+  await expect.poll(placeDeStatus).toBeGreaterThan(depart)
+})
+
 test('la bande d’onglets défile sans montrer de barre', async ({ page }) => {
   await ouvrirUneTable(page)
   const bande = await page.evaluate(() => {

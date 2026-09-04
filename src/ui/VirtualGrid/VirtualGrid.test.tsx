@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
@@ -437,6 +437,144 @@ describe('VirtualGrid', () => {
       const poignee = screen.getByLabelText('Déplacer nom (flèches gauche et droite)')
       expect(poignee.tagName).toBe('BUTTON')
       expect(poignee).toHaveTextContent('nom')
+    })
+
+    describe('le défilement au bord', () => {
+      /**
+       * Les trames, tenues à la main : `requestAnimationFrame` réel rendrait ces tests dépendants
+       * du temps — règle n° 3, un test calé sur une durée réelle est un tirage au sort. Et
+       * `cancelAnimationFrame` retire vraiment de la file : sans cela, « le relâchement arrête le
+       * défilement » resterait vert même si la production n'annulait rien.
+       */
+      function boucherLesTrames() {
+        const file = new Map<number, FrameRequestCallback>()
+        let prochaine = 1
+        const demande = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((rappel) => {
+          file.set(prochaine, rappel)
+          return prochaine++
+        })
+        const annule = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation((id) => {
+          file.delete(id)
+        })
+        return {
+          avancer() {
+            const rappels = [...file.values()]
+            file.clear()
+            act(() => {
+              for (const rappel of rappels) rappel(0)
+            })
+          },
+          restaurer() {
+            demande.mockRestore()
+            annule.mockRestore()
+            vi.mocked(document.elementFromPoint).mockReturnValue(null)
+          },
+        }
+      }
+
+      /** Les bords de la fenêtre de défilement, bouchonnés — jsdom ne mesure rien (règle n° 9). */
+      function fenetreDeDefilement(): HTMLElement {
+        const zone = screen.getByRole('grid').querySelector<HTMLElement>('[class*="viewport"]')
+        if (zone === null) throw new Error('conteneur de défilement introuvable')
+        zone.getBoundingClientRect = () => ({ left: 0, right: 400 }) as DOMRect
+        return zone
+      }
+
+      it('près du bord droit, la grille défile — et continue sans nouveau mouvement', () => {
+        const boucle = boucherLesTrames()
+        try {
+          grille({ columns: COLONNES_REORDER, rows: lignes(3), onColumnReorder: () => {} })
+          const zone = fenetreDeDefilement()
+          vi.mocked(document.elementFromPoint).mockReturnValue(null)
+
+          const poignee = screen.getByLabelText('Déplacer nom (flèches gauche et droite)')
+          fireEvent.pointerDown(poignee, { clientX: 200, clientY: 10, pointerId: 1 })
+          fireEvent.pointerMove(poignee, { clientX: 395, clientY: 10, pointerId: 1 })
+
+          boucle.avancer()
+          const apresUneTrame = zone.scrollLeft
+          expect(apresUneTrame).toBeGreaterThan(0)
+
+          // **Sans aucun `pointermove` de plus** : une souris posée contre le bord n'émet plus
+          // rien, et c'est précisément là que le défilement doit continuer. Un pas par
+          // `pointermove` — le sabotage naturel — s'arrêterait ici.
+          boucle.avancer()
+          boucle.avancer()
+          expect(zone.scrollLeft).toBeGreaterThan(apresUneTrame)
+
+          // Le relâchement arrête tout : plus une trame ne défile après lui.
+          fireEvent.pointerUp(poignee, { clientX: 395, clientY: 10, pointerId: 1 })
+          const auRelachement = zone.scrollLeft
+          boucle.avancer()
+          expect(zone.scrollLeft).toBe(auRelachement)
+        } finally {
+          boucle.restaurer()
+        }
+      })
+
+      it('au milieu de la fenêtre, glisser ne défile pas', () => {
+        const boucle = boucherLesTrames()
+        try {
+          grille({ columns: COLONNES_REORDER, rows: lignes(3), onColumnReorder: () => {} })
+          const zone = fenetreDeDefilement()
+          vi.mocked(document.elementFromPoint).mockReturnValue(null)
+
+          const poignee = screen.getByLabelText('Déplacer nom (flèches gauche et droite)')
+          fireEvent.pointerDown(poignee, { clientX: 100, clientY: 10, pointerId: 1 })
+          fireEvent.pointerMove(poignee, { clientX: 200, clientY: 10, pointerId: 1 })
+
+          boucle.avancer()
+          boucle.avancer()
+          expect(zone.scrollLeft).toBe(0)
+        } finally {
+          boucle.restaurer()
+        }
+      })
+
+      it('près du bord gauche, le défilement revient en arrière', () => {
+        const boucle = boucherLesTrames()
+        try {
+          grille({ columns: COLONNES_REORDER, rows: lignes(3), onColumnReorder: () => {} })
+          const zone = fenetreDeDefilement()
+          zone.scrollLeft = 100
+          vi.mocked(document.elementFromPoint).mockReturnValue(null)
+
+          const poignee = screen.getByLabelText('Déplacer pays (flèches gauche et droite)')
+          fireEvent.pointerDown(poignee, { clientX: 200, clientY: 10, pointerId: 1 })
+          fireEvent.pointerMove(poignee, { clientX: 5, clientY: 10, pointerId: 1 })
+
+          boucle.avancer()
+          expect(zone.scrollLeft).toBeLessThan(100)
+        } finally {
+          boucle.restaurer()
+        }
+      })
+
+      it('les colonnes qui glissent sous un pointeur immobile font suivre la cible du dépôt', () => {
+        const boucle = boucherLesTrames()
+        try {
+          grille({ columns: COLONNES_REORDER, rows: lignes(3), onColumnReorder: () => {} })
+          fenetreDeDefilement()
+          const cibleVille = document.querySelector('[data-colonne="ville"]')
+          const ciblePays = document.querySelector('[data-colonne="pays"]')
+          if (cibleVille === null || ciblePays === null) throw new Error('en-têtes introuvables')
+
+          const poignee = screen.getByLabelText('Déplacer nom (flèches gauche et droite)')
+          fireEvent.pointerDown(poignee, { clientX: 100, clientY: 10, pointerId: 1 })
+          vi.mocked(document.elementFromPoint).mockReturnValue(cibleVille as Element)
+          fireEvent.pointerMove(poignee, { clientX: 395, clientY: 10, pointerId: 1 })
+          expect(cibleVille.className).toMatch(/cibleColonne/)
+
+          // Le pointeur ne bouge plus ; le défilement amène `pays` sous lui. L'indicateur doit
+          // suivre sans attendre un `pointermove` qui ne viendra pas.
+          vi.mocked(document.elementFromPoint).mockReturnValue(ciblePays as Element)
+          boucle.avancer()
+          expect(cibleVille.className).not.toMatch(/cibleColonne/)
+          expect(ciblePays.className).toMatch(/cibleColonne/)
+        } finally {
+          boucle.restaurer()
+        }
+      })
     })
   })
 
