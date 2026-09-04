@@ -1022,10 +1022,16 @@ while true; do sleep 1; done
         // Et les emplacements usuels y sont — assertion qui, elle, ne peut mordre que sur un poste
         // dont le `PATH` en est dépourvu : celui d'une app lancée depuis le Finder, précisément le
         // cas que cet enrichissement vise.
+        // Le chemin **développé**, et pas le littéral de la constante (4 septembre 2026) : la
+        // liste Linux porte `~/.local/bin`, que `path_enrichi` développe. Un `PATH` qui
+        // transmettrait ce littéral à l'enfant ne lui désignerait rien — c'est le défaut à quatre
+        // exemplaires du 31 août, ici sur son cinquième.
         for usuel in programme::EMPLACEMENTS_USUELS {
+            let attendu = programme::chemin_utilisateur(usuel);
             assert!(
-                dossiers.contains(&std::path::PathBuf::from(usuel)),
-                "{usuel} absent de {dossiers:?}"
+                dossiers.contains(&attendu),
+                "{} absent de {dossiers:?}",
+                attendu.display()
             );
         }
     }

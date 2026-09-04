@@ -101,6 +101,11 @@ export const preferencesFr: Dictionnaire = {
     installation: 'Téléchargement…',
     redemarrageNote:
       'DoraBase se relance seul. Les consoles non enregistrées ne sont pas conservées.',
+    // Windows et Linux : il n'y a pas de voie de mise à jour en place. L'infobulle nomme ce qui
+    // manque, la phrase dit quoi faire à la place — voir `shell/plateforme.aUneVoieDeMiseAJour`.
+    sansVoieTitre: 'Cette version de DoraBase ne se met pas à jour d’elle-même.',
+    sansVoie:
+      'Les mises à jour en place ne sont proposées que sur macOS. Ailleurs, téléchargez la version suivante depuis la page des releases.',
   },
   aVenir: {
     corps: (p) => `Rien à régler ici pour l’instant. Cette section portera : ${p.porte}`,
@@ -214,6 +219,9 @@ export const preferencesEn: Dictionnaire = {
     installer: 'Install and restart',
     installation: 'Downloading…',
     redemarrageNote: 'DoraBase restarts on its own. Unsaved consoles are not kept.',
+    sansVoieTitre: 'This build of DoraBase does not update itself.',
+    sansVoie:
+      'In-place updates are only offered on macOS. Elsewhere, download the next version from the releases page.',
   },
   aVenir: {
     corps: (p) => `Nothing to set here yet. This section will cover: ${p.porte}`,

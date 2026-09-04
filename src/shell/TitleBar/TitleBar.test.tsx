@@ -7,7 +7,7 @@ import { TitleBar } from './TitleBar'
  *
  * `sur: 'macos'` par défaut : les trois feux y sont dessinés par le système, donc la barre ne
  * porte qu'un bouton — l'engrenage. Sous Windows elle en porte quatre, `decorations: false`
- * rendant les contrôles de fenêtre à notre charge, et c'est `TitleBar.windows.test.tsx` qui
+ * rendant les contrôles de fenêtre à notre charge, et c'est `TitleBar.horsMacos.test.tsx` qui
  * décrit cette composition-là.
  *
  * Sans ce paramètre, le fichier mesurait la plateforme de la machine plutôt que le produit :

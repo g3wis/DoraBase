@@ -116,6 +116,7 @@ def verifier_ci() -> None:
     etapes_de(jobs, "engine", 11, "ci.yml")
     e2e = etapes_de(jobs, "e2e", 6, "ci.yml")
     windows = etapes_de(jobs, "windows", 13, "ci.yml")
+    linux = etapes_de(jobs, "linux", 13, "ci.yml")
 
     # **Le job Windows doit rester sur Windows, et compiler.**
     #
@@ -132,7 +133,7 @@ def verifier_ci() -> None:
     for fragment, raison in (
         ("pnpm proxy:embarquer",
          "toute commande cargo échouerait sur l'`externalBin` absent (défaut n° 111)"),
-        ("verifier-conf-windows.py",
+        ("verifier-conf-plateformes.py",
          "le recouvrement de configuration pourrait perdre la fenêtre en silence"),
         ("cargo clippy", "les avertissements propres à Windows repasseraient"),
         ("cargo test", "clippy compile les tests sans les exécuter"),
@@ -142,6 +143,44 @@ def verifier_ci() -> None:
             print(f"ci.yml : le job « windows » a perdu « {fragment} » — {raison}",
                   file=sys.stderr)
             raise SystemExit(1)
+
+    # **Le job Linux doit rester sur Linux, et construire.**
+    #
+    # Il existe depuis le 4 septembre 2026, pour la plateforme et non pour les bases : le job
+    # `engine` tourne déjà sur Ubuntu, mais il monte quatre décors et huit minutes de conteneurs.
+    # Fondre les deux ferait dépendre le verdict « Linux tourne » de la disponibilité de ces
+    # décors ; le déplacer ailleurs en ferait un doublon du job macOS. Privé de `cargo test` ou de
+    # `tauri build`, il ne dirait plus que « ça compile », ce que `clippy` dit déjà.
+    if "ubuntu" not in str(jobs["linux"].get("runs-on", "")):
+        print("ci.yml : le job « linux » a quitté un runner Linux — il ne dirait plus rien de la "
+              "pile GTK/WebKit ni du bundle deb/AppImage", file=sys.stderr)
+        raise SystemExit(1)
+
+    commandes_linux = commandes_de(linux)
+    for fragment, raison in (
+        ("pnpm proxy:embarquer",
+         "toute commande cargo échouerait sur l'`externalBin` absent (défaut n° 111)"),
+        ("libwebkit2gtk",
+         "la crate dépend de `tauri`, qui exige la pile GTK/WebKit même pour compiler"),
+        ("postgresql-client",
+         "les deux tests de découverte de `dump::discover` mesureraient l'image du runner "
+         "plutôt que le code (règle 5)"),
+        ("verifier-conf-plateformes.py",
+         "le recouvrement de configuration pourrait perdre la fenêtre en silence"),
+        ("cargo clippy", "les avertissements propres à Linux repasseraient"),
+        ("cargo test", "clippy compile les tests sans les exécuter"),
+        ("tauri build", "rien ne dirait que le deb et l'AppImage se fabriquent"),
+    ):
+        if fragment not in commandes_linux:
+            print(f"ci.yml : le job « linux » a perdu « {fragment} » — {raison}",
+                  file=sys.stderr)
+            raise SystemExit(1)
+
+    # Et il doit **rendre** ce qu'il construit, comme les deux autres : un paquet jeté à la fin
+    # du job ne prouve que sa compilation, et rien ici ne pilote WebKitGTK.
+    if "actions/upload-artifact" not in " ".join(str(e.get("uses", "")) for e in linux):
+        print("ci.yml : le job « linux » ne publie plus ses paquets en artefact", file=sys.stderr)
+        raise SystemExit(1)
 
     # **Une exécution par commit.** `on: [push, pull_request]` faisait tourner toute la CI deux
     # fois sur chaque branche ayant une PR : deux verdicts identiques, à la seconde près. Le
@@ -298,13 +337,17 @@ def verifier_publication() -> None:
                   "téléverse dans une release que le job « release » crée, et sans l'ordre "
                   "l'upload court contre la création", file=sys.stderr)
             raise SystemExit(1)
-    # **Et macOS ne doit plus attendre Windows, ni l'inverse : c'est tout le point.** Deux
-    # jobs qui dépendent tous deux de « release » sans dépendre l'un de l'autre tournent en
-    # parallèle ; un `needs: macos` réapparu sur `windows` les resserialiserait en silence.
-    if jobs["windows"].get("needs") == "macos" or jobs["macos"].get("needs") == "windows":
-        print("publication.yml : macOS et Windows dépendent l'un de l'autre — ils ne "
-              "publieraient plus en parallèle", file=sys.stderr)
-        raise SystemExit(1)
+    # **Et aucune des trois constructions ne doit attendre les autres : c'est tout le point.**
+    # Trois jobs qui dépendent tous de « release » sans dépendre l'un de l'autre tournent en
+    # parallèle ; un `needs: macos` réapparu sur l'un d'eux les resserialiserait en silence.
+    for nom in ("macos", "windows", "linux"):
+        attendus = jobs[nom].get("needs")
+        attendus = [attendus] if isinstance(attendus, str) else (attendus or [])
+        if attendus != ["release"]:
+            print(f"publication.yml : le job « {nom} » dépend de {attendus!r} et non de "
+                  "['release'] — les trois constructions ne publieraient plus en parallèle",
+                  file=sys.stderr)
+            raise SystemExit(1)
 
     # Même variable, même raison — et ici la conséquence est publique.
     if not any(
@@ -328,7 +371,7 @@ def verifier_publication() -> None:
     for fragment, raison in (
         ("pnpm proxy:embarquer",
          "toute commande cargo échouerait sur l'`externalBin` absent (défaut n° 111)"),
-        ("verifier-conf-windows.py",
+        ("verifier-conf-plateformes.py",
          "le recouvrement de configuration pourrait perdre la fenêtre en silence"),
         ("cargo test", "une release publique ne se pose pas sur des tests non joués"),
         ("tauri build", "rien ne construirait l'installateur"),
@@ -356,16 +399,72 @@ def verifier_publication() -> None:
               "  avec sa raison.", file=sys.stderr)
         raise SystemExit(1)
 
-    manifeste = commandes_de(etapes)
-    if "windows-x86_64" in manifeste:
-        print("publication.yml : le manifeste de mise à jour porte `windows-x86_64`.\n"
-              "  Les installations Windows se mettraient à jour avec un exécutable que rien\n"
-              "  n'authentifie. Si c'est voulu, retirez ce garde avec sa raison.",
-              file=sys.stderr)
+    # ── Les paquets Linux, depuis le 4 septembre 2026 ─────────────────────────────────────
+    #
+    # Même forme que le bloc Windows ci-dessus, et les mêmes deux faits à tenir.
+    linux = etapes_de(jobs, "linux", 15, "publication.yml")
+    commandes_linux = commandes_de(linux)
+
+    # 1. Ce qu'il fait, et ce qu'il vérifie avant de publier.
+    for fragment, raison in (
+        ("pnpm proxy:embarquer",
+         "toute commande cargo échouerait sur l'`externalBin` absent (défaut n° 111)"),
+        ("libwebkit2gtk",
+         "la crate dépend de `tauri`, qui exige la pile GTK/WebKit même pour compiler"),
+        ("verifier-conf-plateformes.py",
+         "le recouvrement de configuration pourrait perdre la fenêtre en silence"),
+        ("cargo test", "une release publique ne se pose pas sur des tests non joués"),
+        ("tauri build", "rien ne construirait le deb ni l'AppImage"),
+        ("verifier-aucun-decor-de-version.sh",
+         "la version de décor pourrait partir dans le binaire livré"),
+        ("cloud-sql-proxy --version",
+         "le sidecar embarqué pourrait manquer, ou porter une autre version que le verrou"),
+        ("gh release upload", "les paquets ne seraient attachés à aucune release"),
+    ):
+        if fragment not in commandes_linux:
+            print(f"publication.yml : le job « linux » a perdu « {fragment} » — {raison}",
+                  file=sys.stderr)
+            raise SystemExit(1)
+
+    # 2. **Et surtout : il ne publie pas de mise à jour.** Le plugin `updater` ne sait remplacer
+    #    qu'un AppImage : une installation par le `.deb` verrait l'annonce d'une version et un
+    #    bouton qui échoue à tous les coups. Téléverser l'archive `.AppImage.tar.gz` ou ajouter
+    #    `linux-x86_64` au manifeste ouvrirait cette voie **en silence** pour une moitié des
+    #    installations et la casserait pour l'autre. Le jour où c'est décidé, c'est ce garde
+    #    qu'il faut retirer, et le retirer est alors un geste visible en revue.
+    if "AppImage.tar.gz" in commandes_linux:
+        print("publication.yml : le job « linux » téléverse une archive de mise à jour.\n"
+              "  Le plugin `updater` ne sait remplacer qu'un AppImage : une installation par le\n"
+              "  .deb verrait une annonce et un bouton qui échoue toujours. Si c'est voulu,\n"
+              "  retirez ce garde avec sa raison.", file=sys.stderr)
         raise SystemExit(1)
 
+    # 3. Et il ne publie pas de `.rpm` : Tauri le fabrique sans dépendance déclarée, donc il
+    #    s'installerait proprement et pourrait ne pas se lancer. L'AppImage couvre ces
+    #    distributions. Le garde porte sur le **téléversement**, pas sur la construction : rien
+    #    n'interdit d'en fabriquer un pour l'essayer.
+    if ".rpm" in commandes_linux:
+        print("publication.yml : le job « linux » téléverse un .rpm.\n"
+              "  Tauri le produit sans dépendance déclarée : il s'installerait proprement puis\n"
+              "  pourrait ne pas se lancer, faute de WebKitGTK. Si c'est voulu, déclarez ses\n"
+              "  dépendances et retirez ce garde avec sa raison.", file=sys.stderr)
+        raise SystemExit(1)
+
+    manifeste = commandes_de(etapes)
+    for clef, plateforme, raison in (
+        ("windows-x86_64", "Windows",
+         "un exécutable que rien n'authentifie, faute de certificat Authenticode"),
+        ("linux-x86_64", "Linux",
+         "une archive que seule une installation par AppImage saurait appliquer"),
+    ):
+        if clef in manifeste:
+            print(f"publication.yml : le manifeste de mise à jour porte `{clef}`.\n"
+                  f"  Les installations {plateforme} se mettraient à jour avec {raison}.\n"
+                  "  Si c'est voulu, retirez ce garde avec sa raison.", file=sys.stderr)
+            raise SystemExit(1)
+
     print(f"publication.yml cohérent — {len(jobs)} jobs, tag ancré, release publiée, "
-          "installateur Windows attaché sans voie de mise à jour")
+          "paquets Windows et Linux attachés sans voie de mise à jour")
 
 
 def verifier_playwright() -> None:

@@ -5,6 +5,7 @@ import { Sprite } from '../../design/icons/Sprite'
 import type { Preferences } from '../../domain/config'
 import type { AvailableUpdate } from '../../domain/maj'
 import { LanguageProvider } from '../../i18n/LanguageContext'
+import type { Plateforme } from '../../shell/plateforme'
 import { PreferencesDialog } from './PreferencesDialog'
 import { HAUTEUR_MIN, PREFERENCES_PAR_DEFAUT } from './preferences'
 
@@ -16,6 +17,11 @@ function monter(
     chercher?: () => Promise<AvailableUpdate | null>
     installer?: () => Promise<void>
   } = {},
+  // **La plateforme est nommée, jamais déduite.** La section « Mises à jour » n'offre son bouton
+  // que là où une voie de mise à jour existe, donc laisser la valeur suivre `__APP_PLATFORM__`
+  // ferait dépendre les six tests de cette section du décor sous lequel la suite tourne —
+  // `pnpm test` doit être vert sous les trois.
+  sur: Plateforme = 'macos',
 ) {
   const onChange = vi.fn()
   const onClose = vi.fn()
@@ -33,6 +39,7 @@ function monter(
           version="DoraBase 0.4.2 (arm64)"
           chercherMiseAJour={maj.chercher ?? (() => Promise.reject(new Error('pas de pont')))}
           installerMiseAJour={maj.installer ?? (() => Promise.reject(new Error('pas de pont')))}
+          sur={sur}
         />
       </LanguageProvider>
     </>,
@@ -333,5 +340,44 @@ describe('les mises à jour', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Installer et redémarrer' }))
     expect(await screen.findByText(/n’a pas abouti/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Installer et redémarrer' })).toBeEnabled()
+  })
+
+  /*
+   * **Sans voie de mise à jour, le bouton est désactivé avec sa raison** (4 septembre 2026).
+   *
+   * `latest.json` ne porte que les deux clefs `darwin-*` : ailleurs le plugin échoue sur « the
+   * platform … was not found on the response `platforms` object ». Un bouton actif afficherait
+   * donc ce message, qui accuse une installation parfaitement correcte — c'est exactement le mode
+   * de défaillance que ce dépôt refuse. Les deux plateformes sont nommées séparément parce
+   * qu'elles rendent la même chose pour deux raisons différentes (voir `shell/plateforme`).
+   */
+  it.each(['windows', 'linux'] as const)(
+    'sous %s, la recherche est refusée avec sa raison plutôt que tentée',
+    async (sur) => {
+      const chercher = vi.fn(() => Promise.resolve(null))
+      monter(PREFERENCES_PAR_DEFAUT, { chercher }, sur)
+      await allerA('Mises à jour')
+
+      const bouton = screen.getByRole('button', { name: 'Rechercher une mise à jour' })
+      // `aria-disabled` et non `disabled` : un bouton désactivé pour de bon ne reçoit ni focus ni
+      // survol, donc son infobulle serait inatteignable (piège n° 3 d'accessibilité).
+      expect(bouton).toHaveAttribute('aria-disabled', 'true')
+      expect(bouton).toBeEnabled()
+      expect(bouton).toHaveAttribute('title', expect.stringContaining('ne se met pas à jour'))
+      expect(screen.getByText(/que sur macOS/)).toBeInTheDocument()
+
+      // **Et le clic ne cherche rien.** `aria-disabled` n'empêche rien de lui-même : sans
+      // l'`onClick` retiré, ce test resterait vert sur un bouton qui part quand même en échec.
+      await userEvent.click(bouton)
+      expect(chercher).not.toHaveBeenCalled()
+    },
+  )
+
+  it('sur macOS, la recherche est bien offerte — le contrôle négatif', async () => {
+    monter(PREFERENCES_PAR_DEFAUT, { chercher: () => Promise.resolve(null) }, 'macos')
+    await allerA('Mises à jour')
+    const bouton = screen.getByRole('button', { name: 'Rechercher une mise à jour' })
+    expect(bouton).not.toHaveAttribute('aria-disabled')
+    expect(screen.queryByText(/que sur macOS/)).not.toBeInTheDocument()
   })
 })

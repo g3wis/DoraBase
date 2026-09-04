@@ -15,15 +15,20 @@
 //! ce cas. Un fichier de `tests/`, avec son propre `main()`, est ce que cargo exécute tel
 //! quel.
 //!
-//! **`#[cfg(target_os = "macos")]` sur tout le corps du fichier.** Le remplacement du menu
-//! natif est macOS seulement — Windows et Linux sont hors
-//! scope tant qu'une spec ne les réclame pas — donc ce n'est pas le même cas que le garde
-//! d'appartenance des prédéfinis de la tâche 1, qui lui était indépendant de la plateforme.
+//! **`#[cfg(target_os = "macos")]` sur tout le corps du fichier.**
 //! **Ce que ce `cfg` ne garantit *pas*** : que `build::construire` fonctionnerait sur
 //! Linux (muda y passe par gtk, dont `tauri::test::mock_app()` ne fait très probablement
 //! pas l'initialisation) — ça n'a jamais été vérifié, ni sur cette machine ni en CI. Le
 //! gate est une précaution contre un job Ubuntu qui casserait pour une raison étrangère au
 //! sujet du test, pas une conclusion sur le comportement réel hors macOS.
+//!
+//! **Ce qui a changé le 4 septembre 2026** : le menu est désormais *décrit* par plateforme —
+//! `MenuSpec::pour` —, parce que muda-sur-GTK écarte en silence les items prédéfinis qu'il
+//! n'implémente pas. Les trois descriptions sont mesurées par les tests de `src/menu/mod.rs`,
+//! qui sont purs ; ce fichier-ci, qui construit un vrai menu, ne peut toujours en exercer
+//! qu'une — celle de la machine, donc celle de macOS. C'est exactement le partage que ce dépôt
+//! fait partout : la donnée porte les garanties, la construction est vérifiée là où elle
+//! tourne.
 
 #[cfg(target_os = "macos")]
 mod macos {

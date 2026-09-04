@@ -39,12 +39,12 @@ etape "ci.yml et publication.yml cohérents" python3 scripts/verifier-ci.py
 # `Cargo.lock` — ne se parlent pas. Relever deux sur trois laisse tout vert et publie un `.dmg`
 # dont le nom contredit son `Info.plist`. `scripts/version.sh` est le geste qui les relève.
 etape "version cohérente" python3 scripts/verifier-version.py
-# **Le recouvrement Windows ne doit rien perdre de la fenêtre.** Tauri fusionne
-# `tauri.windows.conf.json` par RFC 7386, où un tableau est *remplacé* et non fusionné : comme la
-# fenêtre est déclarée dans `app.windows`, une clef absente du recouvrement retombe sur le défaut
-# de Tauri — 800 × 600, sans titre — et **rien n'échoue**. Le bundle se construit, se signe, et
-# l'écart ne se voit qu'en lançant l'application.
-etape "conf Windows cohérente" python3 scripts/verifier-conf-windows.py
+# **Les recouvrements de plateforme ne doivent rien perdre de la fenêtre.** Tauri fusionne
+# `tauri.windows.conf.json` et `tauri.linux.conf.json` par RFC 7386, où un tableau est *remplacé*
+# et non fusionné : comme la fenêtre est déclarée dans `app.windows`, une clef absente d'un
+# recouvrement retombe sur le défaut de Tauri — 800 × 600, sans titre — et **rien n'échoue**. Le
+# bundle se construit, se signe, et l'écart ne se voit qu'en lançant l'application.
+etape "recouvrements de plateforme cohérents" python3 scripts/verifier-conf-plateformes.py
 # L'image de fond de la fenêtre d'installation est un bitmap committé : aucune compilation ne
 # la relit. Une régénération à la mauvaise échelle ou une cote changée d'un seul côté
 # n'arrêterait rien avant le volume publié.

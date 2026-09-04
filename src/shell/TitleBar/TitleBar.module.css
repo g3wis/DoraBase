@@ -23,16 +23,22 @@
   border-bottom: 1px solid var(--divider);
 }
 
-/* --- Windows : pas de feux à dégager (31 août 2026) ---
+/* --- Hors macOS : pas de feux à dégager (31 août 2026, Linux le 4 septembre 2026) ---
  *
  * Les 78 px ci-dessus sont le dégagement des trois feux de macOS, qui sont **à gauche**. Sous
- * Windows les boutons de fenêtre sont à droite, et ce sont les nôtres (`decorations: false`) :
- * garder le retrait laisserait un trou de 78 px que rien n'occupe et que rien n'explique.
+ * Windows comme sous Linux les boutons de fenêtre sont à droite, et ce sont les nôtres
+ * (`decorations: false`) : garder le retrait laisserait un trou de 78 px que rien n'occupe et
+ * que rien n'explique.
  *
  * La valeur retenue est celle du retrait droit, `--space-6`, pour que la barre soit symétrique —
  * c'est ce que le reste du produit fait partout ailleurs.
+ *
+ * **La classe est nommée pour le fait, pas pour la plateforme.** Elle s'appelait `.rootWindows`
+ * jusqu'au 4 septembre 2026, et Linux l'aurait fait mentir : ce qu'elle décrit est « la barre
+ * porte nos propres boutons », ce qui est vrai des deux. Voir l'en-tête de
+ * `shell/plateforme.ts`.
  */
-.rootWindows {
+.rootNosBoutons {
   padding-left: var(--space-6);
 }
 
@@ -102,7 +108,7 @@
   box-shadow: var(--shadow-focus);
 }
 
-/* --- Les trois boutons de fenêtre, Windows seulement ---
+/* --- Les trois boutons de fenêtre, hors macOS ---
  *
  * **Le cinquième état de survol du dépôt**, et le premier ajouté depuis la bande d'en-tête de
  * sidebar (26 août 2026). La règle du projet est qu'on n'invente aucun survol ; celui-ci est
@@ -112,19 +118,20 @@
  * `--hover-row` pour les deux premiers, la teinte déjà employée par la ligne d'arbre, l'entrée
  * de menu et les actions de la sidebar. Aucune valeur neuve.
  */
-.rootWindows .action:hover {
+.rootNosBoutons .action:hover {
   background: var(--hover-row);
   border-radius: var(--radius-control);
 }
 
-/* Le rouge de fermeture est **la** convention Windows : s'en écarter ferait chercher le bouton.
+/* Le rouge de fermeture est **la** convention de Windows comme des bureaux Linux : s'en écarter
+ * ferait chercher le bouton.
  *
  * `--hover-close` est dérivé de `--danger` par `var()`, donc « Nuit » le suit tout seul et aucune
  * couleur littérale n'a été ajoutée. `--hover-close-ink` est l'encre : deux jetons plutôt qu'un,
  * parce qu'un jeton nommé pour une surface ne doit jamais servir d'encre — la leçon d'`--on-dark`.
  *
  * Le glyphe hérite de `currentColor` (voir `Icon`), donc changer `color` suffit à le retourner. */
-.rootWindows .fermer:hover {
+.rootNosBoutons .fermer:hover {
   background: var(--hover-close);
   color: var(--hover-close-ink);
 }

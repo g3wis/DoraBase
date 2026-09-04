@@ -18,6 +18,47 @@ pub mod build;
 /// information transmise — le mapping identifiant → action vit côté React.
 pub const EVENEMENT: &str = "menu://declenche";
 
+/// La plateforme pour laquelle le menu est décrit (4 septembre 2026).
+///
+/// **Pourquoi le menu dépend de la plateforme, alors que rien d'autre du Rust n'en dépend à ce
+/// point.** muda n'implémente pas les mêmes items prédéfinis partout, et sur GTK il **écarte en
+/// silence** ceux qu'il n'implémente pas : `platform_impl/gtk/mod.rs` porte un
+/// `is_item_supported!` qui ne laisse passer que `Separator`, `Copy`, `Cut`, `Paste`,
+/// `SelectAll` et `About`, et `return_if_item_not_supported!` fait simplement **ne pas ajouter**
+/// les autres (lu dans muda 0.19.3 le 4 septembre 2026).
+///
+/// Sans cette distinction, le menu de Linux aurait été celui de macOS moins ce que GTK jette :
+/// un sous-menu « DoraBase » réduit à « À propos » et trois séparateurs, un « Affichage » et un
+/// « Fenêtre » **vides**, et un « Édition » commençant par un séparateur orphelin. Or ce menu-là
+/// est **visible dans la fenêtre** sous Linux, où Tauri l'insère au-dessus de la webview : ce
+/// serait du chrome mort en évidence, c'est-à-dire le défaut n° 36 dans la barre de menu du
+/// produit.
+///
+/// **En paramètre plutôt qu'en `cfg!`**, comme partout dans ce dépôt : les trois descriptions
+/// sont alors mesurables depuis n'importe quelle machine, et pas seulement celle qui compile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Plateforme {
+    Macos,
+    Windows,
+    /// Linux, **et les BSD avec lui** : muda leur applique la même implémentation GTK
+    /// (`#[cfg(any(target_os = "linux", target_os = "dragonfly", …))]`), donc ils écartent les
+    /// mêmes items. Les ranger ailleurs serait décrire un menu que personne n'a vu.
+    Linux,
+}
+
+impl Plateforme {
+    /// La plateforme de compilation.
+    pub fn courante() -> Self {
+        if cfg!(target_os = "macos") {
+            Self::Macos
+        } else if cfg!(windows) {
+            Self::Windows
+        } else {
+            Self::Linux
+        }
+    }
+}
+
 /// Un item standard fourni par Tauri (`PredefinedMenuItem`).
 ///
 /// Une énumération plutôt qu'un nom en `&str` : `build.rs` doit faire correspondre chaque
@@ -110,16 +151,29 @@ pub struct MenuSpec {
 }
 
 impl MenuSpec {
-    /// La composition actuelle du menu : le menu applicatif et le menu Édition que Tauri
-    /// installe par défaut, reconstruits à l'identique — **remplacer le menu par défaut
-    /// retire le menu Édition, donc `⌘C` / `⌘V` meurent dans toute la webview** — et le menu
-    /// Fichier enrichi des deux entrées de dump.
+    /// La composition du menu pour la plateforme de compilation.
+    pub fn actuelle() -> MenuSpec {
+        MenuSpec::pour(Plateforme::courante())
+    }
+
+    /// La composition du menu, plateforme par plateforme.
+    ///
+    /// Sur **macOS et Windows** : le menu applicatif et le menu Édition que Tauri installe par
+    /// défaut, reconstruits à l'identique — **remplacer le menu par défaut retire le menu
+    /// Édition, donc `⌘C` / `⌘V` meurent dans toute la webview** — et le menu Fichier enrichi des
+    /// deux entrées de dump.
     ///
     /// Reconstruit plutôt qu'amendé : ni « File » ni « Edit » n'ont d'identifiant stable
     /// dans Tauri 2.11.5 (vérifié dans `menu/menu.rs`), donc les retrouver dans le menu par
     /// défaut pour y insérer nos entrées demanderait de reconnaître un libellé anglais non
     /// documenté.
-    pub fn actuelle() -> MenuSpec {
+    ///
+    /// Sur **Linux** : un seul sous-menu, et sa composition est expliquée à l'endroit où elle est
+    /// écrite, plus bas.
+    pub fn pour(plateforme: Plateforme) -> MenuSpec {
+        if plateforme == Plateforme::Linux {
+            return MenuSpec::linux();
+        }
         MenuSpec {
             sous_menus: vec![
                 SousMenu {
@@ -188,6 +242,64 @@ impl MenuSpec {
                     items: vec![],
                 },
             ],
+        }
+    }
+
+    /// Le menu de Linux : **« Fichier », et les deux entrées de dump.**
+    ///
+    /// # Pourquoi il ne reste que cela
+    ///
+    /// Chaque item retiré l'est parce que muda-sur-GTK **ne le rend pas** — pas parce qu'on a
+    /// jugé qu'il gênait. Trois familles :
+    ///
+    /// - **écartés en silence** : `Undo`, `Redo`, `Minimize`, `Maximize`, `Fullscreen`, `Hide`,
+    ///   `HideOthers`, `CloseWindow`, `Quit`. `is_item_supported!` ne les laisse pas passer et
+    ///   `return_if_item_not_supported!` les saute sans rien dire, donc les garder aurait laissé
+    ///   « Affichage » et « Fenêtre » **vides**, le sous-menu applicatif réduit à trois
+    ///   séparateurs, et un séparateur orphelin en tête d'« Édition » ;
+    /// - **rendus mais inertes** : `Copy`, `Cut`, `Paste`, `SelectAll`. Sur GTK leur action passe
+    ///   par `libxdo`, une feature que Tauri n'active pas (absente du verrou, vérifié le
+    ///   4 septembre 2026) : les entrées paraîtraient et ne feraient rien. Et elles n'ont rien à
+    ///   rattraper — la raison d'être du menu Édition est propre à Cocoa, où remplacer le menu
+    ///   par défaut tue `⌘C` dans toute la webview ; WebKitGTK, lui, traite `Ctrl+C` lui-même,
+    ///   que nous posions un menu ou non ;
+    /// - **inerte faute de métadonnées** : `About`. GTK ouvre bien une boîte « À propos », mais
+    ///   seulement `if let Some(metadata)` — et `menu/build.rs` passe `None`. Une entrée qui
+    ///   n'ouvre rien est précisément ce qu'on retire ici ; la lui donner est une autre décision.
+    ///
+    /// # Ce qui reste, et pourquoi il doit rester
+    ///
+    /// Les deux entrées de dump sont des `MenuItem` ordinaires, que GTK rend et dont il
+    /// **enregistre l'accélérateur** dans le groupe de la fenêtre (`register_accel!`, même
+    /// source). C'est ce qui les fait fonctionner à la souris comme au clavier.
+    ///
+    /// Et elles sont la raison pour laquelle Linux garde un menu : **le menu natif est le seul
+    /// point d'entrée de l'export et de l'import** — le handoff ne maquette aucun bouton, et en
+    /// inventer un serait inventer un pixel. Ne pas poser de menu du tout aurait donc retiré la
+    /// fonction, ce qui est plus coûteux qu'une barre de menu d'un seul titre.
+    ///
+    /// **La contrepartie, qui n'est mesurable par aucun test** : sous Linux, Tauri insère ce menu
+    /// *dans* la fenêtre, au-dessus de la webview (`init_for_gtk_window`), donc au-dessus de
+    /// notre propre barre de titre. C'est une bande de chrome de plus, et c'est la réserve
+    /// consignée dans AGENTS.md — à regarder à l'œil, sur une machine Linux.
+    fn linux() -> MenuSpec {
+        MenuSpec {
+            sous_menus: vec![SousMenu {
+                id: "fichier",
+                libelle: "Fichier",
+                items: vec![
+                    Item::Commande {
+                        id: "fichier.exporter-dump",
+                        libelle: "Exporter un dump…",
+                        accelerateur: Some("CmdOrCtrl+Shift+E"),
+                    },
+                    Item::Commande {
+                        id: "fichier.importer-dump",
+                        libelle: "Importer un dump…",
+                        accelerateur: Some("CmdOrCtrl+Shift+I"),
+                    },
+                ],
+            }],
         }
     }
 
@@ -260,6 +372,13 @@ impl MenuSpec {
 mod tests {
     use super::*;
 
+    /// Les trois plateformes, pour les propriétés qui valent de toutes les descriptions.
+    ///
+    /// **Balayer plutôt que mesurer `actuelle()`** : celle-ci ne rend que la description de la
+    /// machine qui compile, donc deux des trois ne seraient jamais confrontées à rien. C'est le
+    /// même arbitrage que le paramètre `sur` côté écran.
+    const PLATEFORMES: &[Plateforme] = &[Plateforme::Macos, Plateforme::Windows, Plateforme::Linux];
+
     /// Les raccourcis que le handoff s'est déjà attribués. Un accélérateur natif est
     /// intercepté par macOS **avant** la webview : le recouvrir masquerait silencieusement
     /// le `keydown` correspondant.
@@ -275,13 +394,16 @@ mod tests {
 
     #[test]
     fn aucun_accelerateur_ne_recouvre_le_handoff() {
-        for item in MenuSpec::actuelle().items_avec_accelerateur() {
-            assert!(
-                !RACCOURCIS_DU_HANDOFF.contains(&item.accelerateur),
-                "l'accélérateur {} de l'item {} recouvre un raccourci du handoff",
-                item.accelerateur,
-                item.id
-            );
+        for plateforme in PLATEFORMES {
+            for item in MenuSpec::pour(*plateforme).items_avec_accelerateur() {
+                assert!(
+                    !RACCOURCIS_DU_HANDOFF.contains(&item.accelerateur),
+                    "l'accélérateur {} de l'item {} recouvre un raccourci du handoff \
+                     ({plateforme:?})",
+                    item.accelerateur,
+                    item.id
+                );
+            }
         }
     }
 
@@ -309,14 +431,16 @@ mod tests {
 
     #[test]
     fn les_accelerateurs_des_commandes_sont_a_la_graphie_canonique() {
-        for item in MenuSpec::actuelle().items_avec_accelerateur() {
-            assert!(
-                est_graphie_canonique(item.accelerateur),
-                "l'accélérateur {} de l'item {} n'est pas à la graphie canonique \
-                 CmdOrCtrl+[Shift+][Alt+]<Touche>",
-                item.accelerateur,
-                item.id
-            );
+        for plateforme in PLATEFORMES {
+            for item in MenuSpec::pour(*plateforme).items_avec_accelerateur() {
+                assert!(
+                    est_graphie_canonique(item.accelerateur),
+                    "l'accélérateur {} de l'item {} n'est pas à la graphie canonique \
+                     CmdOrCtrl+[Shift+][Alt+]<Touche> ({plateforme:?})",
+                    item.accelerateur,
+                    item.id
+                );
+            }
         }
     }
 
@@ -364,12 +488,15 @@ mod tests {
     /// par `les_valeurs_macos_des_predefinis_sont_figees`.
     #[test]
     fn tous_les_predefinis_utilises_sont_repertories() {
-        let utilises: Vec<Predefini> = MenuSpec::actuelle()
-            .sous_menus
+        // **L'union des trois descriptions**, et non celle de la machine : une entrée de la table
+        // qui ne servirait plus que sur macOS resterait légitime, et un prédéfini ajouté au seul
+        // menu de Windows doit être répertorié comme les autres.
+        let utilises: Vec<Predefini> = PLATEFORMES
             .iter()
-            .flat_map(|sous_menu| &sous_menu.items)
+            .flat_map(|plateforme| MenuSpec::pour(*plateforme).sous_menus)
+            .flat_map(|sous_menu| sous_menu.items)
             .filter_map(|item| match item {
-                Item::Predefini(predefini) => Some(*predefini),
+                Item::Predefini(predefini) => Some(predefini),
                 _ => None,
             })
             .collect();
@@ -392,7 +519,7 @@ mod tests {
             assert!(
                 utilises.contains(predefini),
                 "{predefini:?} est répertorié dans ACCELERATEURS_DES_PREDEFINIS mais n'est \
-                 utilisé par aucun sous-menu de MenuSpec::actuelle"
+                 utilisé par aucun sous-menu, sur aucune plateforme"
             );
         }
     }
@@ -407,6 +534,8 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn les_valeurs_macos_des_predefinis_sont_figees() {
+        // La description de macOS, nommée : c'est la seule dont les valeurs ci-dessous parlent.
+        let _ = MenuSpec::pour(Plateforme::Macos);
         let accelerateur_de = |cherche: Predefini| {
             ACCELERATEURS_DES_PREDEFINIS
                 .iter()
@@ -435,25 +564,94 @@ mod tests {
 
     #[test]
     fn aucun_identifiant_en_doublon() {
-        let mut vus = std::collections::BTreeSet::new();
-        for id in MenuSpec::actuelle().tous_les_identifiants() {
-            assert!(vus.insert(id), "identifiant en doublon : {id}");
+        for plateforme in PLATEFORMES {
+            let spec = MenuSpec::pour(*plateforme);
+            let mut vus = std::collections::BTreeSet::new();
+            for id in spec.tous_les_identifiants() {
+                assert!(
+                    vus.insert(id),
+                    "identifiant en doublon : {id} ({plateforme:?})"
+                );
+            }
         }
     }
 
+    /// **Les deux entrées de dump, sur les trois plateformes.**
+    ///
+    /// C'est la propriété que la description de Linux existe pour tenir : le menu natif est le
+    /// **seul** point d'entrée de l'export et de l'import, donc un menu Linux réduit qui les
+    /// perdrait retirerait la fonction du produit — en silence, puisque rien n'échoue quand une
+    /// entrée de menu n'est pas là.
     #[test]
     fn les_deux_entrees_de_dump_sont_presentes_avec_leurs_accelerateurs() {
-        let spec = MenuSpec::actuelle();
-        assert_eq!(
-            spec.accelerateur_de("fichier.exporter-dump"),
-            Some("CmdOrCtrl+Shift+E")
-        );
-        assert_eq!(
-            spec.accelerateur_de("fichier.importer-dump"),
-            Some("CmdOrCtrl+Shift+I")
-        );
+        for plateforme in PLATEFORMES {
+            let spec = MenuSpec::pour(*plateforme);
+            assert_eq!(
+                spec.accelerateur_de("fichier.exporter-dump"),
+                Some("CmdOrCtrl+Shift+E"),
+                "{plateforme:?}"
+            );
+            assert_eq!(
+                spec.accelerateur_de("fichier.importer-dump"),
+                Some("CmdOrCtrl+Shift+I"),
+                "{plateforme:?}"
+            );
+        }
     }
 
+    /// **Le menu de Linux ne porte aucun item prédéfini, et c'est ce qui le tient** (4 septembre
+    /// 2026).
+    ///
+    /// muda-sur-GTK écarte en silence les prédéfinis qu'il n'implémente pas, et rend inertes les
+    /// quatre du presse-papier faute de la feature `libxdo`. La règle est donc simple et
+    /// vérifiable : **aucun prédéfini** dans la description de Linux. Sans elle, le remède se
+    /// déferait entrée par entrée — quelqu'un rajouterait `Quitter` « par symétrie », et il ne
+    /// paraîtrait nulle part.
+    ///
+    /// Le contrôle négatif est dans le même test : les deux autres plateformes en portent, sinon
+    /// cette assertion serait vraie d'une description vide.
+    #[test]
+    fn la_description_de_linux_n_appelle_aucun_predefini() {
+        let compte = |plateforme| {
+            MenuSpec::pour(plateforme)
+                .sous_menus
+                .iter()
+                .flat_map(|sous_menu| &sous_menu.items)
+                .filter(|item| matches!(item, Item::Predefini(_)))
+                .count()
+        };
+        assert_eq!(compte(Plateforme::Linux), 0);
+        assert!(compte(Plateforme::Macos) > 0);
+        assert!(compte(Plateforme::Windows) > 0);
+    }
+
+    /// Et il ne porte **aucun sous-menu vide**, sur aucune plateforme.
+    ///
+    /// « Aide » est l'exception assumée depuis le premier assemblage : sur macOS le système y
+    /// injecte son champ de recherche, donc un sous-menu vide y est celui d'Apple et non le
+    /// nôtre. Partout ailleurs un titre qui n'ouvre rien est du chrome mort — le motif exact que
+    /// la description de Linux corrige.
+    #[test]
+    fn aucun_sous_menu_vide_hors_aide() {
+        for plateforme in PLATEFORMES {
+            for sous_menu in MenuSpec::pour(*plateforme).sous_menus {
+                if sous_menu.id == "aide" {
+                    continue;
+                }
+                assert!(
+                    !sous_menu.items.is_empty(),
+                    "le sous-menu « {} » est vide ({plateforme:?})",
+                    sous_menu.id
+                );
+            }
+        }
+    }
+
+    /// **Sur macOS et Windows seulement**, et la raison est dans la description de Linux : GTK
+    /// n'implémente ni `Undo` ni `Redo`, et il rend les quatre du presse-papier inertes faute de
+    /// `libxdo`. Surtout, la régression que ce test garde est propre à Cocoa — remplacer le menu
+    /// par défaut y tue `⌘C` dans toute la webview —, alors que WebKitGTK traite `Ctrl+C`
+    /// lui-même, menu ou pas.
     #[test]
     fn le_menu_edition_porte_les_items_que_le_remplacement_retire() {
         // La régression que ce remplacement peut introduire : sans Annuler / Rétablir,
@@ -461,19 +659,23 @@ mod tests {
         // de presse-papier, ⌘X / ⌘C / ⌘V deviennent inertes partout. Annuler est de plus la
         // cible obligatoire de l'annulation de `A6` depuis que le menu Édition est
         // prédéfinis réclament ⌘Z ».
-        let spec = MenuSpec::actuelle();
-        for attendu in [
-            Predefini::Annuler,
-            Predefini::Retablir,
-            Predefini::Couper,
-            Predefini::Copier,
-            Predefini::Coller,
-            Predefini::ToutSelectionner,
+        for spec in [
+            MenuSpec::pour(Plateforme::Macos),
+            MenuSpec::pour(Plateforme::Windows),
         ] {
-            assert!(
-                spec.contient_predefini("edition", attendu),
-                "le menu Édition ne porte pas {attendu:?}"
-            );
+            for attendu in [
+                Predefini::Annuler,
+                Predefini::Retablir,
+                Predefini::Couper,
+                Predefini::Copier,
+                Predefini::Coller,
+                Predefini::ToutSelectionner,
+            ] {
+                assert!(
+                    spec.contient_predefini("edition", attendu),
+                    "le menu Édition ne porte pas {attendu:?}"
+                );
+            }
         }
     }
 }

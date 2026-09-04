@@ -1,30 +1,43 @@
 import { expect, test } from '@playwright/test'
 
 /*
- * La coquille sous Windows : les trois boutons de fenêtre, la barre sans le dégagement des feux,
+ * La coquille hors macOS : les trois boutons de fenêtre, la barre sans le dégagement des feux,
  * et les libellés de raccourci en `Ctrl+`.
  *
- * # Pourquoi ce fichier tourne contre son propre serveur
+ * # Un seul fichier, exécuté deux fois
+ *
+ * `playwright.config.ts` déclare deux projets sur ce fichier — `windows` et `linux` —, chacun
+ * contre son propre serveur Vite. Les assertions sont **les mêmes**, et c'est le fait qu'elles
+ * mesurent : la coquille de Windows et celle de Linux ne diffèrent en rien, parce que les quatre
+ * écarts de plateforme du produit séparent macOS du reste (voir `shell/plateforme.ts`). Deux
+ * fichiers jumeaux auraient été deux fichiers à tenir en phase ; un seul fichier lancé deux fois
+ * dit exactement l'exigence.
+ *
+ * C'est aussi ce qui attrape le seul défaut plausible de ce côté : un prédicat resté sur
+ * « est-ce Windows ? » laisserait le décor Linux sur la barre de macOS — sans boutons de fenêtre
+ * et avec des `⌘` — et **la moitié Windows de ce fichier resterait verte**.
+ *
+ * # Pourquoi il tourne contre ses propres serveurs
  *
  * `__APP_PLATFORM__` est posé à la **construction** par `vite.config.ts`, comme la version : une
- * détection à l'exécution serait fausse dans une webview. Le projet `windows` de
- * `playwright.config.ts` démarre donc un second `pnpm dev` avec
- * `DORABASE_PLATEFORME_DECOR=windows`, et ce fichier est le seul qu'il exécute
- * (`testMatch: /\.windows\.spec\.ts$/`).
+ * détection à l'exécution serait fausse dans une webview. Un `pnpm dev` ne peut donc porter qu'une
+ * plateforme, d'où un serveur par décor.
  *
  * # Pourquoi aucune capture de fidélité ici
  *
  * Les références portent le suffixe de plateforme (`-darwin.png`) et ce job tourne sur macOS :
  * une capture prise ici serait comparée à une référence macOS et échouerait sur un écart voulu.
- * Le rendu Windows se lit **à l'œil sur une machine Windows** — c'est dans la liste de ce
+ * Le rendu se lit **à l'œil sur une machine Windows ou Linux** — c'est dans la liste de ce
  * qu'aucun outil ne peut voir, dans AGENTS.md. Ce fichier mesure la **structure** et la
  * **géométrie**, jamais les pixels.
  *
  * # Et pourquoi il part de `/`
  *
  * Règle 8 d'AGENTS.md : un composant juste dans sa vitrine ne prouve rien de l'assemblage. Les
- * tests unitaires de `TitleBar.windows.test.tsx` montent le composant ; celui-ci charge
+ * tests unitaires de `TitleBar.horsMacos.test.tsx` montent le composant ; celui-ci charge
  * l'application.
+ *
+ * Ce fichier s'appelait `coquille.windows.spec.ts` jusqu'au 4 septembre 2026.
  */
 
 test.beforeEach(async ({ page }) => {
@@ -36,7 +49,7 @@ test.beforeEach(async ({ page }) => {
 /** La barre de titre, désignée par sa zone de glissement — le seul élément qui la porte. */
 const BARRE = '[data-tauri-drag-region]'
 
-test('la barre porte les trois boutons de fenêtre, dans l’ordre de Windows', async ({ page }) => {
+test('la barre porte les trois boutons de fenêtre, dans l’ordre du système', async ({ page }) => {
   const barre = page.locator(BARRE).first()
 
   // Les noms sont **ancrés** : `/Fermer/` seul attraperait « Fermer l'onglet » le jour où il
@@ -56,10 +69,14 @@ test('la barre porte les trois boutons de fenêtre, dans l’ordre de Windows', 
 /**
  * **Une seule barre, pas deux.**
  *
- * C'est tout l'enjeu de `decorations: false` : sans lui, Windows dessine sa propre barre
+ * C'est tout l'enjeu de `decorations: false` : sans lui, le système dessine sa propre barre
  * au-dessus de la nôtre — 72 px de chrome pour 40 px d'information, et « DoraBase » deux fois.
  * Ce test ne peut pas voir la barre du système (elle est hors de la page), mais il peut voir que
  * la nôtre est unique et à sa hauteur, ce qui est la moitié mesurable du fait.
+ *
+ * **Sous Linux, ce que la page ne voit pas est en plus une barre de menu GTK** : Tauri y insère
+ * le menu natif *dans* la fenêtre, au-dessus de la webview. C'est la réserve consignée dans
+ * AGENTS.md, et elle n'est pas mesurable d'ici pour la même raison que les feux de macOS.
  */
 test('la barre reste unique et à la hauteur du handoff', async ({ page }) => {
   await expect(page.locator(BARRE)).toHaveCount(1)
@@ -80,7 +97,7 @@ test('la barre reste unique et à la hauteur du handoff', async ({ page }) => {
 /**
  * Le dégagement des feux tombe.
  *
- * Les 78 px de `padding-left` dégagent les trois feux de macOS, **à gauche**. Sous Windows les
+ * Les 78 px de `padding-left` dégagent les trois feux de macOS, **à gauche**. Ailleurs les
  * contrôles sont à droite et ce sont les nôtres : garder le retrait laisserait un trou que rien
  * n'occupe. Mesuré sur la valeur **calculée** et non sur le rectangle — celui-ci inclut les
  * bordures et masquerait l'écart derrière un arrondi (règle 9 d'AGENTS.md).

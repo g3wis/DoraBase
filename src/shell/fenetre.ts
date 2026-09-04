@@ -1,7 +1,7 @@
 import { getCurrentWindow } from '@tauri-apps/api/window'
 
 /**
- * Les quatre gestes de fenêtre que `TitleBar` doit pouvoir faire sous Windows.
+ * Les quatre gestes de fenêtre que `TitleBar` doit pouvoir faire hors macOS.
  *
  * # Pourquoi une passerelle et non des appels directs
  *
@@ -13,7 +13,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
  *
  * # Pourquoi `estMaximisee` et pas seulement `basculerMaximisation`
  *
- * Le bouton central de Windows change de glyphe selon l'état : un carré quand la fenêtre est
+ * Le bouton central change de glyphe selon l'état : un carré quand la fenêtre est
  * normale, deux carrés décalés quand elle est agrandie. Sans lire l'état, le bouton annoncerait
  * toujours « agrandir » y compris quand il restaure — il mentirait sur ce qu'il va faire.
  */
@@ -26,8 +26,8 @@ export type PasserelleFenetre = {
 
 /**
  * La passerelle réelle. Les quatre commandes correspondent une pour une aux permissions de
- * `capabilities/windows.json` — `allow-minimize`, `allow-toggle-maximize`, `allow-close`,
- * `allow-is-maximized` — et `tests/permissions.rs` garde la liste.
+ * `capabilities/boutons-de-fenetre.json` — `allow-minimize`, `allow-toggle-maximize`,
+ * `allow-close`, `allow-is-maximized` — et `tests/permissions.rs` garde la liste.
  *
  * # Les quatre `async` ne sont pas décoratifs
  *

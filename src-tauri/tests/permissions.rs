@@ -47,19 +47,25 @@ const ATTENDUES: &[(&str, &str)] = &[
         "log:allow-log",
         "les journaux du front, qui rendent le pont IPC observable (08d) — `log` seul",
     ),
-    // --- Windows seulement, depuis le 31 août 2026 (`capabilities/windows.json`) ---
+    // --- Hors macOS, depuis le 31 août 2026 (`capabilities/boutons-de-fenetre.json`) ---
     //
     // **Ces quatre-là n'existent pas sur macOS**, et c'est la raison du second fichier. La
-    // capacité porte `"platforms": ["windows"]`, donc la surface macOS reste à onze — celle que
-    // `01` a réduite de 92 à six, et que ce test garde. Une capacité sans ce champ aurait
-    // accordé quatre droits d'écriture sur la fenêtre à une plateforme qui n'en a pas l'usage.
+    // capacité porte `"platforms": ["windows", "linux"]`, donc la surface macOS reste à onze —
+    // celle que `01` a réduite de 92 à six, et que ce test garde. Une capacité sans ce champ
+    // aurait accordé quatre droits d'écriture sur la fenêtre à une plateforme qui n'en a pas
+    // l'usage.
     //
     // Elles sont nécessaires parce que `decorations: false` retire les boutons du système : ce
     // sont les nôtres qui les remplacent, et `core:window:default` n'accorde **aucune**
     // permission d'écriture (0 des 42, relevé au plan `01`).
+    //
+    // **Linux les a rejointes le 4 septembre 2026 sans en ajouter une seule**, et c'est la
+    // propriété qui compte : la coquille y est la même que sous Windows, y compris pour le
+    // redimensionnement — que tao rend lui-même sur une fenêtre sans décoration, donc sans
+    // `allow-start-resize-dragging`.
     (
         "core:window:allow-minimize",
-        "le bouton de réduction de `TitleBar`, sous Windows",
+        "le bouton de réduction de `TitleBar`, hors macOS",
     ),
     (
         "core:window:allow-toggle-maximize",
@@ -80,11 +86,15 @@ const ATTENDUES: &[(&str, &str)] = &[
 
 /// Les deux fichiers de capacités, et pourquoi il y en a deux.
 ///
-/// `default.json` vaut partout ; `windows.json` porte `"platforms": ["windows"]` et n'accorde
-/// donc rien sur macOS. Les lire tous les deux est ce qui fait que `ATTENDUES` reste la liste
-/// **complète** du projet : un fichier de capacités qu'aucun test ne lit serait exactement
-/// l'angle mort que ce test existe pour fermer.
-const FICHIERS: &[&str] = &["default.json", "windows.json"];
+/// `default.json` vaut partout ; `boutons-de-fenetre.json` porte
+/// `"platforms": ["windows", "linux"]` et n'accorde donc rien sur macOS. Les lire tous les deux
+/// est ce qui fait que `ATTENDUES` reste la liste **complète** du projet : un fichier de
+/// capacités qu'aucun test ne lit serait exactement l'angle mort que ce test existe pour fermer.
+///
+/// **Le second fichier s'appelait `windows.json`** jusqu'au 4 septembre 2026 ; il est nommé pour
+/// ce qu'il accorde plutôt que pour la première plateforme qui en a eu besoin — la même
+/// correction que `estWindows` → `estMacos` côté écran.
+const FICHIERS: &[&str] = &["default.json", "boutons-de-fenetre.json"];
 
 fn permissions_declarees() -> Vec<String> {
     let mut toutes = Vec::new();
@@ -150,20 +160,28 @@ fn aucune_permission_par_defaut_de_plugin_n_est_prise() {
     }
 }
 
-/// **Les capacités Windows ne doivent rien accorder à macOS.**
+/// **Les capacités des boutons de fenêtre ne doivent rien accorder à macOS.**
 ///
 /// C'est ce qui fait que la surface macOS reste à onze permissions alors que le projet en
 /// déclare quinze. La garantie tient à un seul champ, `"platforms"`, et rien ne la gardait :
 /// l'oublier n'aurait produit aucune erreur — Tauri accorde alors la capacité **partout** —, et
 /// un bundle macOS aurait embarqué quatre droits d'écriture sur la fenêtre que rien n'appelle.
 ///
-/// Sabotage vérifié le 31 août 2026 : en retirant `"platforms"` de `windows.json`, ce test
-/// tombe et les trois autres restent verts.
+/// Sabotage vérifié le 31 août 2026 : en retirant `"platforms"`, ce test tombe et les trois
+/// autres restent verts.
+///
+/// **La liste est comparée à l'ensemble, pas à un premier élément** : `["windows"]` seul
+/// reviendrait à laisser Linux sans ses boutons, et un `contains("windows")` ne le dirait pas.
+/// C'est le défaut que l'ajout de Linux rend possible, et il serait silencieux — une capacité
+/// absente n'échoue pas, elle refuse à l'exécution.
 #[test]
-fn les_capacites_de_windows_sont_bornees_a_windows() {
-    let chemin = concat!(env!("CARGO_MANIFEST_DIR"), "/capabilities/windows.json");
-    let brut =
-        std::fs::read_to_string(chemin).expect("capabilities/windows.json doit être lisible");
+fn les_capacites_des_boutons_de_fenetre_excluent_macos() {
+    let chemin = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/capabilities/boutons-de-fenetre.json"
+    );
+    let brut = std::fs::read_to_string(chemin)
+        .expect("capabilities/boutons-de-fenetre.json doit être lisible");
     let json: serde_json::Value = serde_json::from_str(&brut).expect("JSON valable");
 
     let plateformes = json["platforms"].as_array().expect(
@@ -175,9 +193,10 @@ fn les_capacites_de_windows_sont_bornees_a_windows() {
     let noms: Vec<&str> = plateformes.iter().filter_map(|v| v.as_str()).collect();
     assert_eq!(
         noms,
-        vec!["windows"],
-        "`platforms` doit valoir exactement [\"windows\"] — la casse compte, `Target` de \
-         tauri-utils sérialise « windows » en minuscules et « macOS » avec une majuscule"
+        vec!["windows", "linux"],
+        "`platforms` doit valoir exactement [\"windows\", \"linux\"] — les deux plateformes qui \
+         dessinent leurs propres boutons, et la casse compte : `Target` de tauri-utils sérialise \
+         « windows » et « linux » en minuscules, « macOS » avec une majuscule"
     );
 }
 
@@ -190,12 +209,15 @@ fn la_surface_reste_tres_inferieure_au_jeu_par_defaut_de_tauri() {
     // Windows. C'est le geste que ce test veut rendre délibéré, et il l'a été : lever un plafond
     // se voit en revue, contrairement à un ajout dans un fichier de capacités. À noter que
     // **onze de ces quinze seulement s'appliquent à macOS** — les quatre autres portent
-    // `"platforms": ["windows"]`, donc la surface réellement accordée sur un bundle macOS n'a
-    // pas bougé.
+    // `"platforms": ["windows", "linux"]`, donc la surface réellement accordée sur un bundle
+    // macOS n'a pas bougé.
+    //
+    // **Et l'ajout de Linux, le 4 septembre 2026, ne l'a pas relevé d'un cran** : la coquille y
+    // fait exactement ce qu'elle fait sous Windows, avec les mêmes quatre permissions.
     let compte = permissions_declarees().len();
     assert!(
         compte <= 15,
         "{compte} permissions : la surface dérive (six au plan 01, sept depuis 08c, huit depuis \
-         10g, quinze depuis les boutons de fenêtre de Windows)"
+         10g, quinze depuis les boutons de fenêtre hors macOS)"
     );
 }

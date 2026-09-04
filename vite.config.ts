@@ -25,6 +25,19 @@ function devCsp(): Plugin {
   }
 }
 
+/**
+ * La plateforme pour laquelle on construit, dans le vocabulaire du produit.
+ *
+ * `process.platform` en connaît une douzaine ; le produit en connaît trois. Les BSD sont
+ * rangés avec macOS par le repli et non par une affirmation : personne n'y a jamais construit
+ * ce bundle, et prétendre le contraire serait inventer un fait.
+ */
+function plateformeDeConstruction(): 'macos' | 'windows' | 'linux' {
+  if (process.platform === 'win32') return 'windows'
+  if (process.platform === 'linux') return 'linux'
+  return 'macos'
+}
+
 export default defineConfig({
   plugins: [react(), devCsp()],
   clearScreen: false,
@@ -43,9 +56,10 @@ export default defineConfig({
     // `navigator.userAgent` ne la donne pas de façon fiable dans un WKWebView, et une valeur écrite
     // à la main cesserait d'être vraie sur l'autre plateforme.
     __APP_ARCH__: JSON.stringify(process.arch === 'arm64' ? 'arm64' : 'x86_64'),
-    // **La plateforme de construction** (31 août 2026), pour tout ce que la coquille doit faire
-    // autrement sous Windows : les boutons de fenêtre que le système n'y dessine plus, et le
-    // modificateur des raccourcis — `⌘` d'un côté, `Ctrl+` de l'autre.
+    // **La plateforme de construction** (31 août 2026, Linux le 4 septembre 2026), pour tout ce
+    // que la coquille doit faire autrement hors de macOS : les boutons de fenêtre que le système
+    // n'y dessine plus, le modificateur des raccourcis — `⌘` d'un côté, `Ctrl+` de l'autre —, le
+    // sens de `ctrl` + molette, et l'existence d'une voie de mise à jour.
     //
     // La même raison que `__APP_ARCH__`, et elle vaut doublement ici : `navigator.userAgent` est
     // peu fiable dans une webview, et surtout un bundle est **construit pour** une plateforme —
@@ -55,10 +69,14 @@ export default defineConfig({
     // Mac** — troisième valeur figée pour le décor, après la version et la locale, et pour la
     // même raison qu'elles : ce que la machine décide ne doit pas décider ce que les tests
     // mesurent. Sans elle, Playwright ne pourrait exercer les trois boutons et les libellés
-    // `Ctrl+` que sur un runner Windows, et le job de fidélité doit rester sur macOS (les
-    // références portent le suffixe `-darwin.png`).
+    // `Ctrl+` que sur un runner Windows ou Linux, et le job de fidélité doit rester sur macOS
+    // (les références portent le suffixe `-darwin.png`).
+    //
+    // **Trois valeurs depuis le 4 septembre 2026**, et le repli reste `'macos'` : la liste est
+    // fermée côté écran (`shell/plateforme.ts`), donc un quatrième mot serait une faute de
+    // frappe, pas une plateforme.
     __APP_PLATFORM__: JSON.stringify(
-      process.env.DORABASE_PLATEFORME_DECOR ?? (process.platform === 'win32' ? 'windows' : 'macos'),
+      process.env.DORABASE_PLATEFORME_DECOR ?? plateformeDeConstruction(),
     ),
   },
   server: { port: 5173, strictPort: true, watch: { ignored: ['**/src-tauri/**'] } },

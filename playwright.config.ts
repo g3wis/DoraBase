@@ -13,20 +13,25 @@ import { defineConfig } from '@playwright/test'
 const port = Number(process.env.DORABASE_E2E_PORT ?? 5173)
 
 /**
- * Le second serveur, celui du décor Windows (31 août 2026).
+ * Les deux serveurs des décors hors macOS (31 août 2026 ; Linux le 4 septembre 2026).
  *
- * **Pourquoi un serveur et pas seulement un projet.** `__APP_PLATFORM__` est posé par
- * `vite.config.ts` au moment de **construire**, comme la version et pour la même raison : une
- * détection à l'exécution serait fausse dans une webview. Deux plateformes veulent donc deux
- * serveurs, et non deux contextes de navigateur — un seul `pnpm dev` ne peut porter qu'un seul
+ * **Pourquoi un serveur par plateforme et pas seulement un projet.** `__APP_PLATFORM__` est posé
+ * par `vite.config.ts` au moment de **construire**, comme la version et pour la même raison : une
+ * détection à l'exécution serait fausse dans une webview. Trois plateformes veulent donc trois
+ * serveurs, et non trois contextes de navigateur — un seul `pnpm dev` ne peut porter qu'un seul
  * `define`.
  *
- * C'est ce qui rend la coquille Windows mesurable **depuis un Mac**, ce dont le projet a besoin :
- * les captures de fidélité portent le suffixe `-darwin.png`, donc le job Playwright doit rester
- * sur macOS, où Playwright *comparerait* au lieu d'*écrire* (sur une autre plateforme il écrit,
- * et la suite est verte sans rien comparer).
+ * C'est ce qui rend les coquilles Windows et Linux mesurables **depuis un Mac**, ce dont le projet
+ * a besoin : les captures de fidélité portent le suffixe `-darwin.png`, donc le job Playwright
+ * doit rester sur macOS, où Playwright *comparerait* au lieu d'*écrire* (sur une autre plateforme
+ * il écrit, et la suite est verte sans rien comparer).
+ *
+ * Les deux ports suivent celui du worktree, qui est déjà choisi par l'appelant
+ * (`DORABASE_E2E_PORT`) : trois ports consécutifs par worktree, en `--strictPort`, donc un
+ * chevauchement échoue au lieu de dérouter l'exécution vers l'application d'une autre branche.
  */
 const portWindows = port + 1
+const portLinux = port + 2
 
 export default defineConfig({
   testDir: './e2e',
@@ -63,29 +68,46 @@ export default defineConfig({
       reuseExistingServer: false,
       env: { DORABASE_VERSION_DECOR: '9.9.9', DORABASE_PLATEFORME_DECOR: 'windows' },
     },
+    {
+      command: `pnpm dev --port ${portLinux} --strictPort`,
+      port: portLinux,
+      reuseExistingServer: false,
+      env: { DORABASE_VERSION_DECOR: '9.9.9', DORABASE_PLATEFORME_DECOR: 'linux' },
+    },
   ],
   /**
-   * Deux projets, et **le découpage n'est pas symétrique**.
+   * Trois projets, et **le découpage n'est pas symétrique**.
    *
-   * `macos` porte toute la suite, captures de fidélité comprises. `windows` ne porte que les
-   * fichiers `*.windows.spec.ts` : y rejouer la suite entière ferait comparer le rendu Windows aux
-   * références `-darwin.png`, donc échouer sur un écart voulu — et doublerait le temps du job pour
-   * mesurer deux fois la même chose partout où la plateforme ne change rien.
+   * `macos` porte toute la suite, captures de fidélité comprises. `windows` et `linux` ne portent
+   * que les fichiers `*.hors-macos.spec.ts` : y rejouer la suite entière ferait comparer leur
+   * rendu aux références `-darwin.png`, donc échouer sur un écart voulu — et triplerait le temps
+   * du job pour mesurer trois fois la même chose partout où la plateforme ne change rien.
    *
-   * `testIgnore` sur `macos` est ce qui garde la symétrie du **fichier** : sans lui, les specs
-   * Windows tourneraient aussi contre le serveur macOS et échoueraient sur l'absence des trois
-   * boutons.
+   * **Le même fichier pour les deux décors hors macOS**, et c'est le fait qu'il mesure : la
+   * coquille de Windows et celle de Linux ne diffèrent en rien, les quatre écarts de plateforme du
+   * produit séparant macOS du reste. Deux fichiers jumeaux auraient été deux fichiers à tenir en
+   * phase ; un fichier lancé deux fois dit l'exigence — et attrape le seul défaut plausible ici,
+   * un prédicat resté sur « est-ce Windows ? », qui laisserait le décor Linux sur la barre de
+   * macOS pendant que la moitié Windows resterait verte.
+   *
+   * `testIgnore` sur `macos` est ce qui garde la symétrie du **fichier** : sans lui, ces specs
+   * tourneraient aussi contre le serveur macOS et échoueraient sur l'absence des trois boutons.
    */
   projects: [
     {
       name: 'macos',
-      testIgnore: /\.windows\.spec\.ts$/,
+      testIgnore: /\.hors-macos\.spec\.ts$/,
       use: { baseURL: `http://localhost:${port}` },
     },
     {
       name: 'windows',
-      testMatch: /\.windows\.spec\.ts$/,
+      testMatch: /\.hors-macos\.spec\.ts$/,
       use: { baseURL: `http://localhost:${portWindows}` },
+    },
+    {
+      name: 'linux',
+      testMatch: /\.hors-macos\.spec\.ts$/,
+      use: { baseURL: `http://localhost:${portLinux}` },
     },
   ],
   /**
@@ -101,7 +123,7 @@ export default defineConfig({
    * C'est exactement le piège que consigne AGENTS.md pour un runner Linux — « Playwright les
    * *écrirait* au lieu de les comparer, une suite verte qui ne compare rien » — atteint ici par
    * un autre chemin, sur le bon système. Le suffixe qui compte est celui de la **plateforme**
-   * (`-darwin`), pas celui du projet : un seul des deux projets prend des captures, et il n'y a
+   * (`-darwin`), pas celui du projet : un seul des trois projets prend des captures, et il n'y a
    * donc rien à distinguer.
    */
   snapshotPathTemplate:

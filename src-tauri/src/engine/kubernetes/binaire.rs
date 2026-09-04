@@ -32,27 +32,32 @@ pub const NOM: &str = "kubectl";
 /// fiable : Rancher Desktop pose son propre répertoire, Docker Desktop garde ses binaires dans le
 /// bundle de l'app, et le SDK Google en installe un exemplaire à côté de `gcloud`. Un `~` de tête
 /// est développé depuis `HOME` ; une app graphique en hérite toujours, contrairement au `PATH`.
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
 const EMPLACEMENTS_CONNUS: &[&str] = &[
     "~/.rd/bin",
     "/Applications/Docker.app/Contents/Resources/bin",
     "~/google-cloud-sdk/bin",
 ];
 
-/// Les mêmes sous Windows (31 août 2026), et la liste y est **plus courte pour une raison**.
+/// Les mêmes hors macOS (31 août 2026 pour Windows, Linux le 4 septembre 2026), et la liste y est
+/// **plus courte pour une raison**.
 ///
-/// Les deux chemins en `~` valent là-bas aussi : Rancher Desktop pose bien `%USERPROFILE%\.rd\bin`,
-/// et le SDK Google s'installe couramment dans le répertoire personnel. Ils ne coûtent rien et
-/// `programme::chemin_utilisateur` sait les développer depuis le 31 août 2026 — c'est même le
-/// défaut que le job Windows a trouvé.
+/// Les deux chemins en `~` valent là-bas aussi : Rancher Desktop pose bien `%USERPROFILE%\.rd\bin`
+/// et `~/.rd/bin`, et le SDK Google s'installe couramment dans le répertoire personnel. Ils ne
+/// coûtent rien et `programme::chemin_utilisateur` sait les développer depuis le 31 août 2026 —
+/// c'est même le défaut que le job Windows a trouvé.
 ///
-/// **Docker Desktop n'y figure pas, et c'est délibéré.** Son chemin Windows
-/// (`C:\Program Files\Docker\Docker\resources\bin`) n'a **pas été mesuré**, contrairement à
-/// celui de macOS ; et le motif qui rend cette liste nécessaire est bien plus faible ici — un
-/// processus Windows hérite du `PATH` de la machine, où l'installateur de Docker Desktop met son
-/// `bin`. L'ajouter serait inventer un fait pour couvrir un cas que le `PATH` couvre déjà. À
-/// reprendre si l'usage dit le contraire.
-#[cfg(windows)]
+/// **Docker Desktop n'y figure pas, et c'est délibéré.** Ni son chemin Windows
+/// (`C:\Program Files\Docker\Docker\resources\bin`) ni son chemin Linux n'ont **été mesurés**,
+/// contrairement à celui de macOS ; et le motif qui rend cette liste nécessaire est bien plus
+/// faible ici — un processus Windows hérite du `PATH` de la machine, et une session de bureau
+/// Linux transmet un `PATH` utilisable, où l'installateur met son `bin`. L'ajouter serait inventer
+/// un fait pour couvrir un cas que le `PATH` couvre déjà. À reprendre si l'usage dit le contraire.
+///
+/// **Une seule liste pour les deux, et non deux identiques** : rien de ce qui la compose ne
+/// distingue Windows de Linux, et deux constantes jumelles seraient deux constantes à tenir en
+/// phase.
+#[cfg(not(target_os = "macos"))]
 const EMPLACEMENTS_CONNUS: &[&str] = &["~/.rd/bin", "~/google-cloud-sdk/bin"];
 
 /// Les répertoires fouillés, dans l'ordre : le `PATH`, les emplacements usuels, puis ceux des
@@ -88,10 +93,25 @@ pub fn localiser() -> Result<PathBuf, EngineError> {
 /// droit de dépendre de ce qui est installé sur la machine qui l'exécute — ni de réussir *parce
 /// que* la machine de développement a `kubectl`.
 pub fn localiser_dans(emplacements: &[PathBuf]) -> Result<PathBuf, EngineError> {
+    // **La manœuvre est celle du système, et un conseil faux est pire que pas de conseil**
+    // (4 septembre 2026) — c'est l'arbitrage déjà écrit pour le proxy Cloud SQL, appliqué ici.
+    // « brew install kubernetes-cli » nommait, hors macOS, un outil que l'utilisateur n'a pas :
+    // le message envoyait chercher une solution qui n'existe pas là où il est. C'était déjà faux
+    // sous Windows depuis le 31 août ; l'ajout de Linux l'a rendu visible.
+    //
+    // L'URL de la documentation vaut sur les trois systèmes — c'est elle qui porte les
+    // instructions de chacun — et c'est ce qui reste commun aux deux messages.
+    let manoeuvre = if cfg!(target_os = "macos") {
+        "installez-le avec « brew install kubernetes-cli », ou depuis \
+         https://kubernetes.io/docs/tasks/tools/"
+    } else {
+        "installez-le depuis https://kubernetes.io/docs/tasks/tools/, ou par le gestionnaire de \
+         paquets du système, et placez-le dans un dossier du PATH"
+    };
+
     programme::localiser_dans(emplacements, NOM).ok_or_else(|| {
         EngineError::local(format!(
-            "le binaire « {NOM} » est introuvable — installez-le avec « brew install \
-             kubernetes-cli », ou depuis https://kubernetes.io/docs/tasks/tools/, puis réessayez"
+            "le binaire « {NOM} » est introuvable — {manoeuvre}, puis réessayez"
         ))
     })
 }
@@ -107,7 +127,19 @@ mod tests {
         // Même exigence qu'`06g` : l'erreur **nomme ce qu'il faut faire**, plutôt que de rendre
         // le « No such file or directory » du système.
         assert!(erreur.message.contains("kubectl"), "{erreur}");
-        assert!(erreur.message.contains("brew install"), "{erreur}");
+        // **La manœuvre est celle du système** : « brew install » n'a de sens que sur macOS, et
+        // l'y exiger partout était l'assertion qui laissait passer un conseil faux sous Windows.
+        // L'URL, elle, vaut sur les trois — c'est ce qui reste commun aux deux messages.
+        let manoeuvre = if cfg!(target_os = "macos") {
+            "brew install"
+        } else {
+            "gestionnaire de paquets"
+        };
+        assert!(erreur.message.contains(manoeuvre), "{erreur}");
+        assert!(
+            erreur.message.contains("kubernetes.io/docs/tasks/tools/"),
+            "l'URL vaut sur les trois systèmes : {erreur}"
+        );
     }
 
     #[test]
@@ -163,23 +195,37 @@ mod tests {
             assert!(rd.is_some(), "Rancher Desktop attendu : {en_texte:?}");
         }
 
-        // Homebrew et Docker Desktop sont des chemins de macOS : sous Windows la liste ne les
-        // porte pas, et `programme::EMPLACEMENTS_USUELS` y est vide — voir leurs déclarations.
-        #[cfg(not(windows))]
+        // Les emplacements usuels de la plateforme sont là, **demandés et non recopiés**
+        // (4 septembre 2026).
+        //
+        // Ce test épinglait `/opt/homebrew/bin` sous `cfg(not(windows))`, ce qui voulait dire
+        // « macOS » sans le dire : l'arrivée de Linux, dont les emplacements usuels ne sont pas
+        // ceux de Homebrew, l'a fait tomber. C'est le défaut d'`estWindows` reparu dans un `cfg`.
+        // Le `cfg` nomme donc les deux plateformes dont la liste n'est pas vide — ailleurs la
+        // boucle ne mesurerait rien.
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         {
-            assert!(
-                en_texte.iter().any(|c| c == "/opt/homebrew/bin"),
-                "{en_texte:?}"
-            );
-            // Docker Desktop garde son `kubectl` dans le bundle de l'app et ne le lie nulle part
-            // de façon fiable.
-            assert!(
-                en_texte
-                    .iter()
-                    .any(|c| c == "/Applications/Docker.app/Contents/Resources/bin"),
-                "{en_texte:?}"
-            );
+            for usuel in programme::EMPLACEMENTS_USUELS {
+                let attendu = programme::chemin_utilisateur(usuel);
+                assert!(
+                    emplacements.contains(&attendu),
+                    "« {} » manque dans {en_texte:?}",
+                    attendu.display()
+                );
+            }
         }
+
+        // Docker Desktop, lui, **est** un chemin de macOS et le reste : il garde son `kubectl`
+        // dans le bundle de l'app et ne le lie nulle part de façon fiable. Ni Windows ni Linux ne
+        // le portent, faute d'avoir été mesurés — voir la déclaration d'`EMPLACEMENTS_CONNUS`.
+        // Le `cfg` dit donc ici ce qu'il veut dire, et c'est pourquoi il ne bouge pas.
+        #[cfg(target_os = "macos")]
+        assert!(
+            en_texte
+                .iter()
+                .any(|c| c == "/Applications/Docker.app/Contents/Resources/bin"),
+            "{en_texte:?}"
+        );
     }
 
     #[test]

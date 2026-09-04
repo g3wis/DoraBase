@@ -1,17 +1,25 @@
 # DoraBase
 
-Un explorateur de bases de données desktop pour macOS et Windows : la densité de l'explorateur
-d'IntelliJ, sans l'IDE. Quatre moteurs — **PostgreSQL**, **MySQL / MariaDB**, **SQLite**,
-**MongoDB** — derrière un seul arbre, une grille dense, une console SQL et un écran de
-structure.
+Un explorateur de bases de données desktop pour macOS, Windows et Linux : la densité de
+l'explorateur d'IntelliJ, sans l'IDE. Quatre moteurs — **PostgreSQL**, **MySQL / MariaDB**,
+**SQLite**, **MongoDB** — derrière un seul arbre, une grille dense, une console SQL et un écran
+de structure.
 
 Tauri 2 + React / TypeScript / Vite.
 
-**Windows est distribué, mais non signé.** Chaque version publiée porte un installateur
-`.exe` à côté du `.dmg` : le produit y fait tout ce qu'il fait sur macOS, et la CI le vérifie à
-chaque commit. Ce qui manque est un certificat Authenticode, donc **Windows avertira au
-téléchargement** et **les installations Windows ne se mettent pas à jour seules** — il faut
-retélécharger l'installateur à chaque version.
+**macOS est la plateforme soutenue ; Windows et Linux sont distribués sans signature.** Chaque
+version publiée porte un installateur `.exe` et deux paquets Linux à côté du `.dmg` : le produit
+y fait tout ce qu'il fait sur macOS, et la CI le vérifie à chaque commit. Ce qui manque diffère
+d'un côté à l'autre :
+
+- **Windows** n'a pas de certificat Authenticode, donc **SmartScreen avertira au
+  téléchargement** ;
+- **Linux** n'a rien à signer, mais ses paquets sont construits sur la dernière Ubuntu des
+  runners GitHub, donc **liés à la glibc de cette image** : une distribution plus ancienne ne les
+  lancera pas.
+
+Et sur les deux, **les installations ne se mettent pas à jour seules** — il faut retélécharger à
+chaque version. La mise à jour en place est macOS seulement, et les raisons sont dites plus bas.
 
 ---
 
@@ -30,6 +38,8 @@ empreinte SHA-256 :
 | `latest.json` | ce que l'application lit pour savoir qu'une version existe (macOS seulement) |
 | `DoraBase-X.Y.Z-x64-setup.exe` | l'installateur Windows, **non signé** — voir plus bas |
 | `DoraBase-X.Y.Z-x64-setup.exe.sha256` | son empreinte |
+| `DoraBase-X.Y.Z-amd64.deb` | le paquet Debian / Ubuntu — voir plus bas |
+| `DoraBase-X.Y.Z-amd64.AppImage` | la même application, sans installation, pour les autres distributions |
 
 **macOS 13 Ventura** au minimum. Toutes les versions sont sur la
 [page des releases](https://github.com/g3wis/DoraBase/releases).
@@ -70,7 +80,43 @@ Get-FileHash DoraBase-X.Y.Z-x64-setup.exe -Algorithm SHA256
 
 **Il n'y a pas de mise à jour automatique sous Windows** : l'application ne propose rien, et il
 faut retélécharger l'installateur à chaque version. C'est délibéré — proposer un remplacement que
-personne ne peut authentifier serait pire que de ne rien proposer.
+personne ne peut authentifier serait pire que de ne rien proposer. La section « Mises à jour » des
+préférences le dit sur place, plutôt que d'offrir un bouton qui échouerait toujours.
+
+### Installer sur Linux
+
+Deux formes, au choix, et **la même application** dans les deux :
+
+```bash
+# Debian, Ubuntu et dérivées
+sudo apt install ./DoraBase-X.Y.Z-amd64.deb
+
+# Partout ailleurs : rien à installer
+chmod +x DoraBase-X.Y.Z-amd64.AppImage
+./DoraBase-X.Y.Z-amd64.AppImage
+```
+
+Le `.deb` déclare ses dépendances et s'appuie sur la WebKitGTK du système ; l'AppImage embarque
+la sienne, ce qui la rend plus lourde et indifférente à la distribution. Il n'y a **pas de
+`.rpm`** : Tauri le produit sans déclarer aucune dépendance, donc il s'installerait proprement
+et pourrait ne pas se lancer — l'AppImage couvre ces distributions honnêtement.
+
+Les empreintes sont publiées à côté :
+
+```bash
+sha256sum -c DoraBase-X.Y.Z-amd64.deb.sha256
+```
+
+**Le plancher est celui du runner qui a construit** — la dernière Ubuntu des images GitHub — donc
+une distribution nettement plus ancienne refusera de lancer le binaire, avec une erreur de glibc.
+C'est le pendant du « macOS 13 Ventura » ci-dessus, à une différence près : celui-là est déclaré,
+celui-ci est subi. Compiler soi-même est la réponse en attendant (voir *Développer*).
+
+**Pas de mise à jour automatique sous Linux non plus**, et la raison n'est pas celle de Windows :
+la clé du projet suffirait à authentifier une archive, mais le mécanisme de Tauri ne sait
+remplacer qu'un AppImage. Une installation par le `.deb` verrait une annonce de version et un
+bouton qui échoue à tous les coups ; une voie qui marche pour une moitié des installations n'est
+pas une voie.
 
 ### Mettre à jour
 
@@ -93,11 +139,11 @@ ne l'a pas, et le dit plutôt que d'échouer en silence — dans ce cas, retél�
 
 ### Essayer un commit, sans attendre une version
 
-Chaque commit poussé produit deux artefacts de CI, gardés **sept jours** : ouvrir le
+Chaque commit poussé produit trois artefacts de CI, gardés **sept jours** : ouvrir le
 [job CI](https://github.com/g3wis/DoraBase/actions/workflows/ci.yml) du commit, section
-*Artifacts*, puis `DoraBase-<sha>-dmg` ou `DoraBase-<sha>-nsis`. Il faut un accès au dépôt, et
-le `.dmg` est **mono-architecture** — celle du runner GitHub. Pour installer, préférez une
-version publiée.
+*Artifacts*, puis `DoraBase-<sha>-dmg`, `DoraBase-<sha>-nsis` ou `DoraBase-<sha>-linux`. Il faut
+un accès au dépôt, et le `.dmg` est **mono-architecture** — celle du runner GitHub. Pour
+installer, préférez une version publiée.
 
 ---
 
@@ -127,12 +173,13 @@ branche de travail  ──PR──▶  main (CI verte)  ──version.sh──�
    git push origin main --follow-tags   # c'est le tag qui déclenche la publication
    ```
 
-3. **Le tag `vX.Y.Z` déclenche `publication.yml`** : construction du bundle universel,
-   signature et notarisation Apple, vérifications, puis release GitHub avec le `.dmg`,
-   l'archive de mise à jour, le manifeste `latest.json` et les notes de version — celles-ci
-   listent les commits depuis le tag précédent. Un second job construit ensuite
-   l'installateur Windows et l'attache à la même release : **après** elle, pour qu'un échec
-   de ce côté ne coûte pas la publication macOS.
+3. **Le tag `vX.Y.Z` déclenche `publication.yml`** : un premier job crée la release et écrit
+   les notes de version — celles-ci listent les commits depuis le tag précédent —, puis
+   **trois constructions en parallèle** y attachent leurs artefacts. macOS produit le bundle
+   universel, sa signature et sa notarisation Apple, l'archive de mise à jour et le manifeste
+   `latest.json` ; Windows produit l'installateur NSIS ; Linux produit le `.deb` et
+   l'AppImage. Les trois ne dépendent que de la release, jamais l'une de l'autre : **un échec
+   de Windows ou de Linux ne coûte pas la publication macOS**, qui est l'artefact soutenu.
 
 Ce que le script refuse, et pourquoi : une branche autre que `main` (le tag désignerait un
 état que la CI n'a pas validé), un arbre sale (le commit de relèvement emporterait du
@@ -220,6 +267,23 @@ plutôt que de laisser croire à une application cassée.
 
 Pour compiler pour Windows **depuis un Mac** (utile pour vérifier qu'une modification compile,
 sans machine Windows) : voir la section *Commandes* d'[AGENTS.md](AGENTS.md).
+
+### Sur Linux
+
+```bash
+sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+pnpm install
+pnpm tauri build     # produit un .deb et un .AppImage dans src-tauri/target/release/bundle/
+```
+
+Les quatre paquets sont ceux que la CI installe ; sur une distribution non Debian, prendre leurs
+équivalents. **Construire soi-même est aussi la façon de descendre sous le plancher de glibc** des
+paquets publiés : compilé sur votre distribution, le binaire s'y lie.
+
+La coquille dessine ses propres boutons de fenêtre (`decorations: false`), et le
+redimensionnement au bord est celui de tao : une bande de 5 px, active parce que la fenêtre est
+sans décoration. Le menu natif, lui, est inséré **dans** la fenêtre par GTK, au-dessus de la barre
+de titre — voir la réserve consignée dans [AGENTS.md](AGENTS.md).
 
 Les conventions, les décisions et leurs raisons, les prohibitions de design et les pièges
 propres à cette machine sont dans **[AGENTS.md](AGENTS.md)** — le document de référence du

@@ -21,7 +21,7 @@ use crate::engine::programme;
 /// Le `*` d'un segment est développé en listant le répertoire parent : `postgresql@17`,
 /// `postgresql@16`… Une app lancée depuis le Finder n'hérite pas du `PATH` du shell, donc
 /// cette liste n'est pas un luxe — c'est le cas courant.
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
 pub const EMPLACEMENTS_CONNUS: &[&str] = &[
     "/opt/homebrew/opt/postgresql@*/bin",
     "/opt/homebrew/opt/libpq/bin",
@@ -30,6 +30,29 @@ pub const EMPLACEMENTS_CONNUS: &[&str] = &[
     "/Applications/Postgres.app/Contents/Versions/*/bin",
     "/usr/bin",
 ];
+
+/// Les mêmes emplacements sous Linux (4 septembre 2026).
+///
+/// **Le motif est le même que sous Windows, pas celui de macOS** : ce n'est pas le `PATH` qui
+/// manque — une session de bureau en transmet un utilisable —, c'est que les paquets qui
+/// installent plusieurs versions majeures côte à côte ne mettent **aucune** d'elles dans le
+/// `PATH`. Le résultat est identique : l'outil est installé et introuvable.
+///
+/// - **`/usr/lib/postgresql/*/bin`** est la disposition de Debian et d'Ubuntu, PGDG compris.
+///   Elle est **mesurée**, et pas lue dans une documentation : c'est exactement le chemin que le
+///   job Linux de `ci.yml` ajoute au `PATH` pour que les tests de dump voient le client 17
+///   (`echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"`) ;
+/// - **`/usr/pgsql-*/bin`** est celle du dépôt PGDG pour RHEL et Fedora. Elle vient de la
+///   documentation de ce dépôt, **non mesurée** — comme les deux chemins Windows, et à confirmer
+///   de la même façon ;
+/// - **`/usr/bin`** ferme la liste, comme sur macOS : c'est là que vit le paquet
+///   `postgresql-client` d'une distribution qui n'en garde qu'une version.
+///
+/// Le tri décroissant de `developper` fait préférer la majeure la plus récente, comme pour les
+/// `postgresql@N` de Homebrew.
+#[cfg(target_os = "linux")]
+pub const EMPLACEMENTS_CONNUS: &[&str] =
+    &["/usr/lib/postgresql/*/bin", "/usr/pgsql-*/bin", "/usr/bin"];
 
 /// Les mêmes emplacements sous Windows (31 août 2026).
 ///
@@ -52,6 +75,13 @@ pub const EMPLACEMENTS_CONNUS: &[&str] = &[
     r"C:\Program Files\PostgreSQL\*\bin",
     r"C:\Program Files (x86)\PostgreSQL\*\bin",
 ];
+
+/// Les autres unix : aucun chemin mesuré, donc aucun deviné.
+///
+/// Le `PATH` reste fouillé — c'est `decouvrir` qui l'apporte —, et un repli emprunté à une autre
+/// distribution serait l'invention de fait que la liste Linux ci-dessus refuse.
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
+pub const EMPLACEMENTS_CONNUS: &[&str] = &[];
 
 /// Découvre un binaire : `PATH` d'abord, puis les emplacements connus.
 pub fn decouvrir(binaire: &'static str, serveur: Version) -> DumpAvailability {

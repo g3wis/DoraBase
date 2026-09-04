@@ -5,7 +5,7 @@ import type { IconName } from '../../design/icons/names'
 import type { Guards, Preferences, Theme } from '../../domain/config'
 import type { AvailableUpdate } from '../../domain/maj'
 import { useT } from '../../i18n/LanguageContext'
-import { raccourci } from '../../shell/plateforme'
+import { aUneVoieDeMiseAJour, type Plateforme, plateforme, raccourci } from '../../shell/plateforme'
 import { Button } from '../../ui/Button/Button'
 import { Modal } from '../../ui/Modal/Modal'
 import { Toggle } from '../../ui/Toggle/Toggle'
@@ -55,6 +55,16 @@ type PreferencesDialogProps = {
    * `null` laisse la section sur « pas encore cherché », qui n'est pas « à jour ».
    */
   majDejaTrouvee?: AvailableUpdate | null
+  /**
+   * La plateforme, pour la section « Mises à jour » seule.
+   *
+   * Paramètre pour la raison de `shell/plateforme` : `__APP_PLATFORM__` est figé à la
+   * compilation, donc sans elle la section ne serait mesurée que dans un sens. Et elle est
+   * **passée jusqu'ici** plutôt que lue dans `MisesAJour` pour la seconde moitié de cette raison
+   * — `pnpm test` doit être vert sous les trois décors, et un composant qui lit la constante
+   * ferait dépendre les cinq tests de mise à jour du décor sous lequel la suite tourne.
+   */
+  sur?: Plateforme
 }
 
 /**
@@ -82,6 +92,7 @@ export function PreferencesDialog({
   installerMiseAJour = installUpdate,
   sectionInitiale = 'apparence',
   majDejaTrouvee = null,
+  sur = plateforme(),
 }: PreferencesDialogProps) {
   const t = useT()
 
@@ -199,6 +210,7 @@ export function PreferencesDialog({
               chercher={chercherMiseAJour}
               installer={installerMiseAJour}
               dejaTrouvee={majDejaTrouvee}
+              sur={sur}
             />
           )}
           {section === 'general' && <General preferences={preferences} onRegler={regler} />}
@@ -508,13 +520,17 @@ function MisesAJour({
   chercher,
   installer,
   dejaTrouvee,
+  sur,
 }: {
   chercher: () => Promise<AvailableUpdate | null>
   installer: () => Promise<void>
   /** Voir `majDejaTrouvee` : une recherche faite par la notification, reprise sans en refaire une. */
   dejaTrouvee: AvailableUpdate | null
+  /** La plateforme, toujours passée par `PreferencesDialog` — voir sa prop `sur`. */
+  sur: Plateforme
 }) {
   const t = useT()
+  const voie = aUneVoieDeMiseAJour(sur)
   // Quatre états, et « pas encore cherché » n'est pas « à jour » — c'est la même distinction que
   // les quatre états d'une base dans l'arbre : « jamais tentée » n'est pas « hors ligne ».
   const [etat, setEtat] = useState<
@@ -556,17 +572,33 @@ function MisesAJour({
     <section className={styles.bloc}>
       <h3 className={styles.titre}>{t('preferences.maj.titre')}</h3>
       <div className={styles.maj}>
+        {/* **Sans voie de mise à jour, le bouton est désactivé avec sa raison** (4 septembre
+            2026), et c'est la règle de `09f` : un bouton actif qui retombe toujours en échec se
+            lit comme une panne. Le laisser cliquable donnerait « the platform `linux-x86_64` was
+            not found on the response `platforms` object » — un message qui accuse une
+            installation parfaitement correcte.
+
+            `aria-disabled` plutôt que `disabled`, parce qu'il porte une explication : un
+            `<button disabled>` ne reçoit ni focus ni survol, donc son infobulle serait
+            inatteignable là où elle est le plus utile (piège n° 3 d'accessibilité). D'où aussi
+            l'`onClick` retiré plutôt que neutralisé — `aria-disabled` n'empêche rien de
+            lui-même. */}
         <Button
           variant="secondary"
           size="md"
-          onClick={rechercher}
-          disabled={etat.quoi === 'recherche'}
+          onClick={voie ? rechercher : undefined}
+          disabled={voie && etat.quoi === 'recherche'}
+          aria-disabled={voie ? undefined : true}
+          title={voie ? undefined : t('preferences.maj.sansVoieTitre')}
         >
           {etat.quoi === 'recherche'
             ? t('preferences.maj.recherche')
             : t('preferences.maj.rechercher')}
         </Button>
       </div>
+      {/* La phrase qui dit quoi faire à la place. Hors du `role="status"` ci-dessous : elle ne
+          répond à aucun clic, elle décrit l'état du bundle. */}
+      {!voie && <p className={styles.note}>{t('preferences.maj.sansVoie')}</p>}
 
       {/* `role="status"` : la réponse arrive après le clic, donc elle doit s'annoncer sans que le
           focus quitte le bouton. */}

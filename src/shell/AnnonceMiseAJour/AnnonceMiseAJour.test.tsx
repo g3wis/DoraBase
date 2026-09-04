@@ -3,14 +3,26 @@ import userEvent from '@testing-library/user-event'
 import { expect, test, vi } from 'vitest'
 import { Sprite } from '../../design/icons/Sprite'
 import { LanguageProvider } from '../../i18n/LanguageContext'
+import type { Plateforme } from '../plateforme'
 import { AnnonceMiseAJour } from './AnnonceMiseAJour'
 
-function monter(props: Parameters<typeof AnnonceMiseAJour>[0]) {
+/**
+ * **La plateforme est nommée, jamais déduite** — `'macos'` par défaut ici.
+ *
+ * L'annonce ne cherche rien là où il n'y a pas de voie de mise à jour (4 septembre 2026) : sans
+ * ce paramètre, les cinq tests qui attendent une annonce échoueraient sous
+ * `DORABASE_PLATEFORME_DECOR=windows` et `=linux`, où `pnpm test` doit être vert. Le cas sans
+ * voie est mesuré à part, en bas de ce fichier.
+ */
+function monter(
+  props: Omit<Parameters<typeof AnnonceMiseAJour>[0], 'sur'>,
+  sur: Plateforme = 'macos',
+) {
   return render(
     <>
       <Sprite />
       <LanguageProvider preferences={{ language: 'fr' }}>
-        <AnnonceMiseAJour {...props} />
+        <AnnonceMiseAJour {...props} sur={sur} />
       </LanguageProvider>
     </>,
   )
@@ -91,4 +103,23 @@ test('deux montages de la même recherche ne comptent que pour un appel', async 
   monter({ chercher, onInstaller: vi.fn() })
   await screen.findAllByRole('button', { name: 'Installer' })
   expect(appels).toBe(1)
+})
+
+/**
+ * **Là où aucune voie de mise à jour n'existe, rien n'est même demandé** (4 septembre 2026).
+ *
+ * `latest.json` ne porte que les deux clefs `darwin-*` : sous Windows et sous Linux le plugin
+ * échoue sur « the platform … was not found », donc l'annonce serait de toute façon muette. Ce qui
+ * se mesure ici est qu'elle ne paie pas une requête réseau au démarrage pour une réponse connue
+ * d'avance — l'assertion sur le rendu seul serait verte même si l'appel avait lieu.
+ *
+ * Les deux plateformes sont nommées séparément parce qu'elles rendent la même chose pour deux
+ * raisons différentes (voir `shell/plateforme`), et parce qu'un prédicat resté sur Windows
+ * laisserait Linux chercher sans que rien ne bouge ici.
+ */
+test.each(['windows', 'linux'] as const)('sous %s, elle ne cherche même pas', async (sur) => {
+  const chercher = vi.fn(() => Promise.resolve({ version: '0.2.0', notes: null }))
+  const { container } = monter({ chercher, onInstaller: vi.fn() }, sur)
+  await waitFor(() => expect(container.querySelector('[role="status"]')).toBeNull())
+  expect(chercher).not.toHaveBeenCalled()
 })

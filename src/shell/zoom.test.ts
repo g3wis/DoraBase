@@ -74,22 +74,30 @@ describe('le crochet (`useZoom`)', () => {
    * **Le refus du pincement est macOS seulement, et voici les deux moitiés du fait.**
    *
    * Les tests ci-dessus tournent sur la plateforme de cette machine ; celui-ci nomme la sienne,
-   * sans quoi la branche Windows — celle qui vient d'être écrite — ne serait exercée par aucun
-   * test. C'est la raison du paramètre `sur`.
+   * sans quoi la branche hors macOS ne serait exercée par aucun test. C'est la raison du
+   * paramètre `sur`.
    *
-   * Sous Windows, `Ctrl` + molette est le geste de zoom volontaire de tous les logiciels, et le
-   * pincement du pavé de précision arrive par le même événement : le refuser retirerait le zoom
-   * au lieu de l'adoucir. L'événement n'est donc **pas** refusé sèchement — il tombe dans le
-   * chemin du zoom fin, qui hors de Tauri (donc sous jsdom) laisse le navigateur faire.
+   * Hors macOS, `Ctrl` + molette est le geste de zoom volontaire de tous les logiciels — sous
+   * Windows comme sous GTK —, et le pincement du pavé de précision arrive par le même
+   * événement : le refuser retirerait le zoom au lieu de l'adoucir. L'événement n'est donc
+   * **pas** refusé sèchement — il tombe dans le chemin du zoom fin, qui hors de Tauri (donc
+   * sous jsdom) laisse le navigateur faire.
+   *
+   * **Les deux plateformes sont nommées** parce qu'elles rendent la même chose : un prédicat
+   * resté sur `sur === 'windows'` laisserait Linux au refus de macOS, donc sans zoom au geste,
+   * sans qu'aucune assertion Windows ne bouge.
    */
-  it('sous Windows, Ctrl + molette n’est pas refusé : c’est le geste de zoom', () => {
-    const appliquer = vi.fn(async () => {})
-    renderHook(() => useZoom({ appliquer }, 'windows'))
-    const geste = new WheelEvent('wheel', { deltaY: -100, ctrlKey: true, cancelable: true })
-    window.dispatchEvent(geste)
-    // Le refus actif de macOS n'a pas eu lieu.
-    expect(geste.defaultPrevented).toBe(false)
-  })
+  it.each(['windows', 'linux'] as const)(
+    'sous %s, Ctrl + molette n’est pas refusé : c’est le geste de zoom',
+    (sur) => {
+      const appliquer = vi.fn(async () => {})
+      renderHook(() => useZoom({ appliquer }, sur))
+      const geste = new WheelEvent('wheel', { deltaY: -100, ctrlKey: true, cancelable: true })
+      window.dispatchEvent(geste)
+      // Le refus actif de macOS n'a pas eu lieu.
+      expect(geste.defaultPrevented).toBe(false)
+    },
+  )
 
   it('sur macOS, le même événement est refusé — les deux branches diffèrent bien', () => {
     const appliquer = vi.fn(async () => {})

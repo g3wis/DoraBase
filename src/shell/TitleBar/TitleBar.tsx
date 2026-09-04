@@ -3,7 +3,7 @@ import { Icon } from '../../design/icons/Icon'
 import { useT } from '../../i18n/LanguageContext'
 import { cx } from '../../ui/cx'
 import { PASSERELLE_FENETRE, type PasserelleFenetre } from '../fenetre'
-import { estWindows, type Plateforme, plateforme } from '../plateforme'
+import { dessineSesBoutonsDeFenetre, type Plateforme, plateforme } from '../plateforme'
 import styles from './TitleBar.module.css'
 
 /*
@@ -48,41 +48,56 @@ type TitleBarProps = {
    */
   onOpenPreferences?: () => void
   /**
-   * Les gestes de fenêtre des trois boutons Windows. Injectée pour la raison de
-   * `PASSERELLE_ZOOM` : hors de la webview, `getCurrentWindow()` n'existe pas.
+   * Les gestes des trois boutons de fenêtre. Injectée pour la raison de `PASSERELLE_ZOOM` :
+   * hors de la webview, `getCurrentWindow()` n'existe pas.
    */
   fenetre?: PasserelleFenetre
   /**
    * La plateforme, paramètre pour la même raison qu'ailleurs — `__APP_PLATFORM__` est figé à
-   * la compilation, donc sans elle la barre Windows ne serait montée par aucun test.
+   * la compilation, donc sans elle la barre hors macOS ne serait montée par aucun test.
    */
   sur?: Plateforme
 }
 
 /**
- * Les trois boutons que Windows ne dessine plus.
+ * Les trois boutons que le système ne dessine plus, hors macOS.
  *
  * # Pourquoi ils existent
  *
- * `titleBarStyle: "Overlay"` et `hiddenTitle` sont des clefs **macOS seulement** : sous Windows
+ * `titleBarStyle: "Overlay"` et `hiddenTitle` sont des clefs **macOS seulement** : ailleurs
  * elles ne font rien, et le système dessinerait sa propre barre **au-dessus** de la nôtre —
  * 72 px de chrome pour 40 px d'information, et le mot « DoraBase » deux fois. `decorations:
  * false` retire ce cadre, ce qui rend les trois boutons à notre charge. Ce sont les premiers
  * pixels inventés du projet ; la raison est consignée dans AGENTS.md.
  *
+ * # Windows et Linux les reçoivent à l'identique
+ *
+ * Ce n'est pas une économie : les deux systèmes placent la fermeture **au bord droit**, dans
+ * cet ordre — GNOME et KDE comme Windows —, et les trois gestes passent par la même passerelle
+ * Tauri. Un jeu de boutons par plateforme serait deux jeux à tenir en phase pour un rendu
+ * identique.
+ *
+ * **Ce que Linux ajoute, et que rien ici ne voit** : `decorations: false` y retire aussi les
+ * bordures de redimensionnement du gestionnaire de fenêtres. C'est tao qui les rend — une bande
+ * de 5 px × facteur d'échelle testée à chaque clic, active **seulement** quand la fenêtre est
+ * sans décoration, redimensionnable et non agrandie (`platform_impl/linux/event_loop.rs`, lu le
+ * 4 septembre 2026). La fenêtre reste donc redimensionnable sans qu'on écrive une poignée, et
+ * sans la permission `allow-start-resize-dragging`.
+ *
  * # Ce qui les distingue des feux de macOS
  *
- * Ils sont **à droite** (convention Windows), et ils sont à nous — donc, contrairement aux feux,
- * ils obéissent au CSS. Deux conséquences : `padding-left: 78px` n'a plus de raison d'être
- * (c'était le dégagement des feux, qui sont à gauche), et `dimmed` les ternit vraiment, ce que
- * le mockup demandait et que macOS refusait.
+ * Ils sont **à droite**, et ils sont à nous — donc, contrairement aux feux, ils obéissent au
+ * CSS. Deux conséquences : `padding-left: 78px` n'a plus de raison d'être (c'était le
+ * dégagement des feux, qui sont à gauche), et `dimmed` les ternit vraiment, ce que le mockup
+ * demandait et que macOS refusait.
  *
  * # Le glyphe du bouton central suit l'état
  *
  * Carré quand la fenêtre est normale, deux carrés décalés quand elle est agrandie. Un bouton
  * qui annoncerait toujours « agrandir » mentirait une fois sur deux sur ce qu'il va faire.
  * L'état est relu à chaque `resize` : c'est le seul événement qui change la maximisation, y
- * compris par un double-clic sur la barre ou par `Win+↑`, que rien dans ce composant ne voit.
+ * compris par un double-clic sur la barre, par `Win+↑` ou par une tuile du gestionnaire de
+ * fenêtres, que rien dans ce composant ne voit.
  */
 function BoutonsDeFenetre({ passerelle }: { passerelle: PasserelleFenetre }) {
   const t = useT()
@@ -128,7 +143,8 @@ function BoutonsDeFenetre({ passerelle }: { passerelle: PasserelleFenetre }) {
         <Icon name={maximisee ? 'wrestore' : 'wmax'} size={15} strokeWidth={1.8} />
       </button>
       {/* **Le seul bouton du produit à porter un survol rouge**, et le cinquième état de survol
-          du dépôt. C'est la convention Windows, et s'en écarter ferait chercher la fermeture.
+          du dépôt. C'est la convention de Windows comme des bureaux Linux, et s'en écarter
+          ferait chercher la fermeture.
           Le rouge est `--hover-close`, dérivé de `--danger` : celui du produit, pas le #E81123
           de Microsoft, qui jurerait sur du papier crème. Consigné dans AGENTS.md. */}
       <button
@@ -165,10 +181,10 @@ export function TitleBar({
   sur = plateforme(),
 }: TitleBarProps) {
   const t = useT()
-  const windows = estWindows(sur)
+  const nosBoutons = dessineSesBoutonsDeFenetre(sur)
   return (
     <div
-      className={cx(styles.root, windows && styles.rootWindows, dimmed && styles.dimmed)}
+      className={cx(styles.root, nosBoutons && styles.rootNosBoutons, dimmed && styles.dimmed)}
       data-tauri-drag-region="deep"
     >
       <div className={cx(styles.wordmark, dimmed && styles.wordmarkDimmed)}>
@@ -196,9 +212,9 @@ export function TitleBar({
         >
           <Icon name="gear" size={15} strokeWidth={1.8} />
         </button>
-        {/* Après l'engrenage : les boutons de fenêtre sont **au bord**, comme partout sous
-            Windows, et une action du produit ne doit pas se glisser entre eux. */}
-        {windows && <BoutonsDeFenetre passerelle={fenetre} />}
+        {/* Après l'engrenage : les boutons de fenêtre sont **au bord**, comme partout hors de
+            macOS, et une action du produit ne doit pas se glisser entre eux. */}
+        {nosBoutons && <BoutonsDeFenetre passerelle={fenetre} />}
       </div>
     </div>
   )

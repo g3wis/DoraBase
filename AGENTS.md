@@ -48,11 +48,16 @@ maintenant, et rien n'est à réécrire.
 
 ## Le produit en trois phrases
 
-DoraBase est un explorateur de bases de données desktop macOS : la densité de
+DoraBase est un explorateur de bases de données desktop : la densité de
 l'explorateur d'IntelliJ, sans l'IDE, et plus soigné que phpMyAdmin ou pgAdmin. La stack
 est **Tauri 2 + React / TypeScript / Vite**, choisie pour que les deux composants les plus
 coûteux — grille dense et éditeur de code — soient déjà résolus par l'écosystème web.
 Quatre moteurs répondent : PostgreSQL, MySQL / MariaDB, SQLite, MongoDB.
+
+**macOS est la plateforme d'origine et la seule soutenue** — c'est elle que le handoff décrit, elle
+que les captures de fidélité mesurent, et la seule à recevoir des mises à jour en place. Windows
+(31 août 2026) et Linux (4 septembre 2026) compilent, tournent et sont distribués sans signature ;
+leurs écarts et leurs réserves ont chacun leur section.
 
 Dix écrans sont assemblés et atteignables : accueil, nouvelle connexion et son échec,
 explorateur, visualiseur, édition inline, console SQL, console MongoDB, structure et DDL,
@@ -1077,12 +1082,18 @@ points à ne pas défaire :
   absolu que l'utilisateur n'a pas saisi, donc une configuration qui cesse d'être vraie sur une autre
   machine ou sous un autre compte. Seul le processus qui lance `kubectl` connaît son `HOME`.
 
-**Deux autres chemins saisis du produit ne sont pas développés, et c'est un défaut antérieur** :
-`ca_certificate`, lu en `std::fs::read` par `engine/tls.rs`, et `private_key_path`, ouvert par
-`engine/tunnel/`. Les deux **annoncent** pourtant un `~` — le `placeholder` du certificat propose
-`~/certs/interne.pem`, et la capture de fidélité du panneau remplit la clé privée avec
-`~/.ssh/id_ed25519`. `programme::chemin_utilisateur` est la fonction à leur brancher ; ce n'a pas été
-fait le 31 août pour ne pas mêler deux chantiers.
+**Un chemin saisi du produit n'est pas développé, et c'est un défaut antérieur** :
+`private_key_path`, que `engine/tunnel/mod.rs` passe brut à `key::charger`. Il **annonce** pourtant
+un `~` — la capture de fidélité du panneau remplit la clé privée avec `~/.ssh/id_ed25519`.
+`programme::chemin_utilisateur` est la fonction à lui brancher ; ce n'a pas été fait le 31 août pour
+ne pas mêler deux chantiers.
+
+**Cette phrase en nommait deux jusqu'au 4 septembre 2026, et se trompait sur le second.**
+`ca_certificate` **est** développé, et l'était déjà quand la note a été écrite : `engine/tls.rs`
+délègue par `expanser_le_tilde`, arrivé avec le TLS de `06f`. C'est la règle n° 20 sur un
+commentaire de fichier plutôt que sur une garantie — celui-ci est précisément celui qu'on relit en
+cherchant pourquoi un `~` n'est pas développé, et il envoyait chercher dans le seul des deux
+fichiers où il n'y avait rien à trouver.
 
 **La cible est une ressource, pas un hôte — et le champ « Hôte » est donc grisé.** Une base qui vit
 dans un cluster n'a pas d'adresse joignable depuis le poste : ce sont trois coordonnées qui la
@@ -1798,6 +1809,11 @@ notarié » transposé : proposer un remplacement qu'on ne peut pas authentifier
 n'ont rien demandé, est pire que ne rien proposer. Deux gardes de `verifier-ci.py` le tiennent,
 et les retirer est le geste visible en revue qui ouvrirait cette voie.
 
+**Depuis le 4 septembre 2026, Linux est dans le même cas — pour une autre raison.** Voir sa
+section : la clé minisign suffirait à authentifier une archive, mais le plugin ne sait remplacer
+qu'un AppImage, donc une installation par le `.deb` n'aurait aucune voie. Les deux gardes ci-dessus
+en ont donc quatre, et le prédicat `aUneVoieDeMiseAJour` porte le fait côté écran.
+
 **L'installateur s'attache après coup, et c'est un ordre, pas une négligence.** Le job `windows`
 de `publication.yml` déclare `needs: macos` et emploie `gh release upload` — pas un second
 `gh release create`, dont l'unicité décide du `--latest`. La conséquence voulue : **un échec de
@@ -1910,8 +1926,8 @@ env -u HOME USERPROFILE=/tmp/faux-home target/debug/deps/dorabase_lib-<empreinte
   disparaître `title`, `width`, `height`, `minWidth`, `minHeight` et `resizable` — le bundle prend
   les défauts de Tauri (800 × 600, sans titre) et **rien n'échoue**. Vérifié contre `json-patch`
   3.0.1, la version du verrou. Le recouvrement répète donc toute la fenêtre, et
-  `scripts/verifier-conf-windows.py` garde la répétition honnête : sans lui, relever `width` d'un
-  seul côté laisserait Windows à l'ancienne valeur pour toujours.
+  `scripts/verifier-conf-plateformes.py` garde la répétition honnête : sans lui, relever `width`
+  d'un seul côté laisserait Windows — ou Linux — à l'ancienne valeur pour toujours.
 - **Nommer les projets Playwright a renommé les captures de fidélité.** Le gabarit par défaut est
   `{arg}{-projectName}{-snapshotSuffix}{ext}` : Playwright a cherché `a1-accueil-macos-darwin.png`,
   ne l'a pas trouvé, et l'a **écrit**. Les cinq tests de fidélité sont passés au vert en ne
@@ -1962,6 +1978,12 @@ n'a pas besoin de `lld-link` :
 export PATH="$HOME/.cargo/bin:/opt/homebrew/opt/llvm/bin:$PATH"
 pnpm proxy:embarquer x86_64-pc-windows-msvc
 cd src-tauri && cargo xwin clippy --target x86_64-pc-windows-msvc --all-targets -- -D warnings
+
+# **Compiler pour Linux depuis ce Mac n'est pas praticable**, et c'est une différence de nature
+# avec Windows : la crate dépend de `tauri`, donc de la pile GTK/WebKit, que `pkg-config` cherche
+# en `.pc` sur le système cible. Il n'existe pas d'équivalent de `cargo-xwin` qui la fournisse.
+# Le job `linux` de la CI est donc le seul juge, et un conteneur Docker Ubuntu la seule façon de
+# s'en approcher localement.
 ```
 
 **Un défaut préexistant trouvé en route, et corrigé** : `developper()` de `dump/discover.rs` ne
@@ -1971,6 +1993,186 @@ motif `…/Versions/*/bin` rendait donc `…/Versions/bin`, et **le repli Postgr
 fonctionné**. Personne ne l'a vu parce que la mesure du 19 août notait « Postgres.app n'est pas
 installé » — le seul motif faux était le seul qui ne pouvait rien trouver. Le découpage se fait
 désormais sur le segment, et `std::path::is_separator` traite `/` et `\` selon la plateforme.
+
+### Linux (4 septembre 2026)
+
+**Linux est une cible de développement, d'exécution et de distribution, comme Windows.** Le
+produit y compile, s'y lance et y fait tout ce qu'il fait ailleurs, `ci.yml` porte un job
+`linux` qui le tient à chaque commit, et `publication.yml` attache un `.deb` et un `.AppImage` à
+chaque release.
+
+**Et l'ajout n'a créé presque aucune branche : il a révélé que les branches existantes étaient
+mal nommées.** `estWindows`, écrit le 31 août, posait quatre questions — quel modificateur ouvre
+les raccourcis, comment un raccourci s'écrit, qui dessine les boutons de fenêtre, ce que veut dire
+`ctrl` + molette — et **aucune ne portait sur Windows** : les quatre demandaient « est-ce
+macOS ? ». D'où `estMacos`, `Plateforme` à trois valeurs, `dessineSesBoutonsDeFenetre` nommé pour
+le fait, et la classe CSS `.rootNosBoutons` pour la même raison. C'est le défaut de
+`seulLeModificateur` d'un cran plus haut — là, `ctrlKey` voulait dire « un modificateur qui n'est
+pas le nôtre » — et la leçon générale : **un prédicat nommé pour un cas plutôt que pour sa
+question se dénonce à l'ajout du deuxième cas, jamais avant.**
+
+Corollaire de test, et c'est lui qui compte : **Windows et Linux rendant exactement la même chose,
+un oubli y est invisible.** Un prédicat resté sur `sur === 'windows'` laisserait Linux sur la barre
+de macOS — sans boutons de fenêtre, avec des `⌘` dans les libellés — pendant que **toute la moitié
+Windows resterait verte**. Chaque assertion nomme donc les deux plateformes explicitement, et le
+seul fichier e2e de la coquille (`e2e/coquille.hors-macos.spec.ts`) est exécuté **deux fois**, par
+deux projets Playwright contre deux serveurs Vite. Un fichier jumeau aurait été un fichier à tenir
+en phase ; un fichier lancé deux fois dit l'exigence.
+
+**La fenêtre est sans décoration, et le redimensionnement est celui de tao.** `decorations: false`
+retire le cadre du gestionnaire de fenêtres — donc aussi ses bordures de redimensionnement, ce qui
+était la crainte. Elle est sans objet, et c'est **lu dans la source plutôt que supposé** : tao teste
+à chaque clic une bande de 5 px × facteur d'échelle autour de la fenêtre et y démarre un
+`begin_resize_drag`, sous la condition `(is_wayland || !window.is_decorated()) &&
+window.is_resizable() && !window.is_maximized()` (`platform_impl/linux/event_loop.rs`, tao 0.35.3).
+Le redimensionnement existe donc **parce que** la fenêtre est sans décoration, et sans que nous
+écrivions une poignée ni demandions `allow-start-resize-dragging`. Ce qui reste à voir à l'œil :
+qu'un clic à moins de 5 px du bord n'attrape pas la barre de défilement d'une grille.
+
+**Les quatre permissions des boutons de fenêtre sont partagées avec Windows, et pas une de plus.**
+`capabilities/windows.json` est devenu `capabilities/boutons-de-fenetre.json`, en
+`"platforms": ["windows", "linux"]` — nommé pour ce qu'il accorde plutôt que pour la première
+plateforme qui en a eu besoin, la même correction qu'`estWindows` → `estMacos`. Le plafond de
+`tests/permissions.rs` n'a pas bougé, et le test compare la liste **entière** : un `["windows"]`
+resté seul laisserait Linux sans boutons, et un `contains` ne le dirait pas.
+
+**Le magasin de secrets est le Secret Service, et c'est la seule plateforme où sa présence est une
+question.** La prémisse de `secrets/signature.rs` est macOS : les ACL du Trousseau sont liées à la
+signature de code, qui change à chaque build ad-hoc. Ni DPAPI ni le Secret Service ne connaissent
+cette liaison — les deux sont rattachés au **compte** de l'utilisateur. Laisser tourner la
+détection sous Linux aurait donc donné le même « pire des deux mondes » que sous Windows :
+`codesign` absent, `signature_courante` rendant `AdHoc` par prudence, et un **fichier chiffré à
+vie** y compris installé.
+
+Mais le Secret Service n'est pas le Trousseau : c'est un **démon** (gnome-keyring, KWallet, ou
+aucun) qu'aucune session n'est obligée de faire tourner, et un bureau minimal — i3, sway — n'en a
+souvent pas. D'où une sonde, et un repli sur le fichier chiffré. Trois points à ne pas défaire :
+
+- **la sonde est `keyring::Entry::store_status()`, et pas une lecture d'entrée factice.** La
+  crate porte exactement cette question : la fonction rend le résultat de l'initialisation — faite
+  une seule fois, à la demande — du magasin de la plateforme, et sa documentation dit en propres
+  termes de l'appeler « avant `Entry::new` » pour vérifier sans créer d'entrée. La première
+  version de cette sonde lisait une entrée factice ; elle répondait juste, mais payait un
+  aller-retour sur le bus et touchait un trousseau réel pour poser une question **sur** le
+  trousseau. Une sonde n'a pas à laisser de trace ;
+- **le repli se dit** — `SecretMechanism` est ce que le badge d'`A2` affiche —, donc ce n'est pas la
+  dégradation silencieuse que ce module refuse. Sans lui, enregistrer un mot de passe échouerait sur
+  « écriture dans le Trousseau impossible », un message qui accuse une installation correcte ;
+- **la mesure est un paramètre** (`selectionner_selon_le_systeme`), comme la signature l'est de
+  `selectionner_pour` : les deux verdicts sont donc exercés sur n'importe quelle machine. La sonde
+  elle-même n'a pas de test — l'interroger sur macOS ouvrirait une invite de Trousseau qui
+  bloquerait la CI, la raison des `#[ignore]` de `keychain.rs`.
+
+**Le menu natif de Linux n'a qu'un sous-menu, « Fichier », et ses deux entrées de dump.** C'est le
+seul endroit où l'ajout de Linux a demandé une vraie troisième description (`MenuSpec::pour`), et
+la raison n'est pas un choix de design : **muda-sur-GTK écarte en silence les items prédéfinis
+qu'il n'implémente pas.** `is_item_supported!` ne laisse passer que `Separator`, `Copy`, `Cut`,
+`Paste`, `SelectAll` et `About`, et `return_if_item_not_supported!` fait simplement ne pas ajouter
+les autres (muda 0.19.3, lu le 4 septembre 2026). Le menu de macOS transposé tel quel aurait donné,
+**visible dans la fenêtre** : un sous-menu « DoraBase » réduit à « À propos » et trois séparateurs,
+un « Affichage » et un « Fenêtre » vides, et un « Édition » ouvrant sur un séparateur orphelin.
+
+Trois familles de retraits, et chacune a sa raison mesurée :
+
+- **écartés en silence** par GTK : `Undo`, `Redo`, `Minimize`, `Maximize`, `Fullscreen`, `Hide`,
+  `HideOthers`, `CloseWindow`, `Quit` ;
+- **rendus mais inertes** : les quatre du presse-papier, dont l'action GTK passe par la feature
+  `libxdo` que Tauri n'active pas — absente du verrou. Et ils n'ont **rien à rattraper** : la raison
+  d'être du menu Édition est propre à Cocoa, où remplacer le menu par défaut tue `⌘C` dans toute la
+  webview, alors que WebKitGTK traite `Ctrl+C` lui-même, menu ou pas ;
+- **inerte faute de métadonnées** : `About`, dont GTK n'ouvre la boîte que `if let Some(metadata)`,
+  et `menu/build.rs` passe `None`.
+
+Ce qui reste est ce qui **fonctionne** : les deux entrées de dump sont des `MenuItem` ordinaires,
+que GTK rend et dont il enregistre l'accélérateur dans le groupe de la fenêtre (`register_accel!`).
+Et elles sont la raison pour laquelle Linux garde un menu du tout : **le menu natif est le seul
+point d'entrée de l'export et de l'import**, donc ne pas en poser aurait retiré la fonction. Un
+test le garde sur les trois plateformes, et un autre exige qu'**aucun** prédéfini ne figure dans la
+description de Linux — sans quoi le remède se déferait entrée par entrée, quelqu'un rajoutant
+`Quitter` « par symétrie » sans que rien ne paraisse.
+
+**Aucune mise à jour en place, et la raison n'est pas celle de Windows.** Là-bas rien n'atteste
+l'origine d'un exécutable, faute de certificat Authenticode ; ici la clé minisign du projet
+suffirait — mais le plugin `updater` ne sait remplacer qu'un **AppImage**. Une installation par le
+`.deb` vit sous `/usr/bin`, appartient à root, et n'a aucun moyen de se remplacer : elle verrait
+l'annonce d'une version et un bouton qui échoue à tous les coups. **Une voie qui marche pour une
+moitié des installations et échoue pour l'autre n'est pas une voie** — c'est le défaut n° 36 à
+l'échelle d'un flux. Conséquences à ne pas défaire, et deux gardes de `verifier-ci.py` les
+tiennent : `latest.json` ne porte que les deux clefs `darwin-*`, et l'archive `.AppImage.tar.gz` que
+`createUpdaterArtifacts` produit **n'est pas publiée**.
+
+**Et l'écran le dit, plutôt que de laisser un bouton échouer.** `check_update` interroge un
+manifeste qui ne porte aucune clef pour la plateforme courante : le plugin **échoue** — « the
+platform `linux-x86_64` was not found on the response `platforms` object » —, ce qui est un message
+qui accuse une installation parfaitement correcte. D'où `aUneVoieDeMiseAJour` : la notification de
+démarrage ne cherche rien (elle ne rendait déjà rien, mais elle payait une requête pour une réponse
+connue), et le bouton d'`A10` est **désactivé avec sa raison**, en `aria-disabled` parce qu'il porte
+une explication. Ce n'était pas fait pour Windows non plus ; l'ajout de Linux l'a rendu visible.
+
+**Deux paquets, et pas trois.** `.deb` et `.AppImage` : le premier déclare ses dépendances et
+s'appuie sur la WebKitGTK du système, le second embarque la sienne et couvre les autres
+distributions. **Pas de `.rpm`**, et c'est un refus, pas un oubli — Tauri le fabrique sans aucune
+dépendance déclarée, et nous n'avons aucun moyen d'essayer le paquet obtenu : il s'installerait
+proprement puis pourrait ne pas se lancer, ce qui est l'artefact silencieusement cassé que « rien
+n'est proposé qui n'ait été notarié » refuse. Un garde de `verifier-ci.py` refuse son
+téléversement ; rien n'interdit d'en fabriquer un pour l'essayer.
+
+**Le plancher de glibc est celui du runner, et il est *subi* — pas déclaré.** C'est la différence
+avec le plancher macOS 13 Ventura, qui vit dans `bundle.macOS.minimumSystemVersion` : un `.deb` et
+un AppImage construits sur `ubuntu-latest` se lient à la glibc de cette image, donc une
+distribution plus ancienne refuse de les lancer, avec une erreur de glibc. Le levier à tirer le
+jour où quelqu'un le demande est d'épingler le runner sur la plus ancienne Ubuntu encore soutenue
+par GitHub ; en attendant, les notes de release et le README le disent plutôt que de le laisser
+découvrir, et compiler soi-même est la réponse.
+
+**Le job `linux` de la CI n'est pas le job `engine`, qui tourne déjà sur Ubuntu.** Celui-là existe
+pour les tests qui exigent une **vraie base** : il monte quatre décors et un bastion, et prend huit
+minutes. Celui-ci existe pour la **plateforme** : il ne parle à aucune base, et ce qu'il vérifie est
+que le produit compile sans avertissement et que son bundle se fabrique. Les fondre aurait fait
+dépendre le verdict « Linux tourne » de la disponibilité de quatre conteneurs, et rendu le job de
+plateforme aussi lent que le plus lent des deux. Il installe **explicitement**
+`postgresql-client` : deux tests de `dump::discover` exigent un `pg_dump` réel, l'image du runner
+en porte un, et s'en remettre à elle serait mesurer la machine (règle n° 5).
+
+**Deux listes de chemins ont gagné une branche Linux, et les deux disent ce qui n'a pas été
+mesuré.** `programme::EMPLACEMENTS_USUELS` prend `/usr/local/bin` — l'endroit que la documentation
+de `kubectl` dit littéralement d'employer — et `~/.local/bin`, le répertoire de freedesktop qui
+n'est **pas** toujours dans le `PATH` (Ubuntu l'ajoute par `~/.profile`, que les sessions Wayland ne
+sourcent pas toutes). Homebrew pour Linux n'y est pas, faute d'avoir été mesuré : c'est l'arbitrage
+de Docker Desktop sous Windows, appliqué à un autre chemin. Et
+`dump::discover::EMPLACEMENTS_CONNUS` prend `/usr/lib/postgresql/*/bin`, qui est **mesuré** — c'est
+exactement le chemin que le job Linux de `ci.yml` ajoute au `PATH` pour voir le client 17 —, plus
+`/usr/pgsql-*/bin` qui vient de la documentation PGDG et reste à confirmer.
+
+**Conséquence du `~/` dans ces listes** : `emplacements_usuels` développe désormais chaque entrée
+par `programme::chemin_utilisateur`, et un test refuse qu'un `~` littéral en sorte. Sans lui,
+`~/.local/bin` aurait désigné un répertoire **nommé `~`** — le défaut à quatre exemplaires du
+31 août 2026, qui ne plantait pas mais mentait.
+
+**Et deux messages d'installation ont cessé de conseiller Homebrew hors macOS.** Le proxy Cloud SQL
+le faisait déjà correctement ; `kubectl` disait « installez-le avec brew install kubernetes-cli »
+**partout**, ce qui était déjà faux sous Windows depuis le 31 août — l'ajout de Linux l'a rendu
+visible. Un conseil faux est pire que pas de conseil : le message nomme désormais la manœuvre du
+système, et l'URL de la documentation reste commune aux deux, étant la vraie réponse dans tous les
+cas.
+
+**Un garde-fou a été généralisé plutôt que recopié.** `scripts/verifier-conf-windows.py` est devenu
+`scripts/verifier-conf-plateformes.py`, et vérifie les deux recouvrements. Le dupliquer aurait été
+la première recopie d'un garde-fou de ce dépôt, c'est-à-dire le défaut de « où habite
+l'utilisateur » appliqué à un script : **une question qui n'a qu'une réponse doit n'avoir qu'un
+lieu.** Ce qui diffère d'un recouvrement à l'autre vit en données — les cibles de bundle qui lui
+sont interdites —, et la liste est *négative* : ajouter un `msi` ou un `rpm` est une décision de
+packaging qui n'a aucune raison de demander l'édition d'un garde-fou ; ce qui doit échouer est une
+cible qui n'existe pas sur la plateforme visée, parce que le bundler l'ignorerait en silence.
+
+**Un défaut trouvé en route et *non* corrigé, avec sa raison.** Le menu natif de **Windows** porte
+trois entrées inertes — « Services », « Masquer les autres », « Plein écran », que muda y ajoute et
+n'implémente pas — et une **nuisible** : « Masquer DoraBase » y appelle `ShowWindow(hwnd, SW_HIDE)`,
+donc rend la fenêtre invisible sans voie de retour. Le défaut est antérieur au 4 septembre, il ne
+touche pas Linux (dont la description est neuve), et le corriger demande de trancher la forme du
+menu Windows — quitter dans « Fichier », à propos dans « Aide », comme le menu par défaut de Tauri
+le fait lui-même hors macOS. C'est une décision de produit, pas un alignement à décider au passage,
+et elle est dans « Ce qui attend une décision humaine ».
 
 ### La migration du format de configuration
 
@@ -2405,6 +2607,54 @@ que Windows n'a rien changé à macOS.
 - **L'installateur NSIS** : qu'il s'ouvre, installe, et que l'application se lance. SmartScreen
   avertira — c'est attendu, faute de certificat Authenticode.
 
+**Et depuis Linux (4 septembre 2026), une troisième liste, dont rien n'a encore été fait.** Toute
+la coquille est vérifiée *en structure* — trois boutons, géométrie de la barre, libellés `Ctrl+`,
+compilation, paquets `.deb` et `.AppImage` — et **rien du rendu**. WebKitGTK n'est pas plus
+pilotable que WKWebView, et les captures de fidélité mesurent le clair de macOS : leur vert prouve
+seulement que Linux n'a rien changé à macOS.
+
+- **La barre de menu GTK, et c'est la première chose à regarder.** Tauri insère le menu natif
+  **dans** la fenêtre, au-dessus de la webview (`init_for_gtk_window`), donc au-dessus de notre
+  propre barre de titre. Le menu de Linux a été réduit à un seul titre pour cette raison autant
+  que pour les items morts, mais **personne n'a vu la composition**. Trois questions à trancher à
+  l'œil : la bande est-elle acceptable ; le titre unique « Fichier » se lit-il comme un menu ou
+  comme un reste ; et faut-il la masquer (`hide_menu`) en pariant que les accélérateurs GTK
+  survivent au masquage — ce qui n'est **pas** vérifié, l'accélérateur vivant sur l'item et le
+  groupe sur la fenêtre.
+- **Lire les dix écrans sous WebKitGTK**, en clair puis en « Nuit ». Le rendu des polices diffère
+  de macOS comme de WebView2. Même réserve que « lire les dix écrans en Nuit », pour la même
+  raison.
+- **Le redimensionnement au bord, à la main.** La bande de tao fait 5 px × facteur d'échelle et
+  intercepte le clic gauche : ce qu'il faut voir est qu'un clic sur la barre de défilement d'une
+  grille collée au bord droit, ou sur la poignée d'un `SplitPane`, ne démarre pas un
+  redimensionnement de fenêtre. Et sur Wayland, où la condition de tao est vraie **même
+  décorée**.
+- **Les trois boutons de fenêtre, sous GNOME et sous KDE** : survol, rouge de fermeture, anneau de
+  focus, glissement par la barre, et les raccourcis de tuilage du bureau (`Super+↑`), qui changent
+  la maximisation sans que le composant voie autre chose qu'un `resize`.
+- **Le presse-papier**, `Ctrl+C` / `Ctrl+V` / `Ctrl+A` dans un champ et dans la grille. Le menu
+  Édition n'existe **pas** sous Linux, délibérément : le raisonnement est que WebKitGTK traite ces
+  touches lui-même, contrairement à Cocoa. C'est le point de ce portage qui repose le plus sur un
+  raisonnement et le moins sur une mesure.
+- **`⇧⌘E` devenu `Ctrl+Shift+E`**, et son jumeau à l'import : deux lignes distinctes doivent
+  paraître dans la sortie de `pnpm tauri dev`, côté Rust **et** côté front. C'est la seule
+  vérification du pont menu → React, et sous Linux c'est aussi la seule preuve que
+  `register_accel!` de muda enregistre bien nos accélérateurs.
+- **Le Secret Service, dans les deux sens.** Sur un bureau avec gnome-keyring : le badge d'`A2`
+  doit annoncer le trousseau, et un mot de passe doit survivre à un redémarrage. Sur une session
+  **sans** démon — un i3 nu suffit — : le badge doit annoncer le fichier chiffré, et
+  l'enregistrement doit marcher quand même. C'est le repli que la sonde décide, et aucun test ne
+  peut voir un vrai démon.
+- **Le `.deb` et l'AppImage installés**, sur une distribution qui n'est pas celle du runner : que
+  l'un déclare les bonnes dépendances, que l'autre se lance sans FUSE installé, et que l'icône et
+  l'entrée de menu paraissent (le fichier `.desktop` est engendré par Tauri, et nous ne déclarons
+  aucune catégorie).
+- **`pg_dump` sur une distribution non Debian.** `/usr/lib/postgresql/*/bin` est mesuré ;
+  `/usr/pgsql-*/bin` vient de la documentation PGDG, comme les deux chemins Windows.
+- **Le proxy Cloud SQL et `kubectl` depuis une application installée**, l'équivalent Linux du
+  `PATH` minimal du Finder — plus faible ici, une session de bureau transmettant un `PATH`
+  utilisable, mais `~/.local/bin` n'y est pas toujours.
+
 ---
 
 ## Trois pièges propres à cette machine
@@ -2435,7 +2685,9 @@ code :
 
 ```bash
 lsof -nP -iTCP:5173 -sTCP:LISTEN   # à qui appartient ce serveur ?
-export DORABASE_E2E_PORT=5399      # un port à soi, par worktree
+export DORABASE_E2E_PORT=5399      # un port à soi, par worktree — et les deux suivants avec,
+                                   # Playwright démarrant un serveur par plateforme (5399, 5400,
+                                   # 5401 pour macOS, Windows et Linux)
 ```
 
 **`tsc --noEmit` ne vérifie rien.** Le `tsconfig.json` de la racine porte `"files": []` et
@@ -2501,13 +2753,19 @@ export DORABASE_E2E_PORT=5399
 pnpm dev            # serveur Vite ; `?gallery` affiche la galerie, `?demo` le décor de démo
 pnpm tauri dev      # l'app (bloquant, ouvre une fenêtre)
 pnpm test           # Vitest
-pnpm test:e2e       # Playwright, webServer auto — deux projets, `macos` et `windows`
-pnpm test:e2e --project=windows   # la coquille Windows seule, depuis un Mac
+pnpm test:e2e       # Playwright, webServer auto — trois projets, `macos`, `windows` et `linux`
+                    # (donc trois serveurs Vite : port, port+1, port+2)
+pnpm test:e2e --project=windows --project=linux   # les deux coquilles hors macOS, depuis un Mac
 
-# La coquille Windows, à l'œil, sans machine Windows : la plateforme est une constante de
-# construction, donc c'est le serveur qu'on relance, jamais un réglage à l'exécution.
+# Les coquilles Windows et Linux, à l'œil, sans quitter le Mac : la plateforme est une constante
+# de construction, donc c'est le serveur qu'on relance, jamais un réglage à l'exécution.
 DORABASE_PLATEFORME_DECOR=windows pnpm dev
-DORABASE_PLATEFORME_DECOR=windows pnpm test   # doit être vert, comme sans la variable
+DORABASE_PLATEFORME_DECOR=linux pnpm dev
+# `pnpm test` doit être vert sous les **trois** décors, et c'est une exigence : une suite qui
+# rougirait sous l'un rougirait sur un poste de cette plateforme, où l'on est censé pouvoir
+# développer. Les tests nomment donc leur plateforme au lieu de la déduire.
+DORABASE_PLATEFORME_DECOR=windows pnpm test
+DORABASE_PLATEFORME_DECOR=linux pnpm test
 pnpm typecheck      # tsc -b — le seul qui compile quelque chose
 pnpm lint           # Biome
 pnpm tokens:check   # garde-fou : échoue si tokens.css/ts ont été édités à la main
@@ -2613,6 +2871,22 @@ Aucun de ces points ne bloque le code en place.
   n'étant pas autorisé par la CSP, et la même conclusion : l'écriture appartient au Rust. Ce qui
   reste à trancher est ce qu'on exporte au juste — le dessin visible, ou le schéma entier au-delà du
   plafond de soixante tables.
+- **La forme du menu natif hors macOS** (4 septembre 2026). Sous **Windows**, muda ajoute les
+  items prédéfinis qu'il n'implémente pas au lieu de les écarter : « Services », « Masquer les
+  autres » et « Plein écran » y sont donc **visibles et inertes**, et « Masquer DoraBase » y appelle
+  `ShowWindow(hwnd, SW_HIDE)` — la fenêtre disparaît sans voie de retour. Le remède existe et il
+  est écrit dans Tauri lui-même : hors macOS, son menu par défaut met « Quitter » dans « Fichier »,
+  « À propos » dans « Aide », et n'a ni sous-menu applicatif ni « Affichage ». Ce qui manque n'est
+  pas le code — `MenuSpec::pour` prend déjà la plateforme en paramètre depuis Linux — mais la
+  décision : c'est une composition de menu, donc un arbitrage de produit, et l'aligner au passage
+  d'un autre chantier serait exactement ce que ce fichier reproche ailleurs. **Linux n'est pas
+  concerné** : sa description est neuve et ne porte aucun prédéfini.
+- **La barre de menu GTK au-dessus de la barre de titre**, sous Linux. Elle est vue par personne,
+  et les deux issues possibles — l'accepter, ou masquer le menu en pariant que ses accélérateurs
+  survivent — demandent d'abord de regarder. Voir « Ce que l'outillage ne peut pas voir ».
+- **Le plancher de glibc des paquets Linux**, subi plutôt que déclaré : le levier est d'épingler le
+  runner de publication sur la plus ancienne Ubuntu soutenue par GitHub, ce qui échange de la
+  compatibilité contre une image qui vieillit. Personne n'a encore demandé.
 - **Déplacer une connexion d'un environnement à un autre** n'existe pas, délibérément : cela
   demande de déplacer un secret du Trousseau, donc son geste et sa conception. La
   confirmation de suppression ne le propose pas — offrir une action absente est pire que
@@ -2622,6 +2896,13 @@ Aucun de ces points ne bloque le code en place.
 
 ## Réserves connues
 
+- **Aucun build Linux n'a jamais été *lancé*.** Le job `linux` de la CI compile, teste et
+  fabrique les deux paquets à chaque commit, et la coquille est mesurée en structure depuis un Mac
+  par le projet `linux` de Playwright — mais personne n'a ouvert la fenêtre. C'est la même réserve
+  que Windows portait le 31 août, à un cran de plus : là-bas la barre de titre était le seul
+  inconnu, ici s'y ajoutent la barre de menu GTK insérée dans la fenêtre, la bande de
+  redimensionnement de tao, et le repli du Secret Service. La liste des gestes est dans « Ce que
+  l'outillage ne peut pas voir ».
 - **`verify-ca` — vérifier la chaîne sans vérifier le nom — n'est disponible que pour
   PostgreSQL.** Les pilotes MySQL et MongoDB ne savent pas l'exprimer, et le premier a même
   un drapeau silencieusement sans effet. Les deux **refusent avec leur raison** plutôt que

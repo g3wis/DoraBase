@@ -267,7 +267,7 @@ jobs:
       # `tauri.windows.conf.json` par RFC 7386, où un tableau est **remplacé** : `app.windows`
       # étant un tableau, une clef absente du recouvrement retombe sur le défaut de Tauri
       # (800 × 600, sans titre) sans que rien échoue. Voir l'en-tête du script.
-      - run: python3 scripts/verifier-conf-windows.py
+      - run: python3 scripts/verifier-conf-plateformes.py
 
       - run: cargo fmt --all --check
         working-directory: src-tauri
@@ -315,6 +315,148 @@ jobs:
         with:
           name: DoraBase-${{ github.sha }}-nsis
           path: src-tauri/target/release/bundle/nsis/*.exe
+          retention-days: 7
+          if-no-files-found: error
+
+  # **Le pendant Linux du job `build`**, depuis le 4 septembre 2026.
+  #
+  # **Pourquoi il ne se confond pas avec le job `engine`**, qui tourne déjà sur Ubuntu. Celui-là
+  # existe pour les tests qui exigent une **vraie base** — il monte quatre décors et un bastion,
+  # et prend huit minutes. Celui-ci existe pour la **plateforme** : il ne parle à aucune base, et
+  # ce qu'il vérifie est que le produit compile sans avertissement pour Linux et que son bundle se
+  # fabrique. Les fondre aurait fait dépendre le verdict « Linux tourne » de la disponibilité de
+  # quatre conteneurs, et rendu le job de plateforme aussi lent que le plus lent des deux.
+  #
+  # **Il ne rejoue pas la moitié web.** Vitest, Biome, `tsc`, les jetons et les projections sont
+  # indépendants de la plateforme : le job `build` les couvre. Ce qui est propre à Linux, c'est la
+  # compilation Rust, la conformité du recouvrement de configuration, et le bundle deb/AppImage.
+  #
+  # **Ni Playwright ni les captures de fidélité**, pour la raison écrite au job `windows` : les
+  # références portent `-darwin.png`, donc Playwright les *écrirait* ici au lieu de les comparer.
+  # Les coquilles Windows et Linux sont mesurées depuis macOS, par les projets `windows` et
+  # `linux` de `playwright.config.ts` et leur `DORABASE_PLATEFORME_DECOR`.
+  linux:
+    runs-on: ubuntu-latest
+    # Même borne que le job `windows` : sans construction universelle, vingt-cinq minutes sont
+    # larges. Et une borne parce qu'une stalle d'`apt-get` ne doit pas se déguiser en travail —
+    # c'est arrivé au job `engine` le 19 août 2026.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+
+      # La pile GTK/WebKit, exigée par `tauri` **même pour compiler la bibliothèque**
+      # (`glib-sys` cherche `glib-2.0.pc` par `pkg-config`). Les quatre paquets sont ceux du job
+      # `engine`, plus `libssl-dev` pour rien : ils suffisent.
+      #
+      # **`postgresql-client` est là pour deux tests, et il est explicite plutôt que hérité.**
+      # `dump::discover` a deux tests qui exigent un `pg_dump` sur la machine — « le pg_dump de
+      # cette machine est trouvé » et « les emplacements connus sont cherchés même absents du
+      # PATH ». L'image du runner en porte un, mais s'en remettre à elle serait mesurer la
+      # machine (règle 5) : le paquet est donc demandé, comme le job `engine` demande le client
+      # 17. La **version** n'a aucune importance ici, ces deux tests comparant contre un serveur
+      # 0.0 pour ne mesurer que la découverte.
+      #
+      # Le miroir Azure est écarté et chaque appel est borné : les deux remèdes du 19 août 2026,
+      # où `apt-get update` est resté pendu vingt-cinq minutes sur ce miroir.
+      - run: |
+          sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' \
+            /etc/apt/sources.list /etc/apt/sources.list.d/*.list \
+            /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+          apt_reessaye() {
+            for tentative in 1 2 3; do
+              if sudo timeout 240 apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=15 "$@"; then
+                return 0
+              fi
+              echo "::warning::apt-get $1 a échoué ou pendu (tentative $tentative/3)"
+              sleep 5
+            done
+            return 1
+          }
+          apt_reessaye update
+          apt_reessaye install --no-install-recommends -y \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev \
+            postgresql-client
+
+      # `working-directory` est **nécessaire** : `rust-toolchain.toml` vit dans `src-tauri/`, et
+      # rustup résout la toolchain au répertoire courant.
+      - run: rustup show
+        working-directory: src-tauri
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          # Clé distincte de celles des jobs `build` et `engine` : les cibles et les features
+          # diffèrent, et les mélanger ferait invalider un cache par l'autre.
+          key: linux
+
+      - run: pnpm install --frozen-lockfile
+
+      # **Avant toute commande cargo, et c'est structurel** (défaut n° 111) : un `externalBin`
+      # déclaré est exigé par le script de construction de Tauri, donc par `cargo build`,
+      # `cargo test` et `cargo clippy` — y compris sur une plateforme qui ne recevait aucun
+      # bundle jusqu'ici. Les deux triplets Linux sont dans `cloud-sql-proxy.lock` depuis
+      # l'origine, précisément pour cette raison.
+      - run: pnpm proxy:embarquer
+
+      - run: ./scripts/verifier-aucun-sabotage.sh
+
+      # **Le recouvrement de configuration ne doit rien perdre.** Tauri fusionne
+      # `tauri.linux.conf.json` par RFC 7386, où un tableau est **remplacé** : `app.windows`
+      # étant un tableau, une clef absente du recouvrement retombe sur le défaut de Tauri
+      # (800 × 600, sans titre) sans que rien n'échoue. Le script couvre les deux recouvrements
+      # d'un coup ; il tourne ici *et* dans le job `windows`, chacun ayant besoin du verdict.
+      - run: python3 scripts/verifier-conf-plateformes.py
+
+      - run: cargo clippy --all-targets -- -D warnings
+        working-directory: src-tauri
+      # `clippy --all-targets` compile les tests sans les exécuter : sans cette ligne, un test
+      # rouge passerait la CI en silence (constaté le 5 août 2026 sur le job macOS).
+      - run: cargo test
+        working-directory: src-tauri
+
+      # Même clé jetable que sur les deux autres plateformes, et pour la même raison :
+      # `createUpdaterArtifacts` fait échouer tout `tauri build` qui trouve une clé publique sans
+      # privée en face. La paire est jetée à la fin du runner, donc l'archive produite n'est
+      # acceptée par aucune installation — ce qu'on veut d'un artefact que rien ne propose en mise
+      # à jour, et **rien ne le propose sous Linux** (voir `publication.yml`).
+      - name: une clé de mise à jour jetable, le temps du build
+        run: |
+          set -euo pipefail
+          pnpm tauri signer generate --write-keys "$RUNNER_TEMP/jetable.key" --password '' --force
+          {
+            echo "TAURI_SIGNING_PRIVATE_KEY=$(cat "$RUNNER_TEMP/jetable.key")"
+            echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD="
+          } >> "$GITHUB_ENV"
+
+      - run: pnpm tauri build
+
+      # Le sidecar embarqué, constaté plutôt que supposé — le pendant des étapes homonymes des
+      # jobs `build` et `windows`. Sous Linux le fichier ne porte pas d'extension, et c'est
+      # `programme::nom_de_fichier` qui en décide : cette étape est ce qui dirait qu'il a changé
+      # d'avis.
+      - name: le proxy Cloud SQL est bien dans le bundle
+        run: |
+          set -euo pipefail
+          test -f src-tauri/target/release/cloud-sql-proxy
+          attendue=$(sed -n 's/^version *= *//p' src-tauri/cloud-sql-proxy.lock | head -1)
+          src-tauri/target/release/cloud-sql-proxy --version | grep -F "$attendue"
+
+      # **Les deux paquets de chaque commit, téléchargeables.** Même raison que le `.dmg` du job
+      # macOS et le `.exe` du job Windows : « est-ce que ça se lance ? » ne se tranche qu'en
+      # lançant, et rien dans ce dépôt ne pilote WebKitGTK. Ce n'est pas une publication.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DoraBase-${{ github.sha }}-linux
+          path: |
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/appimage/*.AppImage
           retention-days: 7
           if-no-files-found: error
 

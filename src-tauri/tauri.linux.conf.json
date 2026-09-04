@@ -1,0 +1,19 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "app": {
+    "windows": [
+      {
+        "title": "DoraBase",
+        "width": 1360,
+        "height": 814,
+        "minWidth": 960,
+        "minHeight": 600,
+        "resizable": true,
+        "decorations": false
+      }
+    ]
+  },
+  "bundle": {
+    "targets": ["deb", "appimage"]
+  }
+}

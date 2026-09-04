@@ -7,13 +7,24 @@ import type { Plateforme } from '../plateforme'
 import { TitleBar } from './TitleBar'
 
 /*
- * Les trois boutons de fenêtre de Windows.
+ * Les trois boutons de fenêtre, sur les deux plateformes qui les dessinent elles-mêmes.
  *
  * **La plateforme est nommée, jamais déduite.** `__APP_PLATFORM__` est figé à la compilation :
- * sans le paramètre `sur`, ces tests ne s'exécuteraient que sur un runner Windows, et le job de
- * fidélité doit rester sur macOS (les références portent le suffixe `-darwin.png`). C'est le
- * même arbitrage que `DORABASE_PLATEFORME_DECOR` d'un cran plus bas.
+ * sans le paramètre `sur`, ces tests ne s'exécuteraient que sur un runner Windows ou Linux, et
+ * le job de fidélité doit rester sur macOS (les références portent le suffixe `-darwin.png`).
+ * C'est le même arbitrage que `DORABASE_PLATEFORME_DECOR` d'un cran plus bas.
+ *
+ * **Et les deux sont nommées séparément, pas « par symétrie »** : elles rendent exactement la
+ * même barre, ce qui est précisément ce qui rend un oubli invisible. Un composant resté sur
+ * `estWindows(sur)` — le prédicat qui a vécu du 31 août au 4 septembre 2026 — monterait la barre
+ * de macOS sous Linux, donc sans aucun bouton de fenêtre, **sans qu'une seule assertion Windows
+ * ne bouge**.
+ *
+ * Ce fichier s'appelait `TitleBar.windows.test.tsx` jusqu'au 4 septembre 2026.
  */
+
+/** Les plateformes où les boutons sont à notre charge. */
+const NOS_BOUTONS: readonly Plateforme[] = ['windows', 'linux']
 
 function passerelleDouble(): PasserelleFenetre & { appels: string[] } {
   const appels: string[] = []
@@ -40,8 +51,8 @@ function monter(sur: Plateforme, fenetre: PasserelleFenetre = passerelleDouble()
   )
 }
 
-test('sous Windows, la barre porte les trois boutons de fenêtre', () => {
-  monter('windows')
+test.each(NOS_BOUTONS)('sous %s, la barre porte les trois boutons de fenêtre', (sur) => {
+  monter(sur)
   // Noms accessibles **ancrés** : `/Réduire/` seul attraperait aussi « Réduire la sidebar » si
   // elle existait un jour (règle d'AGENTS.md).
   expect(screen.getByRole('button', { name: /^Réduire$/ })).toBeInTheDocument()
@@ -61,7 +72,7 @@ test('sur macOS, elle ne les porte pas — le système les dessine', () => {
   expect(screen.queryByRole('button', { name: /^Réduire$/ })).not.toBeInTheDocument()
   expect(screen.queryByRole('button', { name: /^Agrandir$/ })).not.toBeInTheDocument()
   expect(screen.queryByRole('button', { name: /^Fermer$/ })).not.toBeInTheDocument()
-  // L'engrenage, lui, est là sur les deux.
+  // L'engrenage, lui, est là sur les trois.
   expect(screen.getByRole('button', { name: /^Préférences$/ })).toBeInTheDocument()
 })
 
@@ -74,10 +85,10 @@ test('sur macOS, elle ne les porte pas — le système les dessine', () => {
  * répéteraient exactement ce défaut, et ici il serait pire : un bouton de fermeture qui ne ferme
  * pas.
  */
-test('les trois boutons appellent bien la passerelle', async () => {
+test.each(NOS_BOUTONS)('sous %s, les trois boutons appellent bien la passerelle', async (sur) => {
   const utilisateur = userEvent.setup()
   const passerelle = passerelleDouble()
-  monter('windows', passerelle)
+  monter(sur, passerelle)
 
   await utilisateur.click(screen.getByRole('button', { name: /^Réduire$/ }))
   await utilisateur.click(screen.getByRole('button', { name: /^Agrandir$/ }))

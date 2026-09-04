@@ -115,6 +115,29 @@ jobs:
             echo "Et **les installations Windows ne se mettent pas à jour seules** : il faut"
             echo "retélécharger l'installateur à chaque version."
             echo
+            # **Linux, et les deux choses qu'il faut lire avant de télécharger.** Même raison
+            # que le bloc Windows ci-dessus : le plancher de glibc se remarquerait à
+            # l'exécution, sur une erreur de chargeur qui ne nomme pas la cause, et l'absence
+            # de mise à jour automatique des semaines plus tard. Les deux formes sont annoncées
+            # ensemble parce que le choix entre elles est exactement ce que ce plancher décide.
+            echo "### Linux"
+            echo
+            echo "Deux formes, la même application : \`DoraBase-$VERSION-amd64.deb\` pour"
+            echo "Debian, Ubuntu et dérivées, ou \`DoraBase-$VERSION-amd64.AppImage\` partout"
+            echo "ailleurs — rien à installer, \`chmod +x\` puis lancer."
+            echo
+            echo "\`\`\`bash"
+            echo "sudo apt install ./DoraBase-$VERSION-amd64.deb"
+            echo "\`\`\`"
+            echo
+            echo "**Construits sur la dernière Ubuntu des runners GitHub**, donc liés à sa"
+            echo "glibc : une distribution nettement plus ancienne refusera de les lancer."
+            echo "L'AppImage embarque WebKitGTK, le \`.deb\` s'appuie sur celle du système."
+            echo
+            echo "Et **les installations Linux ne se mettent pas à jour seules** — le"
+            echo "mécanisme ne sait remplacer qu'un AppImage, donc l'offrir aurait marché pour"
+            echo "une moitié des installations et échoué pour l'autre."
+            echo
             echo "## Changements"
             echo
             if [[ -n $precedent ]]; then
@@ -138,8 +161,8 @@ jobs:
           } > publication/notes.md
           cat publication/notes.md
 
-      # **Créée sans aucun asset.** `macos` et `windows` y ajouteront les leurs par
-      # `gh release upload`, en parallèle l'un de l'autre — c'est tout le point de ce job.
+      # **Créée sans aucun asset.** `macos`, `windows` et `linux` y ajouteront les leurs par
+      # `gh release upload`, en parallèle les uns des autres — c'est tout le point de ce job.
       - name: créer la release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -764,7 +787,7 @@ jobs:
       # la moitié web est indépendante du système et le job macOS l'a déjà passée.
       - run: ./scripts/verifier-aucun-sabotage.sh
         shell: bash
-      - run: python3 scripts/verifier-conf-windows.py
+      - run: python3 scripts/verifier-conf-plateformes.py
       - run: cargo clippy --all-targets -- -D warnings
         working-directory: src-tauri
       - run: cargo test
@@ -841,3 +864,184 @@ jobs:
             --clobber
           echo "::notice::installateur Windows attaché — non signé, SmartScreen avertira au"
           echo "  téléchargement, et les installations Windows ne se mettent pas à jour seules."
+
+  # ── Les paquets Linux, en parallèle des deux autres (4 septembre 2026) ────────────────────
+  #
+  # **`needs: release`, comme `windows` et pour la même raison** : la release existe dès que le
+  # job `release` a rendu la main, avant qu'aucun bundle ne soit construit. Les trois
+  # constructions tournent donc en parallèle, chacune ajoutant ses artefacts par
+  # `gh release upload` — jamais par un second `gh release create`, dont l'unicité reste ce qui
+  # décide du titre, des notes et du `--latest`.
+  #
+  # Conséquence voulue, la même que pour Windows : **un échec de la construction Linux ne coûte
+  # pas la release macOS**, qui reste l'artefact soutenu.
+  #
+  # # Deux paquets, et pas trois
+  #
+  # `.deb` et `.AppImage`, déclarés dans `tauri.linux.conf.json`. **Pas de `.rpm`**, et ce n'est
+  # pas un oubli : Tauri le fabrique sans aucune dépendance déclarée (`bundle.linux.rpm.depends`
+  # est vide, et nous n'avons aucun moyen d'essayer le paquet obtenu sur une distribution RPM).
+  # Il s'installerait donc proprement puis pourrait ne pas se lancer, faute de WebKitGTK — un
+  # artefact silencieusement cassé, exactement ce que « rien n'est proposé qui n'ait été
+  # notarié » refuse. L'AppImage, qui embarque sa pile, couvre ces distributions.
+  #
+  # # Le plancher est celui du runner, et il est dit
+  #
+  # Un `.deb` et un AppImage construits sur `ubuntu-latest` se lient à la glibc de cette image :
+  # les distributions plus anciennes ne les lanceront pas. C'est le pendant du plancher
+  # « macOS 13 Ventura », à une différence près — celui-là est **déclaré**
+  # (`minimumSystemVersion`), celui-ci est **subi**. Le lever demanderait d'épingler le runner sur
+  # la plus ancienne Ubuntu encore soutenue par GitHub, ce qui est le levier à tirer le jour où
+  # quelqu'un le demande. Les notes de release le disent plutôt que de le laisser découvrir.
+  linux:
+    needs: release
+    runs-on: ubuntu-latest
+    # Pas de construction universelle ici, donc pas de double compilation : vingt-cinq minutes
+    # laissent la même marge qu'au job Windows.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: le tag correspond à la version des fichiers
+        run: |
+          set -euo pipefail
+          version=${GITHUB_REF_NAME#v}
+          python3 scripts/verifier-version.py "$version"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+
+      # La pile GTK/WebKit, exigée par `tauri` même pour compiler la bibliothèque, plus
+      # `postgresql-client` pour les deux tests de `dump::discover` qui cherchent un `pg_dump`
+      # réel. Le miroir Azure est écarté et chaque appel est borné : les remèdes du 19 août 2026,
+      # où `apt-get update` est resté pendu vingt-cinq minutes.
+      - run: |
+          sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' \
+            /etc/apt/sources.list /etc/apt/sources.list.d/*.list \
+            /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+          apt_reessaye() {
+            for tentative in 1 2 3; do
+              if sudo timeout 240 apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=15 "$@"; then
+                return 0
+              fi
+              echo "::warning::apt-get $1 a échoué ou pendu (tentative $tentative/3)"
+              sleep 5
+            done
+            return 1
+          }
+          apt_reessaye update
+          apt_reessaye install --no-install-recommends -y \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev \
+            postgresql-client
+
+      # `working-directory` est nécessaire : `rust-toolchain.toml` vit dans `src-tauri/`, et
+      # rustup résout la toolchain au répertoire courant.
+      - run: rustup show
+        working-directory: src-tauri
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: pnpm install --frozen-lockfile
+
+      # Avant toute commande cargo, et c'est structurel (défaut n° 111).
+      - run: pnpm proxy:embarquer
+
+      # ── Ce qui doit être vrai avant de publier un binaire ─────────────────────────────
+      #
+      # Le même principe que dans les deux autres jobs : le tag est *censé* être posé sur un
+      # `main` vert, mais « censé » n'est pas une vérification et une release est publique. Ne
+      # sont rejouées ici que les vérifications qui disent quelque chose de **cette**
+      # plateforme — la moitié web est indépendante du système et le job macOS l'a déjà passée.
+      - run: ./scripts/verifier-aucun-sabotage.sh
+      - run: python3 scripts/verifier-conf-plateformes.py
+      - run: cargo clippy --all-targets -- -D warnings
+        working-directory: src-tauri
+      - run: cargo test
+        working-directory: src-tauri
+
+      # `createUpdaterArtifacts` fait échouer tout `tauri build` qui trouve une clé publique
+      # dans `tauri.conf.json` sans clé privée en face. La vraie clé est donc donnée ici, comme
+      # aux deux autres jobs — mais **l'archive qu'elle signe n'est pas publiée** : voir l'étape
+      # de téléversement.
+      - name: construire les paquets
+        run: pnpm tauri build
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      # La version affichée vient du build : le décor de Playwright ne doit pas partir dans un
+      # binaire livré. Même raison, même script que sur les deux autres plateformes.
+      - run: ./scripts/verifier-aucun-decor-de-version.sh
+
+      # Le sidecar embarqué, constaté plutôt que supposé.
+      - name: le proxy Cloud SQL est bien dans le bundle
+        run: |
+          set -euo pipefail
+          test -f src-tauri/target/release/cloud-sql-proxy
+          attendue=$(sed -n 's/^version *= *//p' src-tauri/cloud-sql-proxy.lock | head -1)
+          src-tauri/target/release/cloud-sql-proxy --version | grep -F "$attendue"
+
+      # Tauri nomme ses paquets `DoraBase_<version>_amd64.deb` et
+      # `DoraBase_<version>_amd64.AppImage`. Renommés sur la convention du dépôt —
+      # `DoraBase-<version>-amd64.deb` —, avec leur empreinte à côté, comme le `.dmg` et le
+      # `.exe`.
+      - name: nommer les paquets
+        run: |
+          set -euo pipefail
+          mkdir -p publication
+          for sorte in deb appimage; do
+            case $sorte in
+              deb) motif='*.deb'; suffixe='amd64.deb' ;;
+              appimage) motif='*.AppImage'; suffixe='amd64.AppImage' ;;
+            esac
+            fichiers=$(ls src-tauri/target/release/bundle/$sorte/$motif)
+            # Un seul attendu. Deux voudraient dire qu'un ancien traîne dans le cache, et `ls`
+            # en choisirait un au hasard — donc peut-être la version d'avant.
+            test "$(wc -l <<<"$fichiers")" -eq 1
+            cp "$fichiers" "publication/DoraBase-$VERSION-$suffixe"
+            sha256sum "publication/DoraBase-$VERSION-$suffixe" \
+              | sed "s|publication/||" > "publication/DoraBase-$VERSION-$suffixe.sha256"
+          done
+          ls -lh publication/
+
+      # **Les deux paquets seuls, et pas les artefacts de mise à jour.**
+      #
+      # `tauri build` vient de produire un `.AppImage.tar.gz` et sa signature minisign, qui
+      # suffiraient techniquement à faire se mettre à jour une installation par AppImage. Ils ne
+      # sont pas publiés, et `latest.json` — écrit par le job macOS — ne porte toujours que les
+      # deux clefs `darwin-*`. Trois raisons, chacune suffisante :
+      #
+      #   - **le plugin ne sait remplacer qu'un AppImage.** Une installation par le `.deb` vit
+      #     sous `/usr/bin`, appartient à root, et n'a aucun moyen de se remplacer : elle verrait
+      #     l'annonce d'une version et un bouton qui échoue à tous les coups. Une voie qui marche
+      #     pour une moitié des installations et échoue pour l'autre n'est pas une voie — c'est
+      #     l'arbitrage du « bouton inerte » (défaut n° 36), à l'échelle d'un flux ;
+      #   - **le chemin de mise à jour n'a jamais été exercé**, même sur macOS — c'est écrit dans
+      #     AGENTS.md. L'ouvrir sur une troisième plateforme triplerait une dette non payée ;
+      #   - **ce qui a été demandé est le paquet.** La mise à jour Linux est une décision séparée,
+      #     et elle tiendrait en peu de lignes le jour où on la prend : ajouter `linux-x86_64` au
+      #     manifeste et téléverser les deux fichiers que `tauri build` a déjà produits.
+      #
+      # À noter que la raison **n'est pas** celle de Windows : là-bas rien n'atteste l'origine du
+      # binaire, faute de certificat Authenticode. Ici la clé minisign du projet suffirait à
+      # l'attester ; ce qui manque est qu'une seule des deux sortes d'installation puisse en
+      # profiter.
+      - name: attacher les paquets à la release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload "$GITHUB_REF_NAME" \
+            "publication/DoraBase-$VERSION-amd64.deb" \
+            "publication/DoraBase-$VERSION-amd64.deb.sha256" \
+            "publication/DoraBase-$VERSION-amd64.AppImage" \
+            "publication/DoraBase-$VERSION-amd64.AppImage.sha256" \
+            --clobber
+          echo "::notice::paquets Linux attachés — construits sur ubuntu-latest, donc liés à la"
+          echo "  glibc de cette image, et les installations Linux ne se mettent pas à jour seules."

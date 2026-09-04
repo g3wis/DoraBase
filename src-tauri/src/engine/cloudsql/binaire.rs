@@ -98,18 +98,23 @@ pub fn localiser() -> Result<PathBuf, EngineError> {
 /// pas le droit de dépendre de ce qui est installé sur la machine qui l'exécute.
 pub fn localiser_dans(emplacements: &[PathBuf]) -> Result<PathBuf, EngineError> {
     // **La manœuvre dépend du système, et un conseil faux est pire que pas de conseil.**
-    // `brew install` sous Windows nomme un outil que l'utilisateur n'a pas et ne peut pas avoir :
-    // le message enverrait chercher une solution qui n'existe pas là où il est. Les deux gardent
-    // en commun l'URL de Google, qui est la vraie réponse dans les deux cas.
-    let manoeuvre = if cfg!(windows) {
-        "téléchargez-le depuis https://cloud.google.com/sql/docs/mysql/sql-proxy \
-         et placez-le dans un dossier du PATH"
-            .to_owned()
-    } else {
+    // `brew install` sous Windows ou sous Linux nomme un outil que l'utilisateur n'a pas et n'a
+    // le plus souvent pas : le message enverrait chercher une solution qui n'existe pas là où il
+    // est. Les deux gardent en commun l'URL de Google, qui est la vraie réponse dans tous les cas.
+    //
+    // **Le test porte sur macOS, pas sur Windows** (4 septembre 2026) : c'est la seule plateforme
+    // où une formule Homebrew existe, donc la seule à nommer un installateur. Linux a rejoint
+    // Windows sans une ligne de plus — Homebrew pour Linux existe, mais conseiller de l'installer
+    // pour un binaire unique serait un détour, et Google publie le binaire directement.
+    let manoeuvre = if cfg!(target_os = "macos") {
         format!(
             "installez-le avec « brew install {NOM} », ou depuis \
              https://cloud.google.com/sql/docs/mysql/sql-proxy"
         )
+    } else {
+        "téléchargez-le depuis https://cloud.google.com/sql/docs/mysql/sql-proxy \
+         et placez-le dans un dossier du PATH"
+            .to_owned()
     };
 
     programme::localiser_dans(emplacements, NOM).ok_or_else(|| {
@@ -155,17 +160,17 @@ mod tests {
         // `06e` applique à un hôte inconnu de `known_hosts`.
         assert!(erreur.message.contains("cloud-sql-proxy"), "{erreur}");
         // **La manœuvre nommée est celle du système, et un conseil faux serait pire que rien** :
-        // « brew install » sous Windows enverrait chercher un outil qui n'existe pas là. Les deux
-        // messages gardent en commun l'URL de Google, qui est la vraie réponse dans les deux cas.
-        let manoeuvre = if cfg!(windows) {
-            "téléchargez"
-        } else {
+        // « brew install » hors macOS enverrait chercher un outil qui n'existe pas là. Les deux
+        // messages gardent en commun l'URL de Google, qui est la vraie réponse dans tous les cas.
+        let manoeuvre = if cfg!(target_os = "macos") {
             "install"
+        } else {
+            "téléchargez"
         };
         assert!(erreur.message.contains(manoeuvre), "{erreur}");
         assert!(
             erreur.message.contains("cloud.google.com"),
-            "l'URL vaut sur les deux systèmes : {erreur}"
+            "l'URL vaut sur les trois systèmes : {erreur}"
         );
     }
 
@@ -263,23 +268,33 @@ mod tests {
             );
         }
 
-        // Homebrew : macOS seulement. `programme::EMPLACEMENTS_USUELS` est **vide** sous Windows,
-        // où le motif qui rend cette liste nécessaire — le `PATH` minimal d'une app lancée depuis
-        // le Finder — n'a pas cours. Voir sa déclaration.
+        // Les emplacements usuels de la plateforme sont là.
         //
         // **Gardé ici après l'extraction du 31 août 2026**, alors que `programme` a le même :
         // celui-ci mesure la liste *que ce scope compose*, et une délégation oubliée la laisserait
-        // sans Homebrew sans que le test de `programme` s'en aperçoive.
-        #[cfg(not(windows))]
+        // sans eux sans que le test de `programme` s'en aperçoive.
+        //
+        // **La liste est demandée, pas recopiée** (4 septembre 2026). Ce test épinglait
+        // `/opt/homebrew/bin` sous `cfg(not(windows))`, ce qui voulait dire « macOS » sans le
+        // dire : l'arrivée de Linux, dont les emplacements usuels ne sont pas ceux de Homebrew,
+        // l'a fait tomber. C'est le défaut d'`estWindows` — un garde nommé pour la plateforme
+        // qu'on venait d'ajouter plutôt que pour la question qu'il posait — reparu dans un `cfg`.
+        // Demander la constante rend le test juste sur les trois plateformes **et** le laisse
+        // suivre une liste qui changera encore.
+        //
+        // Le `cfg` restant nomme les deux plateformes dont la liste n'est pas vide : ailleurs
+        // cette boucle ne mesurerait rien, et un test qui passe sans exécuter d'assertion est un
+        // mensonge poli.
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         {
-            assert!(
-                en_texte.iter().any(|c| c == "/opt/homebrew/bin"),
-                "{en_texte:?}"
-            );
-            assert!(
-                en_texte.iter().any(|c| c == "/usr/local/bin"),
-                "{en_texte:?}"
-            );
+            for usuel in programme::EMPLACEMENTS_USUELS {
+                let attendu = programme::chemin_utilisateur(usuel);
+                assert!(
+                    emplacements.contains(&attendu),
+                    "« {} » manque dans {en_texte:?}",
+                    attendu.display()
+                );
+            }
         }
     }
 
