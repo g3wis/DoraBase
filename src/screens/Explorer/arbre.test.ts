@@ -1,7 +1,15 @@
 import type { EnvironmentDeclaration, Project } from '../../domain/config'
 import type { ConnectionState, SchemaInfo, TableSummary } from '../../domain/engine'
 import { REGLAGES, TRIO_DE_TEST } from '../NewConnection/pourLesTests'
-import { aplatir, type Charge, idBase, idEnvironnement, idProjet, idSchema } from './arbre'
+import {
+  aplatir,
+  type Charge,
+  idBase,
+  idEnvironnement,
+  idProjet,
+  idSchema,
+  schemasAffiches,
+} from './arbre'
 
 const RIEN: Charge = { schemas: {}, objets: {}, enCours: new Set(), echecs: {} }
 const JAMAIS = (): ConnectionState => ({ kind: 'never' })
@@ -29,9 +37,12 @@ function projet(overrides: Partial<Project> = {}): Project {
   }
 }
 
-const schema = (name: string): SchemaInfo => ({
+const schema = (name: string, over: Partial<SchemaInfo> = {}): SchemaInfo => ({
   name,
+  owner: 'atelier',
+  system: false,
   counts: { tables: 4, views: 1, functions: 2, indexes: 6 },
+  ...over,
 })
 
 const table = (name: string, kind: TableSummary['kind'] = 'table'): TableSummary => ({
@@ -511,4 +522,47 @@ test('la ligne projet ne porte aucun badge', () => {
 
   const avecProduction = aplatir([projet({ environments: ATELIER })], new Set(), RIEN, JAMAIS)
   expect(avecProduction[0]?.badge).toBeUndefined()
+})
+
+// --- Les schémas affichés (`API-33`) ---
+
+const CATALOGUE = [
+  schema('public'),
+  schema('reporting'),
+  schema('pg_catalog', { system: true }),
+  schema('information_schema', { system: true }),
+]
+
+/** Les noms rendus, dans l'ordre — c'est l'ordre qui compte autant que l'ensemble. */
+const noms = (schemas: readonly SchemaInfo[]) => schemas.map((s) => s.name)
+
+test('rien de réglé montre les non-système, et non « public » seul', () => {
+  // **Le défaut ne change rien à l'existant** : c'est ce que l'arbre montrait avant `API-33`, et le
+  // seul choix qui ne vide pas l'arbre des bases où `public` est justement le schéma vide.
+  expect(noms(schemasAffiches(CATALOGUE, null))).toEqual(['public', 'reporting'])
+  expect(noms(schemasAffiches(CATALOGUE, undefined))).toEqual(['public', 'reporting'])
+})
+
+test('la liste vide est un réglage : aucun schéma n’est montré', () => {
+  // C'est la distinction qui tient tout le reste — `null` n'est pas `[]`, comme « jamais tentée »
+  // n'est pas « hors ligne ». La confondre rendrait impossible de tout décocher.
+  expect(schemasAffiches(CATALOGUE, [])).toEqual([])
+})
+
+test('un schéma de catalogue coché est montré', () => {
+  // C'est ce qui rend son interrupteur honnête : la lecture les rend, et cette fonction ne les
+  // traite pas à part. Un contrôle sans effet aurait été pire que son absence.
+  expect(noms(schemasAffiches(CATALOGUE, ['pg_catalog']))).toEqual(['pg_catalog'])
+})
+
+test('un nom réglé qui ne correspond à rien est simplement absent', () => {
+  // Le gestionnaire n'exige pas que la connexion soit ouverte pour enregistrer, et un schéma peut
+  // avoir été retiré côté serveur depuis : une intersection, jamais une promesse.
+  expect(noms(schemasAffiches(CATALOGUE, ['reporting', 'parti']))).toEqual(['reporting'])
+})
+
+test('l’ordre rendu est celui du catalogue, non celui des cases cochées', () => {
+  // Sinon l'ordre des lignes de l'arbre dépendrait de la suite des clics — un ordre que personne
+  // n'a choisi.
+  expect(noms(schemasAffiches(CATALOGUE, ['reporting', 'public']))).toEqual(['public', 'reporting'])
 })

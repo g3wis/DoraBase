@@ -50,6 +50,10 @@ pub async fn bases(connexion: &mut Conn) -> Result<Vec<SchemaInfo>, EngineError>
             }
             Some(SchemaInfo {
                 name: nom,
+                // MySQL n'attache pas de propriétaire à une base : ses rôles vivent au niveau du
+                // serveur, et `DE_SERVICE` écarte ses bases de catalogue quelques lignes plus haut.
+                owner: None,
+                system: false,
                 counts: ObjectCounts {
                     tables: compteur(&ligne, 1),
                     views: compteur(&ligne, 2),

@@ -185,6 +185,35 @@ impl PostgresAdapter {
     ) -> Result<Vec<TableDetail>, EngineError> {
         introspect::table_details(&self.client, schema, tables).await
     }
+
+    /// `create schema` — la seule écriture de structure du produit (`API-33`).
+    ///
+    /// **Immédiate et sans retour**, et c'est ce qui décide de son bouton propre dans le
+    /// gestionnaire : DoraBase ne peut pas la défaire, là où les schémas affichés sont une
+    /// préférence qui attend « Enregistrer ». Les mêler aurait fait qu'« Annuler » ne défasse
+    /// qu'une moitié de ce qu'on a fait.
+    ///
+    /// **Le nom est cité, jamais interpolé nu** : `rows::identifiant` est la même fonction qui
+    /// cite les tables et les colonnes de toutes les écritures de lignes. Un nom vide est refusé
+    /// ici plutôt que par le serveur — `create schema ""` échoue sur « zero-length delimited
+    /// identifier », un message qui n'apprend rien à qui a laissé le champ vide.
+    ///
+    /// Pas de `if not exists` : un schéma qui existe déjà doit se **dire**, sinon le gestionnaire
+    /// annoncerait une création qui n'a rien créé. C'est la même règle que le refus d'une connexion
+    /// en double, qui ne génère pas de suffixe.
+    pub async fn create_schema(&self, name: &str) -> Result<(), EngineError> {
+        let nom = name.trim();
+        if nom.is_empty() {
+            return Err(EngineError::local(
+                "un schéma a besoin d'un nom pour être créé.".to_owned(),
+            ));
+        }
+
+        self.client
+            .batch_execute(&format!("create schema {}", rows::identifiant(nom)))
+            .await
+            .map_err(|erreur| error::traduire(&erreur))
+    }
 }
 
 impl EngineAdapter for PostgresAdapter {
@@ -202,6 +231,12 @@ impl EngineAdapter for PostgresAdapter {
         })
     }
 
+    /// Tous les schémas du serveur, **catalogue compris et marqué** (`API-33`).
+    ///
+    /// Le filtre qui écartait les trois schémas de catalogue est parti d'ici : c'est l'écran qui
+    /// choisit — non-système par défaut, la préférence de la connexion sinon —, et il ne pourrait
+    /// pas afficher un schéma que cette lecture ne rend pas. Voir `REQUETE_SCHEMAS` et
+    /// `schemasAffiches`, côté front, où le choix se prend une fois.
     async fn schemas(&self) -> Result<Vec<SchemaInfo>, EngineError> {
         introspect::schemas(&self.client).await
     }
@@ -1959,22 +1994,116 @@ mod tests_db {
             .unwrap_or_else(|| panic!("objet {nom} absent du schéma de test"))
     }
 
+    /// Les trois schémas de catalogue sont **rendus et marqués**, non exclus (`API-33`).
+    ///
+    /// Le test qui vivait ici exigeait l'inverse — ils étaient écartés par la requête —, et c'est
+    /// exactement ce que le gestionnaire de schémas renverse : il les liste, repliés, et rien
+    /// n'interdit d'en afficher un. Le choix se prend désormais côté écran.
+    ///
+    /// **Les deux moitiés de l'assertion comptent.** Sans le marquage, l'arbre les afficherait
+    /// tous les trois d'emblée ; sans la présence, le gestionnaire ne pourrait pas les proposer.
     #[tokio::test]
-    async fn les_schemas_systeme_sont_exclus() {
+    async fn les_schemas_de_catalogue_sont_rendus_et_marques() {
         let schemas = adaptateur().await.schemas().await.unwrap();
-        let noms: Vec<&str> = schemas.iter().map(|s| s.name.as_str()).collect();
+        let par_nom = |nom: &str| schemas.iter().find(|s| s.name == nom).cloned();
 
         for systeme in ["pg_catalog", "information_schema", "pg_toast"] {
+            let trouve = par_nom(systeme)
+                .unwrap_or_else(|| panic!("{systeme} doit être rendu : {schemas:?}"));
+            assert!(trouve.system, "{systeme} doit être marqué : {trouve:?}");
+        }
+
+        // Contrôle positif, et la moitié qui dit que le marquage discrimine : un `system` toujours
+        // vrai passerait la boucle ci-dessus.
+        let public = par_nom("public").expect("public doit apparaître");
+        assert!(!public.system, "public n'est pas du catalogue : {public:?}");
+
+        // Les schémas **temporaires**, eux, restent exclus : ils appartiennent à une session.
+        assert!(
+            !schemas.iter().any(|s| s.name.starts_with("pg_temp")),
+            "aucun schéma temporaire ne doit être listé : {schemas:?}"
+        );
+    }
+
+    /// Le propriétaire vient du catalogue (`API-33`), pour la colonne du gestionnaire.
+    ///
+    /// Comparé au rôle de la connexion plutôt qu'à une chaîne écrite ici : le décor est créé par
+    /// l'utilisateur des tests, et une constante se périmerait au premier changement d'identifiants
+    /// (règle n° 4).
+    #[tokio::test]
+    async fn un_schema_porte_son_proprietaire() {
+        let (variante, _) = variante_de_test();
+        let schema = schema_de_test().await;
+
+        assert_eq!(
+            schema.owner.as_deref(),
+            Some(variante.username.as_str()),
+            "le schéma de test est créé par le rôle qui se connecte : {schema:?}"
+        );
+    }
+
+    /// `create schema` crée, et le schéma paraît dans la lecture suivante (`API-33`).
+    ///
+    /// Le nom porte l'identifiant du test : la suite tourne en parallèle sur un décor **partagé**,
+    /// et un nom fixe ferait échouer deux exécutions concurrentes l'une sur l'autre — la leçon des
+    /// deux lectures d'une base vivante. Il est retiré à la fin, mais ce qui garantit surtout
+    /// l'indépendance est qu'aucun autre test ne le nomme.
+    #[tokio::test]
+    async fn un_schema_se_cree_et_se_relit() {
+        let adaptateur = adaptateur().await;
+        let nom = "API-33 essai";
+
+        adaptateur
+            .create_schema(nom)
+            .await
+            .expect("la création doit aboutir");
+
+        let cree = adaptateur
+            .schemas()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|s| s.name == nom);
+        assert!(
+            cree.as_ref().is_some_and(|s| !s.system),
+            "le schéma créé doit paraître, non marqué : {cree:?}"
+        );
+
+        // **Un nom déjà pris est refusé, il n'est pas absorbé.** Pas de `if not exists` : le
+        // gestionnaire annoncerait sinon une création qui n'a rien créé.
+        let deja = adaptateur.create_schema(nom).await;
+        assert!(deja.is_err(), "un second `create schema` doit échouer");
+
+        adaptateur
+            .client
+            .batch_execute("drop schema \"API-33 essai\"")
+            .await
+            .expect("le décor doit se retirer");
+    }
+
+    /// Un nom vide est refusé **avant** le serveur (`API-33`).
+    ///
+    /// PostgreSQL répond « zero-length delimited identifier », qui n'apprend rien à qui a laissé le
+    /// champ vide — et le refus doit valoir aussi pour un nom fait d'espaces, que le `trim` réduit
+    /// au même cas.
+    #[tokio::test]
+    async fn un_nom_vide_est_refuse_avant_la_base() {
+        let adaptateur = adaptateur().await;
+
+        for vide in ["", "   "] {
+            let refus = adaptateur
+                .create_schema(vide)
+                .await
+                .expect_err("un nom vide doit être refusé");
             assert!(
-                !noms.contains(&systeme),
-                "{systeme} ne doit pas apparaître : {noms:?}"
+                refus.message.contains("besoin d'un nom"),
+                "le refus doit nommer ce qui manque : {refus:?}"
+            );
+            assert!(
+                refus.code.is_none(),
+                "refusé en amont du moteur, donc sans SQLSTATE : {refus:?}"
             );
         }
-        // Contrôle positif : sans lui, une requête qui ne rend rien passerait le test.
-        assert!(
-            noms.contains(&"public"),
-            "public doit apparaître : {noms:?}"
-        );
     }
 
     #[tokio::test]

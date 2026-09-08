@@ -81,6 +81,17 @@ export type ExplorerSidebarProps = {
    */
   onEditDatabase?: (project: string, database: string, environment: EnvironmentId) => void
   /**
+   * Ouvre le gestionnaire de schémas d'une connexion (`API-33`).
+   *
+   * **Depuis le menu de la connexion**, comme la création d'une console et pour la même raison : le
+   * geste part du palier qui connaît son contexte, et une bande en tête de colonne devrait deviner
+   * de quelle connexion il s'agit.
+   *
+   * Absent, l'entrée est désactivée avec sa raison. Hors PostgreSQL elle l'est aussi, avec une autre
+   * raison — voir `entreesDe` : la cacher ferait croire qu'elle n'existera jamais.
+   */
+  onManageSchemas?: (project: string, database: string, environment: EnvironmentId) => void
+  /**
    * Renomme une connexion depuis sa ligne (`26`).
    *
    * **Sur place, et non dans une modale** : le nom est le seul champ concerné, et l'ouverture d'un
@@ -173,6 +184,7 @@ export function ExplorerSidebar({
   consoles,
   onOpenDiagram,
   onEditDatabase,
+  onManageSchemas,
   onRenameDatabase,
   onEditProject,
   onDelete,
@@ -235,6 +247,7 @@ export function ExplorerSidebar({
       noeud,
       onAddDatabase,
       onEditDatabase,
+      onManageSchemas,
       onRenameDatabase !== undefined,
       onEditProject,
       demanderLeRetrait,
@@ -627,6 +640,7 @@ function entreesDe(
   noeud: Noeud,
   onAddDatabase: ExplorerSidebarProps['onAddDatabase'],
   onEditDatabase: ExplorerSidebarProps['onEditDatabase'],
+  onManageSchemas: ExplorerSidebarProps['onManageSchemas'],
   /**
    * Un booléen et non la fonction : ce menu n'appelle pas le renommage, il **passe la ligne en
    * édition** — c'est le champ de saisie qui appellera. Il n'a donc besoin que de savoir si l'action
@@ -781,6 +795,9 @@ function entreesDe(
   // envoyer aux commandes IPC. `label` divergerait dès qu'une connexion porte un libellé, et ces
   // appels viseraient une base qui n'existe pas.
   const { project, database, environment } = noeud
+  // Le moteur, tel que le nœud le porte (`API-33`) : c'est lui qui décide si le gestionnaire de
+  // schémas est cliquable ou désactivé avec sa raison.
+  const estPostgres = noeud.engine === 'postgresql'
   const modifiable =
     onEditDatabase !== undefined && project !== undefined && environment !== undefined
 
@@ -796,6 +813,31 @@ function entreesDe(
           ? () => consoles.onCreer(project, database, environment)
           : undefined,
       raison: consoles ? undefined : RAISONS.consoleIndisponible,
+    },
+    {
+      /* **« Gérer les schémas… » en seconde position**, juste après la console (`API-33`). Les deux
+         premières entrées du menu sont les deux gestes qui *ouvrent* quelque chose ; les trois
+         suivantes configurent la déclaration ou la retirent.
+
+         **Hors PostgreSQL, l'entrée reste et se désactive avec sa raison.** La cacher ferait croire
+         qu'elle n'existera jamais, quand c'est un « pas encore » — la distinction que les cinq
+         verdicts de disponibilité du dump tiennent déjà. Et le moteur vient du **nœud**, non d'une
+         déduction sur son icône. */
+      libelle: t('explorer.sidebar.menu.manageSchemas'),
+      icone: 'schema',
+      onClick:
+        onManageSchemas &&
+        estPostgres &&
+        project !== undefined &&
+        database !== undefined &&
+        environment !== undefined
+          ? () => onManageSchemas(project, database, environment)
+          : undefined,
+      raison: estPostgres
+        ? onManageSchemas
+          ? undefined
+          : RAISONS.schemasIndisponible
+        : RAISONS.schemasHorsPostgres,
     },
     {
       /* **« Renommer… » et « Modifier… » sont deux entrées, pas une** (`26`). Le nom est le seul
@@ -865,6 +907,8 @@ function raisons(t: ReturnType<typeof useT>) {
     consoleIndisponible: t('explorer.sidebar.raisons.consoleUnavailable'),
     ajoutIndisponible: t('explorer.sidebar.raisons.addUnavailable'),
     diagrammeIndisponible: t('explorer.sidebar.raisons.diagramUnavailable'),
+    schemasIndisponible: t('explorer.sidebar.raisons.schemasUnavailable'),
+    schemasHorsPostgres: t('explorer.sidebar.raisons.schemasPostgresOnly'),
   }
 }
 

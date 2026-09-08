@@ -642,7 +642,7 @@ pub fn create_console(
     request: ConsoleRequest,
     state: State<'_, ConfigState>,
 ) -> Result<Vec<Project>, String> {
-    ecrire_les_consoles(&state, |projects| {
+    ecrire_les_projets(&state, |projects| {
         super::enregistrer::ajouter_console(
             projects,
             &request.project,
@@ -660,7 +660,7 @@ pub fn save_console(
     request: ConsoleRequest,
     state: State<'_, ConfigState>,
 ) -> Result<Vec<Project>, String> {
-    ecrire_les_consoles(&state, |projects| {
+    ecrire_les_projets(&state, |projects| {
         super::enregistrer::enregistrer_sql_de_console(
             projects,
             &request.project,
@@ -679,7 +679,7 @@ pub fn delete_console(
     request: ConsoleRequest,
     state: State<'_, ConfigState>,
 ) -> Result<Vec<Project>, String> {
-    ecrire_les_consoles(&state, |projects| {
+    ecrire_les_projets(&state, |projects| {
         super::enregistrer::retirer_console(
             projects,
             &request.project,
@@ -701,7 +701,7 @@ pub fn rename_console(
         .rename_to
         .clone()
         .ok_or_else(|| "un renommage exige un nouveau nom".to_owned())?;
-    ecrire_les_consoles(&state, |projects| {
+    ecrire_les_projets(&state, |projects| {
         super::enregistrer::renommer_console(
             projects,
             &request.project,
@@ -714,11 +714,17 @@ pub fn rename_console(
     })
 }
 
-/// Le tronc commun des quatre opérations sur les consoles.
+/// Le tronc commun des écritures qui ne touchent qu'aux projets : les quatre opérations sur les
+/// consoles, et le réglage des schémas affichés (`API-33`).
+///
+/// **Renommée** le 8 septembre 2026, quand elle s'appelait encore d'après les consoles : elle n'a
+/// jamais rien su d'elles — elle lit, applique une opération, écrit — et un nom qui annonce un
+/// domaine fait hésiter à s'en servir depuis un autre, donc fait écrire une seconde fois la même
+/// chose.
 ///
 /// **Les projets viennent du disque**, comme partout ailleurs : une liste envoyée par l'écran pourrait
 /// être périmée et écraser une écriture. Même arbitrage qu'en `08e`, `08f` et `08i`.
-fn ecrire_les_consoles(
+fn ecrire_les_projets(
     state: &State<'_, ConfigState>,
     operation: impl FnOnce(&[Project]) -> Result<Vec<Project>, String>,
 ) -> Result<Vec<Project>, String> {
@@ -738,6 +744,44 @@ fn ecrire_les_consoles(
         .save(&suivants, &preferences)
         .map_err(|erreur| erreur.to_string())?;
     Ok(suivants)
+}
+
+/// Ce que le gestionnaire de schémas envoie en enregistrant (`API-33`).
+#[derive(Debug, Clone, serde::Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "config.ts")]
+pub struct VisibleSchemasRequest {
+    pub project: String,
+    pub database: String,
+    /// **L'environnement fait partie de l'identité d'une connexion** (`23b`) : sans lui, régler
+    /// « analytics » d'un projet qui la déclare en dev et en prod viserait la première venue.
+    pub environment: super::model::EnvironmentId,
+    /// Les schémas à montrer, **tels quels**. La liste vide est un réglage — « aucun » —, distincte
+    /// de la connexion jamais réglée, que cette commande ne peut pas produire.
+    pub schemas: Vec<String>,
+}
+
+/// Règle les schémas que l'arbre montre sous une connexion, et rend les projets à jour (`API-33`).
+///
+/// **Distincte d'`update_variant`, et surtout : elle ne ferme pas la connexion.** Celle-là ferme,
+/// parce que ses réglages décrivent *comment joindre le serveur* et que l'ancien hôte reste dans le
+/// registre. Ici rien de tel n'a changé — c'est un réglage d'affichage —, et fermer aurait fait
+/// perdre une connexion ouverte à chaque case cochée.
+#[tauri::command]
+pub fn save_visible_schemas(
+    request: VisibleSchemasRequest,
+    state: State<'_, ConfigState>,
+) -> Result<Vec<Project>, String> {
+    ecrire_les_projets(&state, |projects| {
+        super::enregistrer::regler_les_schemas_affiches(
+            projects,
+            &request.project,
+            &request.database,
+            &request.environment,
+            request.schemas.clone(),
+        )
+        .map_err(|erreur| erreur.to_string())
+    })
 }
 
 /// Ajoute une base et sa variante à un projet, et range son mot de passe.

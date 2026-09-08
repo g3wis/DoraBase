@@ -410,6 +410,7 @@ mod tests {
                 tunnel: None,
             },
             consoles: Vec::new(),
+            visible_schemas: None,
         }
     }
 

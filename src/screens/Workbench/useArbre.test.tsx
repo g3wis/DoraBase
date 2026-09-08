@@ -36,9 +36,12 @@ const noeudDeBase: Noeud = {
   environment: ENV,
 }
 
-const schema = (name: string): SchemaInfo => ({
+const schema = (name: string, over: Partial<SchemaInfo> = {}): SchemaInfo => ({
   name,
+  owner: 'atelier',
+  system: false,
   counts: { tables: 1, views: 0, functions: 0, indexes: 0 },
+  ...over,
 })
 
 function connexion(defaultDatabase: string): Database {
@@ -226,4 +229,105 @@ test('un changement de projets qui ne ferme rien ne jette aucun cache', async ()
   expect(vu.courant.deplies.has(ID_BASE)).toBe(true)
   // Et rien n'a été réouvert : le cache a servi, ce qui est son rôle.
   expect(compte.ouvertures).toBe(1)
+})
+
+// --- Les schémas affichés (`API-33`) ---
+
+/** Le catalogue tel que `list_schemas` le rend : les schémas de la base, système compris. */
+const CATALOGUE = [schema('public'), schema('reporting'), schema('pg_catalog', { system: true })]
+
+/** Une passerelle qui rend `CATALOGUE`, et compte ses lectures. */
+function passerelleDuCatalogue(etats: { courant: readonly ConnectionStateEntry[] }) {
+  const { passerelle } = passerelleDe(etats)
+  const compte = { lectures: 0 }
+  return {
+    compte,
+    passerelle: {
+      ...passerelle,
+      listSchemas: async () => {
+        compte.lectures += 1
+        return CATALOGUE
+      },
+    } as PasserelleArbre,
+  }
+}
+
+/** Les projets, avec la préférence de schémas affichés de la connexion. */
+function projetsAvec(visibleSchemas: string[] | null): readonly Project[] {
+  const base = { ...connexion('cooknco'), visibleSchemas }
+  return [
+    {
+      name: PROJET,
+      environments: [{ id: ENV, label: 'prod', color: 'red', production: true }],
+      databases: [base],
+      queries: [],
+    },
+  ]
+}
+
+test('le cache ne retient que les schémas que l’arbre montre', async () => {
+  const etats = { courant: OUVERTE }
+  const { passerelle } = passerelleDuCatalogue(etats)
+  const { vu } = monter(passerelle, projetsAvec(['reporting']))
+
+  await act(async () => {
+    vu.courant.basculer(noeudDeBase)
+  })
+
+  /* **Filtré avant d'être caché**, et c'est ce qui tient tout le reste : le cache sert aussi le
+     catalogue d'autocomplétion d'une console et le préchauffage des structures. Cacher la liste
+     complète pour la filtrer au rendu aurait fait décrire `pg_catalog` en entier à chaque
+     ouverture. */
+  expect(vu.courant.charge.schemas[ID_BASE]?.map((s) => s.name)).toEqual(['reporting'])
+})
+
+test('sans préférence, le catalogue est écarté — et lui seul', async () => {
+  const etats = { courant: OUVERTE }
+  const { passerelle } = passerelleDuCatalogue(etats)
+  const { vu } = monter(passerelle, projetsAvec(null))
+
+  await act(async () => {
+    vu.courant.basculer(noeudDeBase)
+  })
+
+  // Le défaut ne change rien à l'existant : les deux schémas ordinaires, pas `pg_catalog`.
+  expect(vu.courant.charge.schemas[ID_BASE]?.map((s) => s.name)).toEqual(['public', 'reporting'])
+})
+
+test('relire les schémas applique la liste qu’on lui passe, non celle des projets', async () => {
+  const etats = { courant: OUVERTE }
+  const { passerelle, compte } = passerelleDuCatalogue(etats)
+  const { vu } = monter(passerelle, projetsAvec(null))
+
+  await act(async () => {
+    vu.courant.basculer(noeudDeBase)
+  })
+  expect(compte.lectures).toBe(1)
+
+  /* **La préférence est passée, non relue.** L'appelant vient de l'enregistrer, et `projects` ne
+     sera reposé qu'au rendu suivant : la relire ici appliquerait le filtre qu'on vient de
+     remplacer. Le décor le rend visible — les projets portent encore `null`. */
+  await act(async () => {
+    await vu.courant.rechargerLesSchemas({ project: PROJET, database: BASE, environment: ENV }, [
+      'pg_catalog',
+    ])
+  })
+
+  expect(compte.lectures).toBe(2)
+  expect(vu.courant.charge.schemas[ID_BASE]?.map((s) => s.name)).toEqual(['pg_catalog'])
+})
+
+test('relire une connexion dont rien n’est en cache ne demande rien', async () => {
+  const etats = { courant: OUVERTE }
+  const { passerelle, compte } = passerelleDuCatalogue(etats)
+  const { vu } = monter(passerelle, projetsAvec(null))
+
+  // Aucun dépliage : il n'y a rien à rafraîchir, et le prochain regard chargera — avec la
+  // préférence à jour, puisqu'elle vient alors de `projects`.
+  await act(async () => {
+    await vu.courant.rechargerLesSchemas({ project: PROJET, database: BASE, environment: ENV }, [])
+  })
+
+  expect(compte.lectures).toBe(0)
+  expect(vu.courant.charge.schemas[ID_BASE]).toBeUndefined()
 })

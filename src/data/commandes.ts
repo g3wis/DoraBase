@@ -6,6 +6,7 @@ import type {
   Engine,
   Preferences,
   Project,
+  VisibleSchemasRequest,
 } from '../domain/config'
 import type {
   ApplyOutcome,
@@ -199,6 +200,28 @@ export async function deleteConsole(request: ConsoleRequest): Promise<Project[]>
 /** Renomme une console. */
 export async function renameConsole(request: ConsoleRequest): Promise<Project[]> {
   return invoke<Project[]>('rename_console', { request })
+}
+
+/**
+ * Crée un schéma sur la base ouverte (`API-33`). **PostgreSQL seulement.**
+ *
+ * **Elle ne rend rien, et c'est le fait à retenir** : `create schema` part sur la base et DoraBase
+ * ne peut pas le défaire. C'est ce qui lui vaut son bouton propre dans le gestionnaire, à côté des
+ * schémas affichés qui sont une préférence et attendent « Enregistrer ».
+ */
+export async function createSchema(key: DatabaseKey, name: string): Promise<void> {
+  return invoke<void>('create_schema', { key, name })
+}
+
+/**
+ * Règle les schémas que l'arbre montre sous une connexion (`API-33`).
+ *
+ * Rend les projets à jour, comme les autres écritures de configuration — c'est ce changement que
+ * l'arbre suit pour se redessiner. **Elle ne ferme pas la connexion**, contrairement à
+ * `update_variant` : rien de ce qui décrit le serveur n'a changé.
+ */
+export async function saveVisibleSchemas(request: VisibleSchemasRequest): Promise<Project[]> {
+  return invoke<Project[]>('save_visible_schemas', { request })
 }
 
 /**

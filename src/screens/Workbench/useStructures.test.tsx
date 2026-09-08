@@ -9,9 +9,12 @@ import {
 
 const CLE: DatabaseKey = { project: 'Atelier Nord', database: 'analytics', environment: 'prod' }
 
-const schema = (name: string): SchemaInfo => ({
+const schema = (name: string, over: Partial<SchemaInfo> = {}): SchemaInfo => ({
   name,
+  owner: 'atelier',
+  system: false,
   counts: { tables: 2, views: 0, functions: 0, indexes: 0 },
+  ...over,
 })
 
 const objet = (name: string, kind: TableSummary['kind'] = 'table'): TableSummary => ({

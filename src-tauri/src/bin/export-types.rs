@@ -20,7 +20,7 @@ use dorabase_lib::config::{
     DeleteDatabaseRequest, DeleteEnvironmentRequest, DeleteEnvironmentResult, DeleteProjectRequest,
     DeleteResult, Project, RecolorEnvironmentRequest, RenameDatabaseRequest,
     RenameEnvironmentRequest, RenameProjectRequest, RenameResult, ReorderEnvironmentsRequest,
-    SaveDatabaseRequest, SavedQuery, UpdateVariantRequest,
+    SaveDatabaseRequest, SavedQuery, UpdateVariantRequest, VisibleSchemasRequest,
 };
 use dorabase_lib::dump::commands::{DumpFailure, DumpRequest};
 use dorabase_lib::dump::inspect::Inspection;
@@ -70,6 +70,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     DeleteResult::export_all(&config)?;
     RenameResult::export_all(&config)?;
     UpdateVariantRequest::export_all(&config)?;
+    VisibleSchemasRequest::export_all(&config)?;
     // Les cinq gestes de `23c`. **Nommés un par un** : `export_all` entraîne les dépendances d'un
     // type, jamais ses voisins — un type de requête oublié ici ne manque pas à la compilation, il
     // manque au front, qui découvre son absence à l'écriture de l'appel.

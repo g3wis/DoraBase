@@ -927,6 +927,11 @@ fn oublier(
 
 /// Localise une connexion par son identité complète — projet, nom, environnement.
 ///
+/// **Son erreur est celle des consoles, et elle sert au-delà d'elles** : le gestionnaire de schémas
+/// passe par ici aussi (`API-33`). Les deux variantes qu'elle rend — projet inconnu, connexion
+/// inconnue — ne parlent pas de consoles, et c'est ce qui rend le partage honnête ; ce qui l'est
+/// moins est le nom du type, qu'un renommage toucherait à quinze endroits sans rien changer.
+///
 /// **Les trois composantes, jamais deux.** Depuis `23b`, `analytics` en dev et `analytics` en prod
 /// sont deux connexions : chercher par le seul nom en désignerait une au hasard, et une console
 /// créée sur l'une apparaîtrait sous l'autre.
@@ -1042,6 +1047,37 @@ pub fn renommer_console(
             nom: ancien.to_owned(),
         })?;
     cible.name = nouveau.to_owned();
+    Ok(suivants)
+}
+
+/// Règle les schémas que l'arbre montre sous une connexion (`API-33`).
+///
+/// **Une préférence, écrite d'un geste explicite** : c'est le « Enregistrer » du gestionnaire de
+/// schémas, à l'inverse de `create schema` qui part immédiatement sur la base. Les deux dans le
+/// même bouton auraient fait qu'« Annuler » ne défasse qu'une moitié de ce qu'on a fait.
+///
+/// **La liste est prise telle quelle, y compris vide.** `Some(vec![])` est un réglage — tout a été
+/// décoché — et se distingue de `None`, qui veut dire « jamais réglé » et laisse l'arbre montrer
+/// tous les schémas non-système. Voir `Database::visible_schemas` : quatre états, pas deux.
+///
+/// **Aucune vérification que ces schémas existent**, et c'est délibéré : la connexion peut être
+/// fermée au moment de l'enregistrement, et un schéma retiré côté serveur ne doit pas faire échouer
+/// l'écriture d'une préférence. Un nom qui ne correspond à rien ne montre simplement rien —
+/// `schemasAffiches` n'affiche que l'intersection.
+///
+/// Elle ne ferme **pas** la connexion, contrairement à `update_variant` : rien de ce qui décrit le
+/// serveur n'a changé, et fermer aurait fait perdre la connexion ouverte pour un réglage
+/// d'affichage.
+pub fn regler_les_schemas_affiches(
+    projects: &[Project],
+    project: &str,
+    database: &str,
+    environment: &EnvironmentId,
+    schemas: Vec<String>,
+) -> Result<Vec<Project>, ConsoleError> {
+    let mut suivants = projects.to_vec();
+    let base = connexion_mut(&mut suivants, project, database, environment)?;
+    base.visible_schemas = Some(schemas);
     Ok(suivants)
 }
 
@@ -1219,6 +1255,10 @@ pub fn enregistrer(
         connection: variant,
         // Une connexion neuve n'a aucune console : elles se créent depuis son menu « … ».
         consoles: Vec::new(),
+        // **`None`, jamais `Some(vec![])`** : les schémas ne sont pas réglés, donc l'arbre montre
+        // tous les non-système. La liste vide dirait « aucun », et une connexion neuve s'ouvrirait
+        // sur un arbre vide (`API-33`).
+        visible_schemas: None,
     };
 
     // Un projet candidat, validé à part : muter d'abord puis valider obligerait à défaire la
@@ -2131,6 +2171,7 @@ mod tests_parcours {
                 environment: EnvironmentId::brut("dev"),
                 connection: variante_de(1),
                 consoles: Vec::new(),
+                visible_schemas: None,
             }],
         }];
 
@@ -2212,6 +2253,7 @@ mod tests_renommage {
                         environment: EnvironmentId::brut("dev"),
                         connection: variante(Some(reference_de("Halle", "analytics", "dev"))),
                         consoles: Vec::new(),
+                        visible_schemas: None,
                     },
                     Database {
                         name: "analytics".to_owned(),
@@ -2220,6 +2262,7 @@ mod tests_renommage {
                         environment: EnvironmentId::brut("prod"),
                         connection: variante(Some(reference_de("Halle", "analytics", "prod"))),
                         consoles: Vec::new(),
+                        visible_schemas: None,
                     },
                     Database {
                         name: "shop".to_owned(),
@@ -2228,6 +2271,7 @@ mod tests_renommage {
                         environment: EnvironmentId::brut("prod"),
                         connection: variante(Some(reference_de("Halle", "shop", "prod"))),
                         consoles: Vec::new(),
+                        visible_schemas: None,
                     },
                 ],
             },
@@ -2943,6 +2987,7 @@ mod tests_consoles {
                 tunnel: None,
             },
             consoles: Vec::new(),
+            visible_schemas: None,
         }
     }
 
@@ -3167,6 +3212,77 @@ mod tests_consoles {
         migrer_requetes_en_consoles(&mut projets);
         migrer_requetes_en_consoles(&mut projets);
         assert_eq!(projets[0].databases[0].consoles.len(), 1);
+    }
+
+    // --- Les schémas affichés (`API-33`) ---
+    //
+    // Dans ce module parce qu'ils partagent son décor : deux connexions **homonymes** en dev et en
+    // prod, qui est précisément ce qui rend visible une préférence écrite sur la mauvaise.
+
+    #[test]
+    fn les_schemas_affiches_se_reglent_sur_la_connexion_designee() {
+        let p = regler_les_schemas_affiches(
+            &projets(),
+            "Halle",
+            "analytics",
+            &prod(),
+            vec!["public".into(), "reporting".into()],
+        )
+        .expect("réglage");
+
+        assert_eq!(
+            p[0].databases[1].visible_schemas.as_deref(),
+            Some(&["public".to_owned(), "reporting".to_owned()][..])
+        );
+        // **La connexion homonyme de dev n'a rien reçu** : c'est le couple nom + environnement qui
+        // désigne, et sans lui la préférence serait tombée sur la première venue.
+        assert_eq!(p[0].databases[0].visible_schemas, None);
+    }
+
+    /// **La liste vide est un réglage, pas une absence de réglage.**
+    ///
+    /// C'est la distinction que `Database::visible_schemas` porte : `None` laisse l'arbre montrer
+    /// tous les non-système, `Some(vec![])` dit « aucun ». Les confondre rendrait impossible de
+    /// tout décocher — ou, dans l'autre sens, viderait l'arbre de toute connexion jamais réglée.
+    #[test]
+    fn tout_decocher_s_ecrit_et_ne_vaut_pas_jamais_regle() {
+        let p = regler_les_schemas_affiches(&projets(), "Halle", "analytics", &prod(), Vec::new())
+            .expect("réglage");
+
+        assert_eq!(p[0].databases[1].visible_schemas.as_deref(), Some(&[][..]));
+        assert_ne!(p[0].databases[1].visible_schemas, None);
+    }
+
+    #[test]
+    fn regler_une_connexion_inconnue_est_un_refus_nomme() {
+        assert!(matches!(
+            regler_les_schemas_affiches(&projets(), "Halle", "absente", &prod(), Vec::new()),
+            Err(ConsoleError::ConnexionInconnue { .. })
+        ));
+        assert!(matches!(
+            regler_les_schemas_affiches(&projets(), "Ailleurs", "analytics", &prod(), Vec::new()),
+            Err(ConsoleError::ProjetInconnu { .. })
+        ));
+    }
+
+    /// Un réglage remplace le précédent, il ne s'y ajoute pas.
+    #[test]
+    fn un_second_reglage_remplace_le_premier() {
+        let p = regler_les_schemas_affiches(
+            &projets(),
+            "Halle",
+            "analytics",
+            &prod(),
+            vec!["a".into()],
+        )
+        .expect("premier");
+        let p = regler_les_schemas_affiches(&p, "Halle", "analytics", &prod(), vec!["b".into()])
+            .expect("second");
+
+        assert_eq!(
+            p[0].databases[1].visible_schemas.as_deref(),
+            Some(&["b".to_owned()][..])
+        );
     }
 }
 

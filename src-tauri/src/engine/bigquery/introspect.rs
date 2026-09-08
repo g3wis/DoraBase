@@ -55,7 +55,14 @@ pub async fn schemas(client: &Client, projet: &str) -> Result<Vec<SchemaInfo>, E
             functions: 0,
             indexes: 0,
         };
-        resultat.push(SchemaInfo { name: id, counts });
+        resultat.push(SchemaInfo {
+            name: id,
+            // Un jeu de données porte des droits IAM, pas un rôle propriétaire que `A4` puisse
+            // nommer ; et BigQuery n'expose aucun jeu de données de catalogue à écarter.
+            owner: None,
+            system: false,
+            counts,
+        });
     }
     Ok(resultat)
 }

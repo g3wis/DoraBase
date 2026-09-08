@@ -54,6 +54,7 @@ mod tests {
             environment: EnvironmentId::brut(env),
             connection: reglages(),
             consoles: Vec::new(),
+            visible_schemas: None,
         }
     }
 

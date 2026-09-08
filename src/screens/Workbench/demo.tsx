@@ -126,7 +126,29 @@ const PROJETS: Project[] = [
 ]
 
 const SCHEMAS: SchemaInfo[] = [
-  { name: 'public', counts: { tables: 3, views: 1, functions: 0, indexes: 4 } },
+  {
+    name: 'public',
+    owner: 'atelier',
+    system: false,
+    counts: { tables: 3, views: 1, functions: 0, indexes: 4 },
+  },
+  /* **Les schémas de catalogue sont dans le décor** (`API-33`), parce que `list_schemas` les rend :
+     sans eux, le gestionnaire de schémas n'aurait aucune section système à replier, et le seul
+     endroit où ce cas se mesure — un vrai navigateur — ne le verrait jamais (règle n° 5). Ils ne
+     changent **rien** à l'arbre, qui écarte les schémas marqués : aucune capture de fidélité ne
+     bouge. */
+  {
+    name: 'information_schema',
+    owner: 'postgres',
+    system: true,
+    counts: { tables: 0, views: 68, functions: 0, indexes: 0 },
+  },
+  {
+    name: 'pg_catalog',
+    owner: 'postgres',
+    system: true,
+    counts: { tables: 62, views: 71, functions: 3_190, indexes: 138 },
+  },
 ]
 
 const objet = (name: string, over: Partial<TableSummary> = {}): TableSummary => ({
@@ -352,8 +374,18 @@ const DETAIL: TableDetail = {
  * Les noms sont inventés, comme le veut `AGENTS.md`.
  */
 const SCHEMAS_MONGO: SchemaInfo[] = [
-  { name: 'atelier_journal', counts: { tables: 2, views: 0, functions: 0, indexes: 3 } },
-  { name: 'atelier_archives', counts: { tables: 1, views: 0, functions: 0, indexes: 1 } },
+  {
+    name: 'atelier_journal',
+    owner: null,
+    system: false,
+    counts: { tables: 2, views: 0, functions: 0, indexes: 3 },
+  },
+  {
+    name: 'atelier_archives',
+    owner: null,
+    system: false,
+    counts: { tables: 1, views: 0, functions: 0, indexes: 1 },
+  },
 ]
 
 const COLLECTIONS: TableSummary[] = [

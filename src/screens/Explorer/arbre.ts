@@ -1,5 +1,5 @@
 import type { IconName } from '../../design/icons/names'
-import type { EnvironmentId, Project } from '../../domain/config'
+import type { Engine, EnvironmentId, Project } from '../../domain/config'
 import type { ConnectionState, SchemaInfo, TableSummary } from '../../domain/engine'
 import type { useT } from '../../i18n/LanguageContext'
 import { formatRowCount } from '../../ui/format'
@@ -124,6 +124,15 @@ export type Noeud = {
   schema?: string
   /** Le nom de la console, pour un nœud `console` — distinct de `label`, qui peut être décoré. */
   console?: string
+  /**
+   * Le moteur, sur un nœud `database` (`API-33`).
+   *
+   * **Le nœud le portait déjà, mais seulement en couleur et en glyphe** — `iconColor` et `icon` en
+   * sont dérivés. Une icône ne se relit pas : le menu de la ligne doit dire « Gérer les schémas… »
+   * cliquable sous PostgreSQL et désactivé avec sa raison ailleurs, et déduire le moteur d'un nom
+   * d'icône aurait fait dépendre une décision d'un détail de rendu.
+   */
+  engine?: Engine
 }
 
 /** L'identité d'un nœud. Stable, et **dérivée du chemin** : deux nœuds homonymes de branches
@@ -310,6 +319,7 @@ export function aplatir(
           project: projet.name,
           database: base.name,
           environment: base.environment,
+          engine: base.engine,
         })
 
         if (!baseDepliee) continue
@@ -351,6 +361,45 @@ export function aplatir(
   }
 
   return noeuds
+}
+
+/**
+ * Les schémas que l'arbre montre sous une connexion (`API-33`).
+ *
+ * # Le seul endroit où ce choix se prend
+ *
+ * `list_schemas` rend **tous** les schémas, ceux du catalogue compris et marqués : elle ne pouvait
+ * pas les taire sans rendre impossible d'en afficher un, et une seconde commande « avec le
+ * catalogue » aurait fait vivre deux listes que rien n'aurait tenues en phase (règle n° 17). Le
+ * tri se fait donc ici, et `useArbre` l'applique **avant de mettre en cache** — de sorte que ce
+ * qui est caché est ce qui est montré : l'arbre, le catalogue d'autocomplétion d'une console et le
+ * préchauffage des structures voient la même liste. Le dernier point n'est pas cosmétique : sans
+ * lui, le préchauffage décrirait les quatre cents relations de `pg_catalog` à chaque ouverture.
+ *
+ * # `undefined` n'est pas la liste vide
+ *
+ * Rien de réglé — le cas de toute connexion existante — montre les schémas **non-système**, donc
+ * exactement ce que l'arbre a toujours montré. La liste vide, elle, est un réglage : quelqu'un a
+ * tout décoché, et l'arbre ne montre alors aucun schéma. C'est la distinction que
+ * `Database.visible_schemas` porte, et celle que « jamais tentée » n'est pas « hors ligne ».
+ *
+ * # Une intersection, jamais une promesse
+ *
+ * Un nom réglé qui ne correspond à aucun schéma est simplement absent du résultat : le
+ * gestionnaire n'exige pas que la connexion soit ouverte pour enregistrer, et un schéma peut avoir
+ * été retiré côté serveur depuis. L'ordre rendu est celui du catalogue, non celui de la
+ * préférence — l'arbre trie par nom, et faire dépendre l'ordre des lignes de l'ordre des cases
+ * cochées serait un ordre que personne n'a choisi.
+ */
+export function schemasAffiches(
+  schemas: readonly SchemaInfo[],
+  affiches: readonly string[] | null | undefined,
+): SchemaInfo[] {
+  if (affiches === null || affiches === undefined) {
+    return schemas.filter((schema) => !schema.system)
+  }
+  const retenus = new Set(affiches)
+  return schemas.filter((schema) => retenus.has(schema.name))
 }
 
 function noeudsDeSchema(

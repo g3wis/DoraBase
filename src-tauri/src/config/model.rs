@@ -533,6 +533,25 @@ pub struct Database {
     /// écrite avant ce jour n'a pas ce champ, et le vecteur vide est l'état correct.
     #[serde(default)]
     pub consoles: Vec<Console>,
+    /// Les schémas que l'arbre montre sous cette connexion, ou `None` : tous les non-système
+    /// (`API-33`).
+    ///
+    /// **`None` n'est pas la liste vide.** `None` veut dire « jamais réglé » — l'arbre affiche
+    /// alors ce qu'il a toujours affiché, les schémas non-système, donc aucune configuration
+    /// existante ne voit son arbre changer. La liste vide, elle, est un réglage : quelqu'un a tout
+    /// décoché. C'est la même distinction que « jamais tentée » et « hors ligne » pour l'état d'une
+    /// connexion, et que `pas encore cherché` / `à jour` pour les mises à jour : quatre états, pas
+    /// deux.
+    ///
+    /// **Une préférence, pas une capacité** : elle ne change rien à ce que la connexion peut lire —
+    /// une console interroge ce qu'elle veut. Elle vit donc à côté de la connexion et non dans
+    /// `ConnectionSettings`, dont chaque champ décrit *comment joindre le serveur*.
+    ///
+    /// **`#[serde(default)]` : aucun cran de migration**, la règle des champs ajoutés de `27a`. Et
+    /// `skip_serializing_if` pour qu'une connexion jamais réglée n'écrive pas un `null` dans le
+    /// fichier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visible_schemas: Option<Vec<String>>,
 }
 
 /// Un projet : ce que la sidebar liste. Pas des connexions — le handoff insiste.
@@ -873,6 +892,7 @@ mod tests {
             environment: EnvironmentId::brut(env),
             connection: reglages(),
             consoles: Vec::new(),
+            visible_schemas: None,
         }
     }
 

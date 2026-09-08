@@ -22,7 +22,7 @@ pub use commands::{
     DeleteEnvironmentRequest, DeleteEnvironmentResult, DeleteProjectRequest, DeleteResult,
     RecolorEnvironmentRequest, RenameDatabaseRequest, RenameEnvironmentRequest,
     RenameProjectRequest, RenameResult, ReorderEnvironmentsRequest, SaveDatabaseRequest,
-    UpdateVariantRequest,
+    UpdateVariantRequest, VisibleSchemasRequest,
 };
 pub use enregistrer::{enregistrer, reference_de, NouvelleBase, SaveError};
 pub use model::{

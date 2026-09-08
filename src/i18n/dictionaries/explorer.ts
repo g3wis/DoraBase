@@ -160,6 +160,7 @@ export const explorerFr: Dictionnaire = {
       newConsole: 'Nouvelle console…',
       edit: 'Modifier…',
       openDiagram: 'Diagramme du schéma',
+      manageSchemas: 'Gérer les schémas…',
     },
     raisons: {
       renameUnavailable: 'Cet écran n’est pas relié à la commande de renommage.',
@@ -170,6 +171,8 @@ export const explorerFr: Dictionnaire = {
       consoleUnavailable: 'Cet écran n’est pas relié à la création de consoles.',
       addUnavailable: 'Cet écran n’est pas relié à la déclaration de connexions.',
       diagramUnavailable: 'Cet écran n’ouvre pas d’onglet.',
+      schemasUnavailable: 'Cet écran n’est pas relié au gestionnaire de schémas.',
+      schemasPostgresOnly: 'Seul PostgreSQL est géré pour l’instant.',
     },
   },
   // L'aplatissement de l'arbre (`arbre.ts`) — une fonction pure, mais qui produit du texte
@@ -351,6 +354,7 @@ export const explorerEn: Dictionnaire = {
       newConsole: 'New console…',
       edit: 'Edit…',
       openDiagram: 'Schema diagram',
+      manageSchemas: 'Manage schemas…',
     },
     raisons: {
       renameUnavailable: 'This screen is not wired to the rename command.',
@@ -361,6 +365,8 @@ export const explorerEn: Dictionnaire = {
       consoleUnavailable: 'This screen is not wired to console creation.',
       addUnavailable: 'This screen is not wired to declaring connections.',
       diagramUnavailable: 'This screen does not open tabs.',
+      schemasUnavailable: 'This screen is not wired to the schema manager.',
+      schemasPostgresOnly: 'Only PostgreSQL is supported for now.',
     },
   },
   arbre: {

@@ -31,9 +31,12 @@ const PROJETS: Project[] = [
   },
 ]
 
-const schema = (name: string): SchemaInfo => ({
+const schema = (name: string, over: Partial<SchemaInfo> = {}): SchemaInfo => ({
   name,
+  owner: 'atelier',
+  system: false,
   counts: { tables: 1, views: 0, functions: 0, indexes: 0 },
+  ...over,
 })
 const table = (name: string): TableSummary => ({
   name,
@@ -91,6 +94,7 @@ function Piloté({
   onAddDatabase,
   onNewProject,
   onOpenDiagram,
+  onManageSchemas,
   projets = PROJETS,
 }: {
   charge?: Charge
@@ -107,6 +111,7 @@ function Piloté({
   onAddDatabase?: ExplorerSidebarProps['onAddDatabase']
   onNewProject?: () => void
   onOpenDiagram?: ExplorerSidebarProps['onOpenDiagram']
+  onManageSchemas?: ExplorerSidebarProps['onManageSchemas']
   projets?: Project[]
 }) {
   const [deplies, setDeplies] = useState(new Set(initial))
@@ -131,6 +136,7 @@ function Piloté({
           onAddDatabase={onAddDatabase}
           onNewProject={onNewProject}
           onOpenDiagram={onOpenDiagram}
+          onManageSchemas={onManageSchemas}
           onSelect={(n) => setChoisi(n.id)}
           onToggle={(n) => {
             onToggleSpy?.(n)
@@ -1016,6 +1022,39 @@ describe('renommer une connexion depuis sa ligne (`26`)', () => {
     expect(screen.getByRole('button', { name: 'Renommer…' })).toBeDisabled()
   })
 
+  // --- Le gestionnaire de schémas (`API-33`) ---
+
+  test('« Gérer les schémas… » part du menu de la connexion, avec ses coordonnées', async () => {
+    const vues: unknown[] = []
+    render(<Piloté initial={TOUT_DEPLIE} onManageSchemas={(...args) => vues.push(args)} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Actions de analytics' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Gérer les schémas…' }))
+
+    // **Les coordonnées viennent du nœud**, environnement compris (`23b`) : sans lui, deux
+    // connexions homonymes ouvriraient le gestionnaire de la première venue.
+    expect(vues).toEqual([['Atelier Nord', 'analytics', 'prod']])
+  })
+
+  test('hors PostgreSQL l’entrée reste, désactivée avec sa raison', async () => {
+    render(<Piloté initial={TOUT_DEPLIE} onManageSchemas={vi.fn()} />)
+    // `shop` est déclarée en MySQL dans le décor. **Présente et désactivée, pas absente** : la
+    // cacher ferait croire qu'elle n'existera jamais, quand c'est un « pas encore ».
+    await userEvent.click(screen.getByRole('button', { name: 'Actions de shop' }))
+    const entree = screen.getByRole('button', { name: 'Gérer les schémas…' })
+    expect(entree).toBeDisabled()
+    expect(entree).toHaveAttribute('title', 'Seul PostgreSQL est géré pour l’instant.')
+  })
+
+  test('sans écran relié, l’entrée dit que rien ne l’ouvre — et non que le moteur est en cause', async () => {
+    render(<Piloté initial={TOUT_DEPLIE} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Actions de analytics' }))
+    const entree = screen.getByRole('button', { name: 'Gérer les schémas…' })
+    expect(entree).toBeDisabled()
+    // **Les deux raisons sont distinctes**, et c'est ce qui compte : « pas branché » sur une
+    // connexion PostgreSQL ne doit pas accuser le moteur, qui est le bon.
+    expect(entree).toHaveAttribute('title', 'Cet écran n’est pas relié au gestionnaire de schémas.')
+  })
+
   test('les lignes projet, schéma et table n’offrent pas « Renommer… »', async () => {
     render(<Piloté initial={TOUT_DEPLIE} onRenameDatabase={vi.fn()} />)
     // Le projet a « Modifier le projet… », qui absorbe son renommage (`23e`) ; un schéma et une
@@ -1040,7 +1079,15 @@ describe('le clic droit ouvre le même menu, au pointeur (`26`)', () => {
     // test est ce qui le prouve plutôt que de le supposer.
     expect(
       [...menu.querySelectorAll('[role=menuitem]')].map((entree) => entree.textContent),
-    ).toEqual(['Nouvelle console…', 'Renommer…', 'Modifier…', 'Retirer de DoraBase…'])
+    ).toEqual([
+      'Nouvelle console…',
+      // **« Gérer les schémas… » en seconde position** (`API-33`) : les deux gestes qui *ouvrent*
+      // quelque chose d'abord, ceux qui configurent ensuite.
+      'Gérer les schémas…',
+      'Renommer…',
+      'Modifier…',
+      'Retirer de DoraBase…',
+    ])
   })
 
   test('une entrée agit, et le menu se referme', async () => {

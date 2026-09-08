@@ -41,7 +41,14 @@ pub async fn bases(client: &Client) -> Result<Vec<SchemaInfo>, EngineError> {
             continue;
         }
         let counts = compter(client, &nom).await?;
-        sortie.push(SchemaInfo { name: nom, counts });
+        sortie.push(SchemaInfo {
+            name: nom,
+            // Une base MongoDB n'a pas de propriétaire au sens d'un rôle SQL, et les bases de
+            // service sont écartées juste au-dessus : rien n'arrive ici qui soit du catalogue.
+            owner: None,
+            system: false,
+            counts,
+        });
     }
     sortie.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(sortie)

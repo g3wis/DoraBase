@@ -297,7 +297,11 @@ fn valider_colonne<'a>(
 ///
 /// Nécessaire même pour un nom validé : un nom légitime peut contenir une majuscule ou un
 /// mot réservé, que PostgreSQL replierait ou refuserait sans guillemets.
-fn identifiant(nom: &str) -> String {
+///
+/// `pub(super)` depuis `API-33` : `create schema` cite son nom par la **même** fonction que les
+/// écritures de lignes. Une seconde citation écrite à côté aurait été une convention en double,
+/// donc une convention qui diverge.
+pub(super) fn identifiant(nom: &str) -> String {
     format!("\"{}\"", nom.replace('"', "\"\""))
 }
 

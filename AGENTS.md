@@ -765,6 +765,99 @@ qu'il portait et que le rendu ne dit pas.
   `pointer-events: none`, donc la mesure rend toujours ce qu'il y a **dessous** — verte pour une
   raison qui n'a rien à voir avec la question posée.
 
+### Le gestionnaire de schémas (8 septembre 2026, `API-33`)
+
+Une connexion PostgreSQL montrait **tous** ses schémas non-système dans l'arbre, sans qu'on puisse en
+choisir, et rien du produit ne savait créer un schéma. « Gérer les schémas… » entre dans le menu
+d'une connexion, en seconde position — les deux entrées qui *ouvrent* quelque chose d'abord, celles
+qui configurent ensuite. **Le geste part du palier qui connaît son contexte**, comme la création
+d'une console : une bande en tête de colonne devrait deviner de quelle connexion il s'agit.
+
+**Hors PostgreSQL, l'entrée reste et se désactive avec sa raison.** La cacher ferait croire qu'elle
+n'existera jamais, là où c'est un « pas encore » — la distinction que les cinq verdicts du dump
+tiennent déjà. Le moteur vient du **nœud** (`Noeud.engine`, ajouté pour cela) et non d'une déduction
+sur son icône : une icône ne se relit pas.
+
+**Les deux temps, et c'est la décision à retenir.** Les schémas affichés sont une **préférence** —
+elle vit dans le registre, à côté de la connexion, et attend « Enregistrer » comme tout formulaire de
+connexion. `create schema` s'exécute **sur la base** et DoraBase ne peut pas le défaire : il a donc
+son propre bouton, dans un bloc séparé, et le schéma créé arrive coché. Les mêler ferait
+qu'« Annuler » ne défasse qu'une moitié de ce qu'on a fait. Sur un environnement marqué production,
+la bande de création porte le rappel — le drapeau de la déclaration, jamais le libellé (`23g`).
+
+Sept décisions à ne pas défaire :
+
+- **le défaut est « tous les non-système », et non `public` seul.** Le premier ne change rien à
+  l'existant — c'est ce que l'arbre montrait avant —, le second aurait vidé l'arbre des bases où
+  `public` est justement le schéma vide, et pour **toutes** les connexions déjà déclarées. Corollaire
+  qui tient tout le reste : `None` n'est pas la liste vide. « Jamais réglé » montre les non-système,
+  `Some(vec![])` dit « aucun » ; les confondre rendrait impossible de tout décocher, ou viderait
+  l'arbre de qui n'a rien demandé. C'est « jamais tentée » qui n'est pas « hors ligne », appliqué à
+  une préférence ;
+- **les schémas système sont listés, repliés — et leur interrupteur fonctionne.** Ils existent, donc
+  ils ne sont pas masqués (masquer est le bon choix pour ce qu'un moteur n'a réellement pas), et rien
+  n'interdit de les afficher. C'est ce dernier point qui a décidé de l'architecture : `list_schemas`
+  **les rend désormais, marqués** (`SchemaInfo.system`), là où la requête PostgreSQL les excluait par
+  un `not in` depuis `06c`. Une lecture qui les taisait rendait l'interrupteur menteur, et une
+  seconde commande « avec le catalogue » aurait fait vivre deux listes que rien n'aurait tenues en
+  phase (règle n° 17) ;
+- **le tri se fait une seule fois, dans `schemasAffiches`**, et `useArbre` l'applique **avant de
+  mettre en cache**. Ce qui est caché est donc ce qui est montré : l'arbre, le catalogue
+  d'autocomplétion d'une console et le préchauffage des structures lisent la même liste. Le dernier
+  n'est pas un détail — sans ce filtre à la source, le préchauffage décrirait les quatre cents
+  relations de `pg_catalog` à chaque ouverture de connexion, pour un catalogue que personne n'a
+  demandé ;
+- **le cache retenant une liste filtrée, il faut le relire** (`useArbre.rechargerLesSchemas`). Les
+  deux gestes le périment, chacun à sa façon : régler change le filtre, créer ajoute un schéma que la
+  lecture précédente ne pouvait pas connaître. Sans cette relecture, décocher un schéma n'aurait
+  aucun effet visible jusqu'au prochain « Rafraîchir l'arborescence », qui replie tout. **La
+  préférence lui est passée, non relue dans `projects`** : l'appelant vient de l'enregistrer, et les
+  projets à jour ne reviennent qu'au rendu suivant — la relire appliquerait le filtre qu'on vient de
+  remplacer. C'est `tourDesEtats` par un autre bout ;
+- **le propriétaire vient du catalogue** (`SchemaInfo.owner`), le pendant exact de `cardinality`
+  ajouté pour le diagramme : ce que le moteur sait, on le lui demande. `pg_get_userbyid(nspowner)`
+  plutôt qu'une jointure sur `pg_roles`, qui aurait vidé la colonne pour un utilisateur sans le droit
+  de lire le catalogue des rôles. `None` chez les quatre autres moteurs : une base MongoDB, un
+  fichier SQLite et un jeu de données BigQuery n'ont pas de propriétaire au sens d'un rôle SQL, et
+  MySQL n'en attache pas à une base ;
+- **`create schema` est refusé par les quatre autres moteurs, nommés un par un.** Ce n'est pas une
+  lacune d'écriture : le niveau « schéma » ne veut pas dire la même chose d'un moteur à l'autre — une
+  base du serveur chez MySQL et MongoDB, le fichier lui-même chez SQLite, un jeu de données facturé à
+  part chez BigQuery. Le `match` reste exhaustif, sans bras attrape-tout : c'est la leçon du défaut
+  n° 16, et un sixième moteur fera échouer la compilation là où son auteur doit choisir. Pas de
+  `if not exists` non plus — un schéma déjà là doit se **dire**, sinon la modale annoncerait une
+  création qui n'a rien créé, comme le refus d'une connexion en double ne génère pas de suffixe ;
+- **`save_visible_schemas` ne ferme pas la connexion**, contrairement à `update_variant`. Celle-là
+  ferme parce que ses réglages décrivent *comment joindre le serveur* et que l'ancien hôte reste dans
+  le registre ; ici rien de tel n'a changé, et fermer aurait fait perdre une connexion ouverte à
+  chaque case cochée.
+
+**Trois choses apprises en le vérifiant**, et les deux dernières valent au-delà de cet écran :
+
+- **`assurerLOuverture` est devenue attendable.** Le menu d'une connexion est atteignable dès que son
+  *environnement* est déplié — sa ligne, non —, donc ce chemin arrive sur une connexion **fermée** :
+  la lecture des schémas partait sur « aucune connexion ouverte » alors que rien n'allait mal. C'est
+  le cinquième point d'ouverture, après les trois consoles et le diagramme, et le premier qui a
+  besoin de la réponse plutôt que du seul déclenchement ;
+- **un double qui répond dans le tour synchrone de son appel ne mesure rien.** Le test d'assemblage
+  est resté **vert sous sabotage** — lire sans attendre l'ouverture — parce que le corps d'une
+  fonction `async` court jusqu'à son premier `await` : le faux `openDatabase` inscrivait la connexion
+  *pendant* l'appel, donc elle était ouverte avant que la lecture ne parte. Un `await Promise.resolve()`
+  dans le double le fait mordre. C'est la leçon du chargeur du diagramme, sous une autre forme :
+  ce que le décor rend indiscernable, aucune assertion ne le rattrape ;
+- **`ecrire_les_consoles` s'appelle désormais `ecrire_les_projets`.** Elle n'a jamais rien su des
+  consoles — elle lit les projets, applique une opération, écrit —, et un nom qui annonce un domaine
+  fait hésiter à s'en servir depuis un autre : donc fait écrire une seconde fois la même chose.
+
+**Ce que la maquette portait et qui n'a pas été retenu** : la colonne « objets » montre le **total**
+des quatre compteurs, le détail en infobulle — quatre nombres dans une colonne de 90 px seraient
+illisibles, et le total est ce qui dit si un schéma est vide. Et les deux planches qui montraient
+« seul `public` affiché » ont été écartées avec le défaut correspondant, pour la raison ci-dessus.
+
+**Ce qui reste à voir à l'œil** : les schémas de catalogue sont dans le décor de `?demo` — c'est ce
+qui rend la section repliée mesurable par Playwright — mais un vrai `pg_catalog` porte des milliers
+de fonctions, et la colonne « objets » n'a jamais affiché cinq chiffres.
+
 ### Les filtres suivent la colonne (3 septembre 2026)
 
 Le popover d'en-tête proposait **les mêmes cinq opérateurs à toutes les colonnes**, et les quatre

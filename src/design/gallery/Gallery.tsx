@@ -1419,8 +1419,18 @@ const ID_SCHEMA = idSchema('Atelier Nord', 'vitrine', 'analytics', 'public')
 const CHARGE_DEMO: Charge = {
   schemas: {
     [ID_BASE]: [
-      { name: 'public', counts: { tables: 4, views: 1, functions: 2, indexes: 6 } },
-      { name: 'introspection', counts: { tables: 4, views: 1, functions: 2, indexes: 6 } },
+      {
+        name: 'public',
+        owner: 'atelier',
+        system: false,
+        counts: { tables: 4, views: 1, functions: 2, indexes: 6 },
+      },
+      {
+        name: 'introspection',
+        owner: 'atelier',
+        system: false,
+        counts: { tables: 4, views: 1, functions: 2, indexes: 6 },
+      },
     ],
   },
   objets: {

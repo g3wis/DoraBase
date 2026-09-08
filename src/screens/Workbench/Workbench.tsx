@@ -29,6 +29,8 @@ import { DetailPanel } from '../Explorer/DetailPanel'
 import { ExplorerSidebar } from '../Explorer/ExplorerSidebar'
 import { ObjectTable } from '../Explorer/ObjectTable'
 import { type GestesEnvironnement, ProjectEditor } from '../Explorer/ProjectEditor'
+import { SchemaManager } from '../SchemaManager/SchemaManager'
+import { PASSERELLE_SCHEMAS, type PasserelleSchemas } from '../SchemaManager/schemaCommands'
 import { DdlPanel } from '../Structure/DdlPanel'
 import { StructureStatusBar, StructureView } from '../Structure/StructureView'
 import { ApplyConfirm } from '../TableView/ApplyConfirm'
@@ -138,6 +140,13 @@ type WorkbenchProps = {
   passerelleApply?: PasserelleApply
   /** Le pont vers `run_sql` (`12c`) — le SQL de l'utilisateur. */
   passerelleExecution?: PasserelleExecution
+  /**
+   * Le pont vers les deux écritures du gestionnaire de schémas (`API-33`). Injectable.
+   *
+   * **La lecture n'y est pas** : la modale lit par `passerelle.listSchemas`, la commande de l'arbre —
+   * la même liste des deux côtés, plutôt que deux voies vers la même lecture.
+   */
+  passerelleSchemas?: PasserelleSchemas
   /** Retirer une déclaration de connexion, ou un projet (`08j`). */
   onDelete?: (cible: CibleDeSuppression) => Promise<{ leftoverSecrets: string[] }>
   /**
@@ -211,21 +220,30 @@ export function Workbench({
   passerellePreview,
   passerelleApply,
   passerelleExecution,
+  passerelleSchemas = PASSERELLE_SCHEMAS,
 }: WorkbenchProps) {
   /**
    * Le cache des structures, **au-dessus de l'arbre et du panneau** : les deux le lisent, et
    * le préchauffage l'alimente. Le poser dans l'un des deux l'aurait rendu inaccessible à l'autre.
    */
   const structures = useStructures(passerelleStructures)
-  const { deplies, charge, etatDeBase, basculer, charger, assurerLOuverture, rafraichir } =
-    useArbre(
-      projects,
-      passerelle,
-      structures.prechauffer,
-      // Le schéma qu'on vient de déplier passe **devant** le reste de la file : c'est le geste
-      // qui précède immédiatement l'ouverture d'une table.
-      structures.prechaufferLeSchema,
-    )
+  const {
+    deplies,
+    charge,
+    etatDeBase,
+    basculer,
+    charger,
+    assurerLOuverture,
+    rechargerLesSchemas,
+    rafraichir,
+  } = useArbre(
+    projects,
+    passerelle,
+    structures.prechauffer,
+    // Le schéma qu'on vient de déplier passe **devant** le reste de la file : c'est le geste
+    // qui précède immédiatement l'ouverture d'une table.
+    structures.prechaufferLeSchema,
+  )
 
   /**
    * « Rafraîchir l'arborescence » vide **aussi** les structures.
@@ -247,6 +265,18 @@ export function Workbench({
   // son compte rendu (« un mot de passe était introuvable »). L'objet gardé ici sert de **repli** pour
   // ce seul rendu ; la liste chargée reste la source dès qu'elle a suivi.
   const [aEditer, setAEditer] = useState<Project | null>(null)
+  /**
+   * La connexion dont le gestionnaire de schémas est ouvert (`API-33`), ou `null`.
+   *
+   * Les **coordonnées**, jamais la déclaration : celle-ci est relue à chaque rendu depuis `projects`,
+   * de sorte qu'un enregistrement — qui repose `projects` — ne laisse pas la modale montrer la
+   * préférence d'avant. C'est ce que `projetAEditer` fait déjà pour la modale de projet.
+   */
+  const [schemasAGerer, setSchemasAGerer] = useState<{
+    project: string
+    database: string
+    environment: EnvironmentId
+  } | null>(null)
   const ouvrirLEditionDe = (nom: string) =>
     setAEditer(projects.find((projet) => projet.name === nom) ?? null)
   const [selection, setSelection] = useState<Noeud | null>(null)
@@ -745,7 +775,7 @@ export function Workbench({
          réécrit `projects`, ce changement fait relire le registre, et cette lecture peut partir avant
          l'ouverture pour revenir après elle. C'est `useArbre.ouverturesAbouties` qui l'empêche de
          reprendre les schémas obtenus entre-temps, et l'ordre ici n'y changerait rien. */
-      assurerLOuverture({ project, database, environment })
+      void assurerLOuverture({ project, database, environment })
       setEtatOnglets((etat) =>
         ouvrirConsole(
           etat,
@@ -1194,6 +1224,37 @@ export function Workbench({
   const projetAEditer =
     aEditer === null ? null : (projects.find((projet) => projet.name === aEditer.name) ?? aEditer)
 
+  /**
+   * Ce que le gestionnaire de schémas a besoin de savoir, **relu dans `projects`** (`API-33`).
+   *
+   * La déclaration porte la préférence enregistrée, et l'environnement déclaré porte son libellé et
+   * son drapeau de production. Les trois viennent donc de la configuration à chaque rendu : garder
+   * une copie dans l'état de la modale l'aurait laissée afficher la préférence d'avant
+   * l'enregistrement, et le libellé d'avant un renommage d'environnement.
+   */
+  const connexionDesSchemas = (() => {
+    if (schemasAGerer === null) return null
+    const projet = projects.find((candidat) => candidat.name === schemasAGerer.project)
+    // **Le couple nom + environnement** (`23b`) : `analytics` peut être déclarée en dev et en prod,
+    // et le seul nom en désignerait une au hasard.
+    const base = projet?.databases.find(
+      (candidate) =>
+        candidate.name === schemasAGerer.database &&
+        candidate.environment === schemasAGerer.environment,
+    )
+    const environnement = projet?.environments.find(
+      (declaration) => declaration.id === schemasAGerer.environment,
+    )
+    // La connexion a pu être retirée pendant que la modale était ouverte : rien à régler alors.
+    if (!projet || !base) return null
+    const cleDesSchemas: DatabaseKey = {
+      project: schemasAGerer.project,
+      database: schemasAGerer.database,
+      environment: schemasAGerer.environment,
+    }
+    return { projet, base, environnement, cle: cleDesSchemas }
+  })()
+
   return (
     <div className={styles.root}>
       {/* La modale d'édition de projet (`23e`). Montée une fois pour les deux points d'entrée. */}
@@ -1209,6 +1270,61 @@ export function Workbench({
             // rien, et la modale se fermerait d'elle-même sans que l'utilisateur l'ait demandé.
             setAEditer({ ...projetAEditer, name: nom })
             return issue
+          }}
+        />
+      )}
+      {/* Le gestionnaire de schémas (`API-33`), monté au niveau de l'écran comme la modale de
+          projet : son point d'entrée est le menu d'une ligne d'arbre, mais elle ne vit pas dans
+          l'arbre — elle lit la base et écrit la configuration. */}
+      {connexionDesSchemas !== null && (
+        <SchemaManager
+          cible={{
+            projet: connexionDesSchemas.projet.name,
+            // Le **libellé** de l'environnement, qui peut diverger de son identifiant depuis `23b` :
+            // c'est ce qui s'affiche partout ailleurs dans l'arbre.
+            environnement:
+              connexionDesSchemas.environnement?.label ?? connexionDesSchemas.base.environment,
+            // Et le libellé de la connexion, pour la même raison (`27a`) : `label` s'il est
+            // renseigné, `name` sinon — la règle d'`arbre.ts`.
+            base: connexionDesSchemas.base.label?.trim() || connexionDesSchemas.base.name,
+          }}
+          affiches={connexionDesSchemas.base.visibleSchemas ?? null}
+          // **Le drapeau de la déclaration, jamais le libellé** (`23g`), comme pour la confirmation
+          // d'écriture : un environnement nommé « live » et marqué production porte le rappel.
+          production={connexionDesSchemas.environnement?.production ?? false}
+          onClose={() => setSchemasAGerer(null)}
+          onLire={async () => {
+            /* **Ouvrir avant de lire, et l'attendre.** Le menu d'une connexion est atteignable dès
+               que son environnement est déplié — sa ligne, non —, donc la connexion peut être
+               fermée : la lecture aurait échoué sur « aucune connexion ouverte » alors que rien
+               n'allait mal. C'est le cinquième point d'ouverture, après les trois consoles et le
+               diagramme, et le premier qui a besoin de la réponse. */
+            await assurerLOuverture(connexionDesSchemas.cle)
+            return passerelle.listSchemas(connexionDesSchemas.cle)
+          }}
+          onCreer={async (nom) => {
+            await passerelleSchemas.createSchema(connexionDesSchemas.cle, nom)
+            /* **L'arbre est relu avec la préférence *enregistrée*, non avec les cases en cours.** Le
+               schéma créé n'apparaît donc dans l'arbre que si rien n'est réglé — le cas où l'arbre
+               montre tous les non-système. Cocher n'engage rien tant qu'on n'a pas enregistré, et
+               faire apparaître la ligne avant aurait donné à « Annuler » un effet à défaire. */
+            await rechargerLesSchemas(
+              connexionDesSchemas.cle,
+              connexionDesSchemas.base.visibleSchemas ?? null,
+            )
+          }}
+          onEnregistrer={async (schemas) => {
+            const suivants = await passerelleSchemas.saveVisibleSchemas({
+              project: connexionDesSchemas.projet.name,
+              // **`database`, jamais `label`** (`27a`) : c'est l'identité que la commande attend.
+              database: connexionDesSchemas.base.name,
+              environment: connexionDesSchemas.base.environment,
+              schemas: [...schemas],
+            })
+            onProjets?.(suivants)
+            /* La liste **qu'on vient d'enregistrer**, non celle que `projects` porte : celui-ci ne
+               sera reposé qu'au rendu suivant, et le filtre appliqué serait celui d'avant. */
+            await rechargerLesSchemas(connexionDesSchemas.cle, schemas)
           }}
         />
       )}
@@ -1317,11 +1433,17 @@ export function Workbench({
                  diagramme se serait alors ouvert sur une toile vide. C'est le quatrième point
                  d'ouverture, et il suit la même règle que les trois autres. */
               onOpenDiagram={(project, database, environment, schema) => {
-                assurerLOuverture({ project, database, environment })
+                void assurerLOuverture({ project, database, environment })
                 setEtatOnglets((etat) =>
                   ouvrirDiagramme(etat, { project, database, environment }, schema),
                 )
               }}
+              /* **Le gestionnaire de schémas part du menu de la connexion** (`API-33`), comme la
+                 création d'une console : le geste part du palier qui connaît son contexte. La
+                 sidebar nomme la connexion ; l'écran, lui, retrouve sa déclaration. */
+              onManageSchemas={(project, database, environment) =>
+                setSchemasAGerer({ project, database, environment })
+              }
               onRenameDatabase={onRenameDatabase === undefined ? undefined : renommerUneConnexion}
               onEditProject={onRenameProject === undefined ? undefined : ouvrirLEditionDe}
               consoles={
@@ -1446,7 +1568,7 @@ export function Workbench({
                      ligne de la base a été dépliée — c'est ce qui a fait paraître la console —, mais
                      pas quand cette ouverture a **échoué** : les consoles s'affichent malgré l'échec,
                      délibérément, et le clic doit donc retenter plutôt qu'ouvrir un onglet inerte. */
-                  assurerLOuverture({
+                  void assurerLOuverture({
                     project: identite.project,
                     database: identite.database,
                     environment: identite.environment,
@@ -1591,7 +1713,7 @@ export function Workbench({
                                    sans que le panneau de structure disparaisse, et le geste
                                    retomberait alors sur une connexion fermée comme les deux
                                    autres. */
-                                assurerLOuverture(cle)
+                                void assurerLOuverture(cle)
                                 setEtatOnglets((etat) => {
                                   const suivant = ouvrirConsole(
                                     etat,

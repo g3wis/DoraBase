@@ -405,7 +405,16 @@ pub async fn connection_states(
         .collect())
 }
 
-/// Les schémas d'une base ouverte.
+/// Les schémas d'une base ouverte, **catalogue compris et marqué** (`API-33`).
+///
+/// Sous PostgreSQL, `pg_catalog`, `information_schema` et `pg_toast` sont rendus avec
+/// `system: true` : c'est le gestionnaire de schémas qui les liste, repliés, et l'arbre qui les
+/// écarte — `schemasAffiches`, côté front, est le seul endroit où ce choix se prend. Une lecture
+/// qui les taisait rendait impossible d'en afficher un, et une seconde commande « avec le
+/// catalogue » aurait fait vivre deux listes que rien n'aurait tenues en phase (règle n° 17).
+///
+/// **Ne pas la consommer sans filtrer** : les schémas de catalogue portent des centaines de
+/// relations, et le préchauffage des structures les décrirait toutes.
 #[tauri::command]
 pub async fn list_schemas(
     key: DatabaseKey,
@@ -413,6 +422,25 @@ pub async fn list_schemas(
 ) -> Result<Vec<SchemaInfo>, EngineError> {
     registry
         .avec(&key.cle(), |adaptateur| Box::pin(adaptateur.schemas()))
+        .await
+}
+
+/// Crée un schéma sur la base ouverte. **PostgreSQL seulement** (`API-33`).
+///
+/// **Immédiate, et sans retour possible depuis DoraBase** : c'est ce qui lui vaut son propre
+/// bouton dans le gestionnaire, à côté des schémas affichés qui sont une préférence et attendent
+/// « Enregistrer ». Voir `AnyEngine::create_schema` pour le refus des quatre autres moteurs, et
+/// `PostgresAdapter::create_schema` pour la citation du nom.
+#[tauri::command]
+pub async fn create_schema(
+    key: DatabaseKey,
+    name: String,
+    registry: tauri::State<'_, ConnectionRegistry>,
+) -> Result<(), EngineError> {
+    registry
+        .avec(&key.cle(), move |adaptateur| {
+            Box::pin(async move { adaptateur.create_schema(&name).await })
+        })
         .await
 }
 

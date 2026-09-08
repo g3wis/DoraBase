@@ -159,6 +159,28 @@ pub struct ObjectCounts {
 pub struct SchemaInfo {
     pub name: String,
     pub counts: ObjectCounts,
+    /// Le rôle propriétaire du schéma, quand le catalogue le dit (`API-33`).
+    ///
+    /// **Demandé au moteur plutôt que déduit** — le pendant de `RelationCardinality`, ajouté pour
+    /// le diagramme : ce que le catalogue sait, on le lui demande. Rien dans un nom de schéma ne
+    /// permettrait de le deviner, et le gestionnaire de schémas en fait une colonne.
+    ///
+    /// `None` là où la notion n'existe pas : une base MongoDB, un fichier SQLite et un jeu de
+    /// données BigQuery n'ont pas de propriétaire au sens d'un rôle SQL, et MySQL n'en attache pas
+    /// à une base. Un nom inventé y serait pire qu'une colonne vide.
+    pub owner: Option<String>,
+    /// Vrai pour un schéma du **catalogue** du moteur, que l'arbre ne montre pas de lui-même.
+    ///
+    /// Ils existent, donc ils ne sont pas tus : `list_schemas` les rend, **marqués**, pour que le
+    /// gestionnaire de schémas les liste — repliés — et que rien n'interdise de les afficher. C'est
+    /// l'écran qui les écarte, en un seul endroit (`schemasAffiches`) : l'arbre, le catalogue
+    /// d'autocomplétion et le préchauffage des structures y lisent donc la même liste, et cocher un
+    /// schéma de catalogue le fait paraître partout plutôt que nulle part.
+    ///
+    /// Faux partout ailleurs que sous PostgreSQL : les autres adaptateurs filtrent leurs bases de
+    /// service à la source (`DE_SERVICE` chez MySQL, `18c` chez MongoDB), donc aucun schéma marqué
+    /// ne leur parvient — et le gestionnaire ne s'ouvre que sur PostgreSQL.
+    pub system: bool,
 }
 
 /// Une ligne du tableau d'objets de `A4` : « Nom, Lignes, Taille, Col., Clé primaire,

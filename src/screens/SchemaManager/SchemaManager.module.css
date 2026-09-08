@@ -1,0 +1,132 @@
+/*
+ * Le gestionnaire de schémas (`API-33`), dans la coquille de `Modal` : 820 px, en-tête 44,
+ * pied 57.
+ *
+ * Le corps, de haut en bas : une bande de filtre, la liste des schémas — deux `DataTable`, la
+ * seconde repliée derrière la section « Schémas système » —, puis la bande de création.
+ *
+ * **Aucune couleur littérale**, et aucune cote hors de l'échelle 3·5·6·7·9·11·14·16 : la bande
+ * de filtre reprend la géométrie de `SidebarFilterBar`, la typographie du tableau celle de
+ * `DataTable`, et l'interrupteur ses 30 × 17. Ce fichier ne fait donc que composer.
+ */
+
+/* Le triplet, à droite du titre dans la bande d'en-tête. Mono : ce sont des identifiants. */
+.contexte {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  color: var(--ink-3);
+}
+
+/* `SidebarFilterBar` porte ses 28 px et son fond ; ce qui s'ajoute ici est le filet du bas, que
+ * la barre n'a pas dans la sidebar — elle y est suivie d'un titre de section. */
+.filtre {
+  border-bottom: 1px solid var(--divider-2);
+}
+
+.corps {
+  padding: var(--space-5) 0;
+}
+
+/* Un message de la liste — chargement, liste vide, filtre sans correspondance. */
+.message {
+  margin: 0;
+  padding: var(--space-5) var(--space-7);
+  font-family: var(--font-ui);
+  font-size: var(--text-meta);
+  color: var(--ink-3);
+}
+
+.echec {
+  margin: 0;
+  padding: var(--space-3) var(--space-7);
+  font-family: var(--font-ui);
+  font-size: var(--text-meta);
+  color: var(--danger-ink);
+}
+
+/* La ligne de section des schémas système. Repliée par défaut : ils existent, mais ce n'est pas
+ * ce qu'on vient régler. */
+.section {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  height: var(--rowh);
+  padding: 0 var(--space-7);
+  border: none;
+  background: none;
+  font-family: var(--font-ui);
+  font-size: var(--text-label);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-caps-sm);
+  color: var(--ink-8);
+  cursor: pointer;
+  text-align: left;
+}
+
+/* Le seul état de survol employé ici, et il est déjà un jeton : celui des lignes d'arbre et de
+ * tableau. Cette ligne se comporte comme une ligne de liste, pas comme un bouton. */
+.section:hover {
+  background: var(--hover-row);
+}
+
+.section:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+/* La bande de création, séparée du reste : c'est le seul bloc de cet écran qui écrit sur la base,
+ * et cette séparation est ce qui rend lisible que son bouton n'attend pas « Enregistrer ». */
+.creation {
+  padding: var(--space-6) var(--space-7);
+  border-top: 1px solid var(--divider);
+  background: var(--paper-alt);
+}
+
+.rangeeDeCreation {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-6);
+}
+
+/* Le champ prend la place, le bouton la sienne : sans cela, une modale de 820 px donnerait au
+ * champ la largeur de son contenu. */
+.rangeeDeCreation > :first-child {
+  flex: 1;
+}
+
+/* Le rappel de production. Sur un environnement marqué seulement — voir le composant. */
+.rappel {
+  margin: 0 0 var(--space-5);
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-field);
+  background: var(--warn-bg);
+  font-family: var(--font-ui);
+  font-size: var(--text-meta);
+  color: var(--warn-ink);
+}
+
+.fait {
+  margin: var(--space-5) 0 0;
+  font-family: var(--font-ui);
+  font-size: var(--text-meta);
+  color: var(--success-ink);
+}
+
+.pied {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-5);
+  width: 100%;
+}
+
+.compte {
+  font-family: var(--font-ui);
+  font-size: var(--text-meta);
+  color: var(--ink-3);
+}
+
+.espace {
+  flex: 1;
+}

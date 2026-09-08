@@ -258,6 +258,16 @@ impl AnyEngine {
     }
 }
 
+/// Le refus des quatre moteurs qui n'ont pas de schéma à créer — voir `AnyEngine::create_schema`.
+///
+/// Une constante plutôt qu'un message par moteur : ce que l'écran en fait est une seule phrase, et
+/// l'entrée de menu qui y mène est déjà désactivée avec sa raison hors PostgreSQL. Ce message ne se
+/// lit donc que par un chemin qui contourne l'écran — une configuration écrite à la main.
+const REFUS_CREATION_DE_SCHEMA: &str =
+    "seul PostgreSQL sait créer un schéma depuis DoraBase : ailleurs, le niveau « schéma » est une \
+     base du serveur (MySQL, MongoDB), le fichier lui-même (SQLite) ou un jeu de données facturé à \
+     part (BigQuery).";
+
 fn nom_du_moteur(moteur: crate::config::Engine) -> &'static str {
     use crate::config::Engine;
     match moteur {
@@ -428,6 +438,29 @@ impl AnyEngine {
             Self::Sqlite(adaptateur) => adaptateur.apply_updates(plan).await,
             Self::MySql(adaptateur) => adaptateur.apply_updates(plan).await,
             Self::BigQuery(adaptateur) => adaptateur.apply_updates(plan).await,
+        }
+    }
+
+    /// Crée un schéma. **PostgreSQL seulement**, et les quatre autres sont nommés (`API-33`).
+    ///
+    /// # Pourquoi les autres refusent, plutôt que de tenter
+    ///
+    /// Ce n'est pas une lacune d'écriture : le niveau « schéma » ne veut pas dire la même chose
+    /// d'un moteur à l'autre, et le tableau d'`AGENTS.md` le dit. Chez MongoDB et MySQL, c'est une
+    /// **base du serveur** — la créer est un geste d'administration de serveur, pas de connexion, et
+    /// elle apparaîtrait dans une modale qui annonce « les schémas de cette base ». Chez SQLite,
+    /// `main` est le fichier lui-même : il n'y a rien à créer. Chez BigQuery, c'est un jeu de
+    /// données, créé par un appel REST et facturé à part.
+    ///
+    /// **Le `match` reste exhaustif**, sans bras attrape-tout : c'est la leçon du défaut n° 16, où
+    /// un `autre =>` avait absorbé deux moteurs livrés. Un sixième moteur fera échouer la
+    /// compilation ici, et son auteur choisira.
+    pub async fn create_schema(&self, name: &str) -> Result<(), EngineError> {
+        match self {
+            Self::Postgres(adaptateur) => adaptateur.create_schema(name).await,
+            Self::MongoDb(_) | Self::Sqlite(_) | Self::MySql(_) | Self::BigQuery(_) => {
+                Err(EngineError::local(REFUS_CREATION_DE_SCHEMA.to_owned()))
+            }
         }
     }
 

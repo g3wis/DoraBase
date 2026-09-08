@@ -16,7 +16,7 @@ import type {
   SchemaInfo,
   TableSummary,
 } from '../../domain/engine'
-import { type Charge, idBase, type Noeud } from '../Explorer/arbre'
+import { type Charge, idBase, type Noeud, schemasAffiches } from '../Explorer/arbre'
 
 /**
  * Les commandes dont l'arbre a besoin, **injectables**.
@@ -237,7 +237,15 @@ export function useArbre(
         // `Database` si. Le déduire côté Rust demanderait de relire la configuration à chaque
         // ouverture.
         await passerelle.openDatabase(cle, declaration.engine, variante)
-        const schemas = await passerelle.listSchemas(cle)
+        /* **Filtré avant d'être caché** (`API-33`). `list_schemas` rend tout, catalogue compris :
+           ce que la connexion montre est décidé par sa préférence, et `schemasAffiches` est le seul
+           endroit qui le décide. Cacher la liste complète pour la filtrer au rendu aurait laissé le
+           préchauffage des structures décrire `pg_catalog` en entier — et le catalogue
+           d'autocomplétion d'une console proposer des schémas que l'arbre ne montre pas. */
+        const schemas = schemasAffiches(
+          await passerelle.listSchemas(cle),
+          declaration.visibleSchemas,
+        )
         setCharge((precedent) => ({
           ...precedent,
           schemas: { ...precedent.schemas, [id]: schemas },
@@ -334,15 +342,24 @@ export function useArbre(
    * Et elle **ne déplie rien** : ouvrir une connexion n'est pas la montrer. Le cache qu'elle remplit
    * sert la console ; la ligne d'arbre, elle, ne bouge que si on la déplie — et `charger` n'y
    * rouvrira pas ce qui est déjà là.
+   *
+   * # Attendable, et pas seulement lancée (`API-33`)
+   *
+   * Elle rendait `void`, ce qui suffit à ses trois premiers appelants : ils ouvrent un onglet, et
+   * l'onglet se remplira quand la connexion répondra. Le gestionnaire de schémas, lui, **lit** juste
+   * après — et sa lecture serait partie sur une connexion pas encore ouverte, pour échouer sur
+   * « aucune connexion ouverte » alors que rien n'allait mal. Le cas déjà couvert rend une promesse
+   * déjà résolue : attendre ce qui est en cache ne coûte pas un tour de boucle d'événements de plus
+   * que ce que `await` impose de toute façon.
    */
   const assurerLOuverture = useCallback(
-    (cle: DatabaseKey) => {
+    (cle: DatabaseKey): Promise<void> => {
       const id = idBase(cle.project, cle.environment, cle.database)
       // **`enCours` en plus des schémas**, là où `charger` ne regarde que les schémas : un clic sur
       // une console n'est pas une bascule, donc rien n'empêche un second d'arriver pendant que le
       // premier ouvre.
-      if (charge.schemas[id] || charge.enCours.has(id)) return
-      void chargerBase({
+      if (charge.schemas[id] || charge.enCours.has(id)) return Promise.resolve()
+      return chargerBase({
         id,
         project: cle.project,
         database: cle.database,
@@ -350,6 +367,49 @@ export function useArbre(
       })
     },
     [charge, chargerBase],
+  )
+
+  /**
+   * Relit les schémas d'**une** connexion, avec la liste des schémas à montrer (`API-33`).
+   *
+   * # Pourquoi le cache ne peut pas s'en passer
+   *
+   * `charge.schemas` retient la liste **déjà filtrée** — voir `chargerBase`. Les deux gestes du
+   * gestionnaire de schémas la périment donc, chacun à sa façon : régler les schémas affichés
+   * change le filtre, et `create schema` ajoute un schéma que la lecture précédente ne pouvait pas
+   * connaître. Sans cette relecture, l'arbre garderait la liste d'avant et le seul recours serait
+   * « Rafraîchir l'arborescence », qui replie tout.
+   *
+   * # La préférence est **passée**, non relue dans `projects`
+   *
+   * L'appelant vient de l'enregistrer, et les projets à jour remontent par `onProjets` : les lire
+   * ici les prendrait dans la fermeture de ce rendu-ci, donc **avant** l'écriture — et le filtre
+   * appliqué serait celui qu'on vient de remplacer. C'est le même piège que `tourDesEtats` par un
+   * autre bout : ce qui est vrai à l'appel ne l'est pas au retour.
+   *
+   * # Ce qu'elle ne fait pas
+   *
+   * Elle n'ouvre rien et ne déplie rien : une connexion dont aucun schéma n'est en cache n'a rien à
+   * relire — le prochain regard la chargera, avec la préférence à jour.
+   */
+  const rechargerLesSchemas = useCallback(
+    async (cle: DatabaseKey, affiches: readonly string[] | null) => {
+      const id = idBase(cle.project, cle.environment, cle.database)
+      if (!charge.schemas[id]) return
+
+      try {
+        const schemas = schemasAffiches(await passerelle.listSchemas(cle), affiches)
+        setCharge((precedent) => ({
+          ...precedent,
+          schemas: { ...precedent.schemas, [id]: schemas },
+        }))
+      } catch (cause) {
+        // L'échec vit sur la ligne du nœud, comme celui d'un dépliage : une relecture qui échoue ne
+        // doit pas laisser croire que l'enregistrement a échoué, lui qui a bien eu lieu.
+        marquer(id, false, message(cause))
+      }
+    },
+    [charge, passerelle, marquer],
   )
 
   /** Déplie ou replie un nœud, et charge ce que le dépliage rend visible. */
@@ -375,8 +435,26 @@ export function useArbre(
   }, [])
 
   return useMemo(
-    () => ({ deplies, charge, etatDeBase, basculer, charger, assurerLOuverture, rafraichir }),
-    [deplies, charge, etatDeBase, basculer, charger, assurerLOuverture, rafraichir],
+    () => ({
+      deplies,
+      charge,
+      etatDeBase,
+      basculer,
+      charger,
+      assurerLOuverture,
+      rechargerLesSchemas,
+      rafraichir,
+    }),
+    [
+      deplies,
+      charge,
+      etatDeBase,
+      basculer,
+      charger,
+      assurerLOuverture,
+      rechargerLesSchemas,
+      rafraichir,
+    ],
   )
 }
 

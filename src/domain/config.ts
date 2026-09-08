@@ -185,7 +185,27 @@ label?: string | null, engine: Engine, environment: EnvironmentId, connection: C
  * **`default` plutôt qu'une migration de version**, comme en `12f` et `15a` : une configuration
  * écrite avant ce jour n'a pas ce champ, et le vecteur vide est l'état correct.
  */
-consoles: Array<Console>, };
+consoles: Array<Console>, 
+/**
+ * Les schémas que l'arbre montre sous cette connexion, ou `None` : tous les non-système
+ * (`API-33`).
+ *
+ * **`None` n'est pas la liste vide.** `None` veut dire « jamais réglé » — l'arbre affiche
+ * alors ce qu'il a toujours affiché, les schémas non-système, donc aucune configuration
+ * existante ne voit son arbre changer. La liste vide, elle, est un réglage : quelqu'un a tout
+ * décoché. C'est la même distinction que « jamais tentée » et « hors ligne » pour l'état d'une
+ * connexion, et que `pas encore cherché` / `à jour` pour les mises à jour : quatre états, pas
+ * deux.
+ *
+ * **Une préférence, pas une capacité** : elle ne change rien à ce que la connexion peut lire —
+ * une console interroge ce qu'elle veut. Elle vit donc à côté de la connexion et non dans
+ * `ConnectionSettings`, dont chaque champ décrit *comment joindre le serveur*.
+ *
+ * **`#[serde(default)]` : aucun cran de migration**, la règle des champs ajoutés de `27a`. Et
+ * `skip_serializing_if` pour qu'une connexion jamais réglée n'écrive pas un `null` dans le
+ * fichier.
+ */
+visibleSchemas?: Array<string> | null, };
 
 /**
  * Ce que `08j` envoie pour retirer une déclaration de connexion.
@@ -639,3 +659,18 @@ password: string | null,
  * passe, il n'est pas secret : le formulaire le renvoie toujours, vide y compris pour l'effacer.
  */
 label: string | null, };
+
+/**
+ * Ce que le gestionnaire de schémas envoie en enregistrant (`API-33`).
+ */
+export type VisibleSchemasRequest = { project: string, database: string, 
+/**
+ * **L'environnement fait partie de l'identité d'une connexion** (`23b`) : sans lui, régler
+ * « analytics » d'un projet qui la déclare en dev et en prod viserait la première venue.
+ */
+environment: EnvironmentId, 
+/**
+ * Les schémas à montrer, **tels quels**. La liste vide est un réglage — « aucun » —, distincte
+ * de la connexion jamais réglée, que cette commande ne peut pas produire.
+ */
+schemas: Array<string>, };

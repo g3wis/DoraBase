@@ -65,7 +65,12 @@ const PROJETS: Project[] = [
 ]
 
 const SCHEMAS: SchemaInfo[] = [
-  { name: 'public', counts: { tables: 2, views: 0, functions: 0, indexes: 0 } },
+  {
+    name: 'public',
+    owner: 'atelier',
+    system: false,
+    counts: { tables: 2, views: 0, functions: 0, indexes: 0 },
+  },
 ]
 
 const objet = (name: string, kind: TableSummary['kind'] = 'table'): TableSummary => ({
@@ -1393,7 +1398,12 @@ describe('la console SQL (`12a`)', () => {
         ],
         listSchemas: async () => [
           ...SCHEMAS,
-          { name: 'archives', counts: { tables: 1, views: 0, functions: 0, indexes: 0 } },
+          {
+            name: 'archives',
+            owner: 'atelier',
+            system: false,
+            counts: { tables: 1, views: 0, functions: 0, indexes: 0 },
+          },
         ],
         listObjects: async (_cle, schema) =>
           schema === 'archives' ? [objet('orders_2024')] : [objet('orders'), objet('order_items')],
@@ -1447,7 +1457,12 @@ describe('la console SQL (`12a`)', () => {
         ],
         listSchemas: async () => [
           ...SCHEMAS,
-          { name: 'archives', counts: { tables: 1, views: 0, functions: 0, indexes: 0 } },
+          {
+            name: 'archives',
+            owner: 'atelier',
+            system: false,
+            counts: { tables: 1, views: 0, functions: 0, indexes: 0 },
+          },
         ],
         listObjects,
       },
@@ -1510,7 +1525,12 @@ describe('la console SQL (`12a`)', () => {
         ],
         listSchemas: async () => [
           ...SCHEMAS,
-          { name: 'archives', counts: { tables: 1, views: 0, functions: 0, indexes: 0 } },
+          {
+            name: 'archives',
+            owner: 'atelier',
+            system: false,
+            counts: { tables: 1, views: 0, functions: 0, indexes: 0 },
+          },
         ],
         listObjects,
       },
@@ -2384,5 +2404,144 @@ describe('le diagramme de schéma', () => {
     // passerait aussi sur un écran qui ne la monterait jamais.
     await utilisateur.dblClick(screen.getByRole('button', { name: /^orders ·/ }))
     expect(screen.getByTestId('colonne-droite')).toBeInTheDocument()
+  })
+})
+
+/**
+ * Le gestionnaire de schémas, **depuis l'écran de travail** (`API-33`).
+ *
+ * `SchemaManager.test.tsx` mesure la modale montée seule ; ce qu'elle ne peut pas prouver est
+ * qu'elle est **branchée** — que l'entrée du menu de l'arbre l'ouvre, et que ce qu'elle enregistre
+ * redessine l'arbre. C'est la règle n° 8 : un composant juste dans sa vitrine ne prouve rien de
+ * l'assemblage, et c'est ainsi que l'engrenage d'`A1` n'ouvrait rien pendant des semaines.
+ */
+describe('le gestionnaire de schémas', () => {
+  /** Une passerelle d'écriture qui enregistre ce qu'on lui a demandé. */
+  function passerelleSchemas() {
+    const vus: { crees: string[]; enregistres: readonly string[][] } = {
+      crees: [],
+      enregistres: [],
+    }
+    return {
+      vus,
+      passerelle: {
+        createSchema: vi.fn(async (_cle: unknown, nom: string) => {
+          vus.crees.push(nom)
+        }),
+        saveVisibleSchemas: vi.fn(async (requete: { schemas: string[] }) => {
+          vus.enregistres = [...vus.enregistres, requete.schemas]
+          return PROJETS
+        }),
+      } as unknown as Parameters<typeof Workbench>[0]['passerelleSchemas'],
+    }
+  }
+
+  /**
+   * Une passerelle d'arbre qui **refuse de lire une connexion fermée**, comme le fait le registre.
+   *
+   * Sans ce refus, le test qui suit resterait vert même si la modale lisait sans attendre
+   * l'ouverture : le double répond tout de suite, donc la course n'existe pas dans le décor
+   * (règle n° 1). C'est le décor qui rend la propriété observable, pas l'assertion.
+   */
+  function passerelleQuiExigeLOuverture() {
+    const ouvertes = new Set<string>()
+    const identite = (cle: DatabaseKey) => `${cle.project}/${cle.environment}/${cle.database}`
+    const state = {
+      kind: 'connected' as const,
+      serverVersion: 'PostgreSQL 17.6',
+      tunnelLocalPort: null,
+    }
+    return {
+      openDatabase: vi.fn(async (cle: DatabaseKey) => {
+        /* **L'ouverture ne s'achève pas dans le tour synchrone de son appel**, et sans cela le test
+           reste vert sous sabotage : le corps d'une fonction `async` court jusqu'à son premier
+           `await`, donc un double qui inscrirait la connexion avant celui-ci la rendrait ouverte
+           *pendant* l'appel — et lire sans l'attendre marcherait. C'est la leçon du double qui tient
+           ses réponses à la main : un double qui répond tout de suite ne mesure rien. */
+        await Promise.resolve()
+        ouvertes.add(identite(cle))
+        return state
+      }),
+      closeDatabase: vi.fn(async (cle: DatabaseKey) => void ouvertes.delete(identite(cle))),
+      connectionStates: vi.fn(async () =>
+        [...ouvertes].map((id) => {
+          const [project, environment, database] = id.split('/')
+          return {
+            key: { project, database, environment } as DatabaseKey,
+            state,
+          } as ConnectionStateEntry
+        }),
+      ),
+      listSchemas: vi.fn(async (cle: DatabaseKey) => {
+        if (!ouvertes.has(identite(cle))) {
+          throw `aucune connexion ouverte pour ${identite(cle)}`
+        }
+        return SCHEMAS
+      }),
+      listObjects: vi.fn(async () => [objet('orders'), objet('order_items')]),
+    } as unknown as PasserelleArbre
+  }
+
+  it('« Gérer les schémas… » ouvre la modale sur la connexion cliquée, et l’ouvre', async () => {
+    const utilisateur = userEvent.setup()
+    const { passerelle } = passerelleSchemas()
+    monter({ passerelleSchemas: passerelle, passerelle: passerelleQuiExigeLOuverture() })
+    await ouvrirLesEnvironnements(utilisateur)
+
+    await utilisateur.click(screen.getByRole('button', { name: 'Actions de analytics' }))
+    await utilisateur.click(screen.getByRole('button', { name: 'Gérer les schémas…' }))
+
+    const modale = await screen.findByRole('dialog', { name: 'Gérer les schémas' })
+    // Le cadre nomme la connexion cliquée, pas la première du décor — `shop` est sa voisine.
+    expect(modale).toHaveTextContent('analytics')
+    /* Et la lecture a répondu : c'est ce qui prouve que la connexion a été **ouverte et attendue**
+       avant d'être lue, la ligne de la base n'ayant jamais été dépliée. Le menu d'une connexion est
+       atteignable dès que son environnement est déplié, donc ce chemin-là arrive sur une connexion
+       fermée — et la passerelle du décor refuse alors la lecture, comme le registre. */
+    expect(
+      await screen.findByRole('switch', { name: 'Afficher public dans l’arbre' }),
+    ).toBeInTheDocument()
+  })
+
+  it('ce qu’il enregistre redessine l’arbre', async () => {
+    const utilisateur = userEvent.setup()
+    const { passerelle, vus } = passerelleSchemas()
+    monter({ passerelleSchemas: passerelle })
+    await ouvrirLesEnvironnements(utilisateur)
+    // La ligne de la base est dépliée : c'est ce qui met ses schémas en cache, donc ce qui rend le
+    // redessin observable.
+    await utilisateur.dblClick(await screen.findByRole('treeitem', { name: /analytics/ }))
+    expect(await screen.findByRole('treeitem', { name: 'public' })).toBeInTheDocument()
+
+    await utilisateur.click(screen.getByRole('button', { name: 'Actions de analytics' }))
+    await utilisateur.click(screen.getByRole('button', { name: 'Gérer les schémas…' }))
+    await utilisateur.click(
+      await screen.findByRole('switch', { name: 'Afficher public dans l’arbre' }),
+    )
+    await utilisateur.click(screen.getByRole('button', { name: /Enregistrer/ }))
+
+    // La préférence part avec l'identité complète de la connexion, environnement compris (`23b`).
+    expect(vus.enregistres).toEqual([[]])
+    // **Et l'arbre suit sans « Rafraîchir »** : le cache tient la liste filtrée, donc il fallait le
+    // relire. Sans cela, décocher un schéma n'aurait eu aucun effet visible jusqu'au prochain
+    // rafraîchissement de l'arborescence, qui replie tout.
+    await waitFor(() => expect(screen.queryByRole('treeitem', { name: 'public' })).toBeNull())
+  })
+
+  it('la création part sur la base, sans passer par « Enregistrer »', async () => {
+    const utilisateur = userEvent.setup()
+    const { passerelle, vus } = passerelleSchemas()
+    monter({ passerelleSchemas: passerelle })
+    await ouvrirLesEnvironnements(utilisateur)
+
+    await utilisateur.click(screen.getByRole('button', { name: 'Actions de analytics' }))
+    await utilisateur.click(screen.getByRole('button', { name: 'Gérer les schémas…' }))
+    await screen.findByRole('switch', { name: 'Afficher public dans l’arbre' })
+    await utilisateur.type(screen.getByLabelText('Créer un schéma'), 'reporting')
+    await utilisateur.click(screen.getByRole('button', { name: 'Créer' }))
+
+    // Les deux temps : la création est partie, la préférence n'a rien reçu.
+    await waitFor(() => expect(vus.crees).toEqual(['reporting']))
+    expect(vus.enregistres).toEqual([])
   })
 })

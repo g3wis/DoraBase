@@ -37,6 +37,11 @@ pub fn schemas(connexion: &Connection) -> Result<Vec<SchemaInfo>, EngineError> {
 
     Ok(vec![SchemaInfo {
         name: SCHEMA.to_owned(),
+        // Un fichier n'a pas de rôle propriétaire — celui du fichier appartient au système, pas au
+        // moteur —, et `main` n'est pas un schéma de catalogue : les tables internes de SQLite
+        // vivent sous le préfixe `sqlite_`, que les compteurs ci-dessous écartent déjà.
+        owner: None,
+        system: false,
         counts: ObjectCounts {
             tables: compte("table")?,
             views: compte("view")?,

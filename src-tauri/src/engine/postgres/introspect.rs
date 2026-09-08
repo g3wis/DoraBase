@@ -21,12 +21,28 @@ use crate::engine::{
 use super::error::traduire;
 use super::types::{categoriser, estimation_de};
 
-/// Les schémas visibles et leurs compteurs d'objets.
+/// Les schémas du serveur, leurs compteurs d'objets, leur propriétaire et leur nature.
 ///
-/// Les schémas système sont exclus **explicitement**, et non par un effet de bord d'une
-/// clause illisible : c'est un choix d'affichage, donc réversible, et il doit se lire.
+/// **Les trois schémas de catalogue sont rendus, marqués `system`, et non exclus** (`API-33`).
+/// Ils l'étaient jusqu'au 8 septembre 2026 par une clause `not in`, avec le commentaire « c'est un
+/// choix d'affichage, donc réversible, et il doit se lire » : le gestionnaire de schémas est
+/// exactement le geste qui le renverse — il les liste, repliés, et rien n'interdit de les afficher.
+/// Le choix d'affichage vit donc là où il se prend : **dans l'écran**, où `schemasAffiches` en
+/// décide une fois pour l'arbre, le gestionnaire et le préchauffage à la fois. Une seconde lecture
+/// « avec le catalogue » aurait fait vivre deux listes que rien n'aurait tenues en phase
+/// (règle n° 17).
+///
+/// Les schémas **temporaires**, eux, restent exclus : `pg_temp_3` appartient à une session, la
+/// nôtre ou celle d'un voisin, et n'a rien à faire dans une liste qu'on règle une fois pour toutes.
+///
+/// `pg_get_userbyid(n.nspowner)` plutôt qu'une jointure sur `pg_roles` : celle-ci demande le droit
+/// de lire le catalogue des rôles, que la fonction n'exige pas — et un propriétaire absent aurait
+/// vidé la colonne pour un utilisateur sans privilège.
 const REQUETE_SCHEMAS: &str = "
 select n.nspname                                          as name,
+       pg_get_userbyid(n.nspowner)                        as owner,
+       n.nspname in ('pg_catalog', 'information_schema', 'pg_toast')
+                                                          as system,
        count(*) filter (where c.relkind in ('r','p'))     as tables,
        count(*) filter (where c.relkind in ('v','m'))     as views,
        count(*) filter (where c.relkind = 'i')            as indexes,
@@ -34,10 +50,9 @@ select n.nspname                                          as name,
          where p.pronamespace = n.oid)                    as functions
   from pg_namespace n
   left join pg_class c on c.relnamespace = n.oid
- where n.nspname not in ('pg_catalog', 'information_schema', 'pg_toast')
-   and n.nspname not like 'pg\\_temp%'
+ where n.nspname not like 'pg\\_temp%'
    and n.nspname not like 'pg\\_toast\\_temp%'
- group by n.nspname, n.oid
+ group by n.nspname, n.oid, n.nspowner
  order by n.nspname";
 
 /// Les objets d'un schéma — les sept colonnes du tableau de `A4`, en une seule requête.
@@ -125,6 +140,8 @@ pub async fn schemas(client: &Client) -> Result<Vec<SchemaInfo>, EngineError> {
         .map(|ligne| {
             Ok(SchemaInfo {
                 name: ligne.try_get("name").map_err(|e| traduire(&e))?,
+                owner: ligne.try_get("owner").map_err(|e| traduire(&e))?,
+                system: ligne.try_get("system").map_err(|e| traduire(&e))?,
                 counts: ObjectCounts {
                     tables: compteur(ligne, "tables")?,
                     views: compteur(ligne, "views")?,

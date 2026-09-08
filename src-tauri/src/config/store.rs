@@ -537,6 +537,9 @@ fn migration_v1_vers_v2(brut: &str) -> Result<(Vec<Project>, Preferences), serde
                             environment: EnvironmentId::brut(variante.environment),
                             connection: variante.reglages,
                             consoles: Vec::new(),
+                            // Une configuration d'avant `API-33` n'a réglé aucun schéma : `None`
+                            // rend l'arbre qu'elle avait, tous les non-système.
+                            visible_schemas: None,
                         })
                         .collect::<Vec<_>>()
                 })
@@ -854,6 +857,7 @@ mod tests {
                     environment: EnvironmentId::brut("dev"),
                     connection: variante(),
                     consoles: Vec::new(),
+                    visible_schemas: None,
                 },
                 Database {
                     name: "analytics".to_owned(),
@@ -862,6 +866,7 @@ mod tests {
                     environment: EnvironmentId::brut("prod"),
                     connection: variante(),
                     consoles: Vec::new(),
+                    visible_schemas: None,
                 },
             ],
         }
@@ -1693,6 +1698,7 @@ mod tests {
                 environment: EnvironmentId::brut("dev"),
                 connection: connexion,
                 consoles: Vec::new(),
+                visible_schemas: None,
             }],
         };
         save(&chemin, &[projet], &Preferences::default()).unwrap();
@@ -1733,6 +1739,7 @@ mod tests {
                 environment: EnvironmentId::brut("dev"),
                 connection: variante_avec_reference,
                 consoles: Vec::new(),
+                visible_schemas: None,
             }],
         };
 
