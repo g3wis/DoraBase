@@ -82,3 +82,17 @@ if (typeof Element !== 'undefined' && Element.prototype.scrollIntoView === undef
 if (typeof Element !== 'undefined' && Element.prototype.scrollTo === undefined) {
   Element.prototype.scrollTo = () => {}
 }
+
+// `elementFromPoint` n'existe pas sous jsdom, et c'est la même famille que les trois ci-dessus :
+// sans mise en page, aucun point n'a d'élément dessous. `BarresDeDefilement` l'appelle à chaque
+// trame où le pointeur bouge, pour trouver la zone défilante dont une bande est survolée — donc
+// depuis un `requestAnimationFrame`, où un `TypeError` devient une **exception non gérée** que
+// Vitest impute au fichier de test qui tournait, quel qu'il soit : la suite entière échouait en
+// annonçant 1369 tests verts, ce qui est le mode d'échec le plus difficile à rattacher à sa cause.
+//
+// **`null` est la bonne réponse ici**, comme le tableau vide de `getClientRects` : « rien sous ce
+// point » est exactement la vérité sous jsdom, et le survol se mesure dans `e2e/geometrie-reelle`,
+// à la fenêtre réelle (règle n° 9).
+if (typeof Document !== 'undefined' && Document.prototype.elementFromPoint === undefined) {
+  Document.prototype.elementFromPoint = () => null
+}

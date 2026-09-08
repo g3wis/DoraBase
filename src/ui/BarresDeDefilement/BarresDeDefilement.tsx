@@ -5,13 +5,26 @@ import styles from './BarresDeDefilement.module.css'
 const REMANENCE_MS = 700
 /** Un curseur plus court que cela devient introuvable à la souris. */
 const LONGUEUR_MINIMALE = 24
+/**
+ * L'épaisseur de la bande, le long d'un bord, qui révèle la barre de cet axe sans qu'on défile.
+ *
+ * Plus épaisse que le curseur, et c'est la condition pour qu'on puisse l'atteindre : un curseur de
+ * 6 px invisible ne se survole pas, il se rencontre.
+ */
+const BANDE_DE_SURVOL = 14
 
 type Axe = 'vertical' | 'horizontal'
 
+const AXES: Axe[] = ['vertical', 'horizontal']
+
 type Etat = {
   pouces: Partial<Record<Axe, HTMLDivElement>>
+  /** Quels axes ont leur bande sous le pointeur. Un axe survolé ne s'efface pas. */
+  survol: Partial<Record<Axe, boolean>>
   minuteur: number | undefined
 }
+
+type Survol = { zone: HTMLElement; axes: Axe[] }
 
 /**
  * Les barres de défilement du produit : **superposées, et visibles seulement pendant le geste**.
@@ -38,11 +51,19 @@ type Etat = {
  *
  * # Ce qu'elles font, et ce qu'elles ne font pas
  *
- * Elles apparaissent au défilement, restent tant que le pointeur les touche ou les traîne, et
- * s'effacent {@link REMANENCE_MS} ms après le dernier geste. Elles se saisissent à la souris, comme
- * celles de macOS. Elles ne s'élargissent pas au survol du bord de la fenêtre — le système le fait,
- * mais cela demande de deviner qu'un pointeur *approche* d'une barre invisible, ce qui n'a de sens
- * que si l'on rend aussi la piste. Laissé dehors sciemment.
+ * Elles apparaissent au défilement **et au survol de leur bord** (API-34). Le survol seul ne
+ * suffisait pas : une barre qu'on n'atteint qu'en défilant ne se saisit jamais, puisqu'il faut avoir
+ * déjà fait à la molette le geste qu'on venait lui demander — et sur une table plus large que sa
+ * colonne, c'est précisément la barre horizontale qu'on cherche du regard avant tout défilement.
+ *
+ * Ce qui est survolé est une **bande** de {@link BANDE_DE_SURVOL} px le long du bord, jamais le
+ * curseur seul : celui-ci est invisible au repos, donc il n'y a rien à viser. Les curseurs restent
+ * tant que le pointeur tient cette bande ou les traîne, et s'effacent {@link REMANENCE_MS} ms après.
+ * Hors de là, **rien n'est visible** — c'est la seconde moitié de l'exigence, et c'est elle qui
+ * interdit de remplacer la bande par une piste peinte.
+ *
+ * Elles ne s'élargissent toujours pas au survol, à la différence de celles du système : cela demande
+ * de rendre aussi la piste, donc de dessiner en permanence ce que l'exigence demande d'effacer.
  */
 export function BarresDeDefilement() {
   const couche = useRef<HTMLDivElement>(null)
@@ -52,11 +73,20 @@ export function BarresDeDefilement() {
     if (!hote) return
 
     const etats = new Map<Element, Etat>()
+    /**
+     * À quel curseur appartient un élément de la couche.
+     *
+     * C'est ce qui rend le pointeur *sur* un curseur indiscernable du pointeur dans sa bande : la
+     * couche est `fixed` et n'a aucun ancêtre défilant, donc sans cette carte, poser le pointeur sur
+     * la barre — ce qu'on fait pour la saisir — l'effacerait.
+     */
+    const proprietaires = new Map<Element, { zone: HTMLElement; axe: Axe }>()
+    let survol: Survol | null = null
 
     function etatDe(zone: Element): Etat {
       const existant = etats.get(zone)
       if (existant) return existant
-      const etat: Etat = { pouces: {}, minuteur: undefined }
+      const etat: Etat = { pouces: {}, survol: {}, minuteur: undefined }
       etats.set(zone, etat)
       return etat
     }
@@ -72,6 +102,7 @@ export function BarresDeDefilement() {
       pouce.className = (axe === 'vertical' ? styles.vertical : styles.horizontal) ?? ''
       installerLeGlissement(pouce, zone, axe)
       hote?.appendChild(pouce)
+      proprietaires.set(pouce, { zone, axe })
       etat.pouces[axe] = pouce
       return pouce
     }
@@ -180,15 +211,123 @@ export function BarresDeDefilement() {
       const etat = etatDe(zone)
       window.clearTimeout(etat.minuteur)
       etat.minuteur = window.setTimeout(() => {
-        for (const pouce of Object.values(etat.pouces)) {
+        let reste = false
+        // **Axe par axe.** Une barre tenue ou survolée ne dit rien de l'autre : survoler le bord bas
+        // d'une grille doit y laisser la barre horizontale seule, et effacer la verticale.
+        for (const axe of AXES) {
+          const pouce = etat.pouces[axe]
+          if (!pouce) continue
           // Ni pendant un glissement, ni sous le pointeur : c'est le moment où la barre sert.
-          if (pouce.dataset.tenu === 'oui' || pouce.matches(':hover')) {
-            effacerPlusTard(zone)
-            return
+          if (pouce.dataset.tenu === 'oui' || etat.survol[axe]) {
+            reste = true
+            continue
           }
           pouce.style.opacity = '0'
         }
+        if (reste) effacerPlusTard(zone)
       }, REMANENCE_MS)
+    }
+
+    function deborde(zone: HTMLElement, axe: Axe): boolean {
+      // Le même pixel de tolérance qu'au placement, et pour la même raison (défaut n° 69).
+      return axe === 'vertical'
+        ? zone.scrollHeight > zone.clientHeight + 1
+        : zone.scrollWidth > zone.clientWidth + 1
+    }
+
+    /** Le point est-il dans la bande qui longe le bord où vit la barre de cet axe ? */
+    function dansLaBande(boite: DOMRect, x: number, y: number, axe: Axe): boolean {
+      if (x < boite.left || x > boite.right || y < boite.top || y > boite.bottom) return false
+      return axe === 'vertical'
+        ? boite.right - x <= BANDE_DE_SURVOL
+        : boite.bottom - y <= BANDE_DE_SURVOL
+    }
+
+    function axesSurvoles(zone: HTMLElement, x: number, y: number): Axe[] {
+      const boite = zone.getBoundingClientRect()
+      const style = getComputedStyle(zone)
+      return AXES.filter(
+        (axe) =>
+          deborde(zone, axe) &&
+          /auto|scroll/.test(axe === 'vertical' ? style.overflowY : style.overflowX) &&
+          dansLaBande(boite, x, y, axe),
+      )
+    }
+
+    /**
+     * La zone dont une bande est sous le pointeur, et les axes concernés.
+     *
+     * La remontée part de l'élément sous le point : un conteneur défilant n'a pas à se déclarer,
+     * exactement comme pour l'écoute des `scroll` en capture. Elle s'arrête à la **première** zone
+     * qui réponde — la plus intérieure, celle que le geste visait.
+     */
+    function survolDe(x: number, y: number): Survol | null {
+      const cible = document.elementFromPoint(x, y)
+      const proprietaire = cible ? proprietaires.get(cible) : undefined
+      if (proprietaire) {
+        const axes = axesSurvoles(proprietaire.zone, x, y)
+        return {
+          zone: proprietaire.zone,
+          axes: axes.includes(proprietaire.axe) ? axes : [...axes, proprietaire.axe],
+        }
+      }
+      let noeud: Element | null = cible
+      while (noeud instanceof HTMLElement) {
+        const axes = axesSurvoles(noeud, x, y)
+        if (axes.length > 0) return { zone: noeud, axes }
+        noeud = noeud.parentElement
+      }
+      return null
+    }
+
+    function memeSurvol(un: Survol | null, autre: Survol | null): boolean {
+      if (!un || !autre) return un === autre
+      return (
+        un.zone === autre.zone &&
+        un.axes.length === autre.axes.length &&
+        un.axes.every((axe) => autre.axes.includes(axe))
+      )
+    }
+
+    function poserLeSurvol(suivant: Survol | null) {
+      const precedent = survol
+      if (precedent) {
+        const etat = etats.get(precedent.zone)
+        if (etat) for (const axe of precedent.axes) etat.survol[axe] = false
+      }
+      survol = suivant
+      if (suivant) {
+        const etat = etatDe(suivant.zone)
+        for (const axe of suivant.axes) {
+          etat.survol[axe] = true
+          placer(suivant.zone, axe)
+        }
+      }
+      // **La rémanence, et non un effacement immédiat.** Quitter la bande d'un pixel en visant le
+      // curseur ne doit pas le retirer sous la main ; et le minuteur, qui relit les axes survolés au
+      // moment où il tire, laisse en place ce qui l'est encore.
+      if (precedent) effacerPlusTard(precedent.zone)
+    }
+
+    let trameDemandee = 0
+    let dernierX = 0
+    let dernierY = 0
+
+    function auMouvement(evenement: PointerEvent) {
+      dernierX = evenement.clientX
+      dernierY = evenement.clientY
+      // Une révision par trame au plus : le pointeur émet bien plus d'événements que l'écran ne rend
+      // d'images, et chaque révision lit une géométrie.
+      if (trameDemandee) return
+      trameDemandee = requestAnimationFrame(() => {
+        trameDemandee = 0
+        const suivant = survolDe(dernierX, dernierY)
+        if (!memeSurvol(survol, suivant)) poserLeSurvol(suivant)
+      })
+    }
+
+    function auDepart() {
+      if (survol) poserLeSurvol(null)
     }
 
     function auDefilement(evenement: Event) {
@@ -205,8 +344,17 @@ export function BarresDeDefilement() {
     // permet d'écouter tous les conteneurs, y compris ceux qui n'existent pas encore, sans que
     // chacun ait à se déclarer.
     document.addEventListener('scroll', auDefilement, true)
+    // En capture aussi : un composant qui arrête la propagation d'un `pointermove` — une poignée
+    // qu'on traîne — ne doit pas priver de barre le panneau qu'il occupe.
+    document.addEventListener('pointermove', auMouvement, true)
+    // Le pointeur qui sort de la fenêtre n'émet pas toujours un dernier mouvement dans la zone
+    // qu'il quitte : sans cela, une barre pouvait rester en place après le départ de la souris.
+    document.documentElement.addEventListener('pointerleave', auDepart)
     return () => {
       document.removeEventListener('scroll', auDefilement, true)
+      document.removeEventListener('pointermove', auMouvement, true)
+      document.documentElement.removeEventListener('pointerleave', auDepart)
+      if (trameDemandee) cancelAnimationFrame(trameDemandee)
       for (const etat of etats.values()) {
         window.clearTimeout(etat.minuteur)
         for (const pouce of Object.values(etat.pouces)) pouce.remove()

@@ -262,6 +262,52 @@ test('un curseur paraît pendant le geste, sous l’en-tête collé, puis s’ef
     .toBe(true)
 })
 
+test('la barre paraît au survol de son bord, sans qu’on ait défilé', async ({ page }) => {
+  await ouvrirUneTable(page)
+
+  const barres = () =>
+    page.evaluate(() => {
+      const lire = (motif: string) => {
+        const pouce = document.querySelector(`[class*="couche"] > [class*="${motif}"]`)
+        return pouce ? Number(getComputedStyle(pouce).opacity) : null
+      }
+      return { horizontale: lire('horizontal'), verticale: lire('vertical') }
+    })
+
+  const zone = await page.evaluate(() => {
+    // La même enveloppe interne que les deux mesures voisines : c'est elle qui porte le débordement.
+    const boite = document
+      .querySelector('[role=grid] > [role=presentation]')
+      ?.getBoundingClientRect()
+    if (!boite) return null
+    return { gauche: boite.left, droite: boite.right, bas: boite.bottom, haut: boite.top }
+  })
+  if (!zone) throw new Error('la zone défilante de la grille doit exister')
+
+  // Loin des deux bords : rien ne doit être visible, et c'est le repos dont part la mesure.
+  await page.mouse.move((zone.gauche + zone.droite) / 2, (zone.haut + zone.bas) / 2)
+  expect(await barres()).toEqual({ horizontale: null, verticale: null })
+
+  // Le bord bas, à quatre pixels : la barre horizontale y vit, invisible.
+  await page.mouse.move((zone.gauche + zone.droite) / 2, zone.bas - 4)
+  await expect.poll(async () => (await barres()).horizontale).toBe(1)
+  // **Le garde de la mesure, et c'est toute l'exigence** : elle est là sans qu'aucun défilement
+  // n'ait eu lieu. Sans cette lecture, le test passerait aussi si le survol s'était contenté de
+  // défiler d'un pixel — ce qui est le contraire de ce qui est demandé.
+  expect(
+    await page.evaluate(
+      () => document.querySelector('[role=grid] > [role=presentation]')?.scrollLeft ?? null,
+    ),
+  ).toBe(0)
+  // **Et l'autre axe reste effacé.** La grille déborde des deux côtés : révéler les deux barres pour
+  // un survol du bord bas rendrait la bande indiscernable d'un « survol de la grille ».
+  expect([null, 0]).toContain((await barres()).verticale)
+
+  // Puis on quitte la bande : la rémanence passée, plus rien. C'est la seconde moitié de l'exigence.
+  await page.mouse.move((zone.gauche + zone.droite) / 2, (zone.haut + zone.bas) / 2)
+  await expect.poll(async () => (await barres()).horizontale, { timeout: 4000 }).toBe(0)
+})
+
 test('la grille défile horizontalement au lieu d’écraser ses colonnes', async ({ page }) => {
   await ouvrirUneTable(page)
 
