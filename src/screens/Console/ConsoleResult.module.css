@@ -89,3 +89,103 @@
   text-align: center;
   color: var(--ink-meta);
 }
+
+/*
+ * L'export du résultat (`API-29`), à droite de la bande des vues.
+ *
+ * `margin-left: auto` plutôt qu'un `justify-content: space-between` sur `.vues` : la bande peut ne
+ * porter que l'un des deux — la galerie monte le résultat sans onglets —, et l'export doit rester à
+ * droite dans les deux cas.
+ */
+.export {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-left: auto;
+  /* Ce qui permet à l'issue de se rogner plutôt que de pousser le bouton hors de la bande. */
+  min-width: 0;
+}
+
+/* L'issue du dernier export. Rognée, jamais repliée : la bande fait une ligne, et le `title` rend
+   le texte entier. */
+.exportIssue {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-ui);
+  font-size: var(--text-dense);
+  font-weight: var(--weight-medium);
+  color: var(--ink-meta);
+}
+
+.exportEchec {
+  color: var(--danger-ink);
+}
+
+/* Le même contrôle que le menu des colonnes de la barre d'outils d'`A5` : c'est le même geste —
+   ouvrir un petit menu depuis une bande —, donc la même forme. `content-box` pour la raison qui y
+   est écrite : le mockup ne déclare aucun `box-sizing`, et un contrôle de 25px y rend 27 avec son
+   filet. */
+.exporter {
+  flex: none;
+  box-sizing: content-box;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: var(--h-btn-sm);
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-control-2);
+  background: var(--field);
+  border: 1px solid var(--border);
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: var(--text-dense);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+/* **Le seul état de survol ajouté, et il en reprend un** : `--hover-row`, la teinte de la ligne
+   d'arbre, de l'entrée de menu et des actions de la bande de sidebar. Pas une valeur nouvelle. */
+.exporter:hover:not([aria-disabled="true"]) {
+  background: var(--hover-row);
+}
+
+/* Terni, mais toujours atteignable au survol et au clavier : c'est ce que l'`aria-disabled` achète,
+   et sans quoi la raison portée par le `title` serait inatteignable (piège n° 3). */
+.exporter[aria-disabled="true"] {
+  color: var(--ink-3);
+  cursor: default;
+}
+
+.formats {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-2) 0;
+}
+
+.format {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 24px;
+  padding: 0 var(--space-5);
+  border: 0;
+  background: none;
+  font-family: var(--font-ui);
+  font-size: var(--text-label);
+  font-weight: var(--weight-medium);
+  color: var(--ink-6);
+  cursor: pointer;
+  text-align: left;
+}
+
+.format:hover:not([aria-disabled="true"]) {
+  background: var(--hover-row);
+}
+
+.format[aria-disabled="true"] {
+  color: var(--ink-3);
+  cursor: default;
+}

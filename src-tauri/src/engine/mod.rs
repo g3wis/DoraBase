@@ -18,6 +18,11 @@ pub mod bigquery;
 pub mod cloudsql;
 pub mod commands;
 mod error;
+/// L'export d'un résultat de console dans un fichier (`API-29`).
+///
+/// **Le sérialiseur vit du côté qui écrit**, et non à l'écran : l'export de la vue table ne pourra
+/// être qu'un flux écrit ici, et deux sérialiseurs CSV divergeraient (règle n° 17).
+pub mod export;
 mod introspection;
 /// Les dernières lignes écrites par un proxy en sous-processus.
 ///
@@ -51,6 +56,7 @@ pub mod tunnel;
 use std::future::Future;
 
 pub use error::{ConnectionProbe, EngineError};
+pub use export::ExportFormat;
 pub use introspection::{
     ColumnInfo, ConstraintInfo, Identity, IndexInfo, KeyKind, ObjectCounts, ObjectKind, Relation,
     RelationCardinality, RelationDirection, RowCount, SchemaInfo, TableDetail, TableSummary,

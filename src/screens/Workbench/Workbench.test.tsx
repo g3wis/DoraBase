@@ -19,6 +19,7 @@ import type {
 import { LanguageProvider } from '../../i18n/LanguageContext'
 import { raccourci } from '../../shell/plateforme'
 import { auModificateur } from '../../test/raccourcis'
+import type { PasserelleExport } from '../Console/exportResultat'
 import { REGLAGES, TRIO_DE_TEST } from '../NewConnection/pourLesTests'
 import type { PasserelleLignes } from '../TableView/useLignes'
 import type { PasserelleArbre } from './useArbre'
@@ -965,6 +966,83 @@ describe('la console SQL (`12a`)', () => {
     expect(limite).toBe('oneThousand')
     // Le résultat s'affiche dans la grille de `10a`, pas dans une seconde grille.
     expect(await screen.findByRole('grid', { name: /Résultat de la requête/ })).toBeInTheDocument()
+  })
+
+  /**
+   * L'export du résultat, **depuis l'écran de travail** (`API-29`).
+   *
+   * C'est le niveau que la vitrine ne peut pas prouver (règle n° 8) : elle monte la console sans
+   * onglets autour d'elle, donc elle ne dit rien du nom de fichier — qui vient du **libellé de
+   * l'onglet** — ni du fait que le bouton parle au bon pont.
+   */
+  it('« Exporter » écrit le résultat sous le nom de l’onglet', async () => {
+    const utilisateur = userEvent.setup()
+    // **Typés par la passerelle qu'ils remplacent** : un `vi.fn` sans paramètre déclaré rend un
+    // tuple d'appel vide, donc `mock.calls[0]?.[0]` ne compile pas — et le lecteur perd la
+    // signature que le double tient.
+    const choisirDestination = vi.fn<PasserelleExport['choisirDestination']>(
+      async () => '/Users/dora/Documents/console-1.csv',
+    )
+    const exportResult = vi.fn<PasserelleExport['exportResult']>(async () => 4096)
+    monter({
+      passerelleExecution: PASSERELLE_SQL,
+      passerelleExport: { choisirDestination, exportResult },
+    })
+    await ouvrirUneConsole(utilisateur)
+    await saisir(utilisateur, 'select 1')
+    await utilisateur.click(screen.getByRole('button', { name: /Exécuter/ }))
+    await screen.findByRole('grid', { name: /Résultat de la requête/ })
+
+    await utilisateur.click(screen.getByRole('button', { name: /^Exporter$/ }))
+    await utilisateur.click(screen.getByRole('button', { name: 'Fichier CSV' }))
+
+    // **Le nom proposé est celui de l'onglet** — « console 1 » pour un brouillon —, et le libellé du
+    // sélecteur natif vient du dictionnaire : un titre écrit en dur serait en français dans une
+    // interface en anglais.
+    await waitFor(() => expect(choisirDestination).toHaveBeenCalledOnce())
+    expect(choisirDestination.mock.calls[0]).toEqual([
+      'console-1.csv',
+      { titre: 'Exporter le résultat', nomDuFiltre: 'Valeurs séparées par des virgules' },
+    ])
+    // Ce que le cœur reçoit : la destination choisie, le format, et le résultat affiché.
+    expect(exportResult).toHaveBeenCalledWith(
+      '/Users/dora/Documents/console-1.csv',
+      'csv',
+      ['n'],
+      [[{ kind: 'int', value: 1 }]],
+    )
+    expect(
+      await screen.findByRole('status', { name: 'Issue du dernier export' }),
+    ).toHaveTextContent('Exporté · 4.0 KB')
+  })
+
+  /**
+   * **Une console persistée exporte sous son nom**, pas sous « console N » : c'est le libellé que
+   * l'onglet porte, et un fichier nommé autrement ferait chercher lequel des deux a raison. Le test
+   * part d'une console de l'arbre, seul chemin où le nom existe.
+   */
+  it('une console nommée donne son nom au fichier proposé', async () => {
+    const utilisateur = userEvent.setup()
+    const choisirDestination = vi.fn<PasserelleExport['choisirDestination']>(async () => null)
+    monter({
+      projects: avecConsole('ventes du mois', 'select 1'),
+      passerelleExecution: PASSERELLE_SQL,
+      passerelleExport: {
+        choisirDestination,
+        exportResult: vi.fn<PasserelleExport['exportResult']>(async () => 1),
+      },
+    })
+    await ouvrirLesEnvironnements(utilisateur)
+    await utilisateur.dblClick(await screen.findByRole('treeitem', { name: /analytics/ }))
+    await utilisateur.click(await screen.findByRole('treeitem', { name: /ventes du mois/ }))
+    await utilisateur.click(screen.getByRole('button', { name: /Exécuter/ }))
+    await screen.findByRole('grid', { name: /Résultat de la requête/ })
+
+    await utilisateur.click(screen.getByRole('button', { name: /^Exporter$/ }))
+    await utilisateur.click(screen.getByRole('button', { name: 'Fichier JSON' }))
+
+    await waitFor(() => expect(choisirDestination).toHaveBeenCalledOnce())
+    expect(choisirDestination.mock.calls[0]?.[0]).toBe('ventes-du-mois.json')
   })
 
   it('la limite ajoutée par DoraBase est annoncée', async () => {

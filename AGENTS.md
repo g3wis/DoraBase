@@ -1320,6 +1320,139 @@ mesuré contre un vrai fichier SQLite (`registry.rs`, sans `db-tests`, donc part
 PostgreSQL et un vrai MySQL, où le test regarde ce qu'une **autre session** voit avant la
 validation.
 
+### L'export d'un résultat de console (9 septembre 2026, `API-29`)
+
+Un résultat de console ne pouvait sortir de l'application par aucun geste : il se lisait, il se
+copiait valeur par valeur, et c'était tout. Un bouton « Exporter » entre dans la **bande de tête du
+résultat** — celle qui porte déjà les vues et le compte de lignes —, et non dans la barre d'outils de
+la console : les quatre actions de celle-ci agissent sur le **texte** de la requête, celle-ci agit sur
+la **réponse**.
+
+**Deux formats, CSV et JSON.** CSV est ce qu'un tableur lit ; JSON est ce qu'il faut pour la console
+mongo, dont la réponse est un arbre de documents et non une grille — un CSV y serait l'aplatissement
+de documents hétérogènes en colonnes, décision de produit explicitement remise par `13b`, et il
+exporterait ce que l'écran n'a jamais montré. La console mongo garde donc l'entrée CSV **désactivée
+avec sa raison**, comme « Gérer les schémas… » hors PostgreSQL : la cacher ferait croire qu'elle
+n'existera jamais.
+
+**Le sérialiseur est du Rust, et c'est la décision qui porte tout le reste** (`engine/export.rs`).
+Les lignes sont déjà dans la webview — `RowLimit` les borne à mille (`12c`) —, donc composer le CSV
+en TypeScript aurait été plus court d'un aller-retour. Deux raisons l'écartent, et la seconde
+décide : la CSP interdit `blob:`, donc l'écriture appartient de toute façon au cœur ; et **l'export
+de la vue table ne pourra être qu'un flux écrit là-bas**, ses 1,9 million de lignes ne traversant
+jamais l'IPC. Un sérialiseur à l'écran maintenant et un second en Rust plus tard divergeraient sur la
+citation, les `NULL` et les sauts de ligne — c'est la règle n° 17 appliquée à un format de fichier que
+personne ne relit une fois écrit. Les lignes remontent donc l'IPC en retour, ce qui est **borné** :
+c'est ce qui est descendu, pas un jeu complet.
+
+Onze décisions à ne pas défaire :
+
+- **ce qui est exporté est ce qui est *affiché*** : les colonnes visibles, dans l'ordre de la
+  grille. C'est la promesse de « Copier la valeur », qui copie le texte de la cellule et non celui de
+  la base, appliquée au fichier. La projection est composée par `ConsoleView`, seul à tenir les
+  masquées et l'ordre — c'est déjà d'ici que la requête est réécrite —, et le cœur n'en sait rien ;
+- **mais les *valeurs* sont brutes, et c'est l'exception à la phrase d'avant.** Le texte de la grille
+  groupe les milliers, replie un JSON sur une ligne et abrège un binaire en sa taille : un CSV qui
+  porterait « 1 234 » avec une espace insécable ne s'ouvrirait dans aucun tableur, et une colonne
+  `bytea` exportée en « \x… 42 o » serait une description plutôt qu'une donnée. C'est la distinction
+  que `texteBrutDe` fait déjà côté écran pour la saisie, refaite en Rust pour le fichier ;
+- **toutes les lignes du résultat, non la fenêtre rendue.** La grille est virtualisée : n'exporter
+  que les lignes peintes donnerait un fichier dont le contenu dépend de l'endroit où l'on avait fait
+  défiler ;
+- **rien n'est réexécuté.** Une requête de console n'est pas forcément idempotente — c'est la raison
+  qui interdit déjà de la relancer sur un geste de colonne — et la relancer sans sa limite serait une
+  autre requête que celle dont on exporte la réponse ;
+- **`NULL` est un champ vide non cité, la chaîne vide s'écrit `""`** — la convention de
+  `COPY … CSV`, seule à garder la distinction que cet outil ne doit jamais brouiller. C'est la même
+  raison qui fait écrire `NULL` en toutes lettres dans la grille plutôt que de laisser une cellule
+  blanche ;
+- **UTF-8 sans BOM, et `\n` plutôt que le `\r\n` de la RFC 4180.** Le BOM aurait fait qu'Excel sous
+  Windows ouvre les accents correctement au double-clic ; il entre en échange dans le **nom de la
+  première colonne** de tout consommateur qui ne le retire pas — `COPY … FROM`, `grep`, `pandas` sans
+  `utf-8-sig`. Un export de base de données est de la donnée à relire par un programme d'abord ;
+  l'encodage se choisit à l'import d'un tableur, un en-tête corrompu ne se rattrape nulle part. `\n`
+  suit la même logique ;
+- **les clés du JSON gardent l'ordre des colonnes**, d'où une sérialisation à la main plutôt qu'une
+  `serde_json::Map` : celle-ci est une `BTreeMap` faute de la feature `preserve_order`, donc elle
+  aurait rendu les colonnes **triées alphabétiquement** — l'ordre qu'on vient de régler à la poignée,
+  perdu en silence. Activer la feature aurait changé le comportement de `serde_json` dans tout le
+  binaire, mongo et BigQuery compris ;
+- **un `Value::Json` redevient un objet imbriqué** dans le JSON, il ne reste pas une chaîne échappée.
+  C'est ce que `documentsDe` fait déjà pour l'arbre de `13b`, et sans quoi l'export d'un résultat
+  mongo — son seul format — aurait porté du JSON dans du JSON. Un décimal, lui, reste une **chaîne** :
+  c'est ce que la vue JSON affiche déjà, et un nombre JSON serait relu en `double` par la plupart des
+  consommateurs, où un `numeric(20,2)` perdrait les chiffres pour lesquels il existe ;
+- **un résultat sans ligne ne s'exporte pas**, et le bouton le dit. Le fichier ne porterait qu'un
+  en-tête — ou rien du tout, une écriture de console ne rendant aucune colonne ;
+- **renoncer au sélecteur n'annonce rien.** Ni réussite — aucun fichier n'a été écrit —, ni échec :
+  rien n'a cassé, et une erreur sur un geste qu'on vient d'annuler ferait chercher quoi. C'est ce que
+  le `null` d'`IssueDExport` porte ;
+- **le nom proposé est le libellé de l'onglet**, assaini. `defaultPath` est un *chemin* : une console
+  nommée « ventes / 2026 » y désignerait un répertoire inexistant, et le sélecteur s'ouvrirait
+  ailleurs. Aucun horodatage — il rendrait le nom imprévisible, donc intestable autrement qu'en le
+  recalculant dans le test (règle n° 3), et le sélecteur natif prévient déjà d'un écrasement. Un seul
+  endroit le compose désormais, `libelleDeConsole` : il nommait l'onglet, il nomme aussi le fichier,
+  et deux endroits en auraient fait deux vérités.
+
+**Aucune permission nouvelle.** `dialog:allow-save` est celle que `22b` a accordée pour le dump, et
+`tests/permissions.rs` garde la liste — le plafond de quinze n'a pas bougé. Le commentaire de
+`lib.rs` qui annonçait « ouverture seule » a été corrigé au passage : il était faux depuis `22b`, et
+c'est le motif du commentaire qui survit à ce qu'il décrivait (règle n° 20).
+
+**Trois choses apprises en le vérifiant, et les trois par sabotage** (règle n° 1) :
+
+- **un `fs::write` suivi d'un `remove_file` détruit un fichier auquel on n'a jamais touché.** Le
+  nettoyage vient du dump — « à l'échec, le fichier partiel est supprimé » — et il est juste là-bas,
+  où l'outil crée le fichier lui-même. Ici, `fs::write` ne distingue pas « l'ouverture a échoué » de
+  « l'écriture a échoué » : un fichier en **lecture seule** faisait donc supprimer l'export
+  *précédent* alors que rien n'y avait été écrit, ce qui est bien pire que le fichier tronqué qu'on
+  cherche à éviter. L'ouverture et l'écriture sont donc deux étapes, et seule la seconde nettoie. Un
+  test le garde, en `cfg(unix)` — `std::os::unix` compile aussi sur Linux, donc un oubli de garde ne
+  se verrait que dans le job Windows, le seul défaut de compilation que le dépôt ait connu ;
+- **la première passe de sabotage a été verte pour rien, et pas pour la bonne raison.** Le script
+  employait un *here-document* non cité, donc le shell avalait les `\n` avant que Python ne lise le
+  motif : aucune substitution n'a eu lieu, les seize tests sont restés verts, et la conclusion
+  qu'« ils ne mordent pas » était fausse. **Vérifier que le sabotage a bien été appliqué** fait partie
+  du sabotage — c'est le pendant du contrôle positif, et `cargo test` disant `error: test failed` sur
+  un échec légitime rend au passage inutilisable toute détection qui cherche `error` dans `stderr` ;
+- **une issue affichée ne doit pas survivre au résultat qu'elle décrit.** « Exporté · 12 ko » est
+  effacé dès que le résultat change d'identité. Le cas ordinaire se réglait tout seul — une nouvelle
+  exécution démonte le bouton en passant par « Exécution… » —, mais le panneau de transaction
+  **repose** une réponse précédente sans cette étape (`API-38`), et l'issue d'avant se lisait alors
+  comme celle du résultat qu'on venait d'afficher. C'est le motif du commentaire qui survit à sa
+  garantie, appliqué à un message d'écran.
+
+**Et un quatrième point, trouvé en le mesurant plutôt qu'en le raisonnant** : **un déclencheur qui
+change de place dans l'arbre React perd son focus.** Le premier jet sortait le bouton de son
+`Popover` pendant l'écriture, pour que l'`aria-disabled` ne soit pas contredit par le `onClick` que
+`Popover` pose lui-même. Conséquence mesurée : `Popover` rend le focus à son déclencheur en se
+fermant, puis le changement d'état le **démonte et le remonte** — et le focus tombe sur le `body`,
+d'où plus aucune touche ne mène nulle part. Le menu reste donc monté pendant l'écriture, et c'est une
+**garde** qui empêche un second export, non la disparition du menu. Deux tests, et le second ne mord
+que si le double **tient sa réponse à la main** : un export qui répond tout de suite est fini avant
+qu'on ait pu en lancer un second, et il n'y a plus rien à mesurer — la leçon du chargeur du
+diagramme, pour la troisième fois.
+
+**Ce que les tests unitaires ne pouvaient pas juger** : le bouton et son menu partagent une bande de
+27 px avec le contrôle des vues, et jsdom ne calcule aucune mise en page (règle n° 9). Trois tests de
+bout en bout gardent donc que le bouton tient dans la bande **et** dans la fenêtre, que l'issue se
+**rogne** au lieu de le pousser dehors — mesuré sur une fenêtre étroite, où la bande manque de place
+—, et que le menu des formats reste dans la fenêtre depuis le déclencheur le plus à droite de l'écran,
+vérifié par `elementFromPoint` comme le défaut n° 35 le demande.
+
+**Ce qui reste à voir à l'œil, et ce qui n'a pas de juge** : le sélecteur de destination natif ne se
+clique pas depuis un test — même angle mort que « Parcourir… » et que les deux modales de dump —,
+donc le parcours complet demande de la faire à la main : exporter en CSV puis en JSON, et **ouvrir
+les deux fichiers**. Et l'`?demo` **n'écrit rien** : sa passerelle rend un chemin et une taille
+plausibles pour que l'issue soit visible sans application réelle, comme son `runSql` rend un résultat
+sans rien exécuter — donc l'**échec** d'écriture ne se voit nulle part en démo, et sa mise en page à
+message long n'a pour juge que les tests unitaires, qui ne mesurent pas les pixels.
+
+**Ce qui reste hors périmètre, et pourquoi** : le bouton « Exporter CSV » de la vue table (`A5`)
+**reste désactivé avec sa raison**. Il demande un flux — 1,9 million de lignes — et l'arbitrage « la
+fenêtre visible ou le résultat complet ? », qui n'est pas tranché ; `engine::export` est ce sur quoi
+il se construira, et c'est précisément pourquoi le sérialiseur y est déjà.
+
 ### Les filtres suivent la colonne (3 septembre 2026)
 
 Le popover d'en-tête proposait **les mêmes cinq opérateurs à toutes les colonnes**, et les quatre
@@ -3397,10 +3530,16 @@ Aucun de ces points ne bloque le code en place.
   le commentaire de tête de `src-tauri/src/engine/bigquery/mod.rs`. Ce qui reste à décider
   n'est plus le principe, mais la vérification : quelqu'un doit le pointer vers un vrai
   projet GCP et regarder ce qui se passe.
-- **L'export CSV est un sujet, pas un bouton.** Outre `blob:` refusé par la CSP, il reste à
-  trancher la fenêtre ou le résultat complet, l'encodage, le séparateur, le traitement des
-  `NULL` et des sauts de ligne. Sur 1,9 million de lignes l'écriture doit être en flux,
-  donc côté Rust. Le bouton est livré désactivé, avec l'infobulle qui le dit.
+- **L'export CSV de la vue table (`A5`) reste un sujet, pas un bouton** — mais il en reste **moins**
+  qu'avant. Cinq des questions sont tranchées depuis `API-29`, et écrites dans `engine/export.rs` :
+  l'écriture appartient au Rust (la CSP refuse `blob:`), l'encodage est l'UTF-8 sans BOM, le
+  séparateur est la virgule et la fin de ligne `\n`, un `NULL` est un champ vide non cité là où la
+  chaîne vide s'écrit `""`, et les valeurs sont brutes plutôt que formatées pour l'œil. Ce qui reste
+  est ce qui distingue `A5` de la console : **la fenêtre visible ou le résultat complet ?** — la
+  console n'a pas eu à choisir, sa réponse tenant en mille lignes (`RowLimit`) —, et 1,9 million de
+  lignes qui ne peuvent traverser l'IPC ni tenir en mémoire, donc une lecture paginée et une écriture
+  **en flux**, avec sa progression et son annulation, sur le patron du dump. Le bouton est livré
+  désactivé, avec l'infobulle qui le dit.
 - **Le patch inverse persisté** — où l'écrire, sous quelle forme, et ce qu'il advient d'un
   patch dont la base a changé. Le garde-fou est livré **désactivé avec sa raison** plutôt
   qu'allumé sans effet.

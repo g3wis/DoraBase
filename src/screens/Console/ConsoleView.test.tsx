@@ -319,3 +319,59 @@ test('une raison fige la bascule, et l’explique', async () => {
   await utilisateur.click(bascule)
   expect(changements).toEqual([])
 })
+
+/**
+ * L'export porte la projection **affichée** (`API-29`).
+ *
+ * C'est ici que ça se vérifie et pas ailleurs : les colonnes masquées et l'ordre vivent dans cet
+ * écran — c'est déjà d'ici que la requête est réécrite —, et le cœur n'en sait rien. Un export qui
+ * porterait les colonnes du résultat brut rendrait celles qu'on vient de masquer, dans l'ordre du
+ * serveur plutôt que celui qu'on a réglé.
+ */
+test('l’export porte les colonnes visibles, dans l’ordre affiché', async () => {
+  const utilisateur = userEvent.setup()
+  const onExporter = vi.fn(async () => 10)
+  const [texte, setTexte] = ['select * from commandes', vi.fn()]
+  render(
+    <LanguageProvider preferences={{ language: 'fr' }}>
+      <ConsoleView
+        texte={texte}
+        onTexteChange={setTexte}
+        resultat={RESULTAT}
+        onExecuter={() => {}}
+        onExporter={onExporter}
+      />
+    </LanguageProvider>,
+  )
+
+  // Le décor est déplacé **puis** amputé : les deux gestes doivent se retrouver dans le fichier,
+  // et un décor qui n'en ferait qu'un ne distinguerait pas « l'ordre suit » de « le masquage suit ».
+  screen.getByRole('button', { name: 'Déplacer statut (flèches gauche et droite)' }).focus()
+  await utilisateur.keyboard('{ArrowLeft}')
+  const [, id] = screen.getAllByRole('columnheader')
+  if (!id) throw new Error('en-tête introuvable')
+  fireEvent.contextMenu(id, { clientX: 40, clientY: 20 })
+  await utilisateur.click(
+    within(await screen.findByRole('menu', { name: 'Actions sur la colonne id' })).getByRole(
+      'menuitem',
+      { name: 'Masquer la colonne' },
+    ),
+  )
+  expect(screen.getAllByRole('columnheader').map((e) => e.textContent)).toEqual(['statut', 'total'])
+
+  await utilisateur.click(screen.getByRole('button', { name: /^Exporter$/ }))
+  await utilisateur.click(screen.getByRole('button', { name: 'Fichier CSV' }))
+
+  // Les colonnes **et** les valeurs suivent : projeter les noms sans réduire les lignes aurait
+  // décalé chaque valeur d'une colonne, ce qu'une assertion sur les seuls noms laisserait passer.
+  expect(onExporter).toHaveBeenCalledWith(
+    'csv',
+    ['statut', 'total'],
+    [
+      [
+        { kind: 'text', value: 'paid' },
+        { kind: 'decimal', value: '12.50' },
+      ],
+    ],
+  )
+})

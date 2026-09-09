@@ -60,6 +60,17 @@ export type OngletConsole = {
   nom?: string
 }
 
+/**
+ * Le libellé d'une console : son nom si elle est persistée, « console N » sinon.
+ *
+ * **Un seul endroit, parce que deux endroits en font deux vérités** (règle n° 17). Il nomme l'onglet
+ * et, depuis `API-29`, le fichier que l'export propose : un fichier nommé autrement que l'onglet
+ * dont il sort ferait chercher lequel des deux a raison.
+ */
+export function libelleDeConsole(onglet: Pick<OngletConsole, 'nom' | 'numero'>): string {
+  return onglet.nom ?? `console ${onglet.numero}`
+}
+
 /** Les langues de console que le projet connaît. `19` (Redis) en ajoutera une troisième. */
 export type Dialecte = 'sql' | 'mongo'
 

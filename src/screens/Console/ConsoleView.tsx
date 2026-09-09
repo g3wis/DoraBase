@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { Icon } from '../../design/icons/Icon'
-import type { QueryResult, TransactionMode } from '../../domain/engine'
+import type { ExportFormat, QueryResult, TransactionMode, Value } from '../../domain/engine'
 import { useT } from '../../i18n/LanguageContext'
 import { raccourci } from '../../shell/plateforme'
 import { cx } from '../../ui/cx'
@@ -11,6 +11,7 @@ import type { Dialecte } from '../Workbench/onglets'
 import { ConsoleResult, ordonner, type VueResultat } from './ConsoleResult'
 import styles from './ConsoleView.module.css'
 import type { Catalogue } from './completion'
+import type { IssueDExport } from './exportResultat'
 import { limiteDe, poserLaLimite } from './limite'
 import { reordonnerLaProjection } from './projection'
 import { type CommandesEditeur, SqlEditor } from './SqlEditor'
@@ -73,6 +74,19 @@ type ConsoleViewProps = {
      */
     raison?: string | null
   }
+  /**
+   * Écrit le résultat affiché dans un fichier (`API-29`). Absent, le bouton n'est pas rendu.
+   *
+   * **C'est l'écran qui compose la projection**, pas l'appelant : les colonnes masquées et l'ordre
+   * d'affichage vivent ici — c'est déjà d'ici que la requête est réécrite —, et le cœur n'en sait
+   * rien. Un export qui porterait les colonnes du résultat brut rendrait celles qu'on vient de
+   * masquer.
+   */
+  onExporter?: (
+    format: ExportFormat,
+    colonnes: readonly string[],
+    lignes: readonly (readonly Value[])[],
+  ) => Promise<IssueDExport>
 }
 
 /**
@@ -98,6 +112,7 @@ export function ConsoleView({
   dialecte = 'sql',
   rowHeight,
   transaction,
+  onExporter,
 }: ConsoleViewProps) {
   const t = useT()
   // La sélection courante, publiée par l'éditeur : « Sélection » l'exécute, et se replie sur la
@@ -165,6 +180,37 @@ export function ConsoleView({
   function reafficherTout() {
     setMasquees(new Set())
     reecrireLaProjection(projectionVisible(ordre, new Set()))
+  }
+
+  /**
+   * Ce qu'un export écrit : les colonnes **visibles**, dans l'ordre d'affichage, et les lignes
+   * réduites aux mêmes colonnes.
+   *
+   * **Ce qui est exporté est ce qui est affiché.** C'est la promesse de « Copier la valeur », qui
+   * copie le texte de la cellule et non celui de la base — la même règle, appliquée au fichier.
+   * Exporter les colonnes du résultat brut rendrait celles qu'on vient de masquer, et dans l'ordre
+   * du serveur plutôt que celui qu'on a réglé à la poignée.
+   *
+   * **Toutes les lignes du résultat, non la fenêtre rendue.** La grille est virtualisée : n'exporter
+   * que les lignes peintes donnerait un fichier dont le contenu dépend de l'endroit où l'on avait
+   * fait défiler. Le compte est borné par `RowLimit` — au plus mille (`12c`) —, et la barre du
+   * résultat l'affiche déjà.
+   */
+  function projectionExportee(): { colonnes: string[]; lignes: Value[][] } {
+    if (resultat === null) return { colonnes: [], lignes: [] }
+    const retenues = ordonner(
+      resultat.columns.map((nom, index) => ({ nom, index })),
+      ordre,
+    ).filter(({ nom }) => !masquees.has(nom))
+    return {
+      colonnes: retenues.map(({ nom }) => nom),
+      lignes: resultat.rows.map((ligne) =>
+        // Une cellule absente devient `NULL`, comme la grille la rend : une ligne plus courte que
+        // l'en-tête ne vient d'aucun moteur, mais la supposer impossible serait un `!` sur une
+        // donnée reçue de l'IPC.
+        retenues.map(({ index }) => ligne[index] ?? { kind: 'null' }),
+      ),
+    }
   }
 
   // Le stepper `LIMIT` est **bidirectionnel** : il affiche la limite que la requête porte — lue à
@@ -320,6 +366,14 @@ export function ConsoleView({
               onBasculerColonne={basculerLaColonne}
               onReafficher={reafficherTout}
               onOrdreChange={poserLOrdre}
+              onExporter={
+                onExporter === undefined
+                  ? undefined
+                  : (format) => {
+                      const { colonnes, lignes } = projectionExportee()
+                      return onExporter(format, colonnes, lignes)
+                    }
+              }
             />
           }
         />

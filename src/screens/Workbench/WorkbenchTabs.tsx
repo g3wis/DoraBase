@@ -1,5 +1,5 @@
 import { type Tab, TabStrip } from '../../ui/TabStrip/TabStrip'
-import { type EtatOnglets, idOnglet } from './onglets'
+import { type EtatOnglets, idOnglet, libelleDeConsole } from './onglets'
 import styles from './WorkbenchTabs.module.css'
 
 /** Les deux vues d'une table : ses lignes, ou sa structure (`14a`). */
@@ -46,7 +46,7 @@ export function WorkbenchTabs({
         iconColor: 'var(--info)',
         accentColor: 'var(--accent)',
         // Une console persistée porte **son nom** ; un brouillon garde « console 1 ».
-        label: onglet.nom ?? `console ${onglet.numero}`,
+        label: libelleDeConsole(onglet),
         // **Seule une console persistée se renomme depuis son onglet.** Un brouillon n'a pas de
         // nom sur le disque : le renommer ne voudrait rien dire tant qu'il n'existe pas.
         renommable: onglet.nom !== undefined,

@@ -16,6 +16,11 @@ import { TitleBar } from '../../shell/TitleBar/TitleBar'
 import { SplitPane } from '../../ui/SplitPane/SplitPane'
 import { CommitConfirm } from '../Console/CommitConfirm'
 import { ConsoleView } from '../Console/ConsoleView'
+import {
+  exporterLeResultat,
+  PASSERELLE_EXPORT,
+  type PasserelleExport,
+} from '../Console/exportResultat'
 import { RunConfirm } from '../Console/RunConfirm'
 import { TransactionPanel } from '../Console/TransactionPanel'
 import { raisonSansTransaction } from '../Console/transactions'
@@ -63,6 +68,7 @@ import {
   idApresRenommage,
   idDeConsolePersistee,
   idOnglet,
+  libelleDeConsole,
   ongletActif,
   ouvrir,
   ouvrirConsole,
@@ -149,6 +155,14 @@ type WorkbenchProps = {
   passerelleApply?: PasserelleApply
   /** Le pont vers `run_sql` (`12c`) — le SQL de l'utilisateur. */
   passerelleExecution?: PasserelleExecution
+  /**
+   * Le pont vers l'export d'un résultat de console (`API-29`) : le sélecteur natif, puis l'écriture.
+   *
+   * Injectable, et par défaut le vrai. **Ce qui laisse la galerie et `?demo` intactes n'est pas
+   * cette prop mais le geste** : rien n'est appelé avant qu'on ait choisi un format, donc aucune
+   * capture de fidélité ne bouge.
+   */
+  passerelleExport?: PasserelleExport
   /**
    * Le pont vers les trois commandes de transaction (`API-38`). Injectable, et par défaut le vrai.
    *
@@ -238,6 +252,7 @@ export function Workbench({
   passerellePreview,
   passerelleApply,
   passerelleExecution,
+  passerelleExport = PASSERELLE_EXPORT,
   passerelleTransaction = PASSERELLE_TRANSACTION,
   passerelleSchemas = PASSERELLE_SCHEMAS,
 }: WorkbenchProps) {
@@ -1219,6 +1234,23 @@ export function Workbench({
           catalogue={catalogue}
           vue={execution.vue}
           onVueChange={execution.setVue}
+          /* **L'export du résultat** (`API-29`). Le nom proposé au sélecteur est le **libellé de
+             l'onglet** — son nom si la console est persistée, « console N » sinon : un fichier nommé
+             autrement que l'onglet dont il sort ferait chercher lequel des deux a raison. Les
+             libellés du sélecteur natif viennent du dictionnaire, la langue étant une préférence. */
+          onExporter={(format, colonnes, lignes) =>
+            exporterLeResultat(
+              passerelleExport,
+              libelleDeConsole(consoleActive),
+              {
+                titre: t('console.export.titre'),
+                nomDuFiltre: t(`console.export.filtres.${format}`),
+              },
+              format,
+              colonnes,
+              lignes,
+            )
+          }
           /* **Le régime de transaction de cette console** (`API-38`), avec la seule raison qui
              puisse figer la bascule. Les deux cas ne peuvent pas se présenter en même temps : un
              moteur qui ne tient pas de transaction n'en a jamais d'ouverte. */

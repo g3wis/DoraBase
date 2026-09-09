@@ -18,6 +18,7 @@ import type {
   TransactionStatement,
 } from '../../domain/engine'
 import { LanguageProvider, langueAppliquee } from '../../i18n/LanguageContext'
+import type { PasserelleExport } from '../Console/exportResultat'
 import { NewConnection } from '../NewConnection/NewConnection'
 import { ParcoursDeCreation } from '../NewProject/ParcoursDeCreation'
 import { PreferencesDialog } from '../Preferences/PreferencesDialog'
@@ -511,6 +512,23 @@ db.evenements.createIndex({ "sorte": 1, "horodatage": -1 }, { name: "evenements_
 
 /** Vrai pour la base documentaire du décor — voir `PROJETS`. */
 const estMongo = (base: string) => base === 'evenements'
+
+/**
+ * L'export d'un résultat, simulé (`API-29`).
+ *
+ * **Rien n'est écrit, et rien ne peut l'être** : le sélecteur natif comme la commande d'écriture ne
+ * répondent que dans la webview de Tauri. La destination est donc inventée — le nom que la vraie
+ * passerelle aurait proposé, dans un répertoire plausible — et la taille est **dérivée du contenu**
+ * plutôt que tirée d'un chiffre rond : un « 12 ko » constant sur un résultat de deux lignes serait
+ * un décor qui ne suit pas ce qu'il décrit.
+ */
+const PASSERELLE_EXPORT_DE_DEMO: PasserelleExport = {
+  choisirDestination: async (nomParDefaut) => `/Users/dora/Documents/${nomParDefaut}`,
+  exportResult: async (_fichier, format, colonnes, lignes) => {
+    const cellules = lignes.length * colonnes.length
+    return format === 'csv' ? cellules * 12 + colonnes.join(',').length : cellules * 24
+  },
+}
 
 const PASSERELLE: PasserelleArbre = {
   openDatabase: async () => ({
@@ -1104,6 +1122,12 @@ export function WorkbenchDemo() {
            paraîtrait vide en mode manuel — le pont ne répondant pas en Chromium — et l'écran ne
            serait vérifiable qu'à l'œil dans l'application réelle. */
         passerelleTransaction={passerelleTransaction}
+        /* **L'export du résultat** (`API-29`), simulé au même degré que l'exécution : la démo
+           **n'écrit rien** et ne peut rien écrire — ni le sélecteur natif ni `invoke` ne répondent
+           en Chromium. Elle rend un chemin et une taille plausibles pour que l'issue du bouton soit
+           visible sans application réelle ; ce qu'un export produit vraiment est mesuré par les
+           tests Rust d'`engine::export`. */
+        passerelleExport={PASSERELLE_EXPORT_DE_DEMO}
         passerelleExecution={{
           runSql: async (cle, sql, _limite, mode, console) => {
             // **Le décor mongo rend des documents**, pas des lignes : sans cela l'arbre de `13b`

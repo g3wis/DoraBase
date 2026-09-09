@@ -14,9 +14,11 @@ use tauri::Emitter;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        // **Ouverture seule.** `capabilities/default.json` n'accorde que `dialog:allow-open`,
-        // pas `dialog:default` — celui-ci ajouterait la sauvegarde, les messages et la
-        // confirmation, dont rien n'a besoin. Gardé par `tests/permissions.rs`.
+        // **Ouverture et sauvegarde, nommées une par une.** `capabilities/default.json` accorde
+        // `dialog:allow-open` (le « Parcourir… » de la clé privée, `08c`) et `dialog:allow-save`
+        // (la destination d'un dump en `22b`, celle d'un export de résultat depuis `API-29`) —
+        // jamais `dialog:default`, qui ajouterait les messages et la confirmation, dont rien n'a
+        // besoin. Gardé par `tests/permissions.rs`.
         .plugin(tauri_plugin_dialog::init())
         // **La mise à jour en place.** Le plugin est enregistré pour son API Rust seule : ses
         // commandes IPC restent inatteignables depuis la webview, faute de `updater:default`
@@ -81,6 +83,7 @@ pub fn run() {
             engine::commands::preview_updates,
             engine::commands::apply_changes,
             engine::commands::run_sql,
+            engine::commands::export_result,
             engine::commands::transaction_state,
             engine::commands::transaction_result,
             engine::commands::commit_transaction,

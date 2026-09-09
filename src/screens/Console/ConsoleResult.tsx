@@ -1,8 +1,11 @@
 import { useMemo, useState } from 'react'
-import type { QueryResult, Value } from '../../domain/engine'
+import { Icon } from '../../design/icons/Icon'
+import type { ExportFormat, QueryResult, Value } from '../../domain/engine'
 import { useT } from '../../i18n/LanguageContext'
-import { formatInteger } from '../../ui/format'
+import { cx } from '../../ui/cx'
+import { formatBytes, formatInteger } from '../../ui/format'
 import { MenuContextuel } from '../../ui/MenuContextuel/MenuContextuel'
+import { Popover } from '../../ui/Popover/Popover'
 import { SegmentedControl } from '../../ui/SegmentedControl/SegmentedControl'
 import { largeurAjustee } from '../../ui/VirtualGrid/ajustement'
 import { type GridColumn, type PositionDuMenu, VirtualGrid } from '../../ui/VirtualGrid/VirtualGrid'
@@ -11,6 +14,7 @@ import type { Dialecte } from '../Workbench/onglets'
 import { ArbreJson } from './ArbreJson'
 import styles from './ConsoleResult.module.css'
 import { documentsDe } from './documents'
+import type { IssueDExport } from './exportResultat'
 import { VueJson, VueMessages } from './vues'
 
 /**
@@ -55,6 +59,16 @@ type ConsoleResultProps = {
   onReafficher?: () => void
   /** L'ordre déposé par la grille : ses clés visibles, dans leur nouvel ordre. */
   onOrdreChange?: (ordre: readonly string[]) => void
+  /**
+   * Écrit le résultat dans un fichier (`API-29`). Rend le nombre d'octets, ou `null` si le
+   * sélecteur de destination a été refermé sans choisir.
+   *
+   * **La projection est déjà faite** par `ConsoleView`, qui tient les colonnes masquées et l'ordre :
+   * ce bouton ne choisit qu'un format. Absent, il n'est pas rendu — la galerie et les vitrines
+   * montent le résultat sans pont, et un bouton qui n'écrirait rien se lirait comme une panne
+   * (défaut n° 36).
+   */
+  onExporter?: (format: ExportFormat) => Promise<IssueDExport>
 }
 
 /** L'ensemble vide, partagé : un défaut `new Set()` en ligne changerait d'identité à chaque rendu. */
@@ -98,6 +112,7 @@ export function ConsoleResult({
   onBasculerColonne,
   onReafficher,
   onOrdreChange,
+  onExporter,
 }: ConsoleResultProps) {
   const t = useT()
   // La ligne sélectionnée, pour la vue JSON : elle **suit la sélection**, comme le panneau de `10f`.
@@ -205,26 +220,41 @@ export function ConsoleResult({
 
   const mongo = dialecte === 'mongo'
 
-  const onglets = onVueChange && (
+  // La bande de tête du résultat : les vues à gauche, l'export à droite.
+  //
+  // **Elle paraît dès que l'une des deux existe**, et non plus seulement avec les vues : accrocher
+  // l'export à la présence de `onVueChange` l'aurait fait disparaître avec les onglets, alors que
+  // rien ne les lie — la galerie monte l'un sans l'autre.
+  const onglets = (onVueChange || onExporter) && (
     <div className={styles.vues}>
-      <SegmentedControl
-        label={t('console.resultat.vueLabel')}
-        segments={[
-          {
-            value: 'resultat' as const,
-            // « Documents » et non « Résultat » : c'est ce que la vue contient, et le mot dit du
-            // même coup que ce n'est pas une grille de lignes.
-            label: mongo ? t('console.resultat.documents') : t('console.resultat.resultat'),
-            count: resultat.rows.length,
-          },
-          // **Pas d'onglet « JSON » en mongo** : la vue « Documents » *est* du JSON. Deux onglets
-          // pour la même chose feraient chercher la différence.
-          ...(mongo ? [] : [{ value: 'json' as const, label: t('console.resultat.json') }]),
-          { value: 'messages' as const, label: t('console.resultat.messages') },
-        ]}
-        value={vue}
-        onValueChange={onVueChange}
-      />
+      {onVueChange && (
+        <SegmentedControl
+          label={t('console.resultat.vueLabel')}
+          segments={[
+            {
+              value: 'resultat' as const,
+              // « Documents » et non « Résultat » : c'est ce que la vue contient, et le mot dit du
+              // même coup que ce n'est pas une grille de lignes.
+              label: mongo ? t('console.resultat.documents') : t('console.resultat.resultat'),
+              count: resultat.rows.length,
+            },
+            // **Pas d'onglet « JSON » en mongo** : la vue « Documents » *est* du JSON. Deux onglets
+            // pour la même chose feraient chercher la différence.
+            ...(mongo ? [] : [{ value: 'json' as const, label: t('console.resultat.json') }]),
+            { value: 'messages' as const, label: t('console.resultat.messages') },
+          ]}
+          value={vue}
+          onValueChange={onVueChange}
+        />
+      )}
+      {onExporter && (
+        <BoutonDExport
+          onExporter={onExporter}
+          mongo={mongo}
+          vide={resultat.rows.length === 0}
+          pourLeResultat={resultat}
+        />
+      )}
     </div>
   )
 
@@ -346,6 +376,200 @@ export function ConsoleResult({
         ))}
     </div>
   )
+}
+
+/** Ce qu'un export vient de produire, et qui s'affiche à côté du bouton. */
+type EtatDExport =
+  | { phase: 'repos' }
+  | { phase: 'en-cours' }
+  | { phase: 'ecrit'; octets: number }
+  | { phase: 'echoue'; message: string }
+
+/**
+ * Le bouton d'export du résultat (`API-29`), et le choix du format.
+ *
+ * **Dans la bande du résultat, et non dans la barre d'outils de la console.** Les quatre actions de
+ * la barre — Exécuter, Sélection, Enregistrer, Formater — agissent sur le **texte** de la requête ;
+ * celle-ci agit sur la **réponse**. La bande de tête du résultat est aussi celle qui porte le compte
+ * de lignes et les vues, c'est-à-dire tout ce qui décrit ce qu'on va exporter.
+ *
+ * **Un menu et non deux boutons** : les deux formats sont deux façons de faire le même geste, et
+ * deux boutons côte à côte auraient laissé croire à deux gestes différents.
+ */
+function BoutonDExport({
+  onExporter,
+  mongo,
+  vide,
+  pourLeResultat,
+}: {
+  onExporter: (format: ExportFormat) => Promise<IssueDExport>
+  mongo: boolean
+  vide: boolean
+  /**
+   * Le résultat que l'issue affichée décrit — **un jeton d'identité, jamais lu**.
+   *
+   * Sans lui, « Exporté · 12 ko » survivrait au résultat qu'il décrit. Une nouvelle exécution
+   * démonte ce bouton en passant par « Exécution… », donc le cas ordinaire se règle tout seul ;
+   * mais le panneau de transaction **repose** une réponse précédente sans cette étape (`API-38`),
+   * et l'issue d'avant serait alors lue comme celle du résultat qu'on vient d'afficher. C'est le
+   * motif du commentaire qui survit à la garantie qu'il décrivait (règle n° 20), appliqué à un
+   * message d'écran.
+   */
+  pourLeResultat: QueryResult
+}) {
+  const t = useT()
+  const [etat, setEtat] = useState<EtatDExport>({ phase: 'repos' })
+  // Le motif documenté de React pour ajuster un état quand une prop change : le comparer pendant le
+  // rendu. Un `useEffect` le ferait après une peinture, donc l'issue périmée serait visible une
+  // image.
+  const [resultatDecrit, setResultatDecrit] = useState(pourLeResultat)
+  if (resultatDecrit !== pourLeResultat) {
+    setResultatDecrit(pourLeResultat)
+    setEtat({ phase: 'repos' })
+  }
+
+  async function exporter(format: ExportFormat) {
+    // **Un export à la fois.** Le déclencheur reste dans son `Popover` pendant l'écriture (voir
+    // plus bas), donc son menu s'ouvre encore : sans cette garde, un second format cliqué pendant
+    // le premier ouvrirait un second sélecteur de destination.
+    if (etat.phase === 'en-cours') return
+    setEtat({ phase: 'en-cours' })
+    try {
+      const octets = await onExporter(format)
+      // **Renoncer au sélecteur n'annonce rien.** Ni réussite — aucun fichier n'a été écrit —, ni
+      // échec : rien n'a cassé, et une erreur sur un geste qu'on vient d'annuler ferait chercher
+      // quoi.
+      setEtat(octets === null ? { phase: 'repos' } : { phase: 'ecrit', octets })
+    } catch (cause) {
+      setEtat({ phase: 'echoue', message: messageDe(cause) })
+    }
+  }
+
+  const enCours = etat.phase === 'en-cours'
+  // **Un résultat sans ligne n'a rien à exporter**, et le dire vaut mieux qu'écrire un fichier qui
+  // ne porte qu'un en-tête — ou rien du tout, une écriture de console ne rendant aucune colonne.
+  // Désactivé avec sa raison, jamais caché.
+  const raison = vide ? t('console.export.raisonVide') : null
+
+  const declencheur = (
+    <button
+      type="button"
+      className={styles.exporter}
+      // **`aria-disabled` et non `disabled`** quand le bouton porte une explication : un bouton
+      // désactivé ne reçoit ni survol ni focus, donc son infobulle serait inatteignable là où elle
+      // est le plus utile (piège n° 3).
+      aria-disabled={raison !== null || enCours ? true : undefined}
+      title={raison ?? undefined}
+    >
+      <Icon name="dl" size={13} strokeWidth={1.9} />
+      {enCours ? t('console.export.enCours') : t('console.export.libelle')}
+    </button>
+  )
+
+  return (
+    <span className={styles.export}>
+      {etat.phase === 'ecrit' && (
+        // `role="status"` : une réussite s'annonce sans interrompre.
+        //
+        // **Nommée, parce que la barre du résultat est déjà un `status`** — « État du résultat »,
+        // vingt pixels plus bas. Deux régions vives homonymes dans le même sous-arbre ne se
+        // distingueraient ni à la voix ni dans un test. Le nom identifie la région ; c'est le
+        // **contenu** qui s'annonce quand il change.
+        <span
+          className={styles.exportIssue}
+          role="status"
+          aria-label={t('console.export.issueAriaLabel')}
+        >
+          {t('console.export.ecrit', { taille: formatBytes(etat.octets) })}
+        </span>
+      )}
+      {etat.phase === 'echoue' && (
+        // `role="alert"` : un fichier qu'on croyait écrit ne l'est pas. Le message vient du cœur et
+        // nomme le fichier — c'est la seule chose que l'utilisateur puisse corriger —, et le `title`
+        // le rend en entier là où la bande le rogne.
+        <span
+          className={cx(styles.exportIssue, styles.exportEchec)}
+          role="alert"
+          aria-label={t('console.export.issueAriaLabel')}
+          title={etat.message}
+        >
+          {etat.message}
+        </span>
+      )}
+      {raison !== null ? (
+        // **Sans le `Popover` quand il n'y a rien à exporter** : celui-ci pose son propre `onClick`,
+        // donc un déclencheur enveloppé ouvrirait son menu malgré l'`aria-disabled`. Cet état-là ne
+        // change pas sous la main de l'utilisateur — il suit le résultat, qui remonte le bouton de
+        // toute façon.
+        //
+        // **Pendant l'écriture, en revanche, le `Popover` reste** : un déclencheur qui change de
+        // place dans l'arbre React est démonté puis remonté, et le focus que `Popover` venait de
+        // lui rendre tombe alors sur le `body` — d'où plus aucune touche ne mène nulle part. C'est
+        // la garde ci-dessus qui empêche un second export, et non le retrait du menu.
+        declencheur
+      ) : (
+        <Popover
+          align="end"
+          title={t('console.export.titre')}
+          // Un menu d'actions se referme volontiers quand on s'en éloigne — voir `fermerEnSortant`.
+          fermerEnSortant
+          content={(fermer) => (
+            <ul className={styles.formats}>
+              {FORMATS.map((format) => {
+                // **Pas de CSV pour un résultat mongo.** Sa réponse est un arbre de documents et
+                // non une grille (`13b`) : un CSV en serait l'aplatissement en colonnes, décision
+                // de produit explicitement remise — et il exporterait ce que l'écran n'a jamais
+                // montré. Désactivé avec sa raison plutôt que retiré : le cacher ferait croire
+                // qu'il n'existera jamais, comme « Gérer les schémas… » hors PostgreSQL.
+                const refus = mongo && format === 'csv' ? t('console.export.raisonMongo') : null
+                return (
+                  <li key={format}>
+                    <button
+                      type="button"
+                      className={styles.format}
+                      aria-disabled={refus !== null ? true : undefined}
+                      title={refus ?? undefined}
+                      onClick={
+                        refus !== null
+                          ? undefined
+                          : () => {
+                              fermer()
+                              void exporter(format)
+                            }
+                      }
+                    >
+                      {t(`console.export.formats.${format}`)}
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        >
+          {declencheur}
+        </Popover>
+      )}
+    </span>
+  )
+}
+
+/** Les deux formats, dans l'ordre où le menu les propose. */
+const FORMATS: readonly ExportFormat[] = ['csv', 'json']
+
+/**
+ * Le message d'un échec remonté par l'IPC.
+ *
+ * `export_result` rend un `Err(String)`, que Tauri sérialise en chaîne — mais un pont cassé ou une
+ * panique de commande rendent autre chose, et un `catch` qui suppose une seule forme afficherait
+ * « undefined » là où la cause était lisible. Même piège que `08d`.
+ */
+function messageDe(cause: unknown): string {
+  if (typeof cause === 'string') return cause
+  if (cause instanceof Error) return cause.message
+  if (cause !== null && typeof cause === 'object' && 'message' in cause) {
+    return String((cause as { message: unknown }).message)
+  }
+  return String(cause)
 }
 
 /** La barre de chiffres, partagée par les trois vues — ils décrivent la même exécution. */

@@ -165,6 +165,16 @@ code: string | null,
 position: number | null, message: string, };
 
 /**
+ * Les deux formats offerts.
+ *
+ * **CSV et JSON, et pas seulement CSV.** Un résultat de console mongo est un arbre de documents et
+ * non une grille (`13b`) : un CSV y serait l'aplatissement de documents hétérogènes en colonnes,
+ * décision de produit explicitement remise. Sans JSON, l'un des quatre moteurs n'aurait aucun
+ * export ; c'est l'écran qui refuse le CSV en mongo, avec sa raison (jamais en le cachant).
+ */
+export type ExportFormat = "csv" | "json";
+
+/**
  * Un filtre par en-tête de colonne, tel que `A5` le saisit.
  *
  * La valeur reste une **chaîne** : c'est ce que l'utilisateur a tapé, et c'est

@@ -13,6 +13,7 @@ import type {
   ConnectionState,
   ConnectionStateEntry,
   DatabaseKey,
+  ExportFormat,
   QueryResult,
   RowLimit,
   RowQuery,
@@ -318,6 +319,26 @@ export async function runSql(
   console: string,
 ): Promise<QueryResult> {
   return appeler<QueryResult>('run_sql', { key, sql, limit, mode, console })
+}
+
+/**
+ * Écrit un résultat de console dans un fichier, et rend le nombre d'octets écrits (`API-29`).
+ *
+ * **La sérialisation est côté Rust**, pas ici : la CSP interdit `blob:`, donc l'écriture appartient
+ * de toute façon au cœur — et l'export de la vue table ne pourra être qu'un flux écrit là-bas. Deux
+ * sérialiseurs CSV divergeraient sur la citation, les `NULL` et les sauts de ligne (règle n° 17).
+ *
+ * **`columns` est la projection affichée**, dans l'ordre de la grille : le cœur ne sait rien des
+ * colonnes que l'écran masque. Les lignes remontent donc l'IPC en retour, ce qui est borné —
+ * `RowLimit` plafonne une réponse de console à mille lignes.
+ */
+export async function exportResult(
+  file: string,
+  format: ExportFormat,
+  columns: readonly string[],
+  rows: readonly (readonly Value[])[],
+): Promise<number> {
+  return appeler<number>('export_result', { file, format, columns, rows })
 }
 
 /**

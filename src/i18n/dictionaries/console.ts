@@ -40,6 +40,27 @@ export const consoleFr: Dictionnaire = {
     compteLignes: (p) => `${p.texte} ligne${Number(p.n) > 1 ? 's' : ''}`,
     limite: (p) => `limité à ${p.n} par DoraBase`,
   },
+  export: {
+    libelle: 'Exporter',
+    titre: 'Exporter le résultat',
+    enCours: 'Export…',
+    formats: {
+      csv: 'Fichier CSV',
+      json: 'Fichier JSON',
+    },
+    // Le nom du type de fichier dans le sélecteur **natif** — pas un libellé d'écran.
+    filtres: {
+      csv: 'Valeurs séparées par des virgules',
+      json: 'Données JSON',
+    },
+    ecrit: (p) => `Exporté · ${p.taille}`,
+    issueAriaLabel: 'Issue du dernier export',
+    raisonVide: 'La requête n’a rendu aucune ligne : il n’y a rien à exporter.',
+    // **Le refus dit ce qui manque, pas « pas encore ».** L'aplatissement de documents en colonnes
+    // est une décision de produit remise, pas un retard d'écriture.
+    raisonMongo:
+      'Un résultat mongo est un arbre de documents, pas un tableau de lignes : le mettre en colonnes demanderait de décider comment aplatir des documents qui n’ont pas les mêmes champs. Exportez-le en JSON.',
+  },
   toolbar: {
     ariaLabel: 'Actions de la console',
     enCours: 'Exécution…',
@@ -217,6 +238,24 @@ export const consoleEn: Dictionnaire = {
     compteDocuments: (p) => `${p.texte} doc${Number(p.n) > 1 ? 's' : ''}`,
     compteLignes: (p) => `${p.texte} row${Number(p.n) > 1 ? 's' : ''}`,
     limite: (p) => `limited to ${p.n} by DoraBase`,
+  },
+  export: {
+    libelle: 'Export',
+    titre: 'Export the result',
+    enCours: 'Exporting…',
+    formats: {
+      csv: 'CSV file',
+      json: 'JSON file',
+    },
+    filtres: {
+      csv: 'Comma-separated values',
+      json: 'JSON data',
+    },
+    ecrit: (p) => `Exported · ${p.taille}`,
+    issueAriaLabel: 'Last export outcome',
+    raisonVide: 'The query returned no rows: there is nothing to export.',
+    raisonMongo:
+      'A mongo result is a tree of documents, not a table of rows: putting it in columns would mean deciding how to flatten documents that do not share the same fields. Export it as JSON.',
   },
   toolbar: {
     ariaLabel: 'Console actions',

@@ -796,6 +796,49 @@ pub async fn run_sql(
     resultat
 }
 
+/// Écrit un résultat de console dans un fichier (`API-29`).
+///
+/// **Aucune connexion n'est touchée, et rien n'est réexécuté.** Les lignes viennent de l'écran, qui
+/// les a déjà reçues : une requête de console n'est pas forcément idempotente — c'est la raison qui
+/// interdit déjà de la relancer sur un geste de colonne — et la relancer sans sa limite serait une
+/// autre requête que celle dont on exporte la réponse.
+///
+/// **Les lignes traversent donc l'IPC en retour, et c'est borné.** `RowLimit` plafonne une réponse de
+/// console à mille lignes (`12c`) : ce qui remonte ici est ce qui est descendu, pas un jeu complet.
+/// C'est ce qui distingue cet export de celui de la vue table, qui portera 1,9 million de lignes et
+/// devra donc être un flux lu et écrit ici — voir l'en-tête de `engine::export`.
+///
+/// `columns` est la projection **affichée** — les colonnes visibles, dans l'ordre de la grille —, que
+/// seul l'écran connaît : `ConsoleView` tient les masquées et l'ordre, et réécrit déjà la requête
+/// avec eux.
+#[tauri::command]
+pub async fn export_result(
+    file: String,
+    format: crate::engine::ExportFormat,
+    columns: Vec<String>,
+    rows: Vec<Vec<crate::engine::Value>>,
+) -> Result<u64, String> {
+    use crate::engine::export;
+
+    let contenu = match format {
+        export::ExportFormat::Csv => export::en_csv(&columns, &rows),
+        export::ExportFormat::Json => export::en_json(&columns, &rows)?,
+    };
+    let octets = export::ecrire(std::path::Path::new(&file), &contenu)?;
+
+    // **Ni les valeurs ni les noms de colonnes ne sont journalisés** : un journal ne doit pas
+    // devenir une copie des données, et un nom de colonne en dit déjà long sur un schéma. Même
+    // règle qu'en `11d` et qu'au `run_sql` juste au-dessus, qui ne journalise pas son SQL.
+    log::info!(
+        "export_result → {} ligne(s), {} colonne(s), {octets} octet(s) en {}",
+        rows.len(),
+        columns.len(),
+        format.extension()
+    );
+
+    Ok(octets)
+}
+
 fn repertoire_de_configuration(app: &tauri::AppHandle) -> Result<std::path::PathBuf, EngineError> {
     use tauri::Manager;
     app.path()
