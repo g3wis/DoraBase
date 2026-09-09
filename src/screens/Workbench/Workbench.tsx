@@ -1823,9 +1823,9 @@ export function Workbench({
                     onAnnuler={() => transaction.annuler(consoleDeTransaction)}
                     /* **Désigner une instruction remet sa réponse dans la grille** (`API-38`), et
                        rien n'est rejoué : les lignes viennent du cœur, qui les a gardées — une
-                       requête de console n'est pas forcément idempotente. Deux états à leur place :
-                       le rang désigné vit avec la transaction (par connexion), le résultat affiché
-                       avec la console (par onglet). */
+                       requête de console n'est pas forcément idempotente. Le rang désigné est celui
+                       du **journal**, non la place de la carte dans une liste filtrée par console —
+                       c'est l'adresse que le cœur attend. */
                     affichee={transaction.affichee(consoleDeTransaction)}
                     onAfficher={async (index) => {
                       const resultat = await transaction.afficher(consoleDeTransaction, index)

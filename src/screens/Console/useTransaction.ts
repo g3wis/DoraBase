@@ -95,7 +95,10 @@ export type Transactions = {
   /** Le régime de **cette console** — `auto` tant que personne n'a rien réglé sur elle. */
   mode: (console: Console | null) => TransactionMode
   poserLeMode: (console: Console, mode: TransactionMode) => void
-  /** Ce que la transaction de sa **connexion** contient, tel que le Rust l'a dit. */
+  /**
+   * Ce que la transaction contient **pour cette console**, tel que le Rust l'a dit : ses propres
+   * instructions, plus le compte de celles des autres. Voir la doc de tête.
+   */
   etat: (console: Console | null) => TransactionState
   /**
    * Vrai quand une transaction est ouverte sur la connexion de cette console alors qu'elle est,

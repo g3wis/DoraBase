@@ -50,11 +50,13 @@ type ConsoleViewProps = {
   /** La densité de `15c`, transmise à la grille du résultat. */
   rowHeight?: number
   /**
-   * Le régime de transaction de la **connexion** (`API-38`), et de quoi le changer.
+   * Le régime de transaction de **cette console** (`API-38`), et de quoi le changer.
    *
-   * **De la connexion, pas de cette console** : le registre ne tient qu'une session par connexion,
-   * donc un `begin` posé ici englobe ce que les consoles voisines exécutent. C'est l'appelant qui
-   * en tient le compte, par connexion — voir `useTransaction`.
+   * **De la console, non de la connexion** : c'est sur cet onglet-là qu'on l'allume, et passer à un
+   * voisin n'en montre pas le panneau. La **transaction**, elle, appartient à la session, donc à la
+   * connexion — un `begin` posé ici englobe ce que les consoles voisines exécutent, et `etrangere`
+   * est ce qui le dit à celle qui ne l'a pas demandé. C'est l'appelant qui tient les deux comptes,
+   * voir `useTransaction`.
    *
    * Absent, le réglage n'est pas rendu : la galerie et les vitrines montent la console sans lui, et
    * une bascule sans effet se lirait comme une panne (défaut n° 36).
