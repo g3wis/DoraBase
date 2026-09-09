@@ -20,7 +20,8 @@ déjà.
 **Les numéros que portent les commentaires** — `06d`, `10b`, `25a`… — sont ceux des specs
 retirées. Ils ont été laissés en place : ils nomment le chantier qui a produit une
 décision, et se retrouvent dans l'historique Git. Aucun fichier ne leur correspond plus.
-N'en écrivez pas de nouveaux.
+N'en écrivez pas de nouveaux : **ce qu'on écrit à leur place est l'identifiant du ticket
+Linear** — `API-28`, `API-33` —, et c'est la section « Le lien avec Linear » qui le dit.
 
 ---
 
@@ -43,6 +44,65 @@ le corps du message — pas dans le sujet.
 
 L'historique antérieur au 26 août 2026 est en français : la règle vaut pour ce qui s'écrit
 maintenant, et rien n'est à réécrire.
+
+---
+
+## Le lien avec Linear
+
+**Rien ne s'écrit sans un ticket.** Une fonction, un correctif, un chantier de fond : chacun est
+rattaché à un ticket Linear avant que la première ligne parte. Les trois traces du projet ne disent
+pas la même chose et aucune ne remplace les deux autres — le code dit *ce qui est*, ce fichier dit
+*pourquoi c'est ainsi*, le ticket dit **ce que quelqu'un a demandé et où en est la réponse**. C'est
+le seul des trois qui se lise sans avoir le dépôt sous la main, et le seul qui se partage avec qui
+n'écrit pas de code.
+
+Les tickets du produit vivent dans l'équipe **`API`**, projet **« DoraBase — explorateur de bases de
+données »**. Le préfixe `API-` est celui que portent déjà `API-28` et `API-33` dans ce fichier :
+**c'est le successeur des numéros de spec retirés**, et c'est lui qu'on écrit désormais dans un
+commentaire de code ou dans une entrée d'ici.
+
+### Trouver le ticket avant d'en créer un
+
+L'ordre ne se saute pas :
+
+1. **le ticket donné dans la demande** — un identifiant, une URL, un titre reconnaissable. Il fait
+   foi, et on le lit **en entier** avant de commencer : la description porte souvent des arbitrages
+   déjà tranchés et des points laissés ouverts, qu'il serait absurde de rejouer ;
+2. **sinon, chercher dans le projet.** Un besoin formulé aujourd'hui a souvent déjà son ticket au
+   backlog, écrit par quelqu'un d'autre, dans l'autre langue, et sous un titre qu'on n'aurait pas
+   choisi. Chercher par mots-clés **et** parcourir le projet, **fermés compris** : un besoin qui
+   revient est soit un défaut rouvert, soit un doublon qu'il vaut mieux lier que réécrire ;
+3. **et seulement si rien ne couvre le besoin, en créer un.** Un second ticket sur un besoin déjà
+   décrit coupe l'historique en deux, et c'est la moitié la moins fournie qu'on retrouve six mois
+   plus tard. Dans le doute, **demander plutôt que deviner** : la question coûte moins cher que le
+   doublon.
+
+Un ticket créé porte le besoin dans les mots de qui l'a demandé, pas la solution qu'on a déjà en
+tête — c'est la même raison qui fait qu'aucune modale ne nomme un objet à sa création.
+
+### Le tenir à jour fait partie du travail
+
+Ni le statut ni la description ne bougent d'eux-mêmes, et **un ticket faux est pire qu'un ticket
+absent** : c'est le motif du commentaire qui survit à la garantie qu'il décrivait (règle n° 20),
+appliqué à ce que lit quelqu'un qui n'ouvrira jamais le code. Donc :
+
+- **le statut suit le travail au moment où il se fait**, jamais en lot à la fin : `In Progress`
+  quand on commence, `In Review` quand la PR est ouverte, `Done` quand elle est fusionnée. Les sept
+  états de l'équipe sont `Backlog`, `Todo`, `In Progress`, `In Review`, `Done`, `Canceled` et
+  `Duplicate` ; un besoin abandonné se **ferme** en `Canceled` avec sa raison, un doublon en
+  `Duplicate` vers celui qu'on garde. Laisser un ticket livré en `In Progress` fait dire au tableau
+  qu'un chantier est en cours alors qu'il est en production ;
+- **la description dit ce qui a été livré**, pas seulement ce qui était demandé. Chaque écart entre
+  les deux s'y écrit : un arbitrage retenu contre un autre, un point ouvert tranché, une moitié
+  remise à plus tard. Le *pourquoi* détaillé reste ici — le ticket en porte la version courte et le
+  renvoi, sinon les deux divergent et c'est le ticket qui a tort ;
+- **ce qui sort du périmètre s'en détache** : un morceau reporté devient son propre ticket, jamais
+  une case grise dans celui qu'on ferme. Un ticket qu'on ferme à moitié n'est fermé pour personne.
+
+**Ce qui ne change pas** : le message de commit reste en anglais et succinct, en
+`type(scope): ce que ça fait`, **sans identifiant de ticket dans la ligne de sujet** — cinquante
+caractères, et un lecteur qui n'est pas choisi. Le rattachement se fait par la PR, par le ticket
+lui-même, et par l'`API-NN` écrit dans le code ou ici.
 
 ---
 
