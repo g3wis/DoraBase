@@ -1,21 +1,27 @@
 //! Le mode de transaction d'une console, et ce que sa transaction contient (`API-38`).
 //!
-//! # Le mode appartient à la connexion, pas à la console
+//! # Chaque console a sa transaction, donc sa session
 //!
-//! Le registre ne tient **qu'un** adaptateur par connexion, donc une seule session : deux consoles
-//! ouvertes sur la même base écrivent dans la même. Un `BEGIN` posé depuis l'une englobe donc ce
-//! que l'autre exécute, qu'elle l'ait demandé ou non — et une console réglée « auto » participerait
-//! **en silence** à la transaction de sa voisine, jusqu'à ce qu'un `commit` qu'elle n'a pas demandé
-//! valide ce qu'elle a écrit. Le mode est donc une propriété de la connexion, et l'écran ne propose
-//! pas de le régler console par console.
+//! Une transaction est un état de **session** : deux consoles qui partagent une session partagent
+//! sa transaction, quoi qu'en dise l'écran. Un `BEGIN` posé depuis l'une engloberait ce que l'autre
+//! exécute — et une console réglée « auto » participerait **en silence** à la transaction de sa
+//! voisine, jusqu'à ce qu'un `commit` qu'elle n'a pas demandé valide ce qu'elle a écrit.
 //!
-//! # Le journal aussi
+//! C'est pourquoi une console qui passe en mode manuel reçoit **sa propre session** : le registre
+//! en ouvre une pour elle, à côté de celle de la connexion, et sa transaction y vit seule. Voir
+//! `ConnectionRegistry::assurer_la_session` — c'est là que tient tout ce qui suit.
 //!
-//! Pour la même raison, le panneau qui liste les instructions doit lister celles de la
-//! **transaction**, pas celles d'un onglet : c'est le seul contenu qu'un `commit` emporte. Le
-//! journal vit donc ici, à côté du registre, et l'écran le lit. Le tenir côté écran aurait donné à
-//! chaque console une liste partielle — chacune juste sur elle-même, fausse sur ce qu'elle allait
-//! valider.
+//! # Ce qu'une session par console rend vrai
+//!
+//! - le journal ci-dessous est **celui d'une console**, entier : la place d'une instruction dans la
+//!   liste est son rang dans la transaction, et il n'y a rien de plus à dire sur ce qu'un `commit`
+//!   emporte ;
+//! - une console en `auto` n'entre dans aucune transaction, même si sa voisine en tient une : ses
+//!   requêtes partent sur la session de la connexion, qui n'a pas de `BEGIN` ;
+//! - et ce qu'une transaction retient n'est visible que d'elle. La grille de `A5`, l'arbre et les
+//!   autres consoles lisent la session de la connexion : ils ne voient pas les lignes qu'une
+//!   transaction ouverte a écrites. C'est l'isolation que le serveur promet, et c'est le prix — la
+//!   contrepartie de « les transactions ne sont pas partagées ».
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -48,18 +54,6 @@ pub enum TransactionMode {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "engine.ts")]
 pub struct TransactionStatement {
-    /// Le rang de cette instruction dans le journal de la transaction.
-    ///
-    /// **L'adresse que `transaction_result` attend**, et elle est **explicite** parce que l'écran
-    /// n'en reçoit qu'une partie : chaque console ne voit que ses propres instructions, donc la
-    /// position dans la liste reçue n'est plus le rang dans le journal. Sans ce champ, désigner la
-    /// deuxième instruction de sa liste demanderait la deuxième du journal — celle d'à côté.
-    #[ts(type = "number")]
-    pub index: u32,
-    /// Le SQL **réellement exécuté**, limite comprise — celui de `QueryResult::sql`.
-    ///
-    /// À l'échec, celui qui a été soumis : le moteur n'a rien rendu qui dise ce qu'il avait compris,
-    /// et fabriquer la forme bornée pour l'occasion afficherait une requête qui n'a pas tourné.
     pub sql: String,
     #[ts(type = "number")]
     pub duration_ms: u64,
@@ -89,34 +83,25 @@ pub struct TransactionStatement {
     pub error: Option<String>,
 }
 
-/// L'état de la transaction d'une connexion, tel que le panneau l'affiche.
+/// L'état de la transaction **d'une console**, tel que son panneau l'affiche.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "engine.ts")]
 pub struct TransactionState {
-    /// Vrai quand une transaction est ouverte sur cette connexion.
+    /// Vrai quand cette console tient une transaction ouverte.
     ///
     /// **Distinct d'un journal non vide**, et les deux cas existent : une transaction s'ouvre avant
     /// sa première instruction, et une instruction refusée la laisse ouverte — donc à annuler.
+    ///
+    /// Il ne dit **rien des autres consoles** : chacune a sa session, donc sa réponse. C'est ce qui
+    /// a fait disparaître la notion de « transaction étrangère » qu'une session partagée imposait.
     pub open: bool,
-    /// Les instructions **de la console qui lit**, dans l'ordre où elles ont été jouées.
+    /// Les instructions de cette transaction, dans l'ordre où elles ont été jouées.
     ///
-    /// # Pourquoi elles sont filtrées
-    ///
-    /// Une console montre ce qu'elle a fait : les requêtes d'une voisine dans son propre panneau se
-    /// lisaient comme les siennes, alors qu'elle ne les a ni écrites ni vues passer. Le journal, lui,
-    /// reste entier — c'est la transaction, et un `commit` l'emporte en entier.
-    ///
-    /// **Ce que le filtre oblige à dire ailleurs** : `foreign`, ci-dessous. Un panneau qui listerait
-    /// deux instructions et un `commit` qui en emporterait quatre serait un mensonge sur ce qu'on
-    /// valide, et c'est la confirmation qui le porte.
+    /// **Entier, et non filtré** : le journal est celui d'une console, puisque la session l'est.
+    /// La place d'une instruction dans cette liste est donc son rang dans la transaction — c'est
+    /// l'adresse que `transaction_result` attend, et elle n'a pas à voyager à part.
     pub statements: Vec<TransactionStatement>,
-    /// Combien d'instructions **d'autres consoles** la transaction porte en plus.
-    ///
-    /// Zéro dans le cas ordinaire — une seule console sur la connexion. Au-delà, la confirmation de
-    /// validation le dit : ce que le panneau ne montre pas, le `commit` l'emporte quand même.
-    #[ts(type = "number")]
-    pub foreign: u32,
     /// Vrai quand une instruction a échoué **sur un moteur qui abandonne** la transaction.
     ///
     /// # Ce que l'écran en fait, et pourquoi ce n'est pas lui qui conclut

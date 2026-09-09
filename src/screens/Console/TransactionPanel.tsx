@@ -28,9 +28,9 @@ type TransactionPanelProps = {
   /**
    * Le rang de l'instruction dont la réponse est dans la grille, ou `null`.
    *
-   * `null` après chaque exécution : la grille montre alors la réponse toute neuve, et rien ne dit
-   * quelle entrée du journal l'a produite — deux consoles y écrivent. Marquer la dernière serait
-   * juste presque toujours, et faux dès qu'une voisine a exécuté après nous.
+   * `null` après chaque exécution : la grille montre alors la réponse toute neuve, et c'est la
+   * dernière entrée du journal — la marquer serait juste, mais dirait « vous regardez une réponse
+   * d'avant » là où l'on regarde celle qui vient d'arriver.
    */
   affichee?: number | null
   /** Vrai pendant l'un des deux gestes : les boutons attendent. */
@@ -41,18 +41,12 @@ type TransactionPanelProps = {
  * Le panneau de la transaction manuelle d'une console (`API-38`) : ce qui attend, et les deux
  * issues.
  *
- * # Ce qu'il liste : ses instructions, et le compte des autres
+ * # Ce qu'il liste : la transaction de sa console, entière
  *
- * Les instructions viennent du **registre**, qui les tient par connexion, et il n'en rend à cette
- * console que **les siennes** : les requêtes d'une voisine s'y liraient comme les nôtres, alors
- * qu'on ne les a ni écrites ni vues passer. Le filtre est au cœur, qui seul connaît l'origine de
- * chaque instruction.
- *
- * **Mais un « Valider » emporte la transaction entière** — c'est une seule session —, donc ce que la
- * liste ne montre pas se **dit** : `TransactionState.foreign`, sous les instructions. Un panneau
- * qui en listerait deux devant un `commit` qui en emporte quatre serait un mensonge sur ce qu'on
- * valide, et c'est le pire défaut que ce panneau puisse avoir. La confirmation de validation le
- * redit, au moment où l'on s'engage.
+ * Les instructions viennent du **registre**, qui les tient à côté de la session que cette console
+ * a ouverte pour sa transaction. Il n'y a donc rien à filtrer et rien à dire de plus : ce que la
+ * liste montre est exactement ce qu'un « Valider » emporte, et la place d'une carte est le rang de
+ * son instruction.
  *
  * # Il paraît avant la première instruction
  *
@@ -71,12 +65,10 @@ export function TransactionPanel({
   enCours = false,
 }: TransactionPanelProps) {
   const t = useT()
-  // **Deux nombres, et il en faut deux.** Le rang du journal (`instruction.index`) est l'adresse
-  // que le cœur attend et l'identité d'une entrée ; la place dans **cette** liste est ce qui
-  // s'affiche, parce que la liste est filtrée — une console qui a joué la première et la troisième
-  // instruction de la transaction montre « #1 » et « #2 », non « #1 » et « #3 » : un numéro qui
-  // sauterait ferait chercher l'instruction manquante dans un panneau qui ne l'aura jamais.
-  const rangees = etat.statements.map((instruction, place) => ({ instruction, place }))
+  // Le rang **est** l'identité d'une entrée du journal : il la désigne auprès du cœur
+  // (`transactionResult`), il s'affiche en tête de carte, et il sert de clef de rendu. Numéroté ici
+  // une fois, plutôt que trois fois depuis l'index d'une boucle.
+  const rangees = etat.statements.map((instruction, rang) => ({ instruction, rang }))
   // **Ce qui décide des deux boutons est `open`, non le compte d'instructions.** Une transaction
   // dont la première instruction a échoué est ouverte et vide de succès : il y a bel et bien
   // quelque chose à annuler, et le dire est tout l'intérêt du journal.
@@ -111,37 +103,22 @@ export function TransactionPanel({
           // l'ordre où elle a été jouée, et c'est ce qui permet de retrouver l'instruction qui l'a
           // fait basculer.
           <ol className={styles.instructions}>
-            {rangees.map(({ instruction, place }) => (
+            {rangees.map(({ instruction, rang }) => (
               <Instruction
-                // **Le rang du journal en clef, et c'est le bon ici.** Deux exécutions du même SQL
-                // sont deux instructions distinctes de la transaction, donc le texte ne les
-                // distingue pas ; et ce journal ne se réordonne jamais — il ne fait que s'allonger,
-                // jusqu'à ce qu'une validation ou une annulation le remplace en entier. C'est le
-                // cœur qui le donne, non la boucle : la liste est filtrée, donc sa place n'est pas
-                // le rang, et lire l'index de la boucle ferait signaler à Biome un défaut qui n'a
-                // pas d'objet.
-                key={instruction.index}
+                // **Le rang en clef, et c'est le bon ici.** Deux exécutions du même SQL sont deux
+                // instructions distinctes de la transaction, donc le texte ne les distingue pas ; et
+                // ce journal ne se réordonne jamais — il ne fait que s'allonger, jusqu'à ce qu'une
+                // validation ou une annulation le remplace en entier. Le rang est numéroté à part
+                // (`rangees`) plutôt que pris de la boucle : il **est** l'identité d'une entrée ici,
+                // et le lire de l'index ferait signaler à Biome un défaut qui n'a pas d'objet.
+                key={rang}
                 instruction={instruction}
-                rang={place + 1}
-                // **Désignée par son rang de journal** : c'est l'adresse que le cœur attend, et la
-                // seule qui reste juste quand une voisine a exécuté entre deux des nôtres.
-                affichee={affichee === instruction.index}
-                onAfficher={
-                  onAfficher === undefined ? undefined : () => onAfficher(instruction.index)
-                }
+                rang={rang + 1}
+                affichee={affichee === rang}
+                onAfficher={onAfficher === undefined ? undefined : () => onAfficher(rang)}
               />
             ))}
           </ol>
-        )}
-
-        {/* **Ce que la liste ne montre pas, et que la validation emporte.** Le compte, non les
-            requêtes : celles-ci appartiennent à une console qui les a écrites et qui les affiche,
-            et les recopier ici referait exactement ce que le filtre défait. Absent quand il n'y a
-            rien à dire — le cas ordinaire, une seule console sur la connexion. */}
-        {etat.foreign > 0 && (
-          <p className={styles.etrangeres}>
-            {t('console.transaction.etrangeres', { n: etat.foreign })}
-          </p>
         )}
 
         {erreur !== null && (

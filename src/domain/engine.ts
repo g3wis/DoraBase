@@ -480,37 +480,27 @@ lastAnalyze: string | null, comment: string | null, };
 export type TransactionMode = "auto" | "manual";
 
 /**
- * L'état de la transaction d'une connexion, tel que le panneau l'affiche.
+ * L'état de la transaction **d'une console**, tel que son panneau l'affiche.
  */
 export type TransactionState = { 
 /**
- * Vrai quand une transaction est ouverte sur cette connexion.
+ * Vrai quand cette console tient une transaction ouverte.
  *
  * **Distinct d'un journal non vide**, et les deux cas existent : une transaction s'ouvre avant
  * sa première instruction, et une instruction refusée la laisse ouverte — donc à annuler.
+ *
+ * Il ne dit **rien des autres consoles** : chacune a sa session, donc sa réponse. C'est ce qui
+ * a fait disparaître la notion de « transaction étrangère » qu'une session partagée imposait.
  */
 open: boolean, 
 /**
- * Les instructions **de la console qui lit**, dans l'ordre où elles ont été jouées.
+ * Les instructions de cette transaction, dans l'ordre où elles ont été jouées.
  *
- * # Pourquoi elles sont filtrées
- *
- * Une console montre ce qu'elle a fait : les requêtes d'une voisine dans son propre panneau se
- * lisaient comme les siennes, alors qu'elle ne les a ni écrites ni vues passer. Le journal, lui,
- * reste entier — c'est la transaction, et un `commit` l'emporte en entier.
- *
- * **Ce que le filtre oblige à dire ailleurs** : `foreign`, ci-dessous. Un panneau qui listerait
- * deux instructions et un `commit` qui en emporterait quatre serait un mensonge sur ce qu'on
- * valide, et c'est la confirmation qui le porte.
+ * **Entier, et non filtré** : le journal est celui d'une console, puisque la session l'est.
+ * La place d'une instruction dans cette liste est donc son rang dans la transaction — c'est
+ * l'adresse que `transaction_result` attend, et elle n'a pas à voyager à part.
  */
 statements: Array<TransactionStatement>, 
-/**
- * Combien d'instructions **d'autres consoles** la transaction porte en plus.
- *
- * Zéro dans le cas ordinaire — une seule console sur la connexion. Au-delà, la confirmation de
- * validation le dit : ce que le panneau ne montre pas, le `commit` l'emporte quand même.
- */
-foreign: number, 
 /**
  * Vrai quand une instruction a échoué **sur un moteur qui abandonne** la transaction.
  *
@@ -536,23 +526,7 @@ aborted: boolean, };
  * suite sera refusée jusqu'à l'annulation. Un journal qui ne garderait que les succès laisserait
  * chercher pourquoi plus rien ne répond.
  */
-export type TransactionStatement = { 
-/**
- * Le rang de cette instruction dans le journal de la transaction.
- *
- * **L'adresse que `transaction_result` attend**, et elle est **explicite** parce que l'écran
- * n'en reçoit qu'une partie : chaque console ne voit que ses propres instructions, donc la
- * position dans la liste reçue n'est plus le rang dans le journal. Sans ce champ, désigner la
- * deuxième instruction de sa liste demanderait la deuxième du journal — celle d'à côté.
- */
-index: number, 
-/**
- * Le SQL **réellement exécuté**, limite comprise — celui de `QueryResult::sql`.
- *
- * À l'échec, celui qui a été soumis : le moteur n'a rien rendu qui dise ce qu'il avait compris,
- * et fabriquer la forme bornée pour l'occasion afficherait une requête qui n'a pas tourné.
- */
-sql: string, durationMs: number, 
+export type TransactionStatement = { sql: string, durationMs: number, 
 /**
  * Les lignes rendues.
  */

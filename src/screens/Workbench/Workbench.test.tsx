@@ -2586,58 +2586,48 @@ describe('la transaction manuelle de la console', () => {
       valides: [] as DatabaseKey[],
       annules: [] as DatabaseKey[],
     }
-    let journal: {
-      rendue: TransactionStatement
-      reponse: QueryResult | null
-      origine: string
-    }[] = []
+    /**
+     * **Un journal par console**, comme le cœur tient une session par console (`API-38`).
+     *
+     * Un décor qui les mettrait en commun ferait passer le test là où l'application isole, et
+     * l'écart ne se verrait nulle part (règle n° 5 — ce que le décor rend indiscernable, aucune
+     * assertion ne le rattrape).
+     */
+    let journaux: Record<string, { rendue: TransactionStatement; reponse: QueryResult | null }[]> =
+      {}
     return {
       vus,
-      /**
-       * Ce que le Rust fait en mode manuel : inscrire l'instruction dans la transaction.
-       *
-       * **Le rang est calculé ici**, comme le registre le calcule : il compte le journal **entier**,
-       * pas la part d'une console. Le laisser passer par l'appelant aurait permis au décor de le
-       * dire juste par hasard.
-       */
-      inscrire(
-        origine: string,
-        rendue: Omit<TransactionStatement, 'index'>,
-        reponse: QueryResult | null = null,
-      ) {
-        journal = [...journal, { rendue: { ...rendue, index: journal.length }, reponse, origine }]
+      /** Ce que le Rust fait en mode manuel : inscrire l'instruction dans la transaction. */
+      inscrire(console: string, rendue: TransactionStatement, reponse: QueryResult | null = null) {
+        journaux = { ...journaux, [console]: [...(journaux[console] ?? []), { rendue, reponse }] }
       },
-      /** Vrai quand une transaction est ouverte — voir la règle du registre, dans `runSql`. */
-      ouverte: () => journal.length > 0,
+      /** Vrai quand **cette console** tient une transaction — la règle du registre, dans `runSql`. */
+      ouverte: (console: string) => (journaux[console]?.length ?? 0) > 0,
       passerelle: {
         transactionState: async (cle: DatabaseKey, console: string) => {
           vus.lectures.push(cle)
           // Comme le registre : les réponses restent ici, seuls les comptes voyagent.
+          const journal = journaux[console] ?? []
           return {
             open: journal.length > 0,
-            // **Filtré par origine, comme le registre** : un décor qui rendrait le journal entier
-            // ferait passer le test là où l'application filtre, et l'écart ne se verrait nulle
-            // part (règle n° 5 — ce que le décor rend indiscernable, aucune assertion ne le
-            // rattrape).
-            statements: journal.filter((e) => e.origine === console).map((e) => e.rendue),
-            foreign: journal.filter((e) => e.origine !== console).length,
+            statements: journal.map((e) => e.rendue),
             // Le décor n'échoue pas : `aborted` a son test au niveau du panneau, où l'écart entre
             // les moteurs se lit sans base réelle.
             aborted: false,
           }
         },
-        transactionResult: async (_cle: DatabaseKey, rang: number) => {
-          const reponse = journal[rang]?.reponse
+        transactionResult: async (_cle: DatabaseKey, console: string, rang: number) => {
+          const reponse = journaux[console]?.[rang]?.reponse
           if (!reponse) throw new Error('cette instruction n’a rendu aucune ligne.')
           return reponse
         },
-        commitTransaction: async (cle: DatabaseKey) => {
+        commitTransaction: async (cle: DatabaseKey, console: string) => {
           vus.valides.push(cle)
-          journal = []
+          journaux = { ...journaux, [console]: [] }
         },
-        rollbackTransaction: async (cle: DatabaseKey) => {
+        rollbackTransaction: async (cle: DatabaseKey, console: string) => {
           vus.annules.push(cle)
-          journal = []
+          journaux = { ...journaux, [console]: [] }
         },
       },
     }
@@ -2671,12 +2661,10 @@ describe('la transaction manuelle de la console', () => {
           const reponse: QueryResult = ecrit
             ? { ...RESULTAT, sql, columns: [], rows: [], affected: 3 }
             : { ...RESULTAT, sql, columns: ['n'], rows: [[{ kind: 'int', value: 41 }]] }
-          // Le pendant du registre, **règle comprise** : le mode décide de l'*ouverture*, mais le
-          // journal dit ce que la transaction *contient* — une requête lancée en `auto` pendant
-          // qu'une transaction est ouverte y entre de toute façon, la session la portant. Un décor
-          // qui ne l'inscrirait qu'en manuel rendrait invisible l'écart que le régime par console
-          // laisse ouvert, c'est-à-dire exactement ce qu'un test doit pouvoir voir.
-          if (mode === 'manual' || factice.ouverte()) {
+          // Le pendant du registre : le mode choisit la **session**, et une console qui tient déjà
+          // la sienne y reste — même repassée en `auto`. Une console voisine, elle, n'y entre
+          // jamais : c'est ce que la session par console garantit.
+          if (mode === 'manual' || factice.ouverte(console)) {
             factice.inscrire(
               console,
               {
@@ -2858,9 +2846,9 @@ describe('la transaction manuelle de la console', () => {
     )
   })
 
-  it('une console en automatique dit qu’une transaction est ouverte sur sa connexion', async () => {
+  it('une console voisine n’entre pas dans la transaction, et n’en sait rien', async () => {
     const utilisateur = userEvent.setup()
-    await ouvrirUneConsoleAvecTransaction(utilisateur)
+    const { modes } = await ouvrirUneConsoleAvecTransaction(utilisateur)
     await utilisateur.click(screen.getByRole('switch', { name: 'Transaction manuelle' }))
     await saisir(utilisateur, 'delete from ventes')
     await utilisateur.click(screen.getByRole('button', { name: /Exécuter/ }))
@@ -2870,40 +2858,30 @@ describe('la transaction manuelle de la console', () => {
       ),
     )
 
+    // **Une seconde console sur la même base**, en automatique : elle n'a pas de panneau, et rien
+    // ne lui annonce la transaction d'à côté — parce qu'elle n'y entre pas. C'est ce qu'une session
+    // par console a supprimé : tant que les deux partageaient celle de la connexion, ses requêtes
+    // entraient dans la transaction de sa voisine, et le pied devait le dire.
     await ouvrirUneConsole(utilisateur)
+    expect(screen.queryByRole('complementary', { name: 'Transaction en cours' })).toBeNull()
+    expect(screen.queryByText(/transaction est ouverte sur cette connexion/)).toBeNull()
 
-    // **Le seul écart que le régime par console laisse ouvert, et il se dit.** Les deux consoles
-    // partagent une session : les requêtes de celle-ci entreront dans la transaction que sa voisine
-    // a ouverte, et qu'un « Valider » d'ailleurs décidera. Le taire serait laisser croire à une
-    // écriture validée.
-    await waitFor(() =>
-      expect(
-        screen.getByText(/Une transaction est ouverte sur cette connexion/),
-      ).toBeInTheDocument(),
-    )
-
-    // Et ce qu'elle exécute entre bien dans cette transaction — c'est une seule session.
     await saisir(utilisateur, 'update ventes set statut = 2')
     await utilisateur.click(screen.getByRole('button', { name: /Exécuter/ }))
-    // **Celle-ci est confirmée, elle** : le régime est réglé par console, et cette console-ci est en
-    // automatique — c'est la dispense de confirmation qui suit le régime, pas la transaction.
+    // **Elle confirme son écriture**, elle : rien ne la retient, donc c'est bien à découvert
+    // qu'elle écrit — et la confirmation de `12c` est le seul garde-fou qui reste.
     await utilisateur.click(screen.getByRole('button', { name: /Exécuter ce UPDATE/ }))
+    await waitFor(() => expect(modes).toEqual(['manual', 'auto']))
+
+    // Et le panneau de la première ne l'a pas vue passer.
     await utilisateur.click(screen.getByRole('tab', { name: /console 1/ }))
     const panneau = await screen.findByRole('complementary', { name: 'Transaction en cours' })
-
-    // **Mais elle n'entre pas dans le panneau de la première** : une console montre ce qu'elle a
-    // fait, et la requête d'une voisine s'y lirait comme la sienne. Ce qui se dit à sa place est le
-    // **compte** — sans quoi ce panneau d'une instruction se lirait comme la transaction entière
-    // devant un « Valider » qui en emporte deux.
-    await waitFor(() =>
-      expect(within(panneau).getByText(/1 instruction d’une autre console/)).toBeInTheDocument(),
-    )
     expect(within(panneau).getAllByRole('listitem')).toHaveLength(1)
     // Le mot qui distingue les deux requêtes : `statut` n'est que dans celle de la seconde console.
     expect(panneau).not.toHaveTextContent('statut')
   })
 
-  it('une console qui n’a rien écrit confirme quand même les écritures d’une voisine', async () => {
+  it('deux consoles tiennent chacune sa transaction, et une validation n’emporte que la sienne', async () => {
     const utilisateur = userEvent.setup()
     const { vus } = await ouvrirUneConsoleAvecTransaction(utilisateur)
     await utilisateur.click(screen.getByRole('switch', { name: 'Transaction manuelle' }))
@@ -2915,28 +2893,32 @@ describe('la transaction manuelle de la console', () => {
       ),
     )
 
-    // Une seconde console, en manuel, qui ne fait que **lire** : son panneau ne porte donc aucune
-    // écriture, et la règle ordinaire la validerait sans rien demander.
+    // La seconde console **aussi** en manuel : elle ouvre la sienne, là où une session partagée
+    // l'aurait fait entrer dans celle de sa voisine.
     await ouvrirUneConsole(utilisateur)
     await utilisateur.click(screen.getByRole('switch', { name: 'Transaction manuelle' }))
     await saisir(utilisateur, 'select n from ventes')
     await utilisateur.click(screen.getByRole('button', { name: /Exécuter/ }))
-    const panneau = await screen.findByRole('complementary', { name: 'Transaction en cours' })
-    await waitFor(() => expect(panneau).toHaveTextContent('1 instruction d’une autre console'))
+    const sienne = await screen.findByRole('complementary', { name: 'Transaction en cours' })
+    await waitFor(() => expect(sienne).toHaveTextContent('1 ligne rendue'))
+    // Son panneau ne porte que sa lecture : le `delete` de la voisine n'est pas dans sa transaction.
+    expect(within(sienne).getAllByRole('listitem')).toHaveLength(1)
+    expect(sienne).not.toHaveTextContent('delete')
 
-    await utilisateur.click(within(panneau).getByRole('button', { name: 'Valider' }))
+    // **Elle n'a fait que lire, donc elle valide sans question** — et c'est juste, puisqu'aucune
+    // écriture invisible ne l'accompagne : la transaction est la sienne, entière.
+    await utilisateur.click(within(sienne).getByRole('button', { name: 'Valider' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await waitFor(() => expect(vus.valides).toHaveLength(1))
 
-    // **Le trou que le filtre aurait ouvert.** Cette console ne voit pas le `delete` de sa voisine,
-    // donc « rien d'écrit ici » ne veut pas dire « rien à confirmer » : ce clic emporte la
-    // transaction entière. La modale paraît, et elle dit le nombre qu'elle ne peut pas nommer — les
-    // verbes d'une instruction qu'on n'a pas jouée ne sont pas rendus à cette console.
-    const modale = await screen.findByRole('dialog')
-    expect(modale).toHaveTextContent(/1 instruction de plus/)
-    // Et le bouton ne compte pas « 0 écriture » : il emporte bel et bien quelque chose.
-    expect(
-      within(modale).getByRole('button', { name: 'Valider la transaction' }),
-    ).toBeInTheDocument()
-    expect(vus.valides).toEqual([])
+    // Et la transaction de la première n'a pas bougé : elle attend toujours son issue.
+    await utilisateur.click(screen.getByRole('tab', { name: /console 1/ }))
+    const premiere = await screen.findByRole('complementary', { name: 'Transaction en cours' })
+    await waitFor(() => expect(premiere).toHaveTextContent('3 lignes touchées'))
+    expect(screen.getByRole('switch', { name: 'Transaction manuelle' })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    )
   })
 
   it('renommer la console lui laisse sa transaction, et ses instructions', async () => {

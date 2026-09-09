@@ -324,12 +324,11 @@ export async function runSql(
  * L'état de la transaction manuelle d'une connexion (`API-38`).
  *
  * **Relu plutôt que déduit de ce que l'écran a envoyé.** Le journal vit dans le registre, à côté de
- * la connexion, et une liste tenue côté écran aurait été juste sur l'onglet et fausse sur ce qu'un
- * « Valider » emporte : la transaction est celle de la session, donc de la connexion.
+ * la session qui tient la transaction : une liste tenue côté écran aurait été juste sur l'onglet et
+ * fausse sur ce qu'un « Valider » emporte.
  *
- * **`console` dit qui lit**, et l'état rendu est le sien : ses instructions, plus le compte de
- * celles des autres (`foreign`). Deux consoles sur la même base partagent la transaction sans se
- * mêler leurs listes.
+ * **`console` désigne la session**, et l'état rendu est le sien seul : chaque console a la sienne,
+ * donc sa transaction (`API-38`).
  */
 export async function transactionState(
   key: DatabaseKey,
@@ -346,24 +345,33 @@ export async function transactionState(
  * Un rang plutôt qu'un identifiant parce que ce journal ne fait que s'allonger — voir
  * `ConnectionRegistry::reponse_de_transaction`.
  */
-export async function transactionResult(key: DatabaseKey, index: number): Promise<QueryResult> {
-  return appeler<QueryResult>('transaction_result', { key, index })
+export async function transactionResult(
+  key: DatabaseKey,
+  console: string,
+  index: number,
+): Promise<QueryResult> {
+  return appeler<QueryResult>('transaction_result', { key, console, index })
 }
 
 /**
- * Valide la transaction manuelle d'une connexion (`API-38`).
+ * Valide la transaction manuelle d'une console (`API-38`).
  *
  * **Après cet appel, la transaction est terminée quoi qu'il arrive** : un `commit` refusé est suivi
  * d'une annulation côté Rust, pour que l'écran n'ait qu'un état à afficher — voir
  * `ConnectionRegistry::valider_la_transaction`.
  */
-export async function commitTransaction(key: DatabaseKey): Promise<void> {
-  return appeler<void>('commit_transaction', { key })
+export async function commitTransaction(key: DatabaseKey, console: string): Promise<void> {
+  return appeler<void>('commit_transaction', { key, console })
 }
 
-/** Annule la transaction manuelle d'une connexion (`API-38`). */
-export async function rollbackTransaction(key: DatabaseKey): Promise<void> {
-  return appeler<void>('rollback_transaction', { key })
+/**
+ * Annule la transaction manuelle d'une console (`API-38`).
+ *
+ * **C'est aussi ce qui rend sa session**, et c'est pourquoi l'écran l'appelle en quittant le mode
+ * manuel : une session gardée pour rien tiendrait une transaction vide et ses verrous côté serveur.
+ */
+export async function rollbackTransaction(key: DatabaseKey, console: string): Promise<void> {
+  return appeler<void>('rollback_transaction', { key, console })
 }
 
 /**

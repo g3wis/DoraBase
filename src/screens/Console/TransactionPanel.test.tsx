@@ -7,10 +7,6 @@ import { TransactionPanel } from './TransactionPanel'
 
 function instruction(partielle: Partial<TransactionStatement> = {}): TransactionStatement {
   return {
-    // **Zéro par défaut, et les tests qui en ont plusieurs le posent.** Le rang du journal est
-    // l'adresse que le cœur attend : le laisser deviner par la position dans la liste est
-    // exactement ce que ce champ existe pour empêcher.
-    index: 0,
     sql: 'update commandes set statut = 1',
     durationMs: 4,
     returned: 0,
@@ -22,12 +18,12 @@ function instruction(partielle: Partial<TransactionStatement> = {}): Transaction
 }
 
 function monter(
-  etat: Omit<TransactionState, 'aborted' | 'foreign'> & { aborted?: boolean; foreign?: number },
+  etat: Omit<TransactionState, 'aborted'> & { aborted?: boolean },
   props: Partial<Parameters<typeof TransactionPanel>[0]> = {},
 ) {
   return render(
     <LanguageProvider preferences={{ language: 'fr' }}>
-      <TransactionPanel etat={{ aborted: false, foreign: 0, ...etat }} {...props} />
+      <TransactionPanel etat={{ aborted: false, ...etat }} {...props} />
     </LanguageProvider>,
   )
 }
@@ -96,54 +92,28 @@ function lecture(partielle: Partial<TransactionStatement> = {}) {
 test('une lecture se désigne pour remettre sa réponse dans la grille', async () => {
   const utilisateur = userEvent.setup()
   const afficher = vi.fn()
-  // **Rang 3 dans le journal, première de cette console** : la liste est filtrée — une voisine a
-  // joué les trois instructions d'avant —, donc les deux nombres diffèrent. Un décor où ils
-  // coïncideraient laisserait passer les deux confusions à la fois (règle n° 5).
-  monter({ open: true, statements: [lecture({ index: 3 })] }, { onAfficher: afficher })
+  monter({ open: true, statements: [lecture()] }, { onAfficher: afficher })
 
-  // **Le numéro affiché est celui de la liste** : « #4 » ferait chercher les trois instructions
-  // d'avant dans un panneau qui ne les aura jamais.
   expect(screen.getByText('#1')).toBeInTheDocument()
   // **Le nom du bouton dit ce qu'un clic fera**, en plus de ce que la carte montre : concaténé, il
   // rendrait « #1 12 lignes rendues 4 ms select … », qui décrit sans annoncer.
   const carte = screen.getByRole('button', { name: /Afficher ce résultat dans la grille/ })
   expect(carte).toHaveAttribute('aria-pressed', 'false')
   await utilisateur.click(carte)
-  // **Le rang du journal, non la place dans la liste** : c'est l'adresse par laquelle le cœur
-  // retrouve la réponse, et la seule qui reste juste quand une voisine a exécuté entre deux des
-  // nôtres.
-  expect(afficher).toHaveBeenCalledWith(3)
+  // Le **rang**, celui du journal : c'est par lui que le cœur retrouve la réponse, et comme le
+  // journal est celui de cette console, c'est aussi la place de la carte.
+  expect(afficher).toHaveBeenCalledWith(0)
 })
 
 test('l’instruction affichée porte sa marque, et elle seule', () => {
   monter(
-    // Les rangs 0 et 2 : entre les deux, une instruction d'une autre console, que cette liste ne
-    // porte pas. La marque suit donc le rang, non la place — et les deux cartes portent « #1 » et
-    // « #2 ».
-    { open: true, statements: [lecture(), lecture({ sql: 'select 2', index: 2 })] },
-    { onAfficher: () => {}, affichee: 2 },
+    { open: true, statements: [lecture(), lecture({ sql: 'select 2' })] },
+    { onAfficher: () => {}, affichee: 1 },
   )
   const cartes = screen.getAllByRole('button', { name: /Afficher ce résultat/ })
   expect(cartes[0]).toHaveAttribute('aria-pressed', 'false')
   expect(cartes[1]).toHaveAttribute('aria-pressed', 'true')
   expect(screen.getByText('#2')).toBeInTheDocument()
-})
-
-test('ce que la liste ne montre pas, le panneau le dit', () => {
-  monter({ open: true, statements: [lecture()], foreign: 2 })
-  // **Le pire défaut que ce panneau puisse avoir serait de se taire.** Un « Valider » emporte la
-  // transaction entière — une connexion n'a qu'une session —, donc une liste d'une instruction
-  // devant un `commit` qui en emporte trois se lirait comme la transaction complète.
-  expect(screen.getByText(/2 instructions d’une autre console/)).toBeInTheDocument()
-  // Et le compte-badge reste celui de **cette** console : c'est ce que la liste porte.
-  expect(screen.getByText('1')).toBeInTheDocument()
-})
-
-test('sans instruction étrangère, le panneau n’en parle pas', () => {
-  // Le cas ordinaire — une seule console sur la connexion. Une phrase « 0 instruction d'une autre
-  // console » ferait chercher une voisine qui n'existe pas.
-  monter({ open: true, statements: [lecture()] })
-  expect(screen.queryByText(/autre console/)).toBeNull()
 })
 
 test('une écriture ne se désigne pas : son compte est sa réponse', () => {

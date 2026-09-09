@@ -817,14 +817,6 @@ const PASSERELLE_LIGNES: PasserelleLignes = {
 const rowAsInsert = async () =>
   'INSERT INTO "public"."orders" ("id", "user_id", "status")\nVALUES (184220, 44019, \'paid\');'
 
-/**
- * L'index d'une connexion dans le journal de la démo — la même forme que celui de `useTransaction`,
- * et pour la même raison : ce n'est pas la clé du registre, que le Rust compose seul.
- */
-function indexDeConnexion(cle: DatabaseKey): string {
-  return `${cle.project}/${cle.database}/${cle.environment}`
-}
-
 export function WorkbenchDemo() {
   // **La démo monte `A2` en mode édition**, et ce n'est pas de la décoration. Elle se contentait
   // d'inscrire la cible dans le titre du document, ce qui vérifiait un *proxy* du chemin : un test
@@ -853,7 +845,7 @@ export function WorkbenchDemo() {
   const [preferences, setPreferences] = useState<Preferences>(PREFERENCES_PAR_DEFAUT)
   const [preferencesOuvertes, setPreferencesOuvertes] = useState(false)
   /**
-   * Le journal de la transaction manuelle, **par connexion** (`API-38`).
+   * Le journal de la transaction manuelle, **par console** (`API-38`).
    *
    * **La démo ne retient rien** : elle inscrit une instruction plausible pour que le panneau d'`A7`
    * soit visible sans base réelle, comme son `runSql` rend un résultat plausible sans rien exécuter.
@@ -864,7 +856,7 @@ export function WorkbenchDemo() {
    * état à lui déclenche le rendu.
    */
   const journaux = useRef<
-    Record<string, { rendue: TransactionStatement; reponse: QueryResult | null; origine: string }[]>
+    Record<string, { rendue: TransactionStatement; reponse: QueryResult | null }[]>
   >({})
   /**
    * **Mémoïsée, et c'est la règle de toute passerelle** (`useLignes`) : une littérale reconstruite
@@ -873,35 +865,32 @@ export function WorkbenchDemo() {
    */
   const passerelleTransaction = useMemo(
     () => ({
-      transactionState: async (cle: DatabaseKey, console: string) => {
-        const journal = journaux.current[indexDeConnexion(cle)] ?? []
-        // **Filtré par origine, comme le registre** (`API-38`) : une console ne voit que ses
-        // propres instructions, et le compte des autres. Un décor qui rendrait le journal entier
-        // ferait passer en démo ce que l'application filtre — et l'écart ne se verrait nulle part.
+      transactionState: async (_cle: DatabaseKey, console: string) => {
+        // **Indexé par console, comme le registre l'est par session** (`API-38`) : une transaction
+        // appartient à une console, pas à la connexion. Un décor qui les mettrait en commun ferait
+        // passer en démo ce que l'application isole — et l'écart ne se verrait nulle part.
+        const journal = journaux.current[console] ?? []
         return {
           open: journal.length > 0,
-          statements: journal
-            .filter((entree) => entree.origine === console)
-            .map((entree) => entree.rendue),
-          foreign: journal.filter((entree) => entree.origine !== console).length,
+          statements: journal.map((entree) => entree.rendue),
           // **La démo n'échoue jamais** : son `runSql` rend toujours une réponse, donc aucune de
           // ses transactions n'est abandonnée. C'est ce que les tests unitaires du panneau
           // couvrent, et ce que les tests Rust mesurent contre un vrai PostgreSQL.
           aborted: false,
         }
       },
-      transactionResult: async (cle: DatabaseKey, rang: number) => {
-        const reponse = journaux.current[indexDeConnexion(cle)]?.[rang]?.reponse
+      transactionResult: async (_cle: DatabaseKey, console: string, rang: number) => {
+        const reponse = journaux.current[console]?.[rang]?.reponse
         // Le même refus que le cœur, dans les mêmes termes : sans lui, un clic sur une instruction
         // sans réponse rendrait `undefined` et la grille se viderait en silence.
         if (!reponse) throw new Error('cette instruction n’a rendu aucune ligne.')
         return reponse
       },
-      commitTransaction: async (cle: DatabaseKey) => {
-        delete journaux.current[indexDeConnexion(cle)]
+      commitTransaction: async (_cle: DatabaseKey, console: string) => {
+        delete journaux.current[console]
       },
-      rollbackTransaction: async (cle: DatabaseKey) => {
-        delete journaux.current[indexDeConnexion(cle)]
+      rollbackTransaction: async (_cle: DatabaseKey, console: string) => {
+        delete journaux.current[console]
       },
     }),
     [],
@@ -1188,21 +1177,13 @@ export function WorkbenchDemo() {
 
             // Le pendant du journal du registre, **règle comprise** : le mode décide de
             // l'*ouverture*, mais le journal dit ce que la transaction *contient* — une requête
-            // lancée en `auto` pendant qu'une transaction est ouverte y entre de toute façon, la
-            // session la portant. C'est `useTransaction` qui le relira.
-            const id = indexDeConnexion(cle)
-            if (mode === 'manual' || (journaux.current[id]?.length ?? 0) > 0) {
-              const precedentes = journaux.current[id] ?? []
-              journaux.current[id] = [
-                ...precedentes,
+            // lancée par une console qui tient déjà la sienne y entre de toute façon, sa session
+            // la portant. C'est `useTransaction` qui le relira.
+            if (mode === 'manual' || (journaux.current[console]?.length ?? 0) > 0) {
+              journaux.current[console] = [
+                ...(journaux.current[console] ?? []),
                 {
-                  // L'origine, comme le cœur l'inscrit : c'est elle qui décide de ce que chaque
-                  // console voit dans son panneau.
-                  origine: console,
                   rendue: {
-                    // Le rang dans le journal **entier**, non dans la liste filtrée : c'est
-                    // l'adresse que `transactionResult` attend, ici comme dans le registre.
-                    index: precedentes.length,
                     sql: resultat.sql,
                     durationMs: resultat.durationMs,
                     returned: resultat.rows.length,

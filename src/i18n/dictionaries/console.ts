@@ -80,11 +80,6 @@ export const consoleFr: Dictionnaire = {
     touchees: (p) =>
       `${p.n} ligne${Number(p.n) > 1 ? 's' : ''} touchée${Number(p.n) > 1 ? 's' : ''}`,
     refusee: 'refusée',
-    // **Ce que la liste ne montre pas**, et que la validation emporte : les instructions d'une autre
-    // console de la même connexion. Le compte, jamais les requêtes — celles-ci appartiennent à la
-    // console qui les a écrites.
-    etrangeres: (p) =>
-      `${p.n} instruction${Number(p.n) > 1 ? 's' : ''} d’une autre console de cette connexion ${Number(p.n) > 1 ? 'entrent' : 'entre'} aussi dans cette transaction, et ${Number(p.n) > 1 ? 'ne sont pas affichées' : 'n’est pas affichée'} ici.`,
     // **Le verbe du bouton**, ajouté au nom accessible de la carte : sans lui, celle-ci s'annoncerait
     // « #2 12 lignes rendues 4 ms select … », ce qui décrit sans dire ce qu'un clic fera.
     afficher: 'Afficher ce résultat dans la grille',
@@ -97,19 +92,15 @@ export const consoleFr: Dictionnaire = {
       'Une instruction a échoué et le moteur a abandonné la transaction : elle ne peut plus être validée, seulement annulée.',
     rienAValider: 'Aucune transaction n’est ouverte : il n’y a rien à valider.',
     rienAAnnuler: 'Aucune transaction n’est ouverte : il n’y a rien à annuler.',
-    // **L'écart que le régime par console laisse ouvert**, dit dans le pied de la console qui le
-    // subit : une seule session par connexion, donc les requêtes de cette console entrent dans la
-    // transaction qu'une voisine a ouverte.
-    etrangere: 'Une transaction est ouverte sur cette connexion : vos requêtes y entrent.',
     modeLabel: 'Transaction manuelle',
     // **Le réglage vaut pour la connexion**, pas pour cet onglet, et la phrase le dit : c'est ce qui
     // explique pourquoi la console voisine change d'aspect en même temps, et pourquoi un « Valider »
     // emporte aussi ce qu'elle a exécuté.
-    // **Le réglage appartient à la console, la transaction à la connexion**, et la phrase dit les
-    // deux : c'est ce qui explique qu'une console voisine ne change pas d'aspect en même temps, et
-    // qu'un « Valider » emporte pourtant ce qu'elle a exécuté.
+    // **Tout appartient à la console**, et la phrase le dit : le réglage, la transaction, et la
+    // session qui la tient. Le dernier membre est ce qui compte le plus — il annonce que ce qu'on
+    // retient ici ne se voit pas ailleurs, ce qui est la contrepartie de l'isolation.
     modeAide:
-      'Éteint, chaque requête est validée par le serveur. Allumé, les requêtes s’accumulent dans une transaction que vous validez ou annulez vous-même. Le réglage vaut pour cette console ; la transaction, elle, appartient à la connexion : les consoles ouvertes sur la même base partagent la sienne.',
+      'Éteint, chaque requête est validée par le serveur. Allumé, les requêtes s’accumulent dans une transaction que vous validez ou annulez vous-même. Cette transaction est celle de cette console seule : les autres consoles et les tables ouvertes ne verront ce qu’elle retient qu’une fois validée.',
     modeVerrouille:
       'Cette transaction contient des instructions : validez-la ou annulez-la avant de revenir au mode automatique.',
     // **Le geste qui reste, et lui seul** : proposer de valider une transaction abandonnée serait
@@ -135,11 +126,6 @@ export const consoleFr: Dictionnaire = {
     sansRestrictionApres: ' : elle touche toutes les lignes de sa table.',
     ecritures: 'Écritures',
     instructions: 'Instructions',
-    // **Ce que le panneau ne montre pas et que la validation emporte.** Leurs verbes sont inconnus
-    // d'ici — le cœur ne rend pas à une console les instructions qu'elle n'a pas jouées —, donc le
-    // nombre est dit plutôt que tu.
-    etrangeres: (p) =>
-      `La transaction porte ${p.n} instruction${Number(p.n) > 1 ? 's' : ''} de plus, ${Number(p.n) > 1 ? 'lancées' : 'lancée'} depuis une autre console de cette connexion : le panneau ne ${Number(p.n) > 1 ? 'les' : 'la'} montre pas, la validation ${Number(p.n) > 1 ? 'les' : 'l’'}emporte.`,
     base: 'Base',
     environnement: 'Environnement',
     production: 'production',
@@ -148,10 +134,6 @@ export const consoleFr: Dictionnaire = {
     annuler: 'Annuler',
     enCours: 'Validation…',
     confirmer: (p) => `Valider ${p.n} écriture${Number(p.n) > 1 ? 's' : ''}`,
-    // **Quand cette console n'a rien écrit** et que la confirmation paraît quand même : ce sont les
-    // instructions d'une voisine qui l'ont demandée, et compter « 0 écriture » sur le bouton dirait
-    // que la validation n'emporte rien.
-    confirmerSansEcriture: 'Valider la transaction',
   },
   runConfirm: {
     titreSchema: 'Modifier la structure',
@@ -272,8 +254,6 @@ export const consoleEn: Dictionnaire = {
     rendues: (p) => `${p.n} row${Number(p.n) > 1 ? 's' : ''} returned`,
     touchees: (p) => `${p.n} row${Number(p.n) > 1 ? 's' : ''} affected`,
     refusee: 'refused',
-    etrangeres: (p) =>
-      `${p.n} statement${Number(p.n) > 1 ? 's' : ''} from another console on this connection ${Number(p.n) > 1 ? 'have' : 'has'} also joined this transaction, and ${Number(p.n) > 1 ? 'are' : 'is'} not shown here.`,
     afficher: 'Show this result in the grid',
     valider: 'Commit',
     annuler: 'Roll back',
@@ -282,10 +262,9 @@ export const consoleEn: Dictionnaire = {
       'A statement failed and the engine abandoned the transaction: it can no longer be committed, only rolled back.',
     rienAValider: 'No transaction is open: there is nothing to commit.',
     rienAAnnuler: 'No transaction is open: there is nothing to roll back.',
-    etrangere: 'A transaction is open on this connection: your queries join it.',
     modeLabel: 'Manual transaction',
     modeAide:
-      'Off, every query is committed by the server. On, queries pile up in a transaction that you commit or roll back yourself. The setting belongs to this console; the transaction belongs to the connection: consoles open on the same database share it.',
+      'Off, every query is committed by the server. On, queries pile up in a transaction that you commit or roll back yourself. That transaction belongs to this console alone: other consoles and open tables will not see what it holds until you commit.',
     modeVerrouille:
       'This transaction holds statements: commit it or roll it back before returning to automatic mode.',
     modeVerrouilleAbandon:
@@ -307,8 +286,6 @@ export const consoleEn: Dictionnaire = {
     sansRestrictionApres: ': it affects every row of its table.',
     ecritures: 'Writes',
     instructions: 'Statements',
-    etrangeres: (p) =>
-      `The transaction holds ${p.n} more statement${Number(p.n) > 1 ? 's' : ''}, run from another console on this connection: the panel does not show ${Number(p.n) > 1 ? 'them' : 'it'}, committing takes ${Number(p.n) > 1 ? 'them' : 'it'} along.`,
     base: 'Database',
     environnement: 'Environment',
     production: 'production',
@@ -317,7 +294,6 @@ export const consoleEn: Dictionnaire = {
     annuler: 'Cancel',
     enCours: 'Committing…',
     confirmer: (p) => `Commit ${p.n} write${Number(p.n) > 1 ? 's' : ''}`,
-    confirmerSansEcriture: 'Commit the transaction',
   },
   runConfirm: {
     titreSchema: 'Modify the structure',

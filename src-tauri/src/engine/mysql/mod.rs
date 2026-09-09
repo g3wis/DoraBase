@@ -66,11 +66,15 @@ pub struct MysqlAdapter {
 /// Une connexion prise le temps d'une opération : celle de la transaction s'il y en a une, une du
 /// pool sinon.
 ///
-/// **Ce n'est pas un détail de mise en œuvre de la console.** Tant qu'une transaction est ouverte,
-/// *toute* opération de cette connexion passe par elle — la grille qui relit ses lignes comme la
-/// console qui exécute. Sans cela, MySQL aurait été le seul moteur où la table qu'on regarde ne
-/// montre pas ce que la transaction vient d'écrire, là où PostgreSQL et SQLite le montrent parce
-/// qu'ils n'ont qu'une connexion.
+/// **C'est ce qui fait qu'un `BEGIN` survit d'un appel à l'autre**, là où PostgreSQL et SQLite n'ont
+/// rien à garder — voir le champ `transaction`.
+///
+/// **Ce qu'il ne faut plus y lire** : que la grille verrait ce qu'une transaction de console
+/// retient. C'était vrai tant que le registre ne tenait qu'un adaptateur par connexion, et cela
+/// avait été noté comme une propriété à garder ; depuis qu'une console tient sa transaction dans
+/// **sa propre session** (`API-38`), cet adaptateur-ci est celui de la console, et la grille lit
+/// sur celui de la connexion. Elle ne voit donc pas les lignes retenues — c'est l'isolation que le
+/// serveur promet, et c'est vrai des trois moteurs de la même façon.
 enum Prise<'a> {
     Pool(Conn),
     Transaction(tokio::sync::MutexGuard<'a, Option<Conn>>),

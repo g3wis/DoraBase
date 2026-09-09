@@ -1210,7 +1210,7 @@ export function Workbench({
           catalogue={catalogue}
           vue={execution.vue}
           onVueChange={execution.setVue}
-          /* **Le régime de transaction de la connexion** (`API-38`), avec la seule raison qui
+          /* **Le régime de transaction de cette console** (`API-38`), avec la seule raison qui
              puisse figer la bascule. Les deux cas ne peuvent pas se présenter en même temps : un
              moteur qui ne tient pas de transaction n'en a jamais d'ouverte. */
           transaction={
@@ -1220,11 +1220,6 @@ export function Workbench({
                   mode: transaction.mode(consoleDeTransaction),
                   onModeChange: (mode) => transaction.poserLeMode(consoleDeTransaction, mode),
                   raison: raisonDeFigerLaTransaction(consoleDeTransaction),
-                  /* **Le seul écart que le régime par console laisse ouvert** : les consoles d'une
-                     même base partagent une session, donc les requêtes de celle-ci entrent dans une
-                     transaction qu'une voisine a ouverte. Le pied le dit — le taire serait laisser
-                     croire à une écriture validée. */
-                  etrangere: transaction.transactionEtrangere(consoleDeTransaction),
                 }
           }
           /* **« Enregistrer » donne un nom à un brouillon**, et le fait exister dans l'arbre. Sur un
