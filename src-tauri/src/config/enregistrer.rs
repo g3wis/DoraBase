@@ -484,7 +484,7 @@ pub fn renommer_projet(
 ///
 /// **Sans valeur de retour, l'appelant ne pourrait pas le dire à l'utilisateur** — et « vos mots de
 /// passe sont intacts » est précisément ce qu'il a besoin d'entendre après un échec.
-fn retirer_les_ecrits(magasin: &dyn SecretStore, ecrits: &[SecretRef]) -> bool {
+pub(super) fn retirer_les_ecrits(magasin: &dyn SecretStore, ecrits: &[SecretRef]) -> bool {
     ecrits
         .iter()
         .all(|nouvelle| magasin.delete(nouvelle).is_ok())

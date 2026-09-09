@@ -52,7 +52,8 @@
         "src/domain/engine.ts",
         "src/domain/maj.ts",
         "src/domain/dump.ts",
-        "src/domain/instances.ts"
+        "src/domain/instances.ts",
+        "src/domain/transfert.ts"
       ],
       "formatter": {
         "enabled": false

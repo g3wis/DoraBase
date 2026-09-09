@@ -32,6 +32,7 @@ import { NewConnection } from '../screens/NewConnection/NewConnection'
 import { ParcoursDeCreation } from '../screens/NewProject/ParcoursDeCreation'
 import { PreferencesDialog } from '../screens/Preferences/PreferencesDialog'
 import { jetonsDe, PREFERENCES_PAR_DEFAUT, themeApplique } from '../screens/Preferences/preferences'
+import { type DemandeDeTransfert, TransferDialogs } from '../screens/Transfer/TransferDialogs'
 import { WelcomeScreen } from '../screens/Welcome/WelcomeScreen'
 import { Workbench } from '../screens/Workbench/Workbench'
 import { AnnonceMiseAJour } from '../shell/AnnonceMiseAJour/AnnonceMiseAJour'
@@ -155,10 +156,22 @@ export function App() {
    */
   const [dump, setDump] = useState<SensDuDump | null>(null)
 
+  /**
+   * Ce que le transfert de projets ouvre (`API-30`).
+   *
+   * **Trois points d'entrée, un seul état** : les deux entrées du menu natif, et « Exporter le
+   * projet… » dans le menu d'une ligne de projet — le seul des trois qui nomme une portée, parce que
+   * c'est le seul palier qui la connaisse. Une bande en tête de colonne aurait dû la deviner, comme
+   * le pied de la sidebar devait deviner un environnement.
+   */
+  const [transfert, setTransfert] = useState<DemandeDeTransfert | null>(null)
+
   useEffect(() => {
     brancherEvenementsDeMenu({
       exporter: () => setDump('export'),
       importer: () => setDump('import'),
+      exporterLesProjets: () => setTransfert({ sens: 'export', projet: null }),
+      importerDesProjets: () => setTransfert({ sens: 'import' }),
     })
   }, [])
 
@@ -332,6 +345,10 @@ export function App() {
             onDeclareInstance={() => setInstanceOuverte({})}
             onEditInstance={(instance) => setInstanceOuverte({ instance })}
             onRemoveInstance={setInstanceARetirer}
+            /* **L'export d'un projet ouvre la même modale que celui de tous** (`API-30`), avec sa
+               portée en paramètre : c'est un seul écran, et deux modales jumelles auraient divergé
+               au premier réglage ajouté — la case des mots de passe, par exemple. */
+            onExportProject={(project) => setTransfert({ sens: 'export', projet: project })}
             onRenameProject={async (project, nom) => {
               const issue = await renommerLeProjet({ project, name: nom })
               setProjects(issue.projects)
@@ -404,6 +421,17 @@ export function App() {
                 setInstances(issue.instances)
                 return issue.secretResiduel
               }}
+            />
+          )}
+          {transfert && (
+            <TransferDialogs
+              demande={transfert}
+              total={projects.length}
+              onClose={() => setTransfert(null)}
+              /* Les projets rendus sont **reposés**, comme après chaque écriture de configuration :
+                 c'est ce changement qui fait relire les états du registre et purger le cache de
+                 l'arbre. La modale reste ouverte pour montrer son rapport. */
+              onImported={setProjects}
             />
           )}
           {(connexionOuverte !== null || edition) && (

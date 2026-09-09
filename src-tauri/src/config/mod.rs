@@ -15,13 +15,15 @@ mod instances;
 mod model;
 mod query;
 mod store;
+mod transfert;
 
 pub use commands::{
-    create_environment, create_project, delete_environment, load_config, recolor_environment,
-    rename_database, rename_environment, reorder_environments, save_config, save_database,
-    save_preferences, update_variant, ConfigLoad, ConfigState, ConsoleRequest,
-    CreateEnvironmentRequest, CreateProjectRequest, DeleteDatabaseRequest,
-    DeleteEnvironmentRequest, DeleteEnvironmentResult, DeleteProjectRequest, DeleteResult,
+    create_environment, create_project, delete_environment, export_projects, import_projects,
+    inspect_projects_file, load_config, recolor_environment, rename_database, rename_environment,
+    reorder_environments, save_config, save_database, save_preferences, update_variant, ConfigLoad,
+    ConfigState, ConsoleRequest, CreateEnvironmentRequest, CreateProjectRequest,
+    DeleteDatabaseRequest, DeleteEnvironmentRequest, DeleteEnvironmentResult, DeleteProjectRequest,
+    DeleteResult, ExportProjectsRequest, ImportProjectsRequest, ImportProjectsResult,
     RecolorEnvironmentRequest, RenameDatabaseRequest, RenameEnvironmentRequest,
     RenameProjectRequest, RenameResult, ReorderEnvironmentsRequest, SaveDatabaseRequest,
     UpdateVariantRequest, VisibleSchemasRequest,
@@ -39,3 +41,6 @@ pub use model::{
 };
 pub use query::{databases_available, validate};
 pub use store::{load, save, ConfigStore, LoadOutcome, StoreError, VERSION_COURANTE};
+pub use transfert::{
+    CarriedSecrets, ExportReport, ImportReport, ProjectOutcome, ProjectVerdict, TransfertError,
+};

@@ -2406,6 +2406,239 @@ l'accepterait, mais rien ne s'en servirait jamais.
 - **Un serveur à vingt bases et cinquante rôles.** La matrice défile dans son conteneur — mesuré —
   mais sa lisibilité à cette échelle n'a jamais été regardée.
 - **Les sept sections en « Nuit »**, comme les dix écrans : toute la suite mesure le clair.
+### Exporter et importer des projets (9 septembre 2026, `API-30`)
+
+Rien du produit ne savait sortir une déclaration de connexion de la machine où elle avait été
+saisie. Un fichier JSON s'exporte et se réimporte désormais, « comme une collection Postman » le
+demandait : tous les projets depuis le menu natif, un seul depuis le menu de sa ligne d'arbre.
+
+**Le mot du produit est « projets », pas « collections ».** L'analogie de la demande est juste, mais
+« collection » est déjà le mot de MongoDB pour une table, et l'arbre en affiche sous une connexion
+mongo : « Exporter les collections… » dans le menu Fichier se lirait comme un export de données. Ce
+qui voyage est un projet, et la demande le dit elle-même — « everything or only a specific project ».
+
+**Le fichier ne traverse jamais l'IPC**, dans aucun sens. À l'export, la webview envoie un chemin et
+une case cochée ; à l'import, elle envoie un chemin et reçoit un **rapport**. C'est la contrainte
+transverse du projet — « le cœur détient les résultats ; la webview ne reçoit que ce qu'elle
+montre » —, et elle a ici une seconde raison qui suffirait seule : le fichier peut porter des mots de
+passe en clair, et une forme qui ne peut pas atteindre la webview ne peut pas finir dans une console
+de développement ni dans un journal. `FichierDeProjets` ne dérive donc pas `TS` là où les deux
+rapports le font, et son `Debug` est écrit à la main.
+
+**Les types du modèle sont réemployés tels quels**, et c'est ce qui tient tout le reste. La clé
+`projects` du fichier est **exactement** celle de `config.json` : le même `Vec<Project>`, le même
+`serde`. Une seconde description — un « ProjectExport » à douze champs — aurait divergé au premier
+champ ajouté à `ConnectionSettings`, sans qu'aucun test le voie (règle n° 17). Corollaire à ne pas
+défaire : **le champ de version s'appelle `version`, à la racine, à côté de `projects`**. Ce n'est
+pas de la coquetterie — c'est ce qui fait de l'enveloppe un document que la chaîne de migrations lit
+**sans adaptateur**, les crans v1 → v2 et suivants désérialisant un `{ version, projects, … }`. Un
+`configVersion` les aurait fait échouer sur un champ manquant, et il aurait fallu une seconde échelle
+de migration pour la même forme de données — celle que le fichier qui traîne six mois dans un dossier
+partagé aurait payée. D'où l'extraction de `store::migrer_le_document`, la chaîne sans son chemin ni
+sa sauvegarde, et de `store::projets_du_document` qui la dispatche.
+
+**Et le bras « rien à migrer » vit chez l'appelant, pas dans la chaîne.** Élargir le `2..=4` de
+`migrer_le_document` jusqu'à `VERSION_COURANTE` aurait été plus court et en aurait fait un bras
+attrape-tout (règle n° 16) : le jour où la v5 → v6 demande une transformation, la plage l'avalerait
+en silence et lirait un fichier v5 comme s'il portait la forme v6. Séparés, l'oubli se **dit** — une
+version sans cran tombe sur « aucune migration connue ».
+
+#### Les mots de passe : trois états, et la structure les distingue
+
+La case « Inclure les mots de passe » est **éteinte par défaut**, et son avertissement est à côté
+d'elle plutôt que dans une confirmation : une confirmation arriverait *après* le choix du fichier,
+donc après le geste, là où il faut le dire avant. Ce qu'elle annonce est le seul fait qui compte —
+un fichier partagé ne se reprend pas.
+
+Aucun champ n'a eu à être inventé pour dire ce qui manque, et c'est la structure qui le porte :
+
+- `password: None` — cette connexion n'en a pas et n'en veut pas (un fichier SQLite) ;
+- `password: Some(ref)`, `ref` **absente** de `passwords` — elle en a un, qui n'a pas voyagé ;
+- `password: Some(ref)`, `ref` **présente** — il voyage en clair, parce que quelqu'un a coché.
+
+La référence reste donc écrite même quand la valeur ne suit pas. C'est « quatre états, pas deux »
+appliqué à un mot de passe, et sans elle une connexion qui attend son mot de passe serait
+indiscernable d'un moteur qui n'en demande aucun. L'import **nomme** ces connexions : faute de quoi
+la première ouverture échouerait sur le message du serveur — « password authentication failed » —,
+qui accuse un mot de passe faux là où il n'y en a aucun.
+
+Cinq points à ne pas défaire :
+
+- **le magasin n'est consulté que si la case est cochée.** Un export ordinaire ne touche donc pas au
+  Trousseau, ce qui compte sur macOS où une lecture peut poser une question selon les ACL de
+  l'entrée. Le double de test **compte ses lectures**, sans quoi un export qui interrogerait le
+  Trousseau pour rien resterait vert ;
+- **une absence est nommée, une panne arrête.** `Ok(None)` — la connexion déclare un mot de passe
+  que le magasin n'a pas — entre dans `passwords_missing` et l'export continue : refuser tout pour
+  une entrée effacée à la main rendrait le geste impossible sans qu'on sache pourquoi. `Err` arrête
+  l'export : quelqu'un a demandé les mots de passe, et un fichier qui en tairait la moitié serait
+  l'artefact dangereux de ce geste. C'est la distinction que `SecretStore::retrieve` porte depuis
+  `05c`, et les deux moitiés ont leur test ;
+- **la référence est recalculée sur le triplet d'arrivée, jamais reprise du fichier.** Une référence
+  est dérivée de `projet/base/environnement` (`08e`) ; celle du fichier est une coordonnée locale
+  d'une autre machine, et un fichier édité à la main peut en porter n'importe laquelle. C'est **sous
+  elle** que la valeur se cherche — c'est la clé sous laquelle l'export l'a rangée — et la locale qui
+  s'écrit. Le décor du test a dû apprendre à les distinguer : avec `Halle/catalogue/prod` des deux
+  côtés, « recalculée » et « reprise » rendent la même valeur, donc le sabotage restait vert
+  (règle n° 5) ;
+- **aucun mot de passe existant n'est écrasé, et c'est une conséquence, pas une précaution.**
+  `fusionner` n'en range un que pour une connexion qu'elle **ajoute**, dont le triplet n'était donc
+  déclaré nulle part. Ce qui peut se trouver sous cette référence est un orphelin resté d'une
+  connexion retirée : l'écraser est exactement ce qu'il faut faire ;
+- **`0600` quand le fichier porte des mots de passe, et posé sur un fichier encore vide.**
+  `set_permissions` après l'écriture laisserait les octets sensibles lisibles par tout compte de la
+  machine le temps d'un appel. Un fichier **sans** mot de passe garde les droits ordinaires — il est
+  fait pour être partagé, et le restreindre serait une gêne que personne n'a demandée : le test porte
+  donc les deux moitiés, sans quoi un `chmod` inconditionnel passerait aussi. Windows n'a pas
+  d'équivalent bon marché, ses ACL s'héritant du répertoire, et le dire vaut mieux que de laisser
+  croire à une protection.
+
+#### L'import fusionne, et dit ce qu'il n'a pas fait
+
+Un projet dont le nom existe déjà est **complété**, non refusé : c'est ce qui rend le geste utile
+entre deux machines. Mais rien n'y écrase quoi que ce soit, et chaque refus est nommé.
+
+- **les réglages d'une connexion déjà déclarée sont gardés**, et ses **consoles versées quand
+  même.** C'est la décision centrale. Les réglages décrivent *comment joindre un serveur* : les
+  reprendre pourrait repointer en silence une connexion vers un autre hôte, ce que `update_variant`
+  ferme une connexion pour éviter. Les consoles, elles, sont tout l'intérêt du geste — recevoir les
+  requêtes de quelqu'un sur une base qu'on a déjà —, et un SQL ajouté ne détruit rien ;
+- **une console homonyme est refusée, le texte local gardé.** Un SQL est un travail : le remplacer
+  par celui du fichier perdrait ce que quelqu'un a écrit, sans un mot. Le refus, lui, se dit ;
+- **une déclaration d'environnement déjà présente est gardée, drapeau de production compris**, et la
+  raison n'est pas la simplicité : `production` gouverne les garde-fous d'écriture. Reprendre la
+  valeur du fichier pourrait **lever** un garde-fou posé sur cette machine, en silence. Dans ce sens,
+  l'import ne peut jamais affaiblir ce qui est déjà là ;
+- **« gardé » veut dire « déjà déclaré *ici* », non « le fichier le porte deux fois ».** Les deux
+  listes se mesurent sur un instantané pris **avant** la fusion : les mesurer sur le candidat qui
+  grandit ferait passer un doublon du fichier pour une déclaration locale — un rapport qui accuse la
+  machine de ce que le fichier porte ;
+- **une connexion dont l'environnement n'est déclaré ni par le fichier ni ici est refusée**, seule :
+  elle serait invisible dans l'arbre, qui liste les connexions sous le nœud de leur environnement.
+  Une connexion refusée ne coûte pas le projet ;
+- **un projet refusé est défait par un compte, pas par un filtre**, et c'est une correction faite en
+  relisant. La première version retirait les secrets déjà mis en attente par un `retain` sur le
+  préfixe de leur référence — or une référence vaut `projet/base/environnement`, donc écarter tout ce
+  qui commence par « Halle/ » emportait aussi ceux d'un projet nommé « Halle/Est », traité plus tôt.
+  La leçon dépasse ce cas : **une collision déjà assumée ne doit pas devenir la base d'un retrait.**
+  Le `/` dans un nom de projet est une ambiguïté connue et tolérée pour les références elles-mêmes
+  (voir `reference_de`), où elle coûte au pire un mot de passe partagé ; en faire dépendre une
+  suppression la transformait en perte, et sur les secrets d'un autre projet que celui qu'on refuse.
+  Une troncature à la longueur d'avant est exacte et ne suppose rien du contenu. Le décor qui le
+  garde porte les deux noms qu'il faut — sans eux, aucune assertion ne peut le voir (règle n° 5) ;
+- **et le sort d'un projet refusé est remis à neuf**, non amendé champ par champ : aucune de ses dix
+  listes ne veut plus rien dire, et « n connexions attendent leur mot de passe » sur un projet dont
+  aucune connexion n'arrive serait une réserve à propos de rien — le genre d'oubli qui revient à
+  chaque liste ajoutée ;
+- **et `valider` reste appelé sur le projet candidat**, en filet. Les refus nommés couvrent ce qu'on
+  sait nommer ; celui-ci couvre ce qu'on ne sait pas encore — un invariant ajouté au modèle après ce
+  fichier. Une configuration invalide écrite sur disque coûterait la mise en quarantaine de tout au
+  prochain démarrage. Le test qui le garde a d'abord été **faux** : écrit sur un environnement en
+  double, il attendait un refus que la fusion n'a aucune raison de prononcer — elle dédoublonne. Le
+  seul cas qui l'atteigne aujourd'hui est un projet que le fichier déclare **sans aucun
+  environnement** ;
+- **les chemins locaux voyagent tels quels, et sont dits.** Fichier SQLite, certificat d'autorité,
+  clé privée de bastion, kubeconfig : ce sont des réglages, donc l'intention de quelqu'un, et les
+  réécrire ou les vider serait pire. Mais ils décrivent une autre machine, donc l'import les nomme
+  plutôt que de laisser le découvrir sur un « fichier introuvable ». Le `match` sur `Proxy` est
+  exhaustif : une quatrième sorte fera échouer la compilation là où son auteur doit décider si elle
+  porte un chemin. Et `default_database` n'est un chemin **que** pour un moteur de fichier (`17a`) —
+  le nommer partout ferait passer « catalogue » pour un chemin à vérifier sur chaque connexion
+  PostgreSQL.
+
+**L'aperçu et l'écriture viennent de la même fonction**, et il n'y a pas de « planifier » distinct
+d'un « appliquer » : deux calculs pour le même acte en laissent un en arrière (règle n° 17), et
+c'est celui qui décide qu'on aurait cessé d'exercer. La commande d'aperçu jette la configuration
+d'après et les secrets à ranger ; celle qui écrit les emploie. Le versement est donc **recalculé** au
+moment d'écrire, sur la configuration telle qu'elle est alors — rejouer l'aperçu écraserait une
+connexion créée entre-temps dans un autre écran. C'est `tourDesEtats` par un autre bout.
+
+**Ce qui autorise cet aperçu est une propriété, et elle a son test** : le sort d'un projet ne dépend
+pas de la sélection, les projets étant indépendants par leur nom. L'aperçu tout-retenu décrit donc
+exactement ce que n'importe quel sous-ensemble fera, et la modale peut laisser décocher sans
+redemander quoi que ce soit au cœur.
+
+**Aucune connexion n'est fermée, et aucune n'a à l'être.** Les six commandes de configuration qui
+ferment le font parce qu'elles *périment* la recette d'une connexion ouverte — un hôte qui change, un
+secret qui se déplace. L'import n'en modifie aucune : il ajoute ce qui manquait et garde le reste,
+donc toute connexion ouverte reste décrite par ce qui l'a ouverte. Ce qu'il rend, en revanche, est
+`Vec<Project>`, que `App` repose : c'est ce changement qui fait relire les états du registre et purger
+le cache de l'arbre, comme pour les six autres.
+
+**L'en-tête `secrets` du fichier est recalculé à la lecture, jamais cru sur parole.** Il existe pour
+qu'un humain sache d'un coup d'œil ce que le fichier porte ; un en-tête faux est pire qu'un en-tête
+absent, c'est celui-là qu'on croit — et un fichier édité à la main pourrait annoncer « aucun » en
+portant des mots de passe. Même motif que le marqueur `kind`, qui existe pour **refuser** : sans lui,
+un `config.json` tombé sous le sélecteur se lirait comme un fichier de transfert vide, donc un import
+qui ne fait rien sans rien à dire.
+
+**Le fichier est déterministe** : ni horodatage, ni version d'application, et les mots de passe dans
+un `BTreeMap`. Deux exports de la même configuration donnent le même fichier octet pour octet, ce qui
+rend deux exports comparables par un `diff` — et un champ décoratif ne mérite pas le mode de
+défaillance d'un `pub_date` mal formé. Le test qui le garde porte **deux** mots de passe : avec un
+seul élément, l'ordre d'une table de hachage ne se distingue de rien.
+
+#### Les points d'entrée, et la case à cocher
+
+**Trois points d'entrée, un seul écran.** Les deux entrées du menu natif — « Exporter les projets… »
+et « Importer des projets… », **sans accélérateur** : `⇧⌘E` et `⇧⌘I` appartiennent au dump, et les
+chords qui resteraient ne sont le geste de personne. Et « Exporter le projet… » dans le menu d'une
+ligne de projet, seul des trois à nommer une portée parce que **c'est le seul palier qui la
+connaisse** — une bande en tête de colonne aurait dû la deviner, comme le pied de la sidebar devait
+deviner un environnement. Son rang dans le menu est une décision : après « Modifier le projet… »,
+avant « Retirer… », parce qu'il ne configure rien et n'ouvre rien — il produit un fichier —, et que
+le geste destructeur reste le dernier de la liste partout dans le produit.
+
+**La case à cocher d'une ligne d'import est un contrôle natif**, et c'est le troisième du produit
+après le curseur des préférences et le calendrier des filtres. La prohibition porte sur les listes
+déroulantes, dont le maison remplace l'apparence ; une case n'a rien de tel à remplacer — c'est un
+carré et une coche, que le système dessine correctement, au thème près que `color-scheme` lui donne
+déjà. `accent-color` est la seule déclaration qui compte. Un `<button role="checkbox">` aurait redit
+ce que la plateforme sait faire en perdant l'appariement au libellé, **et Biome le refuse**, avec
+raison.
+
+**Aucune case sur un projet refusé, plutôt qu'une case grisée.** Un contrôle désactivé annonce « pas
+maintenant » ; celui-ci ne pourra jamais retenir ce projet-là. Sa raison est déjà **écrite** sur la
+ligne, ce qui vaut mieux qu'une infobulle sur un contrôle mort — c'est l'arbitrage du bouton
+« Valider » d'une transaction abandonnée. Et le test qui le garde a dû devenir un **compte** : une
+case rendue sur cette ligne n'aurait aucun nom accessible, le libellé n'étant un `<label>` que sur une
+ligne retenue, donc une recherche par nom rendait zéro pour la mauvaise raison et restait verte sous
+le sabotage.
+
+**L'état de la modale d'import est celui des projets *écartés*, non des retenus.** Un fichier
+fraîchement inspecté a tous ses projets cochés ; une liste de retenus aurait dû être remplie à
+l'arrivée du rapport, donc dans un effet, qui se serait rejoué à chaque rendu de l'hôte — le piège de
+`10d`.
+
+**Dix listes dans le rapport plutôt qu'un compte**, et la modale n'en montre les noms qu'en
+infobulle. Un import amputé en silence se lirait comme un import complet, ce qui est le pire défaut
+que ce geste puisse avoir ; mais un nom par connexion dans une modale serait illisible, et le compte
+dit d'abord s'il y a quelque chose à regarder. Une réserve vide ne paraît pas — « 0 connexion déjà
+déclarée » se lirait comme une réserve —, et c'est un contrôle négatif qui le garde.
+
+#### Ce qui n'a pas été retenu, et ce qui reste à voir
+
+**L'import s'ouvre par un paramètre du décor sous Playwright** (`?demo&transfert=import`), et c'est
+un aveu autant qu'un outil : son seul point d'entrée dans le produit est le menu natif, que Playwright
+ne touche pas — et c'est exactement la raison pour laquelle **les modales de dump n'ont aucun test de
+bout en bout**. Un bouton inventé dans la démo aurait été un pixel inventé ; un paramètre de décor ne
+ment sur rien et rend la géométrie mesurable, que jsdom ne calcule pas (règle n° 9). C'est le même
+arbitrage que `DORABASE_PLATEFORME_DECOR`. L'export, lui, a un vrai chemin — le menu d'une ligne de
+projet —, et c'est celui que le test emprunte.
+
+**Les préférences ne voyagent pas** : un thème n'appartient pas à un projet, et `save_preferences`
+les relit déjà plutôt que de les recevoir, pour la même raison. **`Project::queries` non plus** :
+l'export le vide, et l'import le reverse en consoles par la fonction qui le fait déjà à la lecture
+d'une configuration — l'écrire dans le fichier le verserait une seconde fois, dans une connexion qui
+n'est peut-être pas la même.
+
+**Ce qui reste à voir à l'œil** : les deux modales sous WKWebView et en « Nuit » — même réserve que
+les dix écrans, pour la même raison. Et surtout le **vrai aller-retour** : exporter un projet avec
+ses mots de passe, l'importer sur une autre machine, et ouvrir une connexion sans rien ressaisir.
+C'est le seul geste qui dise que le mot de passe est arrivé sous la référence que la connexion ira
+lire — l'équivalent, pour ce chantier, du « renommer, quitter, relancer » du Trousseau. Le rapport de
+l'import de `?demo` est **simulé** au même degré que son `runSql` : il rend trois verdicts plausibles
+pour que l'écran soit visible sans fichier réel.
 
 ### Les filtres suivent la colonne (3 septembre 2026)
 
@@ -4382,6 +4615,20 @@ présenter comme vérifiées tant qu'un humain ne les a pas faites :
   un fichier non vide arriver au chemin choisi ; puis `⇧⌘I` sur ce fichier doit nommer projet,
   base et environnement avant de laisser confirmer. Les sélecteurs de fichiers natifs ne sont
   pas dans le DOM — même angle mort que « Parcourir… ».
+- **Exporter un projet avec ses mots de passe, l'importer sur une autre machine, et ouvrir une
+  connexion sans rien ressaisir** (`API-30`). Tout ce qui ne demande pas deux machines est couvert —
+  le format et sa migration, la fusion et ses six refus nommés, les droits du fichier, la reprise
+  des secrets après un échec d'écriture — mais l'aller-retour lui-même n'a jamais été fait. C'est le
+  seul geste qui dise que le mot de passe est arrivé **sous la référence que la connexion ira lire**,
+  et il est à `API-30` ce que « renommer, quitter, relancer » est au Trousseau. Trois choses ne se
+  voient que là : que le sélecteur natif s'ouvre avec le nom proposé, que le fichier écrit en `0600`
+  soit lisible par son destinataire après l'avoir reçu, et qu'une connexion importée **sans** son mot
+  de passe échoue sur le message du serveur — ce que le rapport annonce, et qui reste le point le
+  moins agréable de la fonction.
+- **Lire les deux modales de transfert en « Nuit », et sous WKWebView.** Même réserve que les dix
+  écrans, avec un point propre à celles-ci : la case à cocher est un contrôle **natif**, dont seul
+  `color-scheme` donne le thème et `accent-color` la teinte. Chromium la dessine ; WebKit ne la
+  dessine pas pareil, et aucune CSS n'a été écrite pour elle faute de pouvoir en mesurer l'effet.
 - **Tenir une transaction manuelle du début à la fin, dans l'application** (`API-38`). Tout est
   couvert côté cœur — un vrai fichier SQLite, un vrai PostgreSQL, un vrai MySQL, et jusqu'à deux
   consoles qui retiennent chacune la sienne en même temps — mais le parcours entier n'a jamais été
@@ -4668,6 +4915,24 @@ Aucun de ces points ne bloque le code en place.
   n'étant pas autorisé par la CSP, et la même conclusion : l'écriture appartient au Rust. Ce qui
   reste à trancher est ce qu'on exporte au juste — le dessin visible, ou le schéma entier au-delà du
   plafond de soixante tables.
+- **Remplacer le texte d'une console à l'import, plutôt que de le garder** (`API-30`). Une console
+  homonyme est refusée et le texte local gardé, ce qui est le choix sûr — un SQL est un travail. Le
+  prix est réel : exporter, corriger une requête sur la machine A, réimporter sur B ne fait pas
+  arriver la correction. Trois formes possibles, et aucune n'est tranchée : refuser (aujourd'hui),
+  remplacer, ou verser sous un nom libre — ce dernier ayant un précédent, le « console N » de la
+  création. Ce qui manque pour décider est l'usage : si le fichier sert surtout à *donner* ses
+  requêtes à quelqu'un, le refus suffit ; s'il sert à se synchroniser entre deux postes, il gêne.
+- **Importer un projet sous un autre nom** n'existe pas. La fusion couvre le cas courant — deux
+  machines, un même projet — mais pas « je veux les deux côte à côte pour comparer ». Le renommage
+  demanderait de recalculer les références de secret du projet importé, donc de décider ce qu'il
+  advient d'un mot de passe qui voyage vers une identité qui n'existait pas : c'est le geste que
+  `renommer_projet` sait faire, appliqué à un projet qui n'est pas encore là. Rien n'est cassé en
+  attendant : renommer le projet local d'abord donne le même résultat en deux gestes.
+- **Les deux modales de dump n'ont aucun test de bout en bout**, et ce n'est pas propre à `API-30` —
+  c'est ce que ce chantier a rendu visible. Leur seul point d'entrée est le menu natif, que
+  Playwright ne touche pas, donc leur géométrie n'a jamais été mesurée dans une vraie fenêtre. Le
+  transfert de projets s'en sort par un paramètre de décor (`?demo&transfert=import`) ; le même
+  remède leur est applicable, et il coûte trois lignes dans `demo.tsx`.
 - **Déplacer une connexion d'un environnement à un autre** n'existe pas, délibérément : cela
   demande de déplacer un secret du Trousseau, donc son geste et sa conception. La
   confirmation de suppression ne le propose pas — offrir une action absente est pire que

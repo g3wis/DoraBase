@@ -128,6 +128,16 @@ export type ExplorerSidebarProps = {
    */
   onEditProject?: (project: string) => void
   /**
+   * Exporte **ce projet** dans un fichier de transfert (`API-30`).
+   *
+   * **Depuis le menu de sa ligne**, comme la création d'une console part du menu de sa connexion et
+   * pour la même raison : le geste part du palier qui connaît son contexte. L'export de *tous* les
+   * projets vit dans le menu natif, où il n'a rien à deviner.
+   *
+   * Absent, l'entrée est désactivée avec sa raison — c'est le cas de la galerie.
+   */
+  onExportProject?: (project: string) => void
+  /**
    * Retirer la déclaration d'une base, ou un projet entier (`08j`).
    *
    * Une seule prop pour les deux : la cible dit lequel, et deux props jumelles se seraient
@@ -198,6 +208,7 @@ export function ExplorerSidebar({
   onManageSchemas,
   onRenameDatabase,
   onEditProject,
+  onExportProject,
   onDelete,
   modificationsEnAttenteDe,
   columns,
@@ -261,6 +272,7 @@ export function ExplorerSidebar({
       onManageSchemas,
       onRenameDatabase !== undefined,
       onEditProject,
+      onExportProject,
       demanderLeRetrait,
       onRefresh,
       consoles,
@@ -654,6 +666,7 @@ function entreesDe(
    */
   renommageDisponible: boolean,
   onEditProject: ExplorerSidebarProps['onEditProject'],
+  onExportProject: ExplorerSidebarProps['onExportProject'],
   demanderLeRetrait: ((cible: CibleDeSuppression) => void) | undefined,
   onRefresh: ExplorerSidebarProps['onRefresh'],
   consoles: ExplorerSidebarProps['consoles'],
@@ -689,6 +702,20 @@ function entreesDe(
         icone: 'pencil',
         onClick: onEditProject ? () => onEditProject(noeud.label) : undefined,
         raison: onEditProject ? undefined : RAISONS.editionIndisponible,
+      },
+      {
+        /* **« Exporter le projet… », après « Modifier » et avant « Retirer »** (`API-30`). Il ne
+           configure rien et n'ouvre rien : il produit un fichier. Sa place est donc après les deux
+           entrées qui touchent à la déclaration, et avant celle qui la retire — le geste destructeur
+           reste le dernier de la liste, partout dans le produit.
+
+           **Le libellé vient du dictionnaire du transfert**, non de celui de l'explorateur : c'est le
+           même geste que la modale nomme, et deux chaînes pour une action auraient divergé à la
+           première reformulation. */
+        libelle: t('transfer.export.menu'),
+        icone: 'dl',
+        onClick: onExportProject ? () => onExportProject(noeud.label) : undefined,
+        raison: onExportProject ? undefined : RAISONS.exportIndisponible,
       },
       {
         // **« Retirer… » et non « Supprimer… »** : le mot compte, et c'est toute la décision de
@@ -915,6 +942,7 @@ function raisons(t: ReturnType<typeof useT>) {
     diagrammeIndisponible: t('explorer.sidebar.raisons.diagramUnavailable'),
     schemasIndisponible: t('explorer.sidebar.raisons.schemasUnavailable'),
     schemasHorsPostgres: t('explorer.sidebar.raisons.schemasPostgresOnly'),
+    exportIndisponible: t('explorer.sidebar.raisons.exportUnavailable'),
   }
 }
 

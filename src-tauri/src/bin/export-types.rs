@@ -18,9 +18,10 @@
 use dorabase_lib::config::{
     ConfigLoad, Console, ConsoleRequest, CreateEnvironmentRequest, CreateProjectRequest,
     DeleteDatabaseRequest, DeleteEnvironmentRequest, DeleteEnvironmentResult, DeleteProjectRequest,
-    DeleteResult, Project, RecolorEnvironmentRequest, RenameDatabaseRequest,
-    RenameEnvironmentRequest, RenameProjectRequest, RenameResult, ReorderEnvironmentsRequest,
-    SaveDatabaseRequest, SavedQuery, UpdateVariantRequest, VisibleSchemasRequest,
+    DeleteResult, ExportProjectsRequest, ExportReport, ImportProjectsRequest, ImportProjectsResult,
+    Project, RecolorEnvironmentRequest, RenameDatabaseRequest, RenameEnvironmentRequest,
+    RenameProjectRequest, RenameResult, ReorderEnvironmentsRequest, SaveDatabaseRequest,
+    SavedQuery, UpdateVariantRequest, VisibleSchemasRequest,
 };
 use dorabase_lib::dump::commands::{DumpFailure, DumpRequest};
 use dorabase_lib::dump::inspect::Inspection;
@@ -87,6 +88,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     DeleteEnvironmentRequest::export_all(&config)?;
     DeleteEnvironmentResult::export_all(&config)?;
     SecretMechanism::export_all(&config)?;
+    // Le transfert de projets (`API-30`). **Quatre racines, une par sens de chaque geste** :
+    // `ExportProjectsRequest` et `ExportReport` pour l'export, `ImportProjectsRequest` et
+    // `ImportProjectsResult` pour l'import — ce dernier entraînant `ImportReport`,
+    // `ProjectOutcome`, `ProjectVerdict` et `CarriedSecrets` avec lui. `inspect_projects_file` ne
+    // prend qu'une chaîne et rend un `ImportReport`, déjà projeté par ce chemin.
+    //
+    // **`FichierDeProjets` n'y est pas, et c'est structurel** : le fichier ne traverse pas l'IPC,
+    // donc rien de son enveloppe ni de ses mots de passe n'a de projection TypeScript.
+    ExportProjectsRequest::export_all(&config)?;
+    ExportReport::export_all(&config)?;
+    ImportProjectsRequest::export_all(&config)?;
+    ImportProjectsResult::export_all(&config)?;
     // La mise à jour en place. Un seul type traverse l'IPC dans ce sens : `install_update`
     // ne prend rien et ne rend rien.
     AvailableUpdate::export_all(&config)?;

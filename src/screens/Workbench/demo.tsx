@@ -20,6 +20,7 @@ import type {
   TransactionStatement,
 } from '../../domain/engine'
 import type { InstanceAction } from '../../domain/instances'
+import type { ImportReport } from '../../domain/transfert'
 import { LanguageProvider, langueAppliquee } from '../../i18n/LanguageContext'
 import type { PasserelleExport } from '../Console/exportResultat'
 import type { PasserelleInstances } from '../Instances/instanceCommands'
@@ -29,6 +30,7 @@ import { ParcoursDeCreation } from '../NewProject/ParcoursDeCreation'
 import { PreferencesDialog } from '../Preferences/PreferencesDialog'
 import { jetonsDe, PREFERENCES_PAR_DEFAUT, themeApplique } from '../Preferences/preferences'
 import type { PasserelleLignes } from '../TableView/useLignes'
+import { type DemandeDeTransfert, TransferDialogs } from '../Transfer/TransferDialogs'
 import type { PasserelleArbre } from './useArbre'
 import type { PasserelleDetail } from './useDetailTable'
 import { grouperParBoucle, type PasserelleStructures } from './useStructures'
@@ -1195,6 +1197,86 @@ const PASSERELLE_INSTANCES_DEMO: PasserelleInstances = {
     'SCRAM-SHA-256$4096:ZGVjb3JkZWRlbW9uc3RyYQ==$c3RvY2tlZQ==:c2VydmV1cg==',
 }
 
+/**
+ * Le pont de transfert de projets **simulé** (`API-30`).
+ *
+ * **Au même degré que `runSql` de cette démo** : il rend une réponse plausible pour que les deux
+ * modales soient visibles sans base réelle. Ni `invoke` ni le plugin `dialog` ne répondent en
+ * Chromium — et c'est là que la géométrie se mesure, jsdom n'en calculant aucune (règle n° 9).
+ *
+ * **Le fichier n'est pas écrit et rien n'est lu**, ce qui est le point : ce que la démo doit rendre
+ * atteignable est le *chemin* jusqu'aux deux modales et les rapports qu'elles savent afficher — dont
+ * un projet refusé et une connexion gardée, cas que le cœur produit sur un fichier venu d'ailleurs.
+ */
+const TRANSFERT_SIMULE = {
+  exporter: async () => ({
+    projects: 1,
+    connections: 2,
+    consoles: 3,
+    passwordsCarried: 0,
+    passwordsMissing: ['catalogue (staging)'],
+  }),
+  inspecter: async () => APERCU_SIMULE,
+  importer: async () => ({ projects: [], report: APERCU_SIMULE }),
+  choisirDestination: async (projet: string | null) =>
+    `/Users/demo/Desktop/${projet ?? 'projets'}.dorabase.json`,
+  choisirSource: async () => '/Users/demo/Desktop/atelier-nord.dorabase.json',
+  messageDe: (cause: unknown) => String(cause),
+}
+
+/** L'aperçu que le pont simulé rend, et qui porte les trois sortes de verdict. */
+const APERCU_SIMULE: ImportReport = {
+  version: 5,
+  secrets: 'none',
+  projects: [
+    {
+      name: 'Quai Sud',
+      verdict: { kind: 'created' },
+      environmentsAdded: ['dev', 'prod'],
+      environmentsKept: [],
+      connectionsAdded: ['catalogue (dev)', 'catalogue (prod)'],
+      connectionsKept: [],
+      connectionsRejected: [],
+      consolesAdded: ['catalogue (dev) › exploration'],
+      consolesKept: [],
+      passwordsStored: [],
+      passwordsMissing: ['catalogue (prod)'],
+      localPaths: [],
+    },
+    {
+      name: 'Atelier Nord',
+      verdict: { kind: 'merged' },
+      environmentsAdded: [],
+      environmentsKept: ['prod'],
+      connectionsAdded: [],
+      connectionsKept: ['analytics (prod)'],
+      connectionsRejected: [],
+      consolesAdded: ['analytics (prod) › journal'],
+      consolesKept: ['analytics (prod) › exploration'],
+      passwordsStored: [],
+      passwordsMissing: [],
+      localPaths: [],
+    },
+    {
+      name: 'Bancal',
+      verdict: {
+        kind: 'rejected',
+        reason: 'le projet « Bancal » doit déclarer au moins un environnement',
+      },
+      environmentsAdded: [],
+      environmentsKept: [],
+      connectionsAdded: [],
+      connectionsKept: [],
+      connectionsRejected: [],
+      consolesAdded: [],
+      consolesKept: [],
+      passwordsStored: [],
+      passwordsMissing: [],
+      localPaths: [],
+    },
+  ],
+}
+
 export function WorkbenchDemo() {
   // **La démo monte `A2` en mode édition**, et ce n'est pas de la décoration. Elle se contentait
   // d'inscrire la cible dans le titre du document, ce qui vérifiait un *proxy* du chemin : un test
@@ -1222,6 +1304,24 @@ export function WorkbenchDemo() {
    */
   const [preferences, setPreferences] = useState<Preferences>(PREFERENCES_PAR_DEFAUT)
   const [preferencesOuvertes, setPreferencesOuvertes] = useState(false)
+  /**
+   * La modale de transfert ouverte (`API-30`).
+   *
+   * **L'import s'ouvre par un paramètre du décor**, et c'est délibéré : son seul point d'entrée dans
+   * le produit est le menu natif, que Playwright ne touche pas — et les modales de dump, qui n'en
+   * ont pas d'autre non plus, n'ont **aucun** test de bout en bout pour cette raison. Un bouton
+   * inventé dans la démo aurait été un pixel inventé ; un paramètre de décor ne ment sur rien et
+   * rend la géométrie mesurable, ce que jsdom ne peut pas faire (règle n° 9). C'est le même
+   * arbitrage que `DORABASE_PLATEFORME_DECOR` et `DORABASE_VERSION_DECOR`.
+   *
+   * L'export, lui, a un vrai chemin — le menu d'une ligne de projet —, et c'est celui que le test
+   * emprunte.
+   */
+  const [transfert, setTransfert] = useState<DemandeDeTransfert | null>(
+    new URLSearchParams(window.location.search).get('transfert') === 'import'
+      ? { sens: 'import' }
+      : null,
+  )
   /**
    * Le journal de la transaction manuelle, **par console** (`API-38`).
    *
@@ -1460,6 +1560,15 @@ export function WorkbenchDemo() {
             setProjets(suivants)
             return suivants
           }}
+        />
+      )}
+      {transfert !== null && (
+        <TransferDialogs
+          demande={transfert}
+          total={projets.length}
+          onClose={() => setTransfert(null)}
+          onImported={setProjets}
+          commandes={TRANSFERT_SIMULE}
         />
       )}
       {preferencesOuvertes && (
@@ -1718,6 +1827,10 @@ export function WorkbenchDemo() {
           return { missingSecrets: [], leftoverSecrets: [] }
         }}
         onProjets={setProjets}
+        /* L'export d'un projet (`API-30`) : la démo ouvre la **vraie** modale, avec un pont simulé —
+           voir `TRANSFERT_SIMULE`. C'est le seul moyen de la rendre mesurable sous Playwright, la
+           géométrie étant hors de portée de jsdom (règle n° 9). */
+        onExportProject={(projet) => setTransfert({ sens: 'export', projet })}
         gestesEnvironnement={gestesEnvironnement}
       />
       {instanceOuverte !== null && (

@@ -3242,3 +3242,35 @@ describe('suivre une clé étrangère', () => {
     for (const [, requete] of surOrders) expect(requete.filters).toEqual([])
   })
 })
+
+/**
+ * **Le câblage de l'export d'un projet** (`API-30`).
+ *
+ * Ce que la vitrine de la sidebar ne peut pas prouver : que l'entrée du menu atteint bien l'écran
+ * qui la relaie. `ExplorerSidebar.test.tsx` monte le composant seul, avec une prop passée à la main
+ * — c'est la règle n° 8, et le geste doit être exercé à travers l'assemblage.
+ */
+describe('« Exporter le projet… » traverse l’écran de travail (`API-30`)', () => {
+  it('nomme le projet de la ligne, et rien d’autre', async () => {
+    const utilisateur = userEvent.setup()
+    const vus: string[] = []
+    monter({ onExportProject: (projet) => vus.push(projet) })
+    await ouvrirLesEnvironnements(utilisateur)
+
+    await utilisateur.click(screen.getByRole('button', { name: 'Actions de Atelier Nord' }))
+    await utilisateur.click(screen.getByRole('button', { name: 'Exporter le projet…' }))
+
+    expect(vus).toEqual(['Atelier Nord'])
+  })
+
+  it('se désactive quand l’écran ne la relie à rien', async () => {
+    // **Le contrôle négatif** : sans lui, une entrée toujours cliquable passerait le test précédent.
+    // Un bouton inerte mais actif se lit comme une panne (défaut n° 36).
+    const utilisateur = userEvent.setup()
+    monter()
+    await ouvrirLesEnvironnements(utilisateur)
+
+    await utilisateur.click(screen.getByRole('button', { name: 'Actions de Atelier Nord' }))
+    expect(screen.getByRole('button', { name: 'Exporter le projet…' })).toBeDisabled()
+  })
+})
