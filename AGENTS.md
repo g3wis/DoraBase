@@ -1061,7 +1061,8 @@ Dix décisions à ne pas défaire :
 - **sortir du mode manuel n'est ni une validation ni une annulation.** Tant que la transaction
   retient des instructions, l'interrupteur est figé avec sa raison : valider d'office écrirait ce que
   personne n'a relu, annuler d'office jetterait un travail en cours. Les deux boutons du panneau
-  restent les deux seules issues. Et le figer se fait en `aria-disabled`, non en `disabled` : la
+  sont les deux issues qu'on **choisit** — la troisième, fermer l'onglet, annule, et c'est le seul
+  geste qui le fasse sans le demander (voir plus bas). Et le figer se fait en `aria-disabled`, non en `disabled` : la
   raison vit dans une infobulle, qu'un bouton désactivé rendrait inatteignable (piège n° 3) ;
 - **`BEGIN IMMEDIATE` chez SQLite**, pour la raison d'`apply_updates` : une transaction différée
   prend le verrou de lecture d'abord et doit le *promouvoir* à la première écriture — promotion qui
@@ -1188,12 +1189,32 @@ fois dans ce chantier : un faux journal tenu en commun laissait passer exactemen
 l'application isole. Il tient donc **un journal par console**, comme le cœur tient une session par
 console. Même chose pour `?demo`.
 
-**Et une réserve reste ouverte** : fermer l'onglet d'une console ne rend pas sa session. La
-transaction attend, avec ses verrous, et l'on la retrouve en réouvrant l'onglet — le jeton et le
-régime survivant à la fermeture, comme le texte. C'est le comportement d'avant, où la transaction
-restait sur la connexion ; ce qui change est qu'elle tient maintenant une session à elle, donc, sur
-SQLite, le verrou d'écriture du fichier jusqu'à ce qu'on revienne. Fermer l'onglet en demandant une
-issue serait la vraie réponse, et c'est une décision de produit qui n'est pas prise.
+**Et fermer l'onglet annule la transaction** (rapporté à l'usage). C'est la **troisième issue**, à
+côté des deux boutons, et elle est nécessaire : le panneau et ses deux boutons vivent *dans*
+l'onglet, donc une transaction dont l'onglet est fermé n'est plus atteignable par aucun geste. La
+laisser attendre tiendrait ses verrous côté serveur — et sur un fichier SQLite elle empêcherait
+**toute autre console** d'en ouvrir une, jusqu'au prochain lancement de l'application. La première
+version laissait ce cas ouvert, en le notant : c'était le comportement d'avant, où la transaction
+restait sur la connexion et où une autre console pouvait encore la finir ; une session par console a
+retiré ce recours, donc l'issue devait devenir explicite. Quatre points :
+
+- **sans confirmation**, et c'est la règle de l'annulation : elle rend la base à son état, il n'y a
+  rien à perdre. Ce qui se perd — les instructions qu'on avait écrites — est dans l'éditeur, que la
+  fermeture d'un onglet n'efface pas ;
+- **le jeton part avec.** Réouvrir la console en reminte un : c'est un onglet neuf devant une session
+  neuve, et garder l'ancien ferait désigner au cœur une session qu'il a fermée ;
+- **le régime reste**, lui. C'est un réglage de cet onglet, comme son texte : réouvrir une console
+  qu'on avait mise en manuel la retrouve en manuel, avec un panneau vide qui dit ce qui va se passer.
+  La rendre éteinte au retour serait l'avoir défaite en silence ;
+- **et le refus de l'annulation n'est remonté à personne** — le seul endroit du produit où un rejet
+  s'avale pour cette raison-là : le panneau qui l'afficherait vient de se fermer. Rien ne se perd
+  pourtant, `achever` fermant la session dans les deux issues : la transaction est annulée par le
+  serveur même quand l'ordre échoue.
+
+**Ce qui ferme aussi ces sessions, et qu'il ne faut pas croire couvert par l'onglet** : retirer une
+console de l'arbre, comme les cinq autres commandes de configuration, ferme la **connexion** — donc
+`fermer` emporte toutes les sessions de console de cette base. Le geste d'onglet n'a donc à traiter
+que la fermeture d'onglet.
 
 **Et une transaction abandonnée n'offre plus que l'annulation** (rapporté à l'usage). Après une
 instruction refusée, PostgreSQL refuse tout ce qui suit jusqu'à la fin du bloc, et un `commit` s'y
@@ -3159,11 +3180,13 @@ présenter comme vérifiées tant qu'un humain ne les a pas faites :
   consoles qui retiennent chacune la sienne en même temps — mais le parcours entier n'a jamais été
   fait à la main : allumer l'interrupteur, écrire, relire le panneau, ouvrir la table dans un autre
   onglet (elle ne doit **pas** montrer la ligne retenue, chaque console ayant sa session), valider,
-  et la voir paraître. Trois points ne se voient que là : que fermer l'application sans valider ne
+  et la voir paraître. Quatre points ne se voient que là : que fermer l'application sans valider ne
   laisse rien derrière — c'est le serveur qui annule —, que le refus d'écrire depuis la grille
-  pendant une transaction arrive bien avec sa phrase plutôt qu'avec l'erreur du moteur, et **ce que
-  coûte l'ouverture d'une seconde session** : une poignée de main de plus à la première exécution en
-  mode manuel, imperceptible en local, à mesurer derrière un tunnel.
+  pendant une transaction arrive bien avec sa phrase plutôt qu'avec l'erreur du moteur, **ce que
+  coûte l'ouverture d'une seconde session** (une poignée de main de plus à la première exécution en
+  mode manuel, imperceptible en local, à mesurer derrière un tunnel), et que **fermer l'onglet rend
+  bien la session** : sur SQLite, une seconde console doit pouvoir ouvrir sa transaction juste après
+  — c'est le fichier qui répond, et lui seul dira si le verrou est vraiment rendu.
 - **Régler « Afficher les barres de défilement : toujours »**, puis regarder la sidebar et
   la bande d'onglets. Chromium sans tête rend des barres en survol, qui n'occupent aucune
   place : la mesure vaut 0 avec comme sans la correction.

@@ -108,6 +108,13 @@ export type Transactions = {
   /** Relit le journal. Appelé après chaque exécution, et par l'effet de cette fonction. */
   apresExecution: (console: Console) => void
   /**
+   * Rend la session d'une console qu'on **ferme**, en annulant sa transaction (`API-38`).
+   *
+   * Voir la doc de tête, « Fermer l'onglet annule la transaction ». Le régime, lui, reste : c'est un
+   * réglage de cet onglet, et le retrouver éteint au retour serait l'avoir défait en silence.
+   */
+  oublier: (console: Console) => void
+  /**
    * Le jeton d'origine de cette console, celui que `run_sql` inscrit à côté de l'instruction.
    *
    * **Opaque, et le cœur ne le compare qu'à lui-même** : il n'a pas à être lisible, il a à être
@@ -181,14 +188,26 @@ export type Transactions = {
  * commande n'est appelée : la galerie, `?demo` et toute la suite Playwright n'y touchent pas. C'est
  * l'arbitrage de la recherche de mise à jour, pour la même raison.
  *
- * # Les deux boutons restent les deux seules issues, et cela pèse plus qu'avant
+ * # Les deux boutons sont les deux issues, et la bascule ne peut pas les contourner
  *
  * La session s'ouvre à la **première exécution**, jamais au réglage : tant qu'on n'a rien exécuté,
  * il n'y a ni session ni verrou, et éteindre l'interrupteur n'a rien à défaire. Dès qu'une
  * instruction est entrée, en revanche, l'écran fige la bascule — et c'est ce qui garantit qu'une
- * session ne reste jamais ouverte sans que son panneau soit là pour la finir. Une transaction
- * oubliée tiendrait ses verrous côté serveur, et sur un fichier SQLite elle empêcherait **toute
- * autre console** d'en ouvrir une.
+ * session ne reste jamais ouverte sans que son panneau soit là pour la finir.
+ *
+ * # Fermer l'onglet annule la transaction
+ *
+ * C'est la troisième issue, et elle est nécessaire : le panneau et ses deux boutons vivent **dans**
+ * l'onglet, donc une transaction dont l'onglet est fermé n'est plus atteignable par aucun geste.
+ * La laisser attendre tiendrait ses verrous côté serveur — et sur un fichier SQLite elle
+ * empêcherait **toute autre console** d'en ouvrir une, jusqu'au prochain lancement.
+ *
+ * **Sans confirmation**, et c'est la règle de l'annulation : elle rend la base à son état, il n'y a
+ * rien à perdre. Ce qui se perd — les instructions qu'on avait écrites — est dans l'éditeur, que la
+ * fermeture d'un onglet n'efface pas.
+ *
+ * **Le jeton part avec.** Réouvrir la console reminte le sien : c'est un onglet neuf devant une
+ * session neuve, et garder l'ancien ferait désigner une session que le cœur a fermée.
  *
  * @param revision le témoin de configuration, `projects` en pratique : **les six commandes qui
  * ferment une connexion le réécrivent**, et une transaction fermée avec sa connexion doit
@@ -346,6 +365,28 @@ export function useTransaction(
       // non celle de l'instruction qu'on avait désignée.
       setAffichees((precedent) => ({ ...precedent, [console.id]: null }))
       relire(console)
+    },
+    oublier: ({ cle, id }) => {
+      const jeton = jetons.current[id]
+      // **L'annulation part avant l'oubli**, avec le jeton qu'on va justement retirer : c'est lui
+      // qui désigne la session à fermer côté cœur.
+      if (jeton !== undefined && (etats[id]?.open ?? false)) {
+        // **Le rejet ne se remonte pas, et cette fois faute de destinataire** : le panneau qui
+        // l'afficherait vient de se fermer. Rien ne se perd pour autant — `achever` ferme la
+        // session dans les deux issues, donc la transaction est annulée par le serveur même si
+        // l'ordre a échoué.
+        passerelle.rollbackTransaction(cle, jeton).catch(() => {})
+      }
+      delete jetons.current[id]
+      // **Le régime reste**, lui : c'est un réglage de cet onglet, comme le texte que la fermeture
+      // n'efface pas non plus. Ce qui part est ce que la session portait.
+      const sans = <T>(table: Readonly<Record<string, T>>) => {
+        const { [id]: _oublie, ...reste } = table
+        return reste
+      }
+      setEtats(sans)
+      setErreurs(sans)
+      setAffichees(sans)
     },
     jeton: (console) => (console === null ? '' : jetonDe(console.id)),
     reindexer: (nouvelId) => {

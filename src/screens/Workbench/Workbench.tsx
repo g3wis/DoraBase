@@ -1144,7 +1144,16 @@ export function Workbench({
       <WorkbenchTabs
         etat={etatOnglets}
         onSelect={(id) => setEtatOnglets((etat) => ({ ...etat, actif: id }))}
-        onClose={(id) => setEtatOnglets((etat) => fermer(etat, id))}
+        /* **Fermer une console rend sa session** (`API-38`). Le panneau de transaction et ses deux
+           boutons vivent dans l'onglet : une transaction dont l'onglet est fermé ne serait plus
+           atteignable par aucun geste, et attendrait en tenant ses verrous — sur un fichier SQLite,
+           en empêchant toute autre console d'en ouvrir une. C'est `useTransaction` qui annule et
+           oublie ; l'onglet, lui, dit seulement laquelle. */
+        onClose={(id) => {
+          const ferme = etatOnglets.onglets.find((onglet) => idOnglet(onglet) === id)
+          if (ferme?.sorte === 'console') transaction.oublier({ cle: ferme.key, id })
+          setEtatOnglets((etat) => fermer(etat, id))
+        }}
         onReorder={(ids) => setEtatOnglets((etat) => reordonner(etat, ids))}
         /* **Le même geste qu'au double-clic sur la ligne d'arbre.** Une console se rencontre aux
            deux endroits, et n'être renommable qu'à l'un des deux obligerait à se souvenir lequel.

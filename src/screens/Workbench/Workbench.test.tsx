@@ -2585,6 +2585,15 @@ describe('la transaction manuelle de la console', () => {
       lectures: [] as DatabaseKey[],
       valides: [] as DatabaseKey[],
       annules: [] as DatabaseKey[],
+      /**
+       * Les jetons de session, tels que le cœur les reçoit.
+       *
+       * **Leur forme n'est jamais lue** — c'est la règle, et c'est ce qui permet d'en changer : les
+       * tests les comparent entre eux (« l'annulation porte le jeton de la console qu'on ferme »,
+       * « la console réouverte en reçoit un neuf »), jamais à une valeur écrite.
+       */
+      jetons: [] as string[],
+      jetonsAnnules: [] as string[],
     }
     /**
      * **Un journal par console**, comme le cœur tient une session par console (`API-38`).
@@ -2627,7 +2636,11 @@ describe('la transaction manuelle de la console', () => {
         },
         rollbackTransaction: async (cle: DatabaseKey, console: string) => {
           vus.annules.push(cle)
-          journaux = { ...journaux, [console]: [] }
+          vus.jetonsAnnules.push(console)
+          // `delete` et non une liste vide : côté cœur, annuler **ferme la session** — il n'y a
+          // plus de transaction, et non une transaction ouverte et vide.
+          const { [console]: _rendue, ...reste } = journaux
+          journaux = reste
         },
       },
     }
@@ -2654,6 +2667,7 @@ describe('la transaction manuelle de la console', () => {
       passerelleExecution: {
         runSql: async (_cle, sql, _limite, mode, console) => {
           modes.push(mode)
+          factice.vus.jetons.push(console)
           // **Le décor distingue une écriture d'une lecture, et jusque dans sa réponse** : sans
           // cela la grille garderait des colonnes après un `delete`, et le test qui désigne une
           // lecture ne mesurerait rien (règle n° 5 — un décor trop régulier ne mesure que le décor).
@@ -2919,6 +2933,50 @@ describe('la transaction manuelle de la console', () => {
       'aria-disabled',
       'true',
     )
+  })
+
+  it('fermer l’onglet d’une console annule sa transaction et rend sa session', async () => {
+    const utilisateur = userEvent.setup()
+    const { vus } = await ouvrirUneConsoleAvecTransaction(utilisateur)
+    await utilisateur.click(screen.getByRole('switch', { name: 'Transaction manuelle' }))
+    await saisir(utilisateur, 'delete from ventes')
+    await utilisateur.click(screen.getByRole('button', { name: /Exécuter/ }))
+    await waitFor(() =>
+      expect(screen.getByRole('complementary', { name: 'Transaction en cours' })).toHaveTextContent(
+        '3 lignes touchées',
+      ),
+    )
+
+    await utilisateur.click(screen.getByRole('button', { name: 'Fermer console 1' }))
+
+    // **Le panneau et ses deux boutons vivent dans l'onglet** : une transaction dont l'onglet est
+    // fermé ne serait plus atteignable par aucun geste, et attendrait en tenant ses verrous — sur
+    // un fichier SQLite, en empêchant toute autre console d'en ouvrir une.
+    await waitFor(() => expect(vus.annules).toHaveLength(1))
+    // Et c'est **son** jeton qui est annulé, celui-là même qui a porté son exécution : sans quoi le
+    // geste fermerait la session d'une voisine.
+    expect(vus.jetonsAnnules).toEqual([vus.jetons[0]])
+    expect(screen.queryByRole('complementary', { name: 'Transaction en cours' })).toBeNull()
+
+    // La console existe toujours — fermer un onglet ne la supprime pas —, et la réouvrir la
+    // retrouve **en mode manuel** : le régime est un réglage de cet onglet, comme son texte, et le
+    // rendre éteint au retour serait l'avoir défait en silence.
+    await utilisateur.click(await screen.findByRole('treeitem', { name: /console 1/ }))
+    expect(screen.getByRole('switch', { name: 'Transaction manuelle' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    )
+    const rouvert = await screen.findByRole('complementary', { name: 'Transaction en cours' })
+    // Mais son panneau est vide : la transaction a été annulée, et il n'en reste rien à valider.
+    expect(rouvert).toHaveTextContent('Rien n’est encore retenu')
+
+    await saisir(utilisateur, 'select n from ventes')
+    await utilisateur.click(screen.getByRole('button', { name: /Exécuter/ }))
+    await waitFor(() => expect(rouvert).toHaveTextContent('1 ligne rendue'))
+    // **Un jeton neuf**, parce que l'ancien désignait une session que le cœur a fermée : un onglet
+    // qui garderait le sien demanderait au cœur une session qui n'existe plus.
+    expect(vus.jetons).toHaveLength(2)
+    expect(vus.jetons[1]).not.toBe(vus.jetons[0])
   })
 
   it('renommer la console lui laisse sa transaction, et ses instructions', async () => {
