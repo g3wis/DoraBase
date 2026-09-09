@@ -2586,22 +2586,41 @@ describe('la transaction manuelle de la console', () => {
       valides: [] as DatabaseKey[],
       annules: [] as DatabaseKey[],
     }
-    let journal: { rendue: TransactionStatement; reponse: QueryResult | null }[] = []
+    let journal: {
+      rendue: TransactionStatement
+      reponse: QueryResult | null
+      origine: string
+    }[] = []
     return {
       vus,
-      /** Ce que le Rust fait en mode manuel : inscrire l'instruction dans la transaction. */
-      inscrire(rendue: TransactionStatement, reponse: QueryResult | null = null) {
-        journal = [...journal, { rendue, reponse }]
+      /**
+       * Ce que le Rust fait en mode manuel : inscrire l'instruction dans la transaction.
+       *
+       * **Le rang est calculé ici**, comme le registre le calcule : il compte le journal **entier**,
+       * pas la part d'une console. Le laisser passer par l'appelant aurait permis au décor de le
+       * dire juste par hasard.
+       */
+      inscrire(
+        origine: string,
+        rendue: Omit<TransactionStatement, 'index'>,
+        reponse: QueryResult | null = null,
+      ) {
+        journal = [...journal, { rendue: { ...rendue, index: journal.length }, reponse, origine }]
       },
       /** Vrai quand une transaction est ouverte — voir la règle du registre, dans `runSql`. */
       ouverte: () => journal.length > 0,
       passerelle: {
-        transactionState: async (cle: DatabaseKey) => {
+        transactionState: async (cle: DatabaseKey, console: string) => {
           vus.lectures.push(cle)
           // Comme le registre : les réponses restent ici, seuls les comptes voyagent.
           return {
             open: journal.length > 0,
-            statements: journal.map((e) => e.rendue),
+            // **Filtré par origine, comme le registre** : un décor qui rendrait le journal entier
+            // ferait passer le test là où l'application filtre, et l'écart ne se verrait nulle
+            // part (règle n° 5 — ce que le décor rend indiscernable, aucune assertion ne le
+            // rattrape).
+            statements: journal.filter((e) => e.origine === console).map((e) => e.rendue),
+            foreign: journal.filter((e) => e.origine !== console).length,
             // Le décor n'échoue pas : `aborted` a son test au niveau du panneau, où l'écart entre
             // les moteurs se lit sans base réelle.
             aborted: false,
@@ -2643,7 +2662,7 @@ describe('la transaction manuelle de la console', () => {
       onSaveConsole: async () => {},
       passerelleTransaction: factice.passerelle,
       passerelleExecution: {
-        runSql: async (_cle, sql, _limite, mode) => {
+        runSql: async (_cle, sql, _limite, mode, console) => {
           modes.push(mode)
           // **Le décor distingue une écriture d'une lecture, et jusque dans sa réponse** : sans
           // cela la grille garderait des colonnes après un `delete`, et le test qui désigne une
@@ -2659,6 +2678,7 @@ describe('la transaction manuelle de la console', () => {
           // laisse ouvert, c'est-à-dire exactement ce qu'un test doit pouvoir voir.
           if (mode === 'manual' || factice.ouverte()) {
             factice.inscrire(
+              console,
               {
                 sql,
                 durationMs: 7,
@@ -2862,8 +2882,7 @@ describe('la transaction manuelle de la console', () => {
       ).toBeInTheDocument(),
     )
 
-    // Et ce qu'elle exécute entre bien dans cette transaction — le panneau de la première le
-    // montre, puisque le journal est celui de la connexion.
+    // Et ce qu'elle exécute entre bien dans cette transaction — c'est une seule session.
     await saisir(utilisateur, 'update ventes set statut = 2')
     await utilisateur.click(screen.getByRole('button', { name: /Exécuter/ }))
     // **Celle-ci est confirmée, elle** : le régime est réglé par console, et cette console-ci est en
@@ -2871,7 +2890,84 @@ describe('la transaction manuelle de la console', () => {
     await utilisateur.click(screen.getByRole('button', { name: /Exécuter ce UPDATE/ }))
     await utilisateur.click(screen.getByRole('tab', { name: /console 1/ }))
     const panneau = await screen.findByRole('complementary', { name: 'Transaction en cours' })
-    await waitFor(() => expect(within(panneau).getAllByRole('listitem')).toHaveLength(2))
+
+    // **Mais elle n'entre pas dans le panneau de la première** : une console montre ce qu'elle a
+    // fait, et la requête d'une voisine s'y lirait comme la sienne. Ce qui se dit à sa place est le
+    // **compte** — sans quoi ce panneau d'une instruction se lirait comme la transaction entière
+    // devant un « Valider » qui en emporte deux.
+    await waitFor(() =>
+      expect(within(panneau).getByText(/1 instruction d’une autre console/)).toBeInTheDocument(),
+    )
+    expect(within(panneau).getAllByRole('listitem')).toHaveLength(1)
+    // Le mot qui distingue les deux requêtes : `statut` n'est que dans celle de la seconde console.
+    expect(panneau).not.toHaveTextContent('statut')
+  })
+
+  it('une console qui n’a rien écrit confirme quand même les écritures d’une voisine', async () => {
+    const utilisateur = userEvent.setup()
+    const { vus } = await ouvrirUneConsoleAvecTransaction(utilisateur)
+    await utilisateur.click(screen.getByRole('switch', { name: 'Transaction manuelle' }))
+    await saisir(utilisateur, 'delete from ventes')
+    await utilisateur.click(screen.getByRole('button', { name: /Exécuter/ }))
+    await waitFor(() =>
+      expect(screen.getByRole('complementary', { name: 'Transaction en cours' })).toHaveTextContent(
+        '3 lignes touchées',
+      ),
+    )
+
+    // Une seconde console, en manuel, qui ne fait que **lire** : son panneau ne porte donc aucune
+    // écriture, et la règle ordinaire la validerait sans rien demander.
+    await ouvrirUneConsole(utilisateur)
+    await utilisateur.click(screen.getByRole('switch', { name: 'Transaction manuelle' }))
+    await saisir(utilisateur, 'select n from ventes')
+    await utilisateur.click(screen.getByRole('button', { name: /Exécuter/ }))
+    const panneau = await screen.findByRole('complementary', { name: 'Transaction en cours' })
+    await waitFor(() => expect(panneau).toHaveTextContent('1 instruction d’une autre console'))
+
+    await utilisateur.click(within(panneau).getByRole('button', { name: 'Valider' }))
+
+    // **Le trou que le filtre aurait ouvert.** Cette console ne voit pas le `delete` de sa voisine,
+    // donc « rien d'écrit ici » ne veut pas dire « rien à confirmer » : ce clic emporte la
+    // transaction entière. La modale paraît, et elle dit le nombre qu'elle ne peut pas nommer — les
+    // verbes d'une instruction qu'on n'a pas jouée ne sont pas rendus à cette console.
+    const modale = await screen.findByRole('dialog')
+    expect(modale).toHaveTextContent(/1 instruction de plus/)
+    // Et le bouton ne compte pas « 0 écriture » : il emporte bel et bien quelque chose.
+    expect(
+      within(modale).getByRole('button', { name: 'Valider la transaction' }),
+    ).toBeInTheDocument()
+    expect(vus.valides).toEqual([])
+  })
+
+  it('renommer la console lui laisse sa transaction, et ses instructions', async () => {
+    const utilisateur = userEvent.setup()
+    await ouvrirUneConsoleAvecTransaction(utilisateur)
+    await utilisateur.click(screen.getByRole('switch', { name: 'Transaction manuelle' }))
+    await saisir(utilisateur, 'delete from ventes')
+    await utilisateur.click(screen.getByRole('button', { name: /Exécuter/ }))
+    await waitFor(() =>
+      expect(screen.getByRole('complementary', { name: 'Transaction en cours' })).toHaveTextContent(
+        '3 lignes touchées',
+      ),
+    )
+
+    await utilisateur.dblClick(screen.getByRole('tab', { name: /console 1/ }))
+    const champ = screen.getByLabelText('Nouveau nom de console 1')
+    await utilisateur.clear(champ)
+    await utilisateur.type(champ, 'Audit{Enter}')
+    await waitFor(() => expect(screen.getByRole('tab', { name: /Audit/ })).toBeInTheDocument())
+
+    // **Cinq tables indexées par identité d'onglet, et l'identité dérive du nom.** Le régime en est
+    // une : sans réindexation, la console retomberait en automatique et son panneau disparaîtrait,
+    // en laissant une transaction ouverte que plus rien ne validerait.
+    const panneau = await screen.findByRole('complementary', { name: 'Transaction en cours' })
+    // Et le **jeton d'origine** en est une autre, celle dont l'oubli coûte le plus cher : le cœur
+    // garde l'origine des instructions déjà jouées, donc un jeton resté sous l'ancien nom rendrait
+    // à cette console ses propres instructions comme étrangères — un panneau vide devant un
+    // « Valider » qui en emporte une.
+    expect(panneau).toHaveTextContent('3 lignes touchées')
+    expect(within(panneau).getAllByRole('listitem')).toHaveLength(1)
+    expect(panneau).not.toHaveTextContent('autre console')
   })
 
   it('une transaction qui n’a fait que lire se valide sans confirmation', async () => {

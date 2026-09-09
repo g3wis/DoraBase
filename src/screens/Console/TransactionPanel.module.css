@@ -199,6 +199,20 @@
   color: var(--ink-meta);
 }
 
+/* **Ce que la liste ne montre pas** : les instructions d'une autre console de la même connexion.
+   Un ton de note et non d'alerte — une voisine qui travaille dans la même session n'est pas un
+   incident —, mais le taire ferait lire la liste comme la transaction entière. Le filet la sépare
+   des cartes sans en faire une carte de plus. */
+.etrangeres {
+  margin: 0;
+  padding-top: var(--space-6);
+  border-top: 1px dashed var(--border);
+  font-family: var(--font-ui);
+  font-size: var(--text-label);
+  line-height: 1.45;
+  color: var(--ink-meta);
+}
+
 /* **La transaction est abandonnée.** La trame du danger, comme un refus : ce n'est plus quelque
    chose qui va s'écrire. Elle prend la place du bouton « Valider », qui est retiré — la raison doit
    donc se lire, et non se survoler. */

@@ -305,26 +305,37 @@ export async function installUpdate(): Promise<void> {
  * **`mode` décide d'une seule chose : ouvrir une transaction si aucune ne l'est** (`API-38`). Une
  * requête lancée en `auto` pendant qu'une transaction est ouverte y entre de toute façon — c'est la
  * session qui la porte, non ce paramètre —, et le journal du panneau le dit.
+ *
+ * **`console` ne décide rien** : il est inscrit à côté de l'instruction pour que chaque console
+ * retrouve les siennes dans son panneau. Le cœur ne le compare qu'à lui-même — voir
+ * `useTransaction`, qui le mint.
  */
 export async function runSql(
   key: DatabaseKey,
   sql: string,
   limit: RowLimit,
   mode: TransactionMode,
+  console: string,
 ): Promise<QueryResult> {
-  return appeler<QueryResult>('run_sql', { key, sql, limit, mode })
+  return appeler<QueryResult>('run_sql', { key, sql, limit, mode, console })
 }
 
 /**
  * L'état de la transaction manuelle d'une connexion (`API-38`).
  *
  * **Relu plutôt que déduit de ce que l'écran a envoyé.** Le journal vit dans le registre, à côté de
- * la connexion : deux consoles ouvertes sur la même base partagent une transaction, donc chacune
- * doit pouvoir apprendre ce que l'autre y a mis. Une liste tenue côté écran aurait été juste sur
- * l'onglet et fausse sur ce qu'un « Valider » emporte.
+ * la connexion, et une liste tenue côté écran aurait été juste sur l'onglet et fausse sur ce qu'un
+ * « Valider » emporte : la transaction est celle de la session, donc de la connexion.
+ *
+ * **`console` dit qui lit**, et l'état rendu est le sien : ses instructions, plus le compte de
+ * celles des autres (`foreign`). Deux consoles sur la même base partagent la transaction sans se
+ * mêler leurs listes.
  */
-export async function transactionState(key: DatabaseKey): Promise<TransactionState> {
-  return appeler<TransactionState>('transaction_state', { key })
+export async function transactionState(
+  key: DatabaseKey,
+  console: string,
+): Promise<TransactionState> {
+  return appeler<TransactionState>('transaction_state', { key, console })
 }
 
 /**

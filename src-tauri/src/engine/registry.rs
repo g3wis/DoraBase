@@ -166,6 +166,12 @@ struct Instruction {
     rendue: TransactionStatement,
     /// La réponse, quand elle porte des lignes. `None` pour une écriture ou un refus.
     reponse: Option<QueryResult>,
+    /// La console qui l'a lancée, **opaque pour le cœur** : il ne la compare qu'à elle-même.
+    ///
+    /// C'est ce qui permet à chaque console de ne montrer que ses propres instructions, alors que la
+    /// transaction est celle de la session. Le jeton vient de l'écran et survit à un renommage
+    /// d'onglet — l'identité d'un onglet, elle, change (voir `useTransaction`).
+    origine: String,
 }
 
 /// La transaction d'une connexion : ce qu'elle a joué, et si le moteur l'a abandonnée.
@@ -522,6 +528,7 @@ impl ConnectionRegistry {
         sql: &str,
         limite: RowLimit,
         mode: TransactionMode,
+        console: &str,
     ) -> Result<QueryResult, EngineError> {
         self.assurer_l_ouverture(cle).await?;
         let mut journaux = self.transactions.lock().await;
@@ -561,9 +568,13 @@ impl ConnectionRegistry {
 
         if let Some(journal) = journaux.get_mut(cle) {
             journal.abandonnee = journal.abandonnee || abandonnee;
+            // Le rang est celui qu'elle prend dans le journal, et il ne bougera plus : rien ne s'y
+            // retire, rien ne s'y déplace. C'est l'adresse que `reponse_de_transaction` attend.
+            let rang = u32::try_from(journal.instructions.len()).unwrap_or(u32::MAX);
             journal.instructions.push(match &issue {
                 Ok(resultat) => Instruction {
                     rendue: TransactionStatement {
+                        index: rang,
                         sql: resultat.sql.clone(),
                         duration_ms: resultat.duration_ms,
                         returned: resultat.rows.len() as u64,
@@ -579,6 +590,7 @@ impl ConnectionRegistry {
                     // qu'une, celle de la dernière exécution, et c'est le seul endroit où les
                     // autres existent encore.
                     reponse: (!resultat.rows.is_empty()).then(|| resultat.clone()),
+                    origine: console.to_owned(),
                 },
                 // **L'échec est inscrit, et la transaction reste ouverte.** C'est l'état réel :
                 // `begin` a réussi, donc il y a quelque chose à annuler — et sur PostgreSQL la
@@ -591,6 +603,7 @@ impl ConnectionRegistry {
                 // dans aucune transaction, ce qui est la vérité.
                 Err(erreur) => Instruction {
                     rendue: TransactionStatement {
+                        index: rang,
                         sql: sql.to_owned(),
                         duration_ms: u64::try_from(depart.elapsed().as_millis())
                             .unwrap_or(u64::MAX),
@@ -602,6 +615,7 @@ impl ConnectionRegistry {
                     // Un refus n'a **rien** rendu. Le message du serveur est sa réponse, et il est
                     // dans l'entrée juste au-dessus.
                     reponse: None,
+                    origine: console.to_owned(),
                 },
             });
         }
@@ -613,7 +627,13 @@ impl ConnectionRegistry {
     ///
     /// **Ne prend pas `ouvertes`** : une connexion fermée n'a pas de transaction, et répondre
     /// « aucune » sans consulter l'adaptateur est à la fois juste et sans latence.
-    pub async fn etat_de_transaction(&self, cle: &str) -> TransactionState {
+    /// # Ce que la console qui lit en reçoit
+    ///
+    /// **Ses instructions, et le compte des autres.** Une console montre ce qu'elle a fait : les
+    /// requêtes d'une voisine dans son propre panneau se liraient comme les siennes. Le journal, lui,
+    /// reste entier — c'est la transaction, et un `commit` l'emporte en entier —, d'où `foreign`,
+    /// que la confirmation de validation dit.
+    pub async fn etat_de_transaction(&self, cle: &str, console: &str) -> TransactionState {
         match self.transactions.lock().await.get(cle) {
             Some(journal) => TransactionState {
                 open: true,
@@ -622,8 +642,17 @@ impl ConnectionRegistry {
                 statements: journal
                     .instructions
                     .iter()
+                    .filter(|entree| entree.origine == console)
                     .map(|entree| entree.rendue.clone())
                     .collect(),
+                foreign: u32::try_from(
+                    journal
+                        .instructions
+                        .iter()
+                        .filter(|entree| entree.origine != console)
+                        .count(),
+                )
+                .unwrap_or(u32::MAX),
                 aborted: journal.abandonnee,
             },
             None => TransactionState::default(),
@@ -882,6 +911,15 @@ mod tests_transaction {
     use super::*;
     use crate::config::{Engine, SslMode};
 
+    /// La console qui exécute, dans les tests qui n'en ont qu'une.
+    ///
+    /// Le cœur ne compare ce jeton qu'à lui-même : sa forme est celle que l'écran mint, et **aucun
+    /// test ne doit dépendre de cette forme** — c'est ce qui laisse `useTransaction` la changer.
+    const CONSOLE: &str = "console-1";
+
+    /// Une seconde console sur la **même** connexion, donc dans la même transaction.
+    const AUTRE_CONSOLE: &str = "console-2";
+
     /// Un fichier neuf, une table d'une colonne, et une connexion au registre.
     async fn registre_sqlite() -> (tempfile::TempDir, ConnectionRegistry, String) {
         let dossier = tempfile::tempdir().expect("répertoire temporaire");
@@ -934,6 +972,7 @@ mod tests_transaction {
                 "select count(*) as n from jetons",
                 RowLimit::OneHundred,
                 TransactionMode::Auto,
+                CONSOLE,
             )
             .await
             .expect("lecture");
@@ -952,6 +991,7 @@ mod tests_transaction {
                 "insert into jetons (valeur) values (1)",
                 RowLimit::OneHundred,
                 TransactionMode::Auto,
+                CONSOLE,
             )
             .await
             .expect("écriture");
@@ -959,7 +999,7 @@ mod tests_transaction {
         // Aucune transaction n'a été ouverte : il n'y a rien à valider, et le panneau ne doit pas
         // paraître.
         assert_eq!(
-            registre.etat_de_transaction(&cle).await,
+            registre.etat_de_transaction(&cle, CONSOLE).await,
             TransactionState::default()
         );
         assert!(!registre.transaction_ouverte(&cle).await);
@@ -975,6 +1015,7 @@ mod tests_transaction {
                 "insert into jetons (valeur) values (1)",
                 RowLimit::OneHundred,
                 TransactionMode::Manual,
+                CONSOLE,
             )
             .await
             .expect("écriture");
@@ -1000,6 +1041,7 @@ mod tests_transaction {
                 "insert into jetons (valeur) values (7)",
                 RowLimit::OneHundred,
                 TransactionMode::Manual,
+                CONSOLE,
             )
             .await
             .expect("écriture");
@@ -1010,7 +1052,7 @@ mod tests_transaction {
 
         assert_eq!(compte(&registre, &cle).await, 1);
         assert_eq!(
-            registre.etat_de_transaction(&cle).await,
+            registre.etat_de_transaction(&cle, CONSOLE).await,
             TransactionState::default(),
             "une transaction validée n'est plus ouverte, et son journal est vide"
         );
@@ -1025,11 +1067,12 @@ mod tests_transaction {
                 "insert into jetons (valeur) values (1), (2), (3)",
                 RowLimit::OneHundred,
                 TransactionMode::Manual,
+                CONSOLE,
             )
             .await
             .expect("écriture");
 
-        let etat = registre.etat_de_transaction(&cle).await;
+        let etat = registre.etat_de_transaction(&cle, CONSOLE).await;
         assert!(etat.open);
         assert_eq!(etat.statements.len(), 1);
         let instruction = &etat.statements[0];
@@ -1053,6 +1096,7 @@ mod tests_transaction {
                 "insert into jetons (valeur) values (1), (2)",
                 RowLimit::OneHundred,
                 TransactionMode::Manual,
+                CONSOLE,
             )
             .await
             .expect("écriture");
@@ -1062,11 +1106,12 @@ mod tests_transaction {
                 "select valeur from jetons",
                 RowLimit::OneHundred,
                 TransactionMode::Manual,
+                CONSOLE,
             )
             .await
             .expect("lecture");
 
-        let etat = registre.etat_de_transaction(&cle).await;
+        let etat = registre.etat_de_transaction(&cle, CONSOLE).await;
         let lecture = etat.statements.last().expect("deux instructions");
         assert_eq!(lecture.returned, 2, "{lecture:?}");
         // `None`, et non `Some(0)` : une lecture ne touche rien, et le compte de lignes touchées de
@@ -1083,6 +1128,7 @@ mod tests_transaction {
                 "insert into jetons (valeur) values (1), (2), (3)",
                 RowLimit::OneHundred,
                 TransactionMode::Manual,
+                CONSOLE,
             )
             .await
             .expect("écriture");
@@ -1092,6 +1138,7 @@ mod tests_transaction {
                 "select valeur from jetons order by valeur",
                 RowLimit::OneHundred,
                 TransactionMode::Manual,
+                CONSOLE,
             )
             .await
             .expect("première lecture");
@@ -1103,11 +1150,12 @@ mod tests_transaction {
                 "select valeur from jetons where valeur > 2",
                 RowLimit::OneHundred,
                 TransactionMode::Manual,
+                CONSOLE,
             )
             .await
             .expect("seconde lecture");
 
-        let etat = registre.etat_de_transaction(&cle).await;
+        let etat = registre.etat_de_transaction(&cle, CONSOLE).await;
         // **Ce que l'écran lit du journal** : des comptes et un drapeau, jamais les lignes — le
         // journal est relu à chaque exécution, et y mettre les réponses les ferait toutes traverser
         // l'IPC à chaque fois.
@@ -1135,6 +1183,74 @@ mod tests_transaction {
     }
 
     #[tokio::test]
+    async fn chaque_console_ne_voit_que_ses_propres_instructions() {
+        let (_dossier, registre, cle) = registre_sqlite().await;
+        // Trois instructions, deux consoles, et **entrelacées** : si le filtre prenait une tranche
+        // au lieu de comparer les origines, un décor où chaque console joue d'affilée le laisserait
+        // passer (règle n° 5).
+        registre
+            .executer_une_requete(
+                &cle,
+                "insert into jetons (valeur) values (1), (2), (3)",
+                RowLimit::OneHundred,
+                TransactionMode::Manual,
+                CONSOLE,
+            )
+            .await
+            .expect("l'écriture de la première console");
+        registre
+            .executer_une_requete(
+                &cle,
+                "select valeur from jetons where valeur > 2",
+                RowLimit::OneHundred,
+                TransactionMode::Manual,
+                AUTRE_CONSOLE,
+            )
+            .await
+            .expect("la lecture de la seconde console");
+        registre
+            .executer_une_requete(
+                &cle,
+                "select valeur from jetons order by valeur",
+                RowLimit::OneHundred,
+                TransactionMode::Manual,
+                CONSOLE,
+            )
+            .await
+            .expect("la lecture de la première console");
+
+        // La transaction est celle de la **session** : chacune n'en montre que sa part, et sait
+        // combien de plus elle emporte. Un panneau qui listerait deux instructions et un `commit`
+        // qui en emporterait trois serait un mensonge sur ce qu'on valide.
+        let premiere = registre.etat_de_transaction(&cle, CONSOLE).await;
+        assert_eq!(premiere.statements.len(), 2);
+        assert_eq!(premiere.foreign, 1);
+        let seconde = registre.etat_de_transaction(&cle, AUTRE_CONSOLE).await;
+        assert_eq!(seconde.statements.len(), 1);
+        assert_eq!(seconde.foreign, 2);
+
+        // **Le rang reste celui du journal**, pas celui de la liste filtrée. C'est ce qui fait
+        // qu'une réponse se redemande juste : la seule instruction de la seconde console est
+        // première dans son panneau et **deuxième** dans la transaction.
+        assert_eq!(seconde.statements[0].index, 1);
+        assert_eq!(
+            premiere
+                .statements
+                .iter()
+                .map(|instruction| instruction.index)
+                .collect::<Vec<_>>(),
+            vec![0, 2]
+        );
+        let sienne = registre
+            .reponse_de_transaction(&cle, seconde.statements[0].index as usize)
+            .await
+            .expect("la réponse de sa propre lecture");
+        // Une ligne, celle du `> 2` : la lecture de l'autre console en rend trois, donc un rang
+        // pris dans la liste filtrée aurait rendu l'écriture, et un rang décalé l'autre lecture.
+        assert_eq!(sienne.rows.len(), 1);
+    }
+
+    #[tokio::test]
     async fn les_trois_refus_de_reponse_ne_se_confondent_pas() {
         let (_dossier, registre, cle) = registre_sqlite().await;
         // Aucune transaction ouverte.
@@ -1150,6 +1266,7 @@ mod tests_transaction {
                 "insert into jetons (valeur) values (1)",
                 RowLimit::OneHundred,
                 TransactionMode::Manual,
+                CONSOLE,
             )
             .await
             .expect("écriture");
@@ -1179,11 +1296,12 @@ mod tests_transaction {
                 "insert into jetons_absents (valeur) values (1)",
                 RowLimit::OneHundred,
                 TransactionMode::Manual,
+                CONSOLE,
             )
             .await
             .expect_err("une table inconnue doit être refusée");
 
-        let etat = registre.etat_de_transaction(&cle).await;
+        let etat = registre.etat_de_transaction(&cle, CONSOLE).await;
         assert!(
             etat.open,
             "le `begin` a réussi : il y a quelque chose à annuler"
@@ -1205,6 +1323,7 @@ mod tests_transaction {
                 "insert into jetons (valeur) values (1)",
                 RowLimit::OneHundred,
                 TransactionMode::Manual,
+                CONSOLE,
             )
             .await
             .expect("écriture");
@@ -1214,6 +1333,7 @@ mod tests_transaction {
                 "insert into jetons_absents (valeur) values (1)",
                 RowLimit::OneHundred,
                 TransactionMode::Manual,
+                CONSOLE,
             )
             .await
             .expect_err("une table inconnue doit être refusée");
@@ -1222,7 +1342,7 @@ mod tests_transaction {
         // seule, l'écriture d'avant reste bonne, et le panneau doit continuer d'offrir « Valider ».
         // Le déduire d'un simple échec aurait retiré à SQLite et MySQL une capacité qu'ils ont —
         // c'est PostgreSQL qui abandonne, et lui seul.
-        let etat = registre.etat_de_transaction(&cle).await;
+        let etat = registre.etat_de_transaction(&cle, CONSOLE).await;
         assert!(etat.open);
         assert!(!etat.aborted, "{etat:?}");
 
@@ -1244,6 +1364,7 @@ mod tests_transaction {
                     "insert into jetons (valeur) values (1)",
                     RowLimit::OneHundred,
                     TransactionMode::Manual,
+                    CONSOLE,
                 )
                 .await
                 .expect("écriture");
@@ -1251,7 +1372,14 @@ mod tests_transaction {
 
         // Deux instructions dans **une** transaction, et non deux transactions : un second `begin`
         // aurait été refusé par SQLite, et une transaction par requête ne retiendrait rien.
-        assert_eq!(registre.etat_de_transaction(&cle).await.statements.len(), 2);
+        assert_eq!(
+            registre
+                .etat_de_transaction(&cle, CONSOLE)
+                .await
+                .statements
+                .len(),
+            2
+        );
         registre
             .annuler_la_transaction(&cle)
             .await
@@ -1268,6 +1396,7 @@ mod tests_transaction {
                 "insert into jetons (valeur) values (1)",
                 RowLimit::OneHundred,
                 TransactionMode::Manual,
+                CONSOLE,
             )
             .await
             .expect("écriture");
@@ -1277,6 +1406,7 @@ mod tests_transaction {
                 "insert into jetons (valeur) values (2)",
                 RowLimit::OneHundred,
                 TransactionMode::Auto,
+                CONSOLE,
             )
             .await
             .expect("écriture");
@@ -1284,7 +1414,14 @@ mod tests_transaction {
         // **Le journal dit ce que la transaction contient, pas ce que le mode demandait.** La
         // seconde ligne est dedans — la session la porte — donc l'annulation l'emporte aussi, et le
         // panneau doit l'avoir annoncée.
-        assert_eq!(registre.etat_de_transaction(&cle).await.statements.len(), 2);
+        assert_eq!(
+            registre
+                .etat_de_transaction(&cle, CONSOLE)
+                .await
+                .statements
+                .len(),
+            2
+        );
         registre
             .annuler_la_transaction(&cle)
             .await
@@ -1301,6 +1438,7 @@ mod tests_transaction {
                 "insert into jetons (valeur) values (1)",
                 RowLimit::OneHundred,
                 TransactionMode::Manual,
+                CONSOLE,
             )
             .await
             .expect("écriture");
@@ -1310,7 +1448,7 @@ mod tests_transaction {
         // n'a plus rien à valider.
         assert!(!registre.transaction_ouverte(&cle).await);
         assert_eq!(
-            registre.etat_de_transaction(&cle).await,
+            registre.etat_de_transaction(&cle, CONSOLE).await,
             TransactionState::default()
         );
     }
@@ -1330,6 +1468,7 @@ mod tests_transaction {
                 "insert into jetons (valeur) values (1)",
                 RowLimit::OneHundred,
                 TransactionMode::Manual,
+                CONSOLE,
             )
             .await
             .expect("écriture");
@@ -1373,6 +1512,7 @@ mod tests_transaction {
                     "select 1",
                     RowLimit::OneHundred,
                     TransactionMode::Manual,
+                    CONSOLE,
                 )
                 .await
                 .expect_err("aucune connexion"),
@@ -1393,7 +1533,7 @@ mod tests_transaction {
         // Et la lecture d'état, elle, répond sans se plaindre : une connexion fermée n'a pas de
         // transaction, et l'écran doit pouvoir le demander à tout moment.
         assert_eq!(
-            registre.etat_de_transaction(&cle).await,
+            registre.etat_de_transaction(&cle, CONSOLE).await,
             TransactionState::default()
         );
     }
@@ -1405,6 +1545,9 @@ mod tests_transaction {
 mod tests_db {
     use super::*;
     use crate::config::SslMode;
+
+    /// Voir la constante du même nom dans `tests_transaction`.
+    const CONSOLE: &str = "console-1";
 
     fn variante() -> ConnectionSettings {
         let url = std::env::var("DORABASE_TEST_PG")
@@ -1529,6 +1672,7 @@ mod tests_db {
                 "select 1",
                 RowLimit::OneHundred,
                 TransactionMode::Manual,
+                CONSOLE,
             )
             .await
             .expect("lecture");
@@ -1538,6 +1682,7 @@ mod tests_db {
                 "select depuis_nulle_part",
                 RowLimit::OneHundred,
                 TransactionMode::Manual,
+                CONSOLE,
             )
             .await
             .expect_err("une colonne inconnue doit être refusée");
@@ -1545,7 +1690,7 @@ mod tests_db {
         // **La transaction est abandonnée, et l'écran doit le savoir** : un « Valider » offert là
         // se comporterait comme un « Annuler ». Elle reste **ouverte** — il y a bien quelque chose à
         // annuler.
-        let etat = registre.etat_de_transaction(cle).await;
+        let etat = registre.etat_de_transaction(cle, CONSOLE).await;
         assert!(etat.open, "{etat:?}");
         assert!(etat.aborted, "{etat:?}");
         assert_eq!(etat.statements.len(), 2, "{etat:?}");
@@ -1554,7 +1699,7 @@ mod tests_db {
             .annuler_la_transaction(cle)
             .await
             .expect("annulation");
-        assert!(!registre.etat_de_transaction(cle).await.open);
+        assert!(!registre.etat_de_transaction(cle, CONSOLE).await.open);
         registre.fermer(cle).await;
     }
 

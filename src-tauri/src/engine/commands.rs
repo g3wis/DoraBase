@@ -458,11 +458,13 @@ pub async fn create_schema(
         .await
 }
 
-/// L'état de la transaction manuelle d'une connexion (`API-38`).
+/// L'état de la transaction manuelle d'une connexion, **vu par une console** (`API-38`).
 ///
-/// Lue par le panneau après chaque exécution, et à l'arrivée sur une console : deux consoles
-/// ouvertes sur la même base partagent une transaction, donc chacune doit pouvoir apprendre ce que
-/// l'autre y a mis. Aucun aller-retour vers le serveur — le journal est ici.
+/// Lue par le panneau après chaque exécution, et à l'arrivée sur une console. La transaction est
+/// celle de la **session**, donc de la connexion ; ce que la console reçoit d'elle sont **ses
+/// propres instructions**, plus le compte de celles des autres. D'où le `console` : deux consoles
+/// ouvertes sur la même base partagent la transaction sans se mêler leurs listes. Aucun
+/// aller-retour vers le serveur — le journal est ici.
 ///
 /// **`Result` alors que rien ne peut échouer** : une commande asynchrone qui reçoit une référence —
 /// ici l'état Tauri — doit en rendre un, faute de quoi le futur emprunterait le message de l'appel.
@@ -471,9 +473,10 @@ pub async fn create_schema(
 #[tauri::command]
 pub async fn transaction_state(
     key: DatabaseKey,
+    console: String,
     registry: tauri::State<'_, ConnectionRegistry>,
 ) -> Result<crate::engine::TransactionState, EngineError> {
-    Ok(registry.etat_de_transaction(&key.cle()).await)
+    Ok(registry.etat_de_transaction(&key.cle(), &console).await)
 }
 
 /// La réponse d'une instruction de la transaction, désignée par son rang (`API-38`).
@@ -749,12 +752,16 @@ pub async fn apply_changes(
 /// décide pas du journal — une requête exécutée pendant qu'une transaction est ouverte y entre de
 /// toute façon, puisque c'est la session qui la porte. Voir
 /// `ConnectionRegistry::executer_une_requete`.
+///
+/// **`console` ne décide rien non plus** : il est inscrit à côté de l'instruction pour que chaque
+/// console retrouve les siennes dans son panneau. Le cœur ne le compare qu'à lui-même.
 #[tauri::command]
 pub async fn run_sql(
     key: DatabaseKey,
     sql: String,
     limit: crate::engine::RowLimit,
     mode: crate::engine::TransactionMode,
+    console: String,
     registry: tauri::State<'_, ConnectionRegistry>,
 ) -> Result<crate::engine::QueryResult, EngineError> {
     let resultat = registry
@@ -763,7 +770,7 @@ pub async fn run_sql(
         // qui est le verdict de ce chemin depuis `API-37` : rien ici ne sait si cette requête lit ou
         // si elle écrit, et une reprise décidée dans le doute écrirait deux fois. Ce que cette
         // méthode ajoute est le journal de la transaction, qui doit être tenu en travers des deux.
-        .executer_une_requete(&key.cle(), &sql, limit, mode)
+        .executer_une_requete(&key.cle(), &sql, limit, mode, &console)
         .await;
 
     match &resultat {

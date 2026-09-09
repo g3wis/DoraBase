@@ -535,21 +535,19 @@ export function Workbench({
    */
   const idConsoleActive = consoleActive === null ? null : idOnglet(consoleActive)
   /**
-   * Le régime de transaction, **par connexion** (`API-38`).
+   * L'adresse de la console active pour la transaction : sa connexion **et** son onglet (`API-38`).
    *
-   * Déclaré au-dessus de `useExecution`, qui reçoit son mode : c'est le même ordre et la même raison
-   * que pour les renommages, une dépendance de `useCallback` étant évaluée à la déclaration.
+   * Les deux, parce que les deux états ne sont pas au même endroit — le régime et ce que le panneau
+   * montre appartiennent à la console, la transaction à la session. `null` hors d'une console : le
+   * régime ne se règle pas sur une table.
+   *
+   * Déclaré au-dessus de `useExecution`, qui reçoit le mode et le jeton de la console : c'est le
+   * même ordre et la même raison que pour les renommages, une dépendance de `useCallback` étant
+   * évaluée à la déclaration.
    *
    * `projects` en témoin : les six commandes de configuration qui **ferment** une connexion le
    * réécrivent, et une transaction fermée avec sa connexion doit disparaître du panneau plutôt que
    * d'y offrir un « Valider » qui n'a plus rien à valider.
-   */
-  /**
-   * L'adresse de la console active pour la transaction : sa connexion **et** son onglet (`API-38`).
-   *
-   * Les deux, parce que les deux états ne sont pas au même endroit — le régime appartient à la
-   * console, la transaction à la session. `null` hors d'une console : le régime ne se règle pas sur
-   * une table.
    */
   const consoleDeTransaction =
     consoleActive === null || cleConsole === null
@@ -561,6 +559,7 @@ export function Workbench({
     passerelleExecution ?? PASSERELLE_EXECUTION,
     idConsoleActive,
     transaction.mode(consoleDeTransaction),
+    transaction.jeton(consoleDeTransaction),
     transaction.apresExecution,
   )
 
@@ -752,13 +751,18 @@ export function Workbench({
       // **Le résultat suit le nom, comme le texte** : son identité en dérive, et le laisser sous
       // l'ancienne clé viderait la grille sur un renommage.
       execution.reindexer((id) => (id === ancienId ? nouvelId : id))
+      // **La transaction suit aussi** (`API-38`), et c'est celle dont l'oubli coûte le plus cher :
+      // le cœur garde l'origine des instructions déjà jouées, donc un jeton laissé sous l'ancien
+      // nom rendrait à cette console ses propres instructions comme **étrangères** — panneau vide,
+      // et un « Valider » qui emporte ce qu'elle ne voit plus.
+      transaction.reindexer((id) => (id === ancienId ? nouvelId : id))
       setConsolesOuvertes((precedent) => {
         if (!(ancienId in precedent)) return precedent
         const { [ancienId]: _oubliee, ...reste } = precedent
         return { ...reste, [nouvelId]: { project, database, environment, nom: nouveau } }
       })
     },
-    [onRenameConsole, execution.reindexer],
+    [onRenameConsole, execution.reindexer, transaction.reindexer],
   )
 
   /**
@@ -796,6 +800,7 @@ export function Workbench({
       setTextes((precedent) => reindexerParConnexion(precedent, key, nouveau))
       setAttentes((precedent) => reindexerParConnexion(precedent, key, nouveau))
       execution.reindexer((id) => idApresRenommage(id, key, nouveau))
+      transaction.reindexer((id) => idApresRenommage(id, key, nouveau))
       setOngletsEnEdition(
         (precedent) => new Set([...precedent].map((id) => idApresRenommage(id, key, nouveau))),
       )
@@ -829,7 +834,7 @@ export function Workbench({
       )
       return issue
     },
-    [onRenameDatabase, structures, execution.reindexer],
+    [onRenameDatabase, structures, execution.reindexer, transaction.reindexer],
   )
 
   /**
@@ -1241,6 +1246,7 @@ export function Workbench({
                   // `idOnglet`) — donc le résultat déjà affiché doit la suivre, sans quoi
                   // « Enregistrer » viderait la grille sous les yeux.
                   execution.reindexer((autre) => (autre === brouillon ? id : autre))
+                  transaction.reindexer((autre) => (autre === brouillon ? id : autre))
                   setConsolesOuvertes((precedent) => ({
                     ...precedent,
                     [id]: { project, database, environment, nom },

@@ -23,6 +23,7 @@ function monter(
           validation={{
             console: CONSOLE,
             instructions: 3,
+            etrangeres: 0,
             ecritures: ['UPDATE', 'DELETE'],
             sansRestriction: false,
             ...validation,
@@ -65,6 +66,31 @@ test('l’environnement de production porte son encart, et lui seul', () => {
   // **Le drapeau de la déclaration** (`23g`), jamais le libellé : un environnement nommé « live »
   // et marqué production doit porter l'encart.
   expect(screen.getByText('production')).toBeInTheDocument()
+})
+
+test('elle dit ce que le panneau ne montre pas', () => {
+  monter({ etrangeres: 2 })
+  // **Un `commit` emporte la transaction entière** — une connexion n'a qu'une session —, alors que
+  // le panneau ne liste que les instructions de sa console. Le nombre, non les verbes : ceux d'une
+  // instruction qu'on n'a pas jouée ne sont pas rendus à cette console.
+  expect(screen.getByText(/2 instructions de plus/)).toBeInTheDocument()
+  expect(screen.getByText(/une autre console de cette connexion/)).toBeInTheDocument()
+})
+
+test('sans instruction étrangère, elle n’en parle pas', () => {
+  monter()
+  // Le cas ordinaire. « 0 instruction de plus » ferait chercher une voisine qui n'existe pas.
+  expect(screen.queryByText(/autre console/)).toBeNull()
+})
+
+test('une console qui n’a rien écrit ne compte pas zéro écriture', () => {
+  monter({ ecritures: [], etrangeres: 1 })
+  // Elle paraît quand même : ce sont les instructions d'une voisine qui l'ont demandée, et rien ne
+  // dit qu'elles ne sont que des lectures.
+  expect(screen.getByRole('button', { name: 'Valider la transaction' })).toBeInTheDocument()
+  // **Et la rangée « Écritures » disparaît** : vide, elle se lirait comme une écriture qu'on n'a
+  // pas su nommer.
+  expect(screen.queryByText('Écritures')).toBeNull()
 })
 
 test('elle dit ce que DoraBase ne sait pas défaire', () => {

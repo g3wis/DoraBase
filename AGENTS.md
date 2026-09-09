@@ -935,11 +935,13 @@ modifications en attente (`11b`).
 La **transaction**, elle, appartient à la session, donc à la connexion : le registre ne détient qu'un
 adaptateur par base, et un `begin` posé depuis une console englobe ce que ses voisines exécutent,
 qu'elles l'aient demandé ou non. C'est un fait du serveur, pas un choix d'écran. Le journal est donc
-indexé par connexion — deux consoles réglées en manuel sur la même base regardent **la même**
-transaction, et un `commit` de l'une emporte ce que l'autre a écrit. C'est aussi la raison qui met ce
-journal côté Rust plutôt que côté écran : ce qu'un « Valider » emporte est le contenu de la
-transaction, pas celui d'un onglet, et une liste tenue par l'écran aurait été juste sur son onglet et
-fausse sur ce qu'elle validait.
+indexé par connexion — un `commit` d'une console emporte ce que l'autre a écrit. C'est aussi la
+raison qui met ce journal côté Rust plutôt que côté écran : ce qu'un « Valider » emporte est le
+contenu de la transaction, pas celui d'un onglet, et une liste tenue par l'écran aurait été juste sur
+son onglet et fausse sur ce qu'elle validait.
+
+**Mais chaque console n'en voit que sa part** — voir « Une console montre ce qu'elle a fait » plus
+bas : le journal est celui de la connexion, la *vue* est celle d'une console.
 
 **Une première version faisait du régime une propriété de la connexion**, justement pour supprimer le
 cas d'une console « auto » qui écrirait dans la transaction d'une voisine. Ce qu'elle supprimait
@@ -984,8 +986,9 @@ Dix décisions à ne pas défaire :
   - **un rang, pas un identifiant.** Le journal d'une transaction ne fait que s'allonger : rien ne
     s'y retire, rien ne s'y déplace, et un `commit` le remplace en entier. Un rang y désigne donc
     toujours la même instruction, sans distribuer d'identifiants ni les faire voyager avec chaque
-    exécution — et une console peut afficher la réponse d'une instruction qu'une **autre** console a
-    exécutée, la liste étant la même pour les deux ;
+    exécution. **Il est explicite dans la projection** (`TransactionStatement.index`) depuis que la
+    liste est filtrée par console : la place d'une carte dans le panneau n'est plus son rang dans la
+    transaction, et le déduire de la boucle d'affichage demanderait la réponse de la voisine ;
   - **rien n'est rejoué.** Les lignes viennent de ce que le cœur a gardé : relancer la requête serait
     la seule autre façon de les retrouver, et une requête de console n'est pas forcément idempotente
     — c'est déjà la raison pour laquelle un geste de colonne ne réexécute rien ;
@@ -1075,6 +1078,68 @@ qu'on fait vingt fois, ne protégeait de rien. Quatre points :
 - **et l'annulation ne se confirme pas.** Elle rend la base à son état : c'est le geste de repli, et
   le confronter à une question ferait hésiter là où il n'y a rien à perdre. Ce qui se perd — les
   instructions qu'on avait écrites — est dans l'éditeur, que rien n'efface.
+
+**Une console montre ce qu'elle a fait, et dit le reste** (rapporté à l'usage : « les requêtes
+lancées depuis une autre console ne devraient pas apparaître dans la vue de la transaction »). Le
+panneau listait le journal entier : les requêtes d'une voisine s'y lisaient comme les siennes, alors
+qu'on ne les a ni écrites ni vues passer. `etat_de_transaction` prend donc une console et rend **ses**
+instructions, plus le compte des autres. Sept décisions :
+
+- **le filtre est au cœur, non à l'écran**, et c'est ce qui le rend sûr. L'autre voie était de
+  laisser le journal entier traverser l'IPC en marquant chaque instruction, et de filtrer dans le
+  panneau : moins de Rust, et un filtre que **chaque** lecteur du journal devrait refaire — le
+  compteur du panneau, le récapitulatif d'une validation, le prochain qui s'y branchera. C'est le
+  motif de la règle n° 17, et celui du défaut n° 16 : une garantie qu'un commentaire promet et qu'un
+  bras attrape-tout défait. Une console ne *peut* pas voir les instructions d'une autre ;
+- **ce que le filtre oblige à dire ailleurs est nommé dans le type** (`TransactionState.foreign`).
+  Un panneau qui listerait deux instructions devant un `commit` qui en emporte quatre serait un
+  mensonge sur ce qu'on valide, et c'est le pire défaut que cette vue puisse avoir. Le compte est dit
+  **deux fois** — sous la liste, où la décision se forme, et dans la confirmation, où l'on s'engage —
+  et c'est l'honnêteté des deux nombres de la barre d'état du diagramme, appliquée ici. Le compte,
+  **jamais les requêtes** : celles-ci appartiennent à la console qui les a écrites ;
+- **et cela a ouvert un trou qu'il a fallu refermer dans le même geste.** Une transaction qui n'a
+  fait que lire se valide sans question ; une console qui ne voit pas le `delete` de sa voisine
+  aurait donc validé ce `delete` **sans aucune confirmation**. La règle est devenue « rien d'écrit
+  ici *et* rien d'invisible » : `foreign > 0` demande la confirmation, dont le bouton compte alors la
+  transaction plutôt que des écritures qu'il ne peut pas nommer — les verbes d'une instruction qu'on
+  n'a pas jouée ne sont pas rendus à cette console, et « Valider 0 écriture » aurait dit que ce clic
+  n'emporte rien ;
+- **le panneau numérote sa propre liste, et adresse par le rang du journal.** « #1, #3 » ferait
+  chercher l'instruction manquante dans un panneau qui ne l'aura jamais ; et demander la réponse par
+  la place dans la liste rendrait celle de la voisine. D'où les deux nombres, et
+  `TransactionStatement.index` pour porter le second ;
+- **l'origine d'une instruction est un jeton, non l'identité de l'onglet.** Le cœur inscrit ce que
+  l'écran lui donne et ne le compare qu'à lui-même. `Console.id` dérive du **nom** de l'onglet et de
+  celui de la connexion, donc un renommage le change — pendant que le cœur garde l'ancien à côté des
+  instructions déjà jouées : la console retrouverait ses propres instructions **étrangères**, un
+  panneau vide devant un « Valider » qui en emporte une. Le jeton est donc une *valeur*, mintée
+  depuis un compteur, que `reindexer` déplace avec son onglet. Sa forme n'est lue par personne — ni
+  le cœur, ni un test —, ce qui est la seule façon de pouvoir en changer ;
+- **`useTransaction` a gagné son `reindexer` pour cela**, et il déplace cinq tables. C'est le motif
+  du renommage de connexion, où en oublier une casse quelque chose de visible : le **régime** en est
+  une, et son oubli était un défaut antérieur — renommer une console en pleine transaction la faisait
+  retomber en automatique, donc en faisait disparaître le panneau, en laissant une transaction
+  ouverte que plus rien ne validait ;
+- **et l'état lu est désormais indexé par onglet**, puisque c'est celui d'une console. Ce qui reste
+  indexé par **connexion** est le seul fait qui appartienne à la session : *une transaction est-elle
+  ouverte*. C'est lui qui fait relire une console en `auto` dont la voisine a ouvert une transaction
+  — sans quoi son pied ne saurait rien —, et il est vrai quelle que soit la console qui l'a appris.
+  Corollaire à ne pas perdre : l'**onglet actif** est devenu une dépendance de l'effet de relecture.
+  Sans lui, arriver sur une voisine de la même connexion, dans le même régime, ne relirait rien et
+  son panneau afficherait la dernière lecture *qu'elle* avait faite — juste à l'instant où elle
+  l'avait faite, et faux depuis.
+
+**Le décor du test d'assemblage a dû apprendre le filtre**, et c'est la règle n° 5 pour la seconde
+fois dans ce chantier : un faux `transaction_state` qui aurait rendu le journal entier laissait
+passer exactement ce que l'application filtre, sans qu'aucune assertion le rattrape. Il inscrit donc
+l'origine et calcule le rang **sur le journal entier**, comme le registre — le laisser passer par
+l'appelant aurait permis au décor de le dire juste par hasard. Même chose pour `?demo`.
+
+**Et une réserve reste ouverte, propre à cette scène** : le mot « transaction étrangère » du pied
+d'une console en `auto` ne suit pas un **renommage de connexion**, dont le geste ferme la connexion
+côté cœur — l'entrée laissée sous l'ancien index ne décrit plus rien, et seule une connexion homonyme
+recréée plus tard la relirait, sa première lecture la corrigeant. Le déplacer demanderait de
+reconnaître un renommage de connexion dans `useTransaction`, qui ne reçoit qu'un témoin opaque.
 
 **Et une transaction abandonnée n'offre plus que l'annulation** (rapporté à l'usage). Après une
 instruction refusée, PostgreSQL refuse tout ce qui suit jusqu'à la fin du bloc, et un `commit` s'y

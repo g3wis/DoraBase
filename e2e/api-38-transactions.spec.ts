@@ -169,9 +169,22 @@ test('le panneau suit la console, non sa connexion', async ({ page }) => {
   // par connexion, et le taire serait laisser croire à une écriture validée.
   await expect(page.getByText(/Une transaction est ouverte sur cette connexion/)).toBeVisible()
 
-  // Revenir la retrouve, avec ce qu'elle retenait.
+  // Ce qu'elle exécute entre bel et bien dans cette transaction — c'est une seule session.
+  await page.locator('.cm-content').click()
+  await page.keyboard.insertText('select ca_eur from ventes')
+  await page.getByRole('button', { name: /Exécuter/ }).click()
+  await expect(page.getByRole('grid', { name: /Résultat de la requête/ })).toBeVisible()
+
+  // Revenir la retrouve, avec ce qu'elle retenait — **et rien de plus**. Une console montre ce
+  // qu'elle a fait : la requête d'une voisine s'y lirait comme la sienne. Ce qui se dit à sa place
+  // est le compte, sans quoi ce panneau d'une instruction se lirait comme la transaction entière
+  // devant un « Valider » qui en emporte deux.
   await page.getByRole('tab', { name: /console 1/ }).click()
-  await expect(page.locator(panneau)).toContainText('lignes rendues')
+  const retrouve = page.locator(panneau)
+  await expect(retrouve).toContainText('lignes rendues')
+  await expect(retrouve).toContainText('1 instruction d’une autre console')
+  await expect(retrouve.getByRole('listitem')).toHaveCount(1)
+  await expect(retrouve).not.toContainText('ca_eur')
 })
 
 test('les deux sortes de carte ont le même rythme', async ({ page }) => {

@@ -11,6 +11,7 @@ export type PasserelleExecution = {
     sql: string,
     limit: RowLimit,
     mode: TransactionMode,
+    console: string,
   ) => Promise<QueryResult>
 }
 
@@ -100,6 +101,15 @@ export function useExecution(
    */
   mode: TransactionMode = 'auto',
   /**
+   * Le jeton d'origine de cette console, celui que le cœur inscrit à côté de l'instruction
+   * (`API-38`).
+   *
+   * **Opaque, et tenu par `useTransaction`** : c'est lui qui le mint et le déplace sur un
+   * renommage. Il ne sert qu'à une chose — que chaque console retrouve ses propres instructions
+   * dans son panneau. Vide hors d'une console, où `lancer` ne part pas.
+   */
+  jeton = '',
+  /**
    * Appelé après chaque exécution, réussie ou non.
    *
    * C'est par là que le journal de la transaction est relu : une instruction refusée y entre aussi,
@@ -127,7 +137,7 @@ export function useExecution(
       // porte **les deux**, le régime étant réglé par console (`API-38`).
       const console = { cle, id }
       passerelle
-        .runSql(cle, sql, LIMITE_CONSOLE, mode)
+        .runSql(cle, sql, LIMITE_CONSOLE, mode, jeton)
         .then((issue) => {
           poser(id, (precedent) => ({
             ...precedent,
@@ -153,7 +163,7 @@ export function useExecution(
         // que le panneau ait à montrer quand la suite sera refusée jusqu'à l'annulation.
         .finally(() => apresExecution?.(console))
     },
-    [cle, idConsole, passerelle, poser, mode, apresExecution],
+    [cle, idConsole, passerelle, poser, mode, jeton, apresExecution],
   )
 
   const demander = useCallback(

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   commitTransaction,
   rollbackTransaction,
@@ -10,13 +10,12 @@ import type {
   QueryResult,
   TransactionMode,
   TransactionState,
-  TransactionStatement,
 } from '../../domain/engine'
 import { demandeConfirmation, natureDe, sansRestriction } from './nature'
 
 /** Ce qui appelle les commandes. Injectable : le pont ne répond pas hors de la webview. */
 export type PasserelleTransaction = {
-  transactionState: (key: DatabaseKey) => Promise<TransactionState>
+  transactionState: (key: DatabaseKey, console: string) => Promise<TransactionState>
   transactionResult: (key: DatabaseKey, index: number) => Promise<QueryResult>
   commitTransaction: (key: DatabaseKey) => Promise<void>
   rollbackTransaction: (key: DatabaseKey) => Promise<void>
@@ -30,7 +29,12 @@ export const PASSERELLE_TRANSACTION: PasserelleTransaction = {
 }
 
 /** Une transaction au repos : aucune n'est ouverte, et ce n'est pas une transaction vide. */
-const AUCUNE_TRANSACTION: TransactionState = { open: false, statements: [], aborted: false }
+const AUCUNE_TRANSACTION: TransactionState = {
+  open: false,
+  statements: [],
+  foreign: 0,
+  aborted: false,
+}
 
 /**
  * Une console, et la connexion sur laquelle elle porte.
@@ -66,8 +70,16 @@ function index(cle: DatabaseKey): string {
 export type ValidationADemander = {
   /** La console qui a demandé la validation : c'est elle qui la reçoit, et son onglet la porte. */
   console: Console
-  /** Le nombre d'instructions de la transaction, écritures comprises. */
+  /** Le nombre d'instructions **de cette console**, écritures comprises. */
   instructions: number
+  /**
+   * Combien d'instructions d'**autres consoles** la validation emporte en plus.
+   *
+   * Zéro dans le cas ordinaire. Au-delà, la confirmation le dit : le panneau ne montre que ses
+   * propres instructions, et un `commit` emporte la transaction entière — c'est la seule chose que
+   * le filtre par console oblige à dire ailleurs, et c'est ici qu'elle se dit.
+   */
+  etrangeres: number
   /** Les verbes des écritures, dans l'ordre — « DELETE », « UPDATE »… */
   ecritures: readonly string[]
   /**
@@ -116,6 +128,25 @@ export type Transactions = {
   /** Relit le journal. Appelé après chaque exécution, et par l'effet de cette fonction. */
   apresExecution: (console: Console) => void
   /**
+   * Le jeton d'origine de cette console, celui que `run_sql` inscrit à côté de l'instruction.
+   *
+   * **Opaque, et le cœur ne le compare qu'à lui-même** : il n'a pas à être lisible, il a à être
+   * stable. Voir la doc de tête, « L'origine d'une instruction est un jeton, non l'identité de
+   * l'onglet ». Rend `''` hors d'une console, où rien ne s'exécute.
+   */
+  jeton: (console: Console | null) => string
+  /**
+   * Fait suivre un changement d'identité d'onglet — un renommage de console ou de connexion.
+   *
+   * **Cinq tables en dépendent ici**, et le jeton d'origine est celle qui compte le plus : le cœur
+   * garde l'origine des instructions déjà jouées, donc un jeton qui ne suivrait pas son onglet
+   * rendrait à cette console **ses propres instructions comme étrangères** — un panneau vide et un
+   * « Valider » qui emporte trois instructions invisibles. Le régime suit pour la même sorte de
+   * raison : sans lui, renommer une console en pleine transaction la ferait retomber en `auto`,
+   * donc en ferait disparaître le panneau.
+   */
+  reindexer: (nouvelId: (id: string) => string) => void
+  /**
    * Demande la validation — passe par la confirmation quand la transaction contient des écritures.
    *
    * **C'est ici que la confirmation a lieu, et non à l'exécution** (`API-38`) : en transaction
@@ -159,12 +190,38 @@ export type Transactions = {
  * qu'elle supprimait vraiment était le **choix** — le panneau d'une console apparaissait sur toutes
  * celles de la même base.
  *
- * # Le journal n'est pas tenu ici
+ * # Le journal n'est pas tenu ici, et chaque console n'en reçoit que sa part
  *
- * Il vit dans le registre, et cette fonction le **relit**. C'est ce qui rend le panneau vrai pour
- * deux consoles ouvertes sur la même base : chacune voit ce que l'autre a mis dans la transaction,
- * c'est-à-dire ce qu'un « Valider » emporte. Une liste tenue par l'écran aurait été juste sur son
- * onglet et fausse sur la transaction.
+ * Il vit dans le registre, et cette fonction le **relit**. Ce que la lecture rend n'est pas le
+ * journal entier : ce sont les instructions de la console qui lit, plus le compte de celles des
+ * autres (`TransactionState.foreign`). Une console montre ce qu'elle a fait — les requêtes d'une
+ * voisine dans son propre panneau se lisaient comme les siennes, alors qu'elle ne les a ni écrites
+ * ni vues passer.
+ *
+ * **Le filtre est au cœur, non ici**, et c'est ce qui le rend sûr : une console ne *peut* pas voir
+ * les instructions d'une autre, donc aucun lecteur du journal — le compteur du panneau, le
+ * récapitulatif d'une validation, le prochain qui s'y branchera — n'a de filtre à ne pas oublier.
+ * Ce que le filtre oblige à dire ailleurs est le compte des autres, et c'est la confirmation de
+ * validation qui le porte : le `commit` emporte la transaction **entière**.
+ *
+ * **Conséquence sur l'indexation** : l'état lu est celui d'une console, donc il est indexé par
+ * onglet — deux consoles de la même base en reçoivent deux versions différentes de la même
+ * transaction. Ce qui reste indexé par **connexion** est le seul fait qui appartienne à la session :
+ * *une transaction est-elle ouverte*. C'est lui qui fait relire une console en `auto` dont la
+ * voisine a ouvert une transaction, et il est vrai quelle que soit la console qui l'a appris.
+ *
+ * # L'origine d'une instruction est un jeton, non l'identité de l'onglet
+ *
+ * Le cœur inscrit à côté de chaque instruction l'origine que l'écran lui donne, et il ne la compare
+ * qu'à elle-même. Ce n'est **pas** `Console.id` : cette identité dérive du nom de l'onglet et de
+ * celui de la connexion (voir `idOnglet`), donc un renommage la change — et le cœur, lui, garde
+ * l'ancienne à côté des instructions déjà jouées. Une console renommée en pleine transaction
+ * retrouverait ses propres instructions **étrangères** : panneau vide, et un « Valider » qui
+ * emporte ce qu'elle ne voit plus.
+ *
+ * Le jeton est donc une **valeur** que `reindexer` déplace avec son onglet, mintée à la demande
+ * depuis un compteur. Sa forme n'est jamais lue — ni par le cœur, ni par un test : c'est ce qui
+ * permet d'en changer.
  *
  * # Rien ne part avant qu'on le demande
  *
@@ -183,54 +240,90 @@ export function useTransaction(
   revision?: unknown,
 ): Transactions {
   const [modes, setModes] = useState<Readonly<Record<string, TransactionMode>>>({})
+  /** Ce que la transaction contient **pour une console**, indexé par onglet. Voir la doc de tête. */
   const [etats, setEtats] = useState<Readonly<Record<string, TransactionState>>>({})
+  /**
+   * *Une transaction est-elle ouverte*, par **connexion**.
+   *
+   * Le seul fait de la transaction qui appartienne à la session plutôt qu'à une console, et le seul
+   * que la lecture d'une console enseigne aux autres : c'est lui qui fait relire une console en
+   * `auto` dont la voisine a ouvert une transaction, pour que le pied puisse le dire. Une
+   * transaction qu'aucune console n'a jamais lue reste invisible — le prix de « rien ne part avant
+   * qu'on le demande ».
+   *
+   * **Ce qu'il ne suit pas** : un renommage de connexion, qui change l'index. Le cœur ferme la
+   * connexion dans ce geste, donc l'entrée laissée sous l'ancien nom ne décrit plus rien ; elle ne
+   * serait relue que par une connexion homonyme recréée plus tard, dont la première lecture la
+   * corrige. Le déplacer aurait demandé de reconnaître un renommage de connexion ici, là où cette
+   * fonction ne reçoit qu'un témoin opaque.
+   */
+  const [ouvertures, setOuvertures] = useState<Readonly<Record<string, boolean>>>({})
   const [erreurs, setErreurs] = useState<Readonly<Record<string, string | null>>>({})
   const [affichees, setAffichees] = useState<Readonly<Record<string, number | null>>>({})
   const [aValider, setAValider] = useState<ValidationADemander | null>(null)
   const [enCours, setEnCours] = useState(false)
 
+  // Le jeton d'origine d'un onglet, et le compteur qui les mint. **Des refs, non un état** : rien
+  // ne les affiche, donc rien n'a à se rendre de nouveau quand un jeton naît — et le minter est une
+  // mémoïsation, une même console rendant toujours le même jeton.
+  const jetons = useRef<Record<string, string>>({})
+  const prochainJeton = useRef(0)
+  const jetonDe = useCallback((id: string) => {
+    const connu = jetons.current[id]
+    if (connu !== undefined) return connu
+    prochainJeton.current += 1
+    // Aucun nom d'onglet, de base ni de projet : le cœur ne compare ce jeton qu'à lui-même, et une
+    // valeur opaque est ce qui garantit que personne ne se mette à en lire la forme.
+    const jeton = `console-${prochainJeton.current}`
+    jetons.current[id] = jeton
+    return jeton
+  }, [])
+
   const relire = useCallback(
-    (cle: DatabaseKey) => {
-      const id = index(cle)
+    (console: Console) => {
+      const { cle, id } = console
       passerelle
-        .transactionState(cle)
+        .transactionState(cle, jetonDe(id))
         // **Une lecture identique ne rend pas un état neuf**, et ce n'est pas une optimisation :
         // l'effet ci-dessous dépend de l'identité de la passerelle, qu'un appelant peut reconstruire
         // à chaque rendu — une lecture qui reposerait toujours un objet neuf relancerait alors
         // l'effet indéfiniment. C'est le piège de `10d` désarmé à la source plutôt que confié à la
-        // discipline des appelants.
-        .then((etat) =>
+        // discipline des appelants. Même raison pour l'ouverture, que la garde de l'effet lit.
+        .then((etat) => {
           setEtats((precedent) =>
             JSON.stringify(precedent[id]) === JSON.stringify(etat)
               ? precedent
               : { ...precedent, [id]: etat },
-          ),
-        )
+          )
+          setOuvertures((precedent) =>
+            precedent[index(cle)] === etat.open
+              ? precedent
+              : { ...precedent, [index(cle)]: etat.open },
+          )
+        })
         // **Le rejet est normal et il ne se remonte pas** : hors de la webview le pont ne répond
         // pas, et personne n'a rien demandé. Le panneau garde alors sa dernière lecture, ou son
         // état au repos.
         .catch(() => {})
     },
-    [passerelle],
+    [passerelle, jetonDe],
   )
 
   const connexionActive = consoleActive === null ? null : index(consoleActive.cle)
+  const ongletActif = consoleActive === null ? null : consoleActive.id
   const modeActif = consoleActive === null ? 'auto' : (modes[consoleActive.id] ?? 'auto')
-  /**
-   * Vrai quand le journal de cette connexion est **connu** ouvert.
-   *
-   * C'est ce qui fait relire une console en `auto` : sans transaction connue, rien ne part — et dès
-   * qu'une voisine en a ouvert une, la lecture reprend, pour que le pied puisse le dire. Une
-   * transaction qu'aucune console n'a jamais lue reste invisible, ce qui est le prix de « rien ne
-   * part avant qu'on le demande ».
-   */
-  const journalConnu = connexionActive !== null && (etats[connexionActive]?.open ?? false)
+  /** Vrai quand une transaction est **connue** ouverte sur la connexion de la console active. */
+  const journalConnu = connexionActive !== null && (ouvertures[connexionActive] ?? false)
 
-  // Trois dépendances que le corps ne nomme pas, et il en faut trois :
+  // Quatre dépendances que le corps ne nomme pas, et il en faut quatre :
   //
   // - `connexionActive` **remplace** la clef, que l'appelant reconstruit à chaque rendu — c'est
   //   l'index qui dit qu'on a changé de connexion, pas l'identité de l'objet. Le piège de `10d`, où
   //   une passerelle littérale relisait les lignes à chaque frappe ;
+  // - `ongletActif` est ce qui a été ajouté avec le filtre par console : l'état lu appartient
+  //   désormais à **une** console, donc arriver sur une voisine de la même connexion, dans le même
+  //   régime, doit relire. Sans lui, son panneau afficherait la dernière lecture *qu'elle* avait
+  //   faite — juste au moment où elle l'avait faite, et faux depuis ;
   // - `modeActif` et `journalConnu` sont les deux raisons de relire, chacune lue par la garde ;
   // - `revision` est un **témoin** : on ne le lit pas, on constate qu'il a bougé. C'est le signal
   //   commun aux six commandes qui ferment une connexion (voir la doc de tête).
@@ -239,8 +332,8 @@ export function useTransaction(
     // **En manuel, ou sur une transaction déjà connue** : hors de ces deux cas il n'y a rien à
     // lire, et aucune commande ne part — la galerie et `?demo` n'y touchent pas.
     if (consoleActive === null || (modeActif !== 'manual' && !journalConnu)) return
-    relire(consoleActive.cle)
-  }, [connexionActive, modeActif, journalConnu, revision, relire])
+    relire(consoleActive)
+  }, [connexionActive, ongletActif, modeActif, journalConnu, revision, relire])
 
   const achever = useCallback(
     (console: Console, ordre: 'valider' | 'annuler') => {
@@ -264,8 +357,9 @@ export function useTransaction(
           setAffichees((precedent) => ({ ...precedent, [id]: null }))
           // Relu dans les deux cas : côté Rust la transaction est terminée qu'elle ait été validée
           // ou non, et le journal est vide. Le relire plutôt que de le supposer garde une seule
-          // vérité.
-          relire(cle)
+          // vérité. **Les voisines relisent en arrivant** — c'est l'onglet actif qui est une
+          // dépendance de l'effet, et leur état d'ici est périmé par construction.
+          relire(console)
         })
     },
     [passerelle, relire],
@@ -275,12 +369,14 @@ export function useTransaction(
     mode: (console) => (console === null ? 'auto' : (modes[console.id] ?? 'auto')),
     poserLeMode: (console, mode) => setModes((precedent) => ({ ...precedent, [console.id]: mode })),
     etat: (console) =>
-      console === null ? AUCUNE_TRANSACTION : (etats[index(console.cle)] ?? AUCUNE_TRANSACTION),
+      console === null ? AUCUNE_TRANSACTION : (etats[console.id] ?? AUCUNE_TRANSACTION),
     transactionEtrangere: (console) => {
       if (console === null) return false
       // **Ouverte sur la connexion, alors que cette console-ci ne l'a pas demandé.** C'est le seul
-      // écart que le régime par console laisse ouvert : une seule session, plusieurs onglets.
-      const ouverte = etats[index(console.cle)]?.open ?? false
+      // écart que le régime par console laisse ouvert : une seule session, plusieurs onglets. Lu
+      // dans `ouvertures`, la table de connexion : une console en `auto` n'a pas d'état à elle
+      // tant qu'elle n'a pas lu, et c'est justement ce qu'il faut lui apprendre.
+      const ouverte = ouvertures[index(console.cle)] ?? false
       return ouverte && (modes[console.id] ?? 'auto') === 'auto'
     },
     erreur: (console) => (console === null ? null : (erreurs[console.id] ?? null)),
@@ -304,7 +400,7 @@ export function useTransaction(
       // dont la voisine a ouvert une transaction : ses requêtes y entrent, et le pied doit le dire.
       if (
         (modes[console.id] ?? 'auto') !== 'manual' &&
-        !(etats[index(console.cle)]?.open ?? false)
+        !(ouvertures[index(console.cle)] ?? false)
       ) {
         return
       }
@@ -314,13 +410,34 @@ export function useTransaction(
       // **La marque part avec l'exécution** : la grille montre désormais la réponse toute neuve, et
       // non celle de l'instruction qu'on avait désignée.
       setAffichees((precedent) => ({ ...precedent, [console.id]: null }))
-      relire(console.cle)
+      relire(console)
+    },
+    jeton: (console) => (console === null ? '' : jetonDe(console.id)),
+    reindexer: (nouvelId) => {
+      // **Le jeton d'abord** : c'est celui dont l'oubli coûte le plus cher, le cœur gardant
+      // l'origine des instructions déjà jouées. Une ref, donc déplacée sur place — rien ne
+      // l'affiche, et le rendu que les quatre `set` déclenchent suffit.
+      jetons.current = Object.fromEntries(
+        Object.entries(jetons.current).map(([id, jeton]) => [nouvelId(id), jeton]),
+      )
+      const deplacer = <T>(table: Readonly<Record<string, T>>) =>
+        Object.fromEntries(Object.entries(table).map(([id, valeur]) => [nouvelId(id), valeur]))
+      setModes(deplacer)
+      setEtats(deplacer)
+      setErreurs(deplacer)
+      setAffichees(deplacer)
     },
     demanderLaValidation: (console) => {
-      const enjeu = enJeu(console, etats[index(console.cle)]?.statements ?? [])
+      const enjeu = enJeu(console, etats[console.id] ?? AUCUNE_TRANSACTION)
       // Rien d'écrit dans la transaction : il n'y a rien à confirmer, et un clic de plus ne
       // protégerait de rien. C'est la règle de `demandeConfirmation`, appliquée à un lot.
-      if (enjeu.ecritures.length === 0) {
+      //
+      // **Sauf si la transaction porte des instructions qu'on ne voit pas** : celles d'une voisine
+      // ne sont pas rendues à cette console, donc rien ne dit qu'elles ne sont que des lectures, et
+      // ce `commit` les emporte. Sans cette seconde condition, une console qui n'a fait que lire
+      // validerait le `delete` d'une autre **sans aucune confirmation** — le trou que le filtre
+      // aurait ouvert.
+      if (enjeu.ecritures.length === 0 && enjeu.etrangeres === 0) {
         achever(console, 'valider')
         return
       }
@@ -347,10 +464,8 @@ export function useTransaction(
  * même abandonné la transaction — la compter comme une écriture ferait annoncer un `delete` qui n'a
  * pas eu lieu.
  */
-function enJeu(
-  console: Console,
-  instructions: readonly TransactionStatement[],
-): ValidationADemander {
+function enJeu(console: Console, etat: TransactionState): ValidationADemander {
+  const instructions = etat.statements
   const ecrivantes = instructions.filter((instruction) => {
     if (instruction.error !== null) return false
     return demandeConfirmation(natureDe(instruction.sql))
@@ -358,6 +473,10 @@ function enJeu(
   return {
     console,
     instructions: instructions.length,
+    // **Ce que le panneau ne montre pas et que le `commit` emporte.** Les verbes de ces
+    // instructions-là ne sont pas connus d'ici — le cœur ne les rend pas à une console qui ne les a
+    // pas jouées —, donc la confirmation en dit le **nombre** plutôt que de les taire.
+    etrangeres: etat.foreign,
     ecritures: ecrivantes.map((instruction) => {
       const nature = natureDe(instruction.sql)
       return nature.kind === 'lecture' ? '' : nature.instruction

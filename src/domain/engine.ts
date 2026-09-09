@@ -489,7 +489,28 @@ export type TransactionState = {
  * **Distinct d'un journal non vide**, et les deux cas existent : une transaction s'ouvre avant
  * sa première instruction, et une instruction refusée la laisse ouverte — donc à annuler.
  */
-open: boolean, statements: Array<TransactionStatement>, 
+open: boolean, 
+/**
+ * Les instructions **de la console qui lit**, dans l'ordre où elles ont été jouées.
+ *
+ * # Pourquoi elles sont filtrées
+ *
+ * Une console montre ce qu'elle a fait : les requêtes d'une voisine dans son propre panneau se
+ * lisaient comme les siennes, alors qu'elle ne les a ni écrites ni vues passer. Le journal, lui,
+ * reste entier — c'est la transaction, et un `commit` l'emporte en entier.
+ *
+ * **Ce que le filtre oblige à dire ailleurs** : `foreign`, ci-dessous. Un panneau qui listerait
+ * deux instructions et un `commit` qui en emporterait quatre serait un mensonge sur ce qu'on
+ * valide, et c'est la confirmation qui le porte.
+ */
+statements: Array<TransactionStatement>, 
+/**
+ * Combien d'instructions **d'autres consoles** la transaction porte en plus.
+ *
+ * Zéro dans le cas ordinaire — une seule console sur la connexion. Au-delà, la confirmation de
+ * validation le dit : ce que le panneau ne montre pas, le `commit` l'emporte quand même.
+ */
+foreign: number, 
 /**
  * Vrai quand une instruction a échoué **sur un moteur qui abandonne** la transaction.
  *
@@ -516,6 +537,15 @@ aborted: boolean, };
  * chercher pourquoi plus rien ne répond.
  */
 export type TransactionStatement = { 
+/**
+ * Le rang de cette instruction dans le journal de la transaction.
+ *
+ * **L'adresse que `transaction_result` attend**, et elle est **explicite** parce que l'écran
+ * n'en reçoit qu'une partie : chaque console ne voit que ses propres instructions, donc la
+ * position dans la liste reçue n'est plus le rang dans le journal. Sans ce champ, désigner la
+ * deuxième instruction de sa liste demanderait la deuxième du journal — celle d'à côté.
+ */
+index: number, 
 /**
  * Le SQL **réellement exécuté**, limite comprise — celui de `QueryResult::sql`.
  *

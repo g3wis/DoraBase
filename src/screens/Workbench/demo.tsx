@@ -864,7 +864,7 @@ export function WorkbenchDemo() {
    * état à lui déclenche le rendu.
    */
   const journaux = useRef<
-    Record<string, { rendue: TransactionStatement; reponse: QueryResult | null }[]>
+    Record<string, { rendue: TransactionStatement; reponse: QueryResult | null; origine: string }[]>
   >({})
   /**
    * **Mémoïsée, et c'est la règle de toute passerelle** (`useLignes`) : une littérale reconstruite
@@ -873,12 +873,17 @@ export function WorkbenchDemo() {
    */
   const passerelleTransaction = useMemo(
     () => ({
-      transactionState: async (cle: DatabaseKey) => {
+      transactionState: async (cle: DatabaseKey, console: string) => {
         const journal = journaux.current[indexDeConnexion(cle)] ?? []
-        // Comme le registre : ce qui voyage est ce que l'écran lit, les réponses restent ici.
+        // **Filtré par origine, comme le registre** (`API-38`) : une console ne voit que ses
+        // propres instructions, et le compte des autres. Un décor qui rendrait le journal entier
+        // ferait passer en démo ce que l'application filtre — et l'écart ne se verrait nulle part.
         return {
           open: journal.length > 0,
-          statements: journal.map((entree) => entree.rendue),
+          statements: journal
+            .filter((entree) => entree.origine === console)
+            .map((entree) => entree.rendue),
+          foreign: journal.filter((entree) => entree.origine !== console).length,
           // **La démo n'échoue jamais** : son `runSql` rend toujours une réponse, donc aucune de
           // ses transactions n'est abandonnée. C'est ce que les tests unitaires du panneau
           // couvrent, et ce que les tests Rust mesurent contre un vrai PostgreSQL.
@@ -1111,7 +1116,7 @@ export function WorkbenchDemo() {
            serait vérifiable qu'à l'œil dans l'application réelle. */
         passerelleTransaction={passerelleTransaction}
         passerelleExecution={{
-          runSql: async (cle, sql, _limite, mode) => {
+          runSql: async (cle, sql, _limite, mode, console) => {
             // **Le décor mongo rend des documents**, pas des lignes : sans cela l'arbre de `13b`
             // n'aurait rien à déplier, et `A8` ne se verrait pas en démo.
             if (estMongo(cle.database)) {
@@ -1187,10 +1192,17 @@ export function WorkbenchDemo() {
             // session la portant. C'est `useTransaction` qui le relira.
             const id = indexDeConnexion(cle)
             if (mode === 'manual' || (journaux.current[id]?.length ?? 0) > 0) {
+              const precedentes = journaux.current[id] ?? []
               journaux.current[id] = [
-                ...(journaux.current[id] ?? []),
+                ...precedentes,
                 {
+                  // L'origine, comme le cœur l'inscrit : c'est elle qui décide de ce que chaque
+                  // console voit dans son panneau.
+                  origine: console,
                   rendue: {
+                    // Le rang dans le journal **entier**, non dans la liste filtrée : c'est
+                    // l'adresse que `transactionResult` attend, ici comme dans le registre.
+                    index: precedentes.length,
                     sql: resultat.sql,
                     durationMs: resultat.durationMs,
                     returned: resultat.rows.length,
