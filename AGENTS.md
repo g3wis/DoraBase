@@ -915,6 +915,62 @@ qu'il portait et que le rendu ne dit pas.
   `pointer-events: none`, donc la mesure rend toujours ce qu'il y a **dessous** — verte pour une
   raison qui n'a rien à voir avec la question posée.
 
+- **Et ce bouton est devenu une bascule à deux verrous** (10 septembre 2026, `API-48`, à la
+  demande : « une sorte de buttonswitch avec mode lecture (icône verrou) et mode édition (icône
+  déverrouillé) », « placer ce bouton sur la droite de la barre », puis un **design fourni**,
+  `IconSwitch`). Ce n'est pas un revirement du point précédent, c'est son autre moitié :
+  **l'argument qui a banni le verrou portait sur un bouton, et une bascule n'est pas un bouton.**
+  Un bouton dit l'*acte* qu'il offre, donc un cadenas y disait l'état courant sans annoncer qu'on
+  pouvait l'ouvrir ; deux positions côte à côte ne disent aucun acte — elles montrent les deux
+  états et celui qu'on tient. Le cadenas fermé y redevient lisible parce qu'il est lu **contre**
+  son voisin ouvert. Huit points :
+  - **`IconSwitch` est une primitive de plus, et non `Toggle` ni `SegmentedControl`.** L'écart
+    avec `Toggle` est celui du sens : un interrupteur est une piste qui s'allume, dont la position
+    éteinte n'a rien à montrer ; ici les deux positions **sont** deux états nommés, chacun avec
+    son dessin, et c'est ce qui les rend lisibles. `SegmentedControl`, lui, est un choix exclusif
+    à n positions **avec des libellés** : deux icônes nues n'y entrent pas sans en faire un
+    troisième composant. Une première version l'avait employé, avec « Lecture » et « Édition »
+    écrits ; le design a tranché pour les icônes seules ;
+  - **`role="switch"`, donc un seul contrôle et une seule tabulation.** `Espace` et `Entrée`
+    basculent nativement, ce qui est la raison de n'avoir écrit aucun gestionnaire clavier — un
+    test le garde, sans quoi rien ne dirait que le choix du `<button>` tient : un
+    `<div role="switch">` passerait tous les autres ;
+  - **`checked` vaut « verrouillé », soit l'inverse d'`edition`.** C'est le sens du design, où la
+    position de droite porte le cadenas fermé, et le nom accessible suit — « Verrouiller la
+    table », le même dans les deux positions. L'inverser laisserait le cadenas fermé du côté
+    allumé, c'est-à-dire le contraire de ce qu'il dessine ;
+  - **le nom ne bouge pas, l'infobulle si.** Le nom est ce qu'on doit retrouver au même endroit à
+    chaque bascule ; l'infobulle **décrit**, et ce qu'il y a à décrire diffère — « Déverrouiller
+    pour modifier les lignes » ou « Verrouiller — la grille repasse en lecture seule », plus le
+    raccourci. C'est la seule chose que deux cadenas ne peuvent pas écrire ;
+  - **le contrôle est au bout de la barre, à droite.** La barre se lisait en deux temps — à gauche
+    ce qui décide des lignes qu'on voit, à droite ce qui les regarde —, et le mode n'appartient ni
+    à l'un ni à l'autre : il dit ce que la grille **accepte**. Le `+` reste à gauche contre le
+    stepper, donc les deux ne se touchent plus ; ce qui les liait n'était pas la place mais la
+    cause, et elle tient toujours — le `+` ne paraît qu'en édition, d'un bout de la barre à
+    l'autre ;
+  - **le survol de la piste est le sixième état de survol du dépôt, et il vient du design.** La
+    prohibition porte sur les survols *inventés* : celui-ci est dessiné, il ne fait que relever le
+    filet, et avec le jeton que le bouton secondaire emploie déjà (`--hover-border`). Sa raison
+    tient en une phrase : une piste sans libellé n'a rien d'autre pour dire qu'elle se clique ;
+  - **une ombre de pastille est un jeton, pas un littéral** — `--shadow-switch`, avec sa valeur
+    « Nuit », toutes deux prises dans le design. C'est la règle des ombres déclarées en entier
+    dans `tokens.json`, et la seule couleur que ce chantier ajoute ;
+  - **une seule taille est bâtie**, celle que le design appelle `md` (28 px) et met dans sa propre
+    barre d'outils — donc un pixel de plus que les contrôles voisins, qui sont en `content-box` à
+    25 + 2. Ses `sm · 25` et `xl · 34` attendent qu'un écran les demande : une variante dont
+    aucune position n'est choisie coûte un prop, une table de cotes et deux chemins à tenir, ce que
+    la bascule d'authentification IAM a déjà appris. `i-unlock` est la seule icône ajoutée, avec le
+    tracé du design — le rectangle d'`i-lock` à l'identique, l'anse seule ouverte.
+
+  **Ce que les tests ont dû apprendre à dire.** Trois d'entre eux mesuraient le bouton par son
+  `aria-pressed` ; ils mesurent maintenant `aria-checked`, et **la position rendue de la pastille**
+  plutôt que sa déclaration — un `transform` se lit en matrice, l'abscisse de la boîte dit où elle
+  est vraiment tombée. La transition durant 140 ms, cette mesure passe par `expect.poll` et non par
+  une lecture sèche (règle n° 15). Ce que jsdom garde de son côté est ce qu'il peut : les **deux**
+  dessins sont rendus, dans l'ordre, et ne bougent pas avec la position — c'est l'écart avec un
+  bouton qui échangerait son icône, et c'est vérifiable sans mise en page.
+
 - **La poubelle d'une ligne se découvre au survol de la ligne, non de son numéro** (10 septembre
   2026, `API-45`). Elle ne paraissait qu'au survol de la **gouttière** — 30 px de piste : il fallait
   viser cette bande pour savoir qu'un geste existe, ce qui est la forme la plus étroite du « chemin
@@ -928,8 +984,10 @@ qu'il portait et que le rendu ne dit pas.
   - **la poubelle est rouge, mais le rouge suit l'acte et non le bouton.** Le même bouton, sur une
     ligne déjà marquée, **annule** la suppression : il garde la croix et l'encre neutre. Peindre les
     deux en rouge ferait dire « attention » au geste de repli, et une poubelle y annoncerait une
-    suppression là où le clic la défait — c'est le crayon du bouton d'édition, qui dit l'**acte**
-    offert et jamais l'état courant. `--danger-ink`, non `--danger`, qui est une **surface** ;
+    suppression là où le clic la défait — c'est la règle d'`API-28` : un bouton dit l'**acte**
+    offert et jamais l'état courant. (Le crayon qui l'illustrait est parti le même jour, la bascule
+    de mode d'`API-48` n'étant justement plus un bouton ; la règle, elle, n'a pas bougé.)
+    `--danger-ink`, non `--danger`, qui est une **surface** ;
   - **les actions n'ont plus de fond.** Leur `--hover-row` se composait avec celui de la ligne
     survolée : une case plus sombre que le reste de la ligne, à l'endroit précis où l'on regarde. Ce
     qu'il cachait — le numéro — s'efface désormais par le même canal que celui qui les révèle ;

@@ -88,26 +88,6 @@
   }
 }
 
-/*
- * La bascule du mode édition, allumée.
- *
- * **La pastille sombre d'`A9`**, celle qui dit laquelle des deux vues est à l'écran
- * (`ColonneDroite.vueActive`) : un mode en cours se dit de la même façon d'un bout à l'autre du
- * produit. Pas `--accent`, qui veut dire « désigné » — un objet qu'on a choisi, non un mode qui
- * tourne — et que les préférences laissent recolorer.
- *
- * **Ce n'est pas un état de survol**, dont le dépôt refuse l'invention : c'est l'état d'un contrôle.
- *
- * **Et c'est la seule marque visuelle**, l'icône restant le crayon dans les deux états depuis le
- * 8 septembre 2026 : ce n'est pas une teinte posée sur un fond inchangé, c'est le fond **et**
- * l'encre qui s'inversent — la distinction tient sans la couleur —, et `aria-pressed` dit l'état à
- * qui ne voit ni l'une ni l'autre.
- */
-.actif {
-  background: var(--dark);
-  color: var(--on-dark);
-}
-
 /* Un bouton en cours **reste lisible** : c'est un état d'attente, pas une interdiction. L'atténuer
  * comme un contrôle indisponible ferait croire à une panne. */
 .carre:disabled {

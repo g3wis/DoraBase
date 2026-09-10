@@ -51,6 +51,7 @@ export type IconName =
   | 'table'
   | 'term'
   | 'trash'
+  | 'unlock'
   | 'view'
   | 'warn'
   | 'wmax'

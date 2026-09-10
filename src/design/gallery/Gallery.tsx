@@ -26,6 +26,7 @@ import { type Column, DataTable } from '../../ui/DataTable/DataTable'
 import { Dot } from '../../ui/Dot/Dot'
 import { Field } from '../../ui/Field/Field'
 import { ABSENT, formatBytes, formatCount } from '../../ui/format'
+import { IconSwitch } from '../../ui/IconSwitch/IconSwitch'
 import { Modal } from '../../ui/Modal/Modal'
 import { Popover } from '../../ui/Popover/Popover'
 import { RadioGroup } from '../../ui/RadioGroup/RadioGroup'
@@ -266,6 +267,120 @@ function ToggleGallery() {
             </AutoFocus>
           }
           disabled={<Toggle checked={true} onCheckedChange={() => {}} label="Exemple" disabled />}
+        />
+      </Sub>
+    </Section>
+  )
+}
+
+/**
+ * `IconSwitch` (`API-48`), la bascule à deux verrous de la barre d'outils de `A5`.
+ *
+ * **La vitrine montre ce que l'écran ne peut pas montrer en même temps** : les deux positions
+ * côte à côte, et l'état désactivé, qu'aucun écran n'emploie encore — c'est la raison d'être de la
+ * galerie, et le seul endroit d'où l'on juge la paire.
+ */
+function IconSwitchGallery() {
+  const [verrouille, setVerrouille] = useState(true)
+
+  return (
+    <Section title="IconSwitch">
+      <Note>
+        **Pas un Toggle** : celui-ci est un interrupteur dont la position éteinte n'a rien à
+        montrer, celle-là a **deux états nommés**, chacun avec son dessin. Un cadenas fermé lu seul
+        dit l'état sans annoncer qu'on peut l'ouvrir ; lu contre un cadenas ouvert, il dit les deux.
+        Le nom accessible ne bouge pas — c'est `aria-checked` qui porte la position.
+      </Note>
+      <Sub title="Interactif">
+        <div className={styles.grid}>
+          <div className={styles.cell}>
+            <IconSwitch
+              checked={verrouille}
+              onCheckedChange={setVerrouille}
+              label="Verrouiller la table"
+              iconOff="unlock"
+              iconOn="lock"
+            />
+            <span className={styles.cellCaption}>
+              {verrouille ? 'verrouillé — lecture seule' : 'déverrouillé — écriture'}
+            </span>
+          </div>
+        </div>
+      </Sub>
+      <Sub title="États">
+        <StatesHeader />
+        <StatesRow
+          label="ouvert"
+          normal={
+            <IconSwitch
+              checked={false}
+              onCheckedChange={() => {}}
+              label="Exemple"
+              iconOff="unlock"
+              iconOn="lock"
+            />
+          }
+          hover={
+            <Note>
+              Le filet passe à `--hover-border` : la piste n'a aucun libellé, donc rien d'autre ne
+              dit qu'elle se clique.
+            </Note>
+          }
+          focus={
+            <AutoFocus>
+              <IconSwitch
+                checked={false}
+                onCheckedChange={() => {}}
+                label="Exemple"
+                iconOff="unlock"
+                iconOn="lock"
+              />
+            </AutoFocus>
+          }
+          disabled={
+            <IconSwitch
+              checked={false}
+              onCheckedChange={() => {}}
+              label="Exemple"
+              iconOff="unlock"
+              iconOn="lock"
+              disabled
+            />
+          }
+        />
+        <StatesRow
+          label="fermé"
+          normal={
+            <IconSwitch
+              checked={true}
+              onCheckedChange={() => {}}
+              label="Exemple"
+              iconOff="unlock"
+              iconOn="lock"
+            />
+          }
+          hover={<Note>Idem : seul le filet bouge.</Note>}
+          focus={
+            <AutoFocus>
+              <IconSwitch
+                checked={true}
+                onCheckedChange={() => {}}
+                label="Exemple"
+                iconOff="unlock"
+                iconOn="lock"
+              />
+            </AutoFocus>
+          }
+          disabled={
+            <IconSwitch
+              checked={true}
+              onCheckedChange={() => {}}
+              label="Exemple"
+              iconOff="unlock"
+              iconOn="lock"
+              disabled
+            />
+          }
         />
       </Sub>
     </Section>
@@ -1628,9 +1743,9 @@ const LIGNES_DEMO: LigneDemo[] = Array.from({ length: 100_000 }, (_, i) => ({
  */
 function ToolbarGallery() {
   const [limite, setLimite] = useState<RowLimit>('fiveHundred')
-  // La bascule du mode édition est **réellement basculable ici** : c'est le seul endroit qui montre
-  // ses deux visages — le verrou sur fond clair, le crayon sur la pastille sombre — et une vitrine
-  // qui n'en montrerait qu'un ne dirait pas ce que le bouton fait. Le `+` la suit, comme dans `A5`.
+  // La bascule de mode est **réellement basculable ici** : c'est le seul endroit qui montre ses deux
+  // positions — verrou fermé, verrou ouvert — et une vitrine qui n'en montrerait qu'une ne dirait
+  // pas ce que le contrôle fait. Le `+` la suit, comme dans `A5`, d'un bout de la barre à l'autre.
   const [edition, setEdition] = useState(false)
   const colonne = (name: string, typeName: string): ColumnInfo => ({
     position: 1,
@@ -2210,6 +2325,7 @@ export function Gallery() {
       <ButtonGallery />
       <FieldGallery />
       <ToggleGallery />
+      <IconSwitchGallery />
       <BadgeGallery />
       <ChipGallery />
       <RadioGroupGallery />

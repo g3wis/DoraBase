@@ -11,12 +11,14 @@ export const tableViewFr: Dictionnaire = {
     refresh: 'Rafraîchir',
     increaseLimit: 'Augmenter la limite',
     decreaseLimit: 'Réduire la limite',
-    // Le nom **ne bouge pas** entre les deux états : c'est `aria-pressed` qui les distingue, et un
-    // bouton qui changerait de nom sous le doigt se chercherait à nouveau à chaque bascule.
-    editMode: 'Mode édition',
-    // L'infobulle *décrit*, elle ne *nomme* pas : elle porte ce que le nom ne peut pas dire — le
-    // raccourci qui fait le même geste.
-    editModeHint: (p) => `Modifier les lignes de la table · ${p.raccourci}`,
+    // Le nom de la bascule, **le même dans les deux positions** : c'est `aria-checked` qui dit
+    // laquelle est tenue, et un contrôle qui se renommerait sous le doigt se chercherait à
+    // nouveau à chaque bascule. On nomme le verrouillage, puisque c'est lui que « coché » vaut.
+    lockLabel: 'Verrouiller la table',
+    // L'infobulle *décrit*, elle ne *nomme* pas : elle dit ce que le clic va faire — ce que deux
+    // cadenas ne peuvent pas écrire — et le raccourci qui fait le même geste.
+    unlockHint: (p) => `Déverrouiller pour modifier les lignes · ${p.raccourci}`,
+    lockHint: (p) => `Verrouiller — la grille repasse en lecture seule · ${p.raccourci}`,
     addRow: 'Ajouter une ligne',
     removeFilter: (p) => `Retirer le filtre sur ${p.column}`,
     sqlExecuted: 'SQL exécuté',
@@ -185,8 +187,9 @@ export const tableViewEn: Dictionnaire = {
     refresh: 'Refresh',
     increaseLimit: 'Increase the limit',
     decreaseLimit: 'Decrease the limit',
-    editMode: 'Edit mode',
-    editModeHint: (p) => `Edit the table's rows · ${p.raccourci}`,
+    lockLabel: 'Lock the table',
+    unlockHint: (p) => `Unlock to edit rows · ${p.raccourci}`,
+    lockHint: (p) => `Lock — the grid goes back to read-only · ${p.raccourci}`,
     addRow: 'Add a row',
     removeFilter: (p) => `Remove the filter on ${p.column}`,
     sqlExecuted: 'SQL executed',

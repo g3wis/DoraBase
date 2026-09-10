@@ -1,0 +1,109 @@
+/*
+ * Bascule à icônes, relevée sur le design `IconSwitch` (10 septembre 2026, `API-48`) :
+ *
+ *   piste     28px (`--h-btn-md`), rayon 8px (`--radius-field`), fond `--muted`,
+ *             filet 1px `--border`, remplissage 3px (`--space-1`)
+ *   cellule   26 × 20, icône 14px, trait 2
+ *   pastille  26 × 20, rayon 6px (`--radius-control`), fond `--paper-bright`,
+ *             ombre `--shadow-switch`, course 26px
+ *   icônes    active `--accent`, inactive `--ink-3`
+ *
+ * Les cotes 26 et 20 sont des métriques internes à ce contrôle, comme le 30 / 17 / 13 de
+ * `Toggle` : aucune autre primitive ne les partage, et l'échelle d'espacement ne les couvre pas.
+ *
+ * **Une seule taille**, celle que le design appelle `md` et met dans sa propre barre d'outils.
+ * Ses deux autres — `sm · 25` et `xl · 34` — ne seront bâties que le jour où un écran les
+ * demande : une variante dont aucune position n'est choisie coûte un prop, une table de cotes et
+ * deux chemins à tenir, ce que la bascule d'authentification IAM a déjà appris.
+ *
+ * **L'ordre des règles suit la spécificité croissante**, et c'est une contrainte de l'outillage
+ * autant qu'une lecture : Biome refuse qu'un sélecteur moins spécifique suive un plus spécifique,
+ * la déclaration pouvant alors ne jamais s'appliquer.
+ */
+
+.root {
+  position: relative;
+  flex: none;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  height: var(--h-btn-md);
+  padding: var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-field);
+  background: var(--muted);
+  cursor: pointer;
+  transition: border-color 120ms ease;
+}
+
+.pastille {
+  position: absolute;
+  top: var(--space-1);
+  left: var(--space-1);
+  width: 26px;
+  height: 20px;
+  border-radius: var(--radius-control);
+  background: var(--paper-bright);
+  box-shadow: var(--shadow-switch);
+  transition: transform 140ms ease;
+}
+
+.cellule {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 20px;
+  color: var(--ink-3);
+}
+
+/* Le mouvement part, l'information reste : la position est portée par la couleur des icônes et
+ * par `aria-checked`, que rien ici ne retire. */
+@media (prefers-reduced-motion: reduce) {
+  .root,
+  .pastille {
+    transition: none;
+  }
+}
+
+/*
+ * **Le sixième état de survol du dépôt**, et il vient du design plutôt que d'une invention : la
+ * piste ne porte aucun libellé, donc rien d'autre ne dit qu'elle se clique. Il ne fait que
+ * relever le filet, avec le jeton que le bouton secondaire emploie déjà.
+ */
+.root:hover:not(:disabled) {
+  border-color: var(--hover-border);
+}
+
+.root:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+/* Désactivé : la pastille perd son relief et l'icône tenue son accent. Les deux positions
+ * deviennent grises, ce qui dit « rien à choisir ici » sans effacer laquelle est tenue. */
+.root:disabled {
+  border-color: var(--disabled);
+  cursor: not-allowed;
+}
+
+/* La course vaut exactement la largeur d'une cellule : les deux se touchent, donc la pastille
+ * passe de l'une à l'autre sans laisser de jour. */
+.root[aria-checked="true"] .pastille {
+  transform: translateX(26px);
+}
+
+.root[aria-checked="false"] .gauche,
+.root[aria-checked="true"] .droite {
+  color: var(--accent);
+}
+
+.root:disabled .pastille {
+  background: var(--paper-alt);
+  box-shadow: none;
+}
+
+.root:disabled .cellule {
+  color: var(--ink-3);
+}
