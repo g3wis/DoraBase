@@ -1,0 +1,156 @@
+/*
+ * La matrice rôle × base (`API-32`).
+ *
+ * Elle suit la facture de `DataTable` — en-tête de 26 px sur `--bar`, cellules en mono, filets
+ * verticaux entre colonnes et aucun au bord gauche — sans en être une : ses colonnes sont une
+ * donnée, et chacune de ses cellules est un contrôle. Voir l'en-tête du composant.
+ */
+.cadre {
+  /* Le tableau défile **dans son conteneur**, jamais en poussant l'écran : une instance à vingt
+     bases dépasse toute largeur de fenêtre, et la règle du produit est que la racine ne défile pas
+     horizontalement. */
+  overflow: auto;
+  overscroll-behavior: none;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.matrice {
+  border-collapse: collapse;
+  font: var(--weight-medium) var(--text-dense) var(--font-mono);
+}
+
+/* La légende nomme le tableau pour une voix, sans occuper de place à l'œil : le titre visible est
+   celui du segment actif de la bande. */
+.legende {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.enteteRole,
+.enteteBase {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: 26px;
+  padding: 0 var(--space-4);
+  border-bottom: 1px solid var(--divider);
+  background: var(--bar);
+  font: var(--weight-semibold) var(--text-label) var(--font-ui);
+  color: var(--ink-2);
+  text-align: left;
+  white-space: nowrap;
+}
+
+/* La colonne des rôles reste visible pendant le défilement horizontal : sans elle, une matrice à
+   vingt bases affiche des sigles dont on ne sait plus à quel rôle ils appartiennent. */
+.enteteRole,
+.role {
+  position: sticky;
+  left: 0;
+  background: var(--paper);
+}
+
+.enteteRole {
+  z-index: 2;
+  background: var(--bar);
+}
+
+.role {
+  padding: 0 var(--space-4);
+  border-right: 1px solid var(--divider-2);
+  border-bottom: 1px solid var(--divider-2);
+  font: var(--weight-semibold) var(--text-dense) var(--font-ui);
+  color: var(--ink);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.enteteBase {
+  border-left: 1px solid var(--divider-2);
+}
+
+.cellule {
+  padding: 0 var(--space-3);
+  border-left: 1px solid var(--divider-2);
+  border-bottom: 1px solid var(--divider-2);
+  height: 24px;
+}
+
+.groupe {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+/*
+ * Une pastille par privilège.
+ *
+ * Le fond **et** l'encre s'inversent entre les deux états : la distinction tient donc sans la
+ * couleur, et `aria-pressed` la dit à qui ne voit ni l'une ni l'autre. C'est le motif du bouton
+ * d'édition de la barre d'outils.
+ */
+.actif,
+.inactif {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-control);
+  font: var(--weight-semibold) var(--text-meta) var(--font-mono);
+  cursor: pointer;
+}
+
+.actif {
+  background: var(--dark);
+  color: var(--on-dark);
+}
+
+.inactif {
+  background: none;
+  color: var(--ink-4);
+}
+
+.actif:hover,
+.inactif:hover {
+  outline: 1px solid var(--divider);
+}
+
+.actif:focus-visible,
+.inactif:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.actif[aria-disabled="true"],
+.inactif[aria-disabled="true"] {
+  cursor: default;
+}
+
+.actif[aria-disabled="true"]:hover,
+.inactif[aria-disabled="true"]:hover {
+  outline: none;
+}
+
+/* Le sigle composé, à droite des trois pastilles : ce qu'on balaie du regard. */
+.sigle {
+  margin-left: var(--space-2);
+  min-width: 26px;
+  font: var(--weight-medium) var(--text-meta) var(--font-mono);
+  color: var(--ink-3);
+}
+
+.vide {
+  margin: 0;
+  padding: var(--space-6);
+  font: var(--weight-medium) var(--text-label) var(--font-ui);
+  color: var(--ink-2);
+}

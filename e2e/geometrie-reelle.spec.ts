@@ -452,10 +452,12 @@ test('la barre de fil d’Ariane contient son contrôle segmenté, même à l’
 
 test('le séparateur est un trait d’un pixel, et une barre au survol', async ({ page }) => {
   await ouvrirUneTable(page)
-  const poignee = page.locator('[role=separator]').first()
+  const poignee = page.locator('[role=separator][aria-orientation=vertical]').first()
 
   const trait = await page.evaluate(() => {
-    const separateur = document.querySelector('[role=separator]') as HTMLElement
+    const separateur = document.querySelector(
+      '[role=separator][aria-orientation=vertical]',
+    ) as HTMLElement
     return {
       // **La poignée est le trait.** Elle faisait 5 px transparents autour d'un trait de 1 : entre une
       // sidebar en `--paper-alt` et un centre en `--paper`, ces 5 px dessinaient une bande claire.
@@ -481,8 +483,10 @@ test('le séparateur est un trait d’un pixel, et une barre au survol', async (
     .poll(() =>
       page.evaluate(() =>
         Number(
-          getComputedStyle(document.querySelector('[role=separator]') as Element, '::after')
-            .opacity,
+          getComputedStyle(
+            document.querySelector('[role=separator][aria-orientation=vertical]') as Element,
+            '::after',
+          ).opacity,
         ),
       ),
     )
@@ -851,7 +855,10 @@ test('les deux jonctions verticales sont un seul trait, identique à gauche et �
   await ouvrirUneTable(page)
 
   const jonctions = await page.evaluate(() => {
-    const poignees = [...document.querySelectorAll('[role=separator]')]
+    // **Les jonctions *verticales*** : depuis `API-32`, la sidebar porte elle-même un partage
+    // horizontal — la zone d'instances — dont la poignée est un séparateur de pleine largeur. La
+    // compter ici ferait échouer l'assertion sur une poignée qui n'a rien à voir avec la question.
+    const poignees = [...document.querySelectorAll('[role=separator][aria-orientation=vertical]')]
     // Ce qui borde chaque poignée : si un voisin dessine son propre filet, il se colle à celui de la
     // poignée et le trait fait 2 px — l'écart que l'écran a signalé.
     return poignees.map((poignee) => {

@@ -1,0 +1,22 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+/*
+ * La portée de la lecture, dite plutôt que tue.
+ *
+ * En tête et non en pied : ce qu'elle corrige est la lecture qu'on ferait du tableau, donc elle doit
+ * arriver avant. `flex: none` — le tableau défile, la phrase reste.
+ */
+.portee {
+  flex: none;
+  margin: 0;
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--divider-2);
+  background: var(--bar);
+  font: var(--weight-medium) var(--text-label) var(--font-ui);
+  color: var(--ink-2);
+}

@@ -1,0 +1,48 @@
+/* Les rôles du serveur, en deux tableaux (`API-32`, 9 septembre 2026). */
+.root {
+  display: flex;
+  flex-direction: column;
+}
+
+/*
+ * La ligne qui déplie les groupes.
+ *
+ * **La facture des schémas système du gestionnaire de schémas**, réemployée : même hauteur de ligne,
+ * même graisse, même survol. Deux façons de replier une seconde liste dans le même produit auraient
+ * été deux conventions à apprendre — et celle-là est déjà écrite.
+ */
+.section {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  height: var(--rowh);
+  padding: 0 var(--space-5);
+  border: none;
+  border-top: 1px solid var(--divider-2);
+  background: none;
+  font-family: var(--font-ui);
+  font-size: var(--text-label);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-caps-sm);
+  color: var(--ink-2);
+  cursor: pointer;
+  text-align: left;
+}
+
+/* Le seul état de survol employé ici, et il est déjà un jeton : celui des lignes d'arbre et de
+ * tableau. Cette ligne se comporte comme une ligne de liste, pas comme un bouton. */
+.section:hover {
+  background: var(--hover-row);
+}
+
+.section:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+/* Le badge d'un rôle prédéfini ne pousse pas le nom sous l'ellipse : il ne se rétrécit pas, mais il
+   ne s'étire pas non plus, et un mot suffit. La phrase entière est en infobulle de la cellule. */
+.badge {
+  flex: none;
+}

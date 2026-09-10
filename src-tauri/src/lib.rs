@@ -5,6 +5,8 @@
 pub mod config;
 pub mod dump;
 pub mod engine;
+/// Le gestionnaire d'instances (`API-32`).
+pub mod instances;
 pub mod maj;
 pub mod menu;
 pub mod secrets;
@@ -88,6 +90,21 @@ pub fn run() {
             engine::commands::transaction_result,
             engine::commands::commit_transaction,
             engine::commands::rollback_transaction,
+            instances::commands::save_instance,
+            instances::commands::delete_instance,
+            instances::commands::open_instance,
+            instances::commands::close_instance,
+            instances::commands::instance_state,
+            instances::commands::instance_overview,
+            instances::commands::instance_databases,
+            instances::commands::instance_roles,
+            instances::commands::instance_privileges,
+            instances::commands::instance_sessions,
+            instances::commands::instance_extensions,
+            instances::commands::instance_settings,
+            instances::commands::scram_verifier,
+            instances::commands::plan_instance_action,
+            instances::commands::run_instance_action,
             maj::check_update,
             maj::install_update,
             dump::commands::dump_availability,

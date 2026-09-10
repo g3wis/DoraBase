@@ -10,7 +10,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::model::{
-    Database, EnvironmentColor, EnvironmentDeclaration, EnvironmentId, Preferences, Project,
+    Database, EnvironmentColor, EnvironmentDeclaration, EnvironmentId, ManagedInstance,
+    Preferences, Project,
 };
 
 /// La version du format sur disque. À incrémenter pour tout changement de forme, en ajoutant la
@@ -45,6 +46,16 @@ struct ConfigFile {
     /// forcé une migration qui ne migre rien, le même arbitrage qu'en `12f`.
     #[serde(default)]
     preferences: Preferences,
+    /// Les instances managées d'`API-32`.
+    ///
+    /// **`serde(default)` plutôt qu'un cran de migration**, la règle des champs *ajoutés* de `27a` :
+    /// une configuration écrite avant `API-32` n'a pas ce champ, et le vecteur vide est exactement
+    /// l'état correct — personne n'avait déclaré d'instance.
+    ///
+    /// **`skip_serializing_if` pour ne pas écrire un tableau vide** chez qui n'en déclare aucune :
+    /// le fichier est lisible à la main, et une clé qui ne porte rien fait chercher à quoi elle sert.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    instances: Vec<ManagedInstance>,
 }
 
 /// L'issue d'une lecture. Quatre cas distincts, délibérément : confondre « absent » et
@@ -58,6 +69,8 @@ pub enum LoadOutcome {
         /// **Toujours présentes**, même quand le fichier ne les portait pas : leur défaut *est* une
         /// valeur, pas une absence.
         preferences: Preferences,
+        /// Les instances managées (`API-32`). Vide quand le fichier n'en portait pas.
+        instances: Vec<ManagedInstance>,
     },
     /// Fichier présent mais incompréhensible. L'original est **conservé** sous
     /// `quarantined_to` : c'est peut-être la seule copie du travail de l'utilisateur.
@@ -156,6 +169,7 @@ pub(crate) fn ecrire_temporaire_sans_renommer(
     cible: &Path,
     projects: &[Project],
     preferences: &Preferences,
+    instances: &[ManagedInstance],
 ) -> Result<PathBuf, StoreError> {
     if let Some(parent) = cible.parent() {
         fs::create_dir_all(parent)?;
@@ -167,6 +181,7 @@ pub(crate) fn ecrire_temporaire_sans_renommer(
         // **Bornées à l'écriture**, pas seulement à la lecture : une valeur hors bornes écrite sur
         // disque reviendrait à chaque démarrage.
         preferences: preferences.clone().borner(),
+        instances: instances.to_vec(),
     })?;
 
     let temporaire = chemin_temporaire(cible);
@@ -183,12 +198,18 @@ pub(crate) fn ecrire_temporaire_sans_renommer(
 ///
 /// À tout instant, le chemin cible désigne soit l'ancien contenu complet, soit le
 /// nouveau — jamais un JSON tronqué.
+/// **Les instances sont un paramètre, non un défaut.** Le fichier est réécrit *entier* à chaque
+/// enregistrement : une signature qui les aurait laissées de côté aurait fait qu'enregistrer un
+/// projet **efface toutes les instances déclarées**, sans erreur et sans qu'un test de projet le
+/// voie. C'est la raison pour laquelle il n'existe pas de variante à trois arguments — deux voies
+/// pour un même acte en laissent une en arrière (règle n° 17), et celle-ci perdrait des données.
 pub fn save(
     cible: &Path,
     projects: &[Project],
     preferences: &Preferences,
+    instances: &[ManagedInstance],
 ) -> Result<(), StoreError> {
-    let temporaire = ecrire_temporaire_sans_renommer(cible, projects, preferences)?;
+    let temporaire = ecrire_temporaire_sans_renommer(cible, projects, preferences, instances)?;
     fs::rename(&temporaire, cible)?;
     Ok(())
 }
@@ -248,6 +269,7 @@ pub fn load(cible: &Path) -> LoadOutcome {
                 projects,
                 // Bornées à la lecture aussi : le fichier est éditable à la main.
                 preferences: fichier.preferences.borner(),
+                instances: fichier.instances,
             }
         }
         Err(erreur) => mettre_en_quarantaine(cible, format!("forme inattendue : {erreur}")),
@@ -296,7 +318,7 @@ fn migrer(cible: &Path, brut: &str, mut valeur: serde_json::Value, depuis: u32) 
         0 | 1 => migration_v1_vers_v2(&brut_migre),
         // `2..=4` et non `2 | 3 | 4` : clippy refuse l'énumération d'entiers contigus.
         2..=4 => serde_json::from_str::<ConfigFile>(&brut_migre)
-            .map(|fichier| (fichier.projects, fichier.preferences)),
+            .map(|fichier| (fichier.projects, fichier.preferences, fichier.instances)),
         _ => {
             return LoadOutcome::Unreadable {
                 reason: format!("aucune migration connue depuis la version {depuis}"),
@@ -306,9 +328,10 @@ fn migrer(cible: &Path, brut: &str, mut valeur: serde_json::Value, depuis: u32) 
     };
 
     match migre {
-        Ok((projects, preferences)) => LoadOutcome::Loaded {
+        Ok((projects, preferences, instances)) => LoadOutcome::Loaded {
             projects,
             preferences: preferences.borner(),
+            instances,
         },
         Err(erreur) => LoadOutcome::Unreadable {
             reason: format!("migration depuis la version {depuis} impossible : {erreur}"),
@@ -475,7 +498,11 @@ mod v1 {
 /// plus l'environnement actif, dans l'ordre du trio. Déclarer les trois d'office ajouterait des
 /// environnements vides que l'utilisateur n'a jamais demandés ; n'en déclarer aucun rendrait le
 /// projet invalide.
-fn migration_v1_vers_v2(brut: &str) -> Result<(Vec<Project>, Preferences), serde_json::Error> {
+/// **Aucune instance n'en sort, et le vecteur vide est la bonne réponse** : `API-32` est postérieur
+/// de plus de deux crans à cette forme, donc un fichier v1 ne peut en porter aucune.
+fn migration_v1_vers_v2(
+    brut: &str,
+) -> Result<(Vec<Project>, Preferences, Vec<ManagedInstance>), serde_json::Error> {
     let ancien: v1::Fichier = serde_json::from_str(brut)?;
 
     let projects = ancien
@@ -554,7 +581,7 @@ fn migration_v1_vers_v2(brut: &str) -> Result<(Vec<Project>, Preferences), serde
         })
         .collect();
 
-    Ok((projects, ancien.preferences))
+    Ok((projects, ancien.preferences, Vec::new()))
 }
 
 fn mettre_en_quarantaine(cible: &Path, raison: String) -> LoadOutcome {
@@ -609,13 +636,37 @@ impl ConfigStore {
         (Self { chemin, refus }, issue)
     }
 
-    pub fn save(&self, projects: &[Project], preferences: &Preferences) -> Result<(), StoreError> {
+    pub fn save(
+        &self,
+        projects: &[Project],
+        preferences: &Preferences,
+        instances: &[ManagedInstance],
+    ) -> Result<(), StoreError> {
         if let Some(raison) = &self.refus {
             return Err(StoreError::EcritureRefusee {
                 raison: raison.clone(),
             });
         }
-        save(&self.chemin, projects, preferences)
+        save(&self.chemin, projects, preferences, instances)
+    }
+
+    /// Relit les instances managées du disque (`API-32`).
+    ///
+    /// **Même raison que `load_projects`, et une de plus** : le fichier est réécrit entier à chaque
+    /// enregistrement, donc toute commande qui écrit *quelque chose* doit d'abord relire ce qu'elle
+    /// n'écrit pas. Sans cette lecture, renommer un projet effacerait les instances.
+    pub fn load_instances(&self) -> Result<Vec<ManagedInstance>, String> {
+        if let Some(raison) = &self.refus {
+            return Err(raison.clone());
+        }
+        match load(&self.chemin) {
+            LoadOutcome::Fresh => Ok(Vec::new()),
+            LoadOutcome::Loaded { instances, .. } => Ok(instances),
+            LoadOutcome::Unreadable { reason, .. } => Err(reason),
+            LoadOutcome::TooNew { found, supported } => Err(format!(
+                "le fichier est en version {found}, cette application comprend la version {supported}"
+            )),
+        }
     }
 
     /// Relit les préférences du disque.
@@ -726,7 +777,7 @@ mod tests_preferences {
                 ..Guards::default()
             },
         };
-        save(&chemin, &[], &voulues).unwrap();
+        save(&chemin, &[], &voulues, &[]).unwrap();
 
         let LoadOutcome::Loaded { preferences, .. } = load(&chemin) else {
             panic!("le fichier doit se lire");
@@ -799,11 +850,11 @@ mod tests_preferences {
             theme: Theme::Nuit,
             ..Preferences::default()
         };
-        save(&chemin, &[], &reglees).unwrap();
+        save(&chemin, &[], &reglees, &[]).unwrap();
 
         let (store, _) = ConfigStore::open(&chemin);
         let relues = store.load_preferences().unwrap();
-        store.save(&[], &relues).unwrap();
+        store.save(&[], &relues, &[]).unwrap();
 
         let LoadOutcome::Loaded { preferences, .. } = load(&chemin) else {
             panic!("le fichier doit se lire");
@@ -880,7 +931,7 @@ mod tests {
         let chemin = dir.path().join("config.json");
         let projets = vec![projet_nomme("Atelier Nord")];
 
-        save(&chemin, &projets, &Preferences::default()).unwrap();
+        save(&chemin, &projets, &Preferences::default(), &[]).unwrap();
         let relu = match load(&chemin) {
             LoadOutcome::Loaded { projects, .. } => projects,
             autre => panic!("attendu Loaded, obtenu {autre:?}"),
@@ -893,7 +944,7 @@ mod tests {
     fn le_fichier_porte_un_numero_de_version() {
         let dir = tempfile::tempdir().unwrap();
         let chemin = dir.path().join("config.json");
-        save(&chemin, &[], &Preferences::default()).unwrap();
+        save(&chemin, &[], &Preferences::default(), &[]).unwrap();
 
         let valeur: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(&chemin).unwrap()).unwrap();
@@ -904,7 +955,7 @@ mod tests {
     fn le_repertoire_est_cree_s_il_manque() {
         let dir = tempfile::tempdir().unwrap();
         let chemin = dir.path().join("sous/dossier/config.json");
-        save(&chemin, &[], &Preferences::default()).unwrap();
+        save(&chemin, &[], &Preferences::default(), &[]).unwrap();
         assert!(chemin.exists());
     }
 
@@ -915,7 +966,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let chemin = dir.path().join("config.json");
 
-        save(&chemin, &[projet_nomme("Ancien")], &Preferences::default()).unwrap();
+        save(
+            &chemin,
+            &[projet_nomme("Ancien")],
+            &Preferences::default(),
+            &[],
+        )
+        .unwrap();
         let avant = fs::read_to_string(&chemin).unwrap();
 
         // L'interruption simulée : le temporaire est écrit et synchronisé, le renommage
@@ -924,6 +981,7 @@ mod tests {
             &chemin,
             &[projet_nomme("Nouveau")],
             &Preferences::default(),
+            &[],
         )
         .unwrap();
 
@@ -946,7 +1004,7 @@ mod tests {
     fn le_temporaire_ne_subsiste_pas_apres_une_ecriture_reussie() {
         let dir = tempfile::tempdir().unwrap();
         let chemin = dir.path().join("config.json");
-        save(&chemin, &[], &Preferences::default()).unwrap();
+        save(&chemin, &[], &Preferences::default(), &[]).unwrap();
         assert!(!chemin_temporaire(&chemin).exists());
     }
 
@@ -968,10 +1026,22 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let chemin = dir.path().join("config.json");
 
-        save(&chemin, &[projet_nomme("Premier")], &Preferences::default()).unwrap();
+        save(
+            &chemin,
+            &[projet_nomme("Premier")],
+            &Preferences::default(),
+            &[],
+        )
+        .unwrap();
         let inode_avant = fs::metadata(&chemin).unwrap().ino();
 
-        save(&chemin, &[projet_nomme("Second")], &Preferences::default()).unwrap();
+        save(
+            &chemin,
+            &[projet_nomme("Second")],
+            &Preferences::default(),
+            &[],
+        )
+        .unwrap();
         let inode_apres = fs::metadata(&chemin).unwrap().ino();
 
         assert_ne!(
@@ -1060,7 +1130,7 @@ mod tests {
         let (store, issue) = ConfigStore::open(&chemin);
         assert!(matches!(issue, LoadOutcome::Unreadable { .. }));
 
-        let erreur = store.save(&[projet_nomme("Nouveau")], &Preferences::default());
+        let erreur = store.save(&[projet_nomme("Nouveau")], &Preferences::default(), &[]);
         assert!(matches!(erreur, Err(StoreError::EcritureRefusee { .. })));
         // Rien n'a été écrit à la place.
         assert!(!chemin.exists());
@@ -1075,7 +1145,7 @@ mod tests {
 
         let (store, _) = ConfigStore::open(&chemin);
         assert!(matches!(
-            store.save(&[], &Preferences::default()),
+            store.save(&[], &Preferences::default(), &[]),
             Err(StoreError::EcritureRefusee { .. })
         ));
         assert_eq!(fs::read_to_string(&chemin).unwrap(), futur);
@@ -1089,7 +1159,7 @@ mod tests {
         let (store, issue) = ConfigStore::open(&chemin);
         assert!(matches!(issue, LoadOutcome::Fresh));
         assert!(store
-            .save(&[projet_nomme("Premier")], &Preferences::default())
+            .save(&[projet_nomme("Premier")], &Preferences::default(), &[])
             .is_ok());
     }
 
@@ -1482,11 +1552,12 @@ mod tests {
         let LoadOutcome::Loaded {
             projects,
             preferences,
+            ..
         } = load(&chemin)
         else {
             panic!("un fichier v4 doit se lire");
         };
-        save(&chemin, &projects, &preferences).unwrap();
+        save(&chemin, &projects, &preferences, &[]).unwrap();
 
         let reecrit = fs::read_to_string(&chemin).unwrap();
         assert!(!reecrit.contains("activeEnvironment"));
@@ -1701,7 +1772,7 @@ mod tests {
                 visible_schemas: None,
             }],
         };
-        save(&chemin, &[projet], &Preferences::default()).unwrap();
+        save(&chemin, &[projet], &Preferences::default(), &[]).unwrap();
 
         let issue = load(&chemin);
         assert!(matches!(issue, LoadOutcome::Loaded { .. }), "{issue:?}");
@@ -1743,7 +1814,7 @@ mod tests {
             }],
         };
 
-        save(&chemin, &[projet], &Preferences::default()).unwrap();
+        save(&chemin, &[projet], &Preferences::default(), &[]).unwrap();
 
         // Lecture en texte brut : la seule vérification qui vaille.
         let brut = fs::read_to_string(&chemin).unwrap();
@@ -1797,7 +1868,7 @@ mod tests {
             sql: "select 1".into(),
         }];
 
-        save(&cible, &projets, &Preferences::default()).expect("écriture");
+        save(&cible, &projets, &Preferences::default(), &[]).expect("écriture");
         match load(&cible) {
             LoadOutcome::Loaded { projects, .. } => {
                 // Le concept a disparu du modèle rendu à l'écran…
@@ -1823,13 +1894,13 @@ mod tests {
             name: "CA par jour".into(),
             sql: "select 1".into(),
         }];
-        save(&cible, &projets, &Preferences::default()).expect("écriture");
+        save(&cible, &projets, &Preferences::default(), &[]).expect("écriture");
 
         let projets = match load(&cible) {
             LoadOutcome::Loaded { projects, .. } => projects,
             autre => panic!("la lecture doit réussir : {autre:?}"),
         };
-        save(&cible, &projets, &Preferences::default()).expect("réécriture");
+        save(&cible, &projets, &Preferences::default(), &[]).expect("réécriture");
         let brut = std::fs::read_to_string(&cible).expect("lecture");
         assert!(!brut.contains("queries"));
         assert!(brut.contains("CA par jour"));
@@ -2035,6 +2106,173 @@ mod tests_migration_v2 {
         assert!(
             !sauvegardes.is_empty(),
             "l'original en v1 doit être conservé quelque part : {sauvegardes:?}"
+        );
+    }
+}
+
+/// Les instances managées dans le fichier de configuration (`API-32`).
+///
+/// **Ce que ces tests gardent tient en une phrase** : le fichier est réécrit *entier* à chaque
+/// enregistrement, donc tout ce qu'une écriture ne porte pas, elle l'efface. C'est le mode de
+/// défaillance propre à ce format, et il est silencieux — aucun test de projet ne le verrait.
+#[cfg(test)]
+mod tests_instances {
+    use super::super::model::{ConnectionSettings, Engine, InstanceId, ManagedInstance, SslMode};
+    use super::*;
+    use tempfile::tempdir;
+
+    fn instance(id: &str) -> ManagedInstance {
+        ManagedInstance {
+            id: InstanceId::brut(id),
+            label: id.to_owned(),
+            engine: Engine::PostgreSql,
+            connection: ConnectionSettings {
+                host: "localhost".into(),
+                port: 5432,
+                default_database: "postgres".into(),
+                username: "postgres".into(),
+                password: None,
+                ssl_mode: SslMode::Prefer,
+                ca_certificate: None,
+                auth_database: None,
+                read_only: false,
+                reconnect_on_startup: false,
+                tunnel: None,
+            },
+            production: true,
+            confirm_writes: true,
+        }
+    }
+
+    #[test]
+    fn une_instance_ecrite_se_relit() {
+        let dir = tempdir().unwrap();
+        let chemin = dir.path().join("config.json");
+
+        save(
+            &chemin,
+            &[],
+            &Preferences::default(),
+            &[instance("pg-prod")],
+        )
+        .unwrap();
+
+        let LoadOutcome::Loaded { instances, .. } = load(&chemin) else {
+            panic!("le fichier doit se relire");
+        };
+        assert_eq!(instances, vec![instance("pg-prod")]);
+    }
+
+    #[test]
+    fn une_configuration_ecrite_avant_api_32_se_lit_sans_instance_et_sans_migration() {
+        // La règle des champs *ajoutés* de `27a` : `serde(default)` plutôt qu'un cran. Le vecteur
+        // vide est exactement l'état correct — personne n'avait déclaré d'instance.
+        let dir = tempdir().unwrap();
+        let chemin = dir.path().join("config.json");
+        fs::write(
+            &chemin,
+            format!(r#"{{"version":{VERSION_COURANTE},"projects":[]}}"#),
+        )
+        .unwrap();
+
+        let LoadOutcome::Loaded { instances, .. } = load(&chemin) else {
+            panic!("un fichier sans instances doit se lire");
+        };
+        assert!(instances.is_empty());
+    }
+
+    #[test]
+    fn un_fichier_sans_instance_n_en_ecrit_pas_la_cle() {
+        // `skip_serializing_if` : le fichier est lisible à la main, et une clé qui ne porte rien
+        // fait chercher à quoi elle sert.
+        let dir = tempdir().unwrap();
+        let chemin = dir.path().join("config.json");
+        save(&chemin, &[], &Preferences::default(), &[]).unwrap();
+
+        assert!(!fs::read_to_string(&chemin).unwrap().contains("instances"));
+    }
+
+    #[test]
+    fn ecrire_des_projets_sans_repasser_les_instances_les_efface() {
+        // **Le mode de défaillance que la signature de `save` rend impossible à provoquer par
+        // omission.** Ce test le provoque *délibérément*, en passant le vecteur vide, pour que la
+        // conséquence soit écrite noir sur blanc : c'est la raison pour laquelle il n'existe pas de
+        // variante de `save` à trois arguments, et pour laquelle `ecrire_le_reste_intact` existe.
+        let dir = tempdir().unwrap();
+        let chemin = dir.path().join("config.json");
+        save(
+            &chemin,
+            &[],
+            &Preferences::default(),
+            &[instance("pg-prod")],
+        )
+        .unwrap();
+
+        save(&chemin, &[], &Preferences::default(), &[]).unwrap();
+
+        let LoadOutcome::Loaded { instances, .. } = load(&chemin) else {
+            panic!("le fichier doit se relire");
+        };
+        assert!(instances.is_empty(), "la démonstration du danger");
+    }
+
+    #[test]
+    fn le_magasin_relit_les_instances_du_disque() {
+        // C'est `load_instances` qui rend possible « relire ce qu'on n'écrit pas ». Sans elle, chaque
+        // commande qui écrit des projets devrait recevoir les instances du front — donc un état
+        // périmé pourrait les écraser, ce que `load_projects` écarte déjà pour les projets.
+        let dir = tempdir().unwrap();
+        let chemin = dir.path().join("config.json");
+        save(
+            &chemin,
+            &[],
+            &Preferences::default(),
+            &[instance("pg-prod")],
+        )
+        .unwrap();
+
+        let (store, _) = ConfigStore::open(&chemin);
+        assert_eq!(store.load_instances().unwrap(), vec![instance("pg-prod")]);
+    }
+
+    #[test]
+    fn une_ouverture_refusee_refuse_aussi_de_rendre_les_instances() {
+        // Un fichier en quarantaine ne doit pas être lu comme s'il était vide : rendre `[]` ferait
+        // écrire par-dessus, et la première écriture de projet effacerait des instances qu'on n'a
+        // simplement pas su lire.
+        let dir = tempdir().unwrap();
+        let chemin = dir.path().join("config.json");
+        fs::write(&chemin, "{ pas du json").unwrap();
+
+        let (store, _) = ConfigStore::open(&chemin);
+        assert!(store.load_instances().is_err());
+    }
+
+    #[test]
+    fn confirmer_chaque_ecriture_reste_allume_pour_une_instance_ecrite_sans_ce_champ() {
+        // `serde(default)` sur un `bool` rendrait `false`, ce qui ferait d'une mise à jour de
+        // DoraBase une levée silencieuse du garde-fou — exactement ce que `Guards` refuse.
+        let brut = format!(
+            r#"{{"version":{VERSION_COURANTE},"projects":[],"instances":[{{
+                 "id":"pg","label":"pg","engine":"postgresql",
+                 "connection":{{"host":"h","port":5432,"defaultDatabase":"postgres",
+                   "username":"postgres","password":null,"sslMode":"prefer",
+                   "readOnly":false,"reconnectOnStartup":false,"tunnel":null}}}}]}}"#
+        );
+        let dir = tempdir().unwrap();
+        let chemin = dir.path().join("config.json");
+        fs::write(&chemin, brut).unwrap();
+
+        let LoadOutcome::Loaded { instances, .. } = load(&chemin) else {
+            panic!("le fichier doit se lire");
+        };
+        assert!(
+            instances[0].confirm_writes,
+            "le garde-fou doit rester allumé"
+        );
+        assert!(
+            !instances[0].production,
+            "et le drapeau de prod rester éteint"
         );
     }
 }

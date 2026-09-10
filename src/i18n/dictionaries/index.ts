@@ -2,6 +2,7 @@ import { consoleEn, consoleFr } from './console'
 import { diagramEn, diagramFr } from './diagram'
 import { dumpEn, dumpFr } from './dump'
 import { explorerEn, explorerFr } from './explorer'
+import { instancesEn, instancesFr } from './instances'
 import { newConnectionEn, newConnectionFr } from './newConnection'
 import { newProjectEn, newProjectFr } from './newProject'
 import { preferencesEn, preferencesFr } from './preferences'
@@ -31,6 +32,7 @@ export const DICTIONNAIRES = {
     shell: shellFr,
     dump: dumpFr,
     schemas: schemasFr,
+    instances: instancesFr,
     ui: uiFr,
   },
   en: {
@@ -46,6 +48,7 @@ export const DICTIONNAIRES = {
     shell: shellEn,
     dump: dumpEn,
     schemas: schemasEn,
+    instances: instancesEn,
     ui: uiEn,
   },
 } as const

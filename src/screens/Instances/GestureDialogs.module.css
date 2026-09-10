@@ -1,0 +1,90 @@
+/* Les formulaires de geste d'administration (`API-32`). */
+.formulaire {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-6);
+}
+
+.note {
+  margin: 0;
+  font: var(--weight-medium) var(--text-label) var(--font-ui);
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+
+/*
+ * Le bouton de soumission masqué : il rend `Entrée` opérant dans les champs, le bouton visible
+ * vivant dans la bande de pied de `Modal`, hors du `<form>`.
+ *
+ * `clip-path` et non `display: none`, comme partout : un `<button hidden>` ne soumet pas, et le
+ * retirer de l'arbre d'accessibilité n'aurait servi à rien puisqu'il est déjà `aria-hidden`.
+ */
+.soumission {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: none;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.pied {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  width: 100%;
+}
+
+/*
+ * Un interrupteur et son libellé.
+ *
+ * Le libellé est **dans** le `<label>` du contrôle, donc cliquable : un interrupteur de 26 px se
+ * rate, deux mots non. Il double le nom accessible que `Toggle` porte déjà en `aria-label` — c'est
+ * voulu : le premier est ce qu'une voix annonce, le second ce qu'un œil lit.
+ */
+.interrupteur {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font: var(--weight-medium) var(--text-label) var(--font-ui);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.oeil {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--ink-3);
+  cursor: pointer;
+  font-size: var(--text-meta);
+}
+
+.oeil[aria-pressed="true"] {
+  color: var(--ink);
+}
+
+/*
+ * Les deux saisies qui ne s'accordent pas, et l'échec du hachage.
+ *
+ * En `--danger` : c'est le seul formulaire du produit dont une faute de frappe **verrouille** ce
+ * qu'il modifie — un mot de passe posé ne se relit nulle part, et le seul remède est d'en poser un
+ * autre.
+ */
+.desaccord {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-panel);
+  background: var(--danger-bg);
+  font: var(--weight-medium) var(--text-label) var(--font-ui);
+  color: var(--danger-ink);
+}

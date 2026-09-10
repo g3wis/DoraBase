@@ -861,7 +861,7 @@ fn repertoire_de_configuration(app: &tauri::AppHandle) -> Result<std::path::Path
 /// d'abord garde le comportement d'avant inchangé partout où il existe, y compris sous les
 /// shells POSIX de Windows (Git Bash, MSYS) où c'est `HOME` qui désigne le bon dossier et
 /// `USERPROFILE` qui peut pointer ailleurs.
-fn known_hosts_utilisateur() -> std::path::PathBuf {
+pub(crate) fn known_hosts_utilisateur() -> std::path::PathBuf {
     known_hosts_dans(crate::engine::programme::repertoire_personnel())
 }
 

@@ -342,16 +342,9 @@ const REFUS_CREATION_DE_SCHEMA: &str =
      part (BigQuery).";
 
 fn nom_du_moteur(moteur: crate::config::Engine) -> &'static str {
-    use crate::config::Engine;
-    match moteur {
-        Engine::PostgreSql => "PostgreSQL",
-        Engine::MySql => "MySQL",
-        Engine::Sqlite => "SQLite",
-        Engine::MongoDb => "MongoDB",
-        Engine::Redis => "Redis",
-        Engine::Snowflake => "Snowflake",
-        Engine::BigQuery => "BigQuery",
-    }
+    // **Le nom vit sur le type** depuis `API-32`, où `config` a eu besoin de le dire aussi. Cette
+    // fonction reste : elle est appelée six fois ici, et la remplacer partout n'apprendrait rien.
+    moteur.nom()
 }
 
 /// Pourquoi ce moteur n'est pas livré, **dans ses termes**.
@@ -481,6 +474,53 @@ impl AnyEngine {
                 }
                 Ok(details)
             }
+        }
+    }
+
+    /// L'adaptateur d'administration d'une instance managée (`API-32`).
+    ///
+    /// # Un accès, et non onze méthodes de répartition
+    ///
+    /// Les sept lectures et l'exécution d'un geste vivent sur `PostgresAdapter` : les répartir une
+    /// par une ici ferait huit `match` identiques, dont chacun devrait nommer les quatre moteurs qui
+    /// refusent — trente-deux bras pour dire une seule chose. Cette méthode la dit une fois : « ce
+    /// moteur se gère, celui-là non ».
+    ///
+    /// **Le `match` reste exhaustif, les quatre autres moteurs nommés un par un.** C'est la leçon du
+    /// défaut n° 16, où un bras attrape-tout avait absorbé SQLite et MySQL alors que leurs
+    /// adaptateurs existaient : un huitième moteur fera échouer la compilation ici, là où son auteur
+    /// doit choisir.
+    ///
+    /// Les raisons sont **distinctes**, et les confondre dirait « pas encore » d'un cas qui ne
+    /// viendra jamais — le partage des cinq verdicts du dump.
+    pub fn administration(&self) -> Result<&postgres::PostgresAdapter, EngineError> {
+        match self {
+            Self::Postgres(adaptateur) => Ok(adaptateur),
+            // « Pas encore » : ces deux-là ont des rôles et des bases de serveur, donc un
+            // gestionnaire leur irait. Il n'est simplement pas écrit.
+            Self::MySql(_) => Err(EngineError::local(
+                "DoraBase ne sait pas encore gérer une instance MySQL : le gestionnaire \
+                 d'instances ne parle que PostgreSQL pour l'instant."
+                    .to_owned(),
+            )),
+            Self::MongoDb(_) => Err(EngineError::local(
+                "DoraBase ne sait pas encore gérer une instance MongoDB : le gestionnaire \
+                 d'instances ne parle que PostgreSQL pour l'instant."
+                    .to_owned(),
+            )),
+            // « Jamais », et pour deux raisons différentes. Un fichier SQLite n'a ni rôles, ni
+            // serveur, ni sessions : il n'y a pas d'instance à gérer. Les autorisations d'un projet
+            // BigQuery sont celles d'IAM, qui vit hors de la base — les gérer d'ici demanderait de
+            // parler à une autre API que celle des données, et ce serait un autre écran.
+            Self::Sqlite(_) => Err(EngineError::local(
+                "SQLite est un fichier : il n'a ni serveur, ni rôles, ni sessions à gérer."
+                    .to_owned(),
+            )),
+            Self::BigQuery(_) => Err(EngineError::local(
+                "les autorisations d'un projet BigQuery sont celles d'IAM, hors de la base : elles \
+                 se gèrent dans la console Google Cloud, pas ici."
+                    .to_owned(),
+            )),
         }
     }
 

@@ -11,7 +11,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 use ts_rs::TS;
 
-use super::model::{Preferences, Project};
+use super::model::{ManagedInstance, Preferences, Project};
 use super::store::{ConfigStore, LoadOutcome};
 
 /// Nom du fichier dans le répertoire de configuration de l'app.
@@ -41,6 +41,12 @@ pub enum ConfigLoad {
         /// Les préférences (`15a`), **toujours présentes** : leur défaut est une valeur, pas une
         /// absence. Une configuration écrite avant `15a` en rend les valeurs du handoff.
         preferences: Preferences,
+        /// Les instances managées (`API-32`), lues avec les projets.
+        ///
+        /// **Dans la même issue de lecture, et non par une commande à part.** Elles vivent dans le
+        /// même fichier ; deux commandes en feraient deux lectures, donc deux instants, et l'écran
+        /// aurait à composer deux réponses dont l'une peut échouer sans l'autre.
+        instances: Vec<ManagedInstance>,
     },
     /// La configuration existe mais n'a pas pu être lue. **L'écriture est bloquée** — le
     /// front doit le dire à l'utilisateur au lieu de proposer de créer un projet, ce qui
@@ -61,9 +67,11 @@ impl From<LoadOutcome> for ConfigLoad {
             LoadOutcome::Loaded {
                 projects,
                 preferences,
+                instances,
             } => Self::Loaded {
                 projects,
                 preferences,
+                instances,
             },
             LoadOutcome::Unreadable {
                 reason,
@@ -152,8 +160,11 @@ pub fn save_config(projects: Vec<Project>, state: State<'_, ConfigState>) -> Res
     // par un état qu'il n'a pas modifié perdrait un réglage changé entre-temps. Même raison que
     // `load_projects` en `08e`.
     let preferences = store.load_preferences()?;
+    // **Les instances aussi sont relues.** Le fichier est réécrit entier : ne pas les repasser
+    // reviendrait à les effacer en enregistrant des projets.
+    let instances = store.load_instances()?;
     store
-        .save(&projects, &preferences)
+        .save(&projects, &preferences, &instances)
         .map_err(|erreur| erreur.to_string())
 }
 
@@ -181,8 +192,9 @@ pub fn save_preferences(
     // **Bornées, et les valeurs bornées sont rendues.** Sans le retour, l'écran garderait 14 px
     // dans son curseur là où le disque porte 20 — deux vérités, dont la visible serait fausse.
     let bornees = preferences.borner();
+    let instances = store.load_instances()?;
     store
-        .save(&projects, &bornees)
+        .save(&projects, &bornees, &instances)
         .map_err(|erreur| erreur.to_string())?;
     Ok(bornees)
 }
@@ -349,11 +361,7 @@ pub fn create_project(
     let suivants = super::enregistrer::creer_projet(&projects, &request.name, request.environments)
         .map_err(|erreur| erreur.to_string())?;
 
-    // Les préférences sont relues, pas remplacées : voir `save_config`.
-    let preferences = store.load_preferences().unwrap_or_default();
-    store
-        .save(&suivants, &preferences)
-        .map_err(|erreur| erreur.to_string())?;
+    ecrire_le_reste_intact(store, &suivants)?;
     log::info!(
         "create_project ← {} → {} projet(s)",
         request.name,
@@ -399,15 +407,7 @@ pub async fn rename_project(
             &request.project,
             &request.name,
             magasin.store.as_ref(),
-            &mut |projets| {
-                // Les préférences sont **relues** à chaque écriture de projets : elles ne
-                // traversent pas ces commandes, et les remplacer par un défaut effacerait les
-                // réglages de l'utilisateur à la première base ajoutée.
-                let preferences = store.load_preferences().unwrap_or_default();
-                store
-                    .save(projets, &preferences)
-                    .map_err(|erreur| erreur.to_string())
-            },
+            &mut |projets| ecrire_le_reste_intact(store, projets),
         )
         .map_err(|erreur| erreur.to_string())?;
 
@@ -475,14 +475,7 @@ pub async fn rename_database(
             &request.database,
             &request.name,
             magasin.store.as_ref(),
-            &mut |projets| {
-                // Les préférences sont **relues** à chaque écriture de projets : elles ne traversent
-                // pas ces commandes, et les remplacer par un défaut effacerait les réglages.
-                let preferences = store.load_preferences().unwrap_or_default();
-                store
-                    .save(projets, &preferences)
-                    .map_err(|erreur| erreur.to_string())
-            },
+            &mut |projets| ecrire_le_reste_intact(store, projets),
         )
         .map_err(|erreur| erreur.to_string())?;
 
@@ -544,15 +537,7 @@ pub async fn delete_database(
             &request.database,
             &request.environment,
             magasin.store.as_ref(),
-            &mut |projets| {
-                // Les préférences sont **relues** à chaque écriture de projets : elles ne
-                // traversent pas ces commandes, et les remplacer par un défaut effacerait les
-                // réglages de l'utilisateur à la première base ajoutée.
-                let preferences = store.load_preferences().unwrap_or_default();
-                store
-                    .save(projets, &preferences)
-                    .map_err(|erreur| erreur.to_string())
-            },
+            &mut |projets| ecrire_le_reste_intact(store, projets),
         )
         .map_err(|erreur| erreur.to_string())?
     };
@@ -606,15 +591,7 @@ pub async fn delete_project(
             &projects,
             &request.project,
             magasin.store.as_ref(),
-            &mut |projets| {
-                // Les préférences sont **relues** à chaque écriture de projets : elles ne
-                // traversent pas ces commandes, et les remplacer par un défaut effacerait les
-                // réglages de l'utilisateur à la première base ajoutée.
-                let preferences = store.load_preferences().unwrap_or_default();
-                store
-                    .save(projets, &preferences)
-                    .map_err(|erreur| erreur.to_string())
-            },
+            &mut |projets| ecrire_le_reste_intact(store, projets),
         )
         .map_err(|erreur| erreur.to_string())?
     };
@@ -722,6 +699,57 @@ pub fn rename_console(
 /// domaine fait hésiter à s'en servir depuis un autre, donc fait écrire une seconde fois la même
 /// chose.
 ///
+/// Écrit les projets **sans toucher au reste du fichier**.
+///
+/// # Pourquoi une fonction, et non trois lignes recopiées
+///
+/// Le fichier de configuration est réécrit **entier** à chaque enregistrement. Une commande qui
+/// n'écrit que les projets doit donc relire tout ce qu'elle n'écrit pas — les préférences, et
+/// depuis `API-32` les instances managées — sous peine de l'effacer. Ces trois lignes vivaient à
+/// **huit** endroits, chacun n'ayant pensé qu'aux préférences ; ajouter les instances y aurait fait
+/// huit corrections dont la neuvième, écrite demain, aurait manqué.
+///
+/// C'est la leçon de `programme::repertoire_personnel` transposée : la question « que faut-il
+/// préserver en écrivant ? » n'a qu'une réponse, elle doit n'avoir qu'un lieu.
+///
+/// **`unwrap_or_default` sur les deux relectures**, comme avant : l'écriture qu'on est en train de
+/// faire est celle qui compte, et une relecture qui échoue échouera de nouveau au `save` — avec un
+/// message qui nomme le vrai problème.
+fn ecrire_le_reste_intact(store: &ConfigStore, projets: &[Project]) -> Result<(), String> {
+    let preferences = store.load_preferences().unwrap_or_default();
+    let instances = store.load_instances().unwrap_or_default();
+    store
+        .save(projets, &preferences, &instances)
+        .map_err(|erreur| erreur.to_string())
+}
+
+/// Exécute une opération avec le magasin ouvert, ou refuse si la configuration n'a pas été lue.
+///
+/// **Exposée au module des instances** (`API-32`), qui écrit dans le même fichier par le même
+/// magasin. Recopier le déverrouillage et son refus là-bas aurait fait vivre deux fois la propriété
+/// « ne pas écraser ce qu'on n'a pas su lire » — celle que `ConfigStore` porte précisément pour
+/// qu'elle ne dépende pas de la vigilance de l'appelant.
+pub(crate) fn avec_le_magasin<T>(
+    state: &State<'_, ConfigState>,
+    operation: impl FnOnce(&ConfigStore) -> Result<T, String>,
+) -> Result<T, String> {
+    let garde = state
+        .0
+        .lock()
+        .map_err(|_| "état de configuration corrompu".to_owned())?;
+    let store = garde
+        .as_ref()
+        .ok_or_else(|| "la configuration doit être lue avant d'être écrite".to_owned())?;
+    operation(store)
+}
+
+/// Les instances déclarées, relues du disque (`API-32`).
+pub(crate) fn instances_declarees(
+    state: &State<'_, ConfigState>,
+) -> Result<Vec<ManagedInstance>, String> {
+    avec_le_magasin(state, ConfigStore::load_instances)
+}
+
 /// **Les projets viennent du disque**, comme partout ailleurs : une liste envoyée par l'écran pourrait
 /// être périmée et écraser une écriture. Même arbitrage qu'en `08e`, `08f` et `08i`.
 fn ecrire_les_projets(
@@ -738,11 +766,7 @@ fn ecrire_les_projets(
 
     let projects: Vec<Project> = store.load_projects()?;
     let suivants = operation(&projects)?;
-    // Les préférences sont relues, pas remplacées : voir `save_config`.
-    let preferences = store.load_preferences().unwrap_or_default();
-    store
-        .save(&suivants, &preferences)
-        .map_err(|erreur| erreur.to_string())?;
+    ecrire_le_reste_intact(store, &suivants)?;
     Ok(suivants)
 }
 
@@ -830,15 +854,7 @@ pub fn save_database(
             label: request.label.as_deref(),
         },
         magasin.store.as_ref(),
-        &mut |projets| {
-            // Les préférences sont **relues** à chaque écriture de projets : elles ne
-            // traversent pas ces commandes, et les remplacer par un défaut effacerait les
-            // réglages de l'utilisateur à la première base ajoutée.
-            let preferences = store.load_preferences().unwrap_or_default();
-            store
-                .save(projets, &preferences)
-                .map_err(|erreur| erreur.to_string())
-        },
+        &mut |projets| ecrire_le_reste_intact(store, projets),
     )
     .map_err(|erreur| erreur.to_string())?;
 
@@ -900,15 +916,7 @@ pub async fn update_variant(
                 label: request.label.as_deref(),
             },
             magasin.store.as_ref(),
-            &mut |projets| {
-                // Les préférences sont **relues** à chaque écriture de projets : elles ne
-                // traversent pas ces commandes, et les remplacer par un défaut effacerait les
-                // réglages de l'utilisateur à la première base ajoutée.
-                let preferences = store.load_preferences().unwrap_or_default();
-                store
-                    .save(projets, &preferences)
-                    .map_err(|erreur| erreur.to_string())
-            },
+            &mut |projets| ecrire_le_reste_intact(store, projets),
         )
         .map_err(|erreur| erreur.to_string())?;
 
@@ -1029,10 +1037,7 @@ fn ecrire_les_environnements(
     // écriture. Même arbitrage qu'en `08e`, `08f` et `08i`.
     let projects: Vec<Project> = store.load_projects()?;
     geste(&projects, &mut |projets| {
-        let preferences = store.load_preferences().unwrap_or_default();
-        store
-            .save(projets, &preferences)
-            .map_err(|erreur| erreur.to_string())
+        ecrire_le_reste_intact(store, projets)
     })
     .map_err(|erreur| erreur.to_string())
 }
@@ -1162,12 +1167,7 @@ pub async fn delete_environment(
             &request.project,
             &request.environment,
             magasin.store.as_ref(),
-            &mut |projets| {
-                let preferences = store.load_preferences().unwrap_or_default();
-                store
-                    .save(projets, &preferences)
-                    .map_err(|erreur| erreur.to_string())
-            },
+            &mut |projets| ecrire_le_reste_intact(store, projets),
         )
         .map_err(|erreur| erreur.to_string())?
     };

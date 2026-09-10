@@ -49,6 +49,10 @@ const items = {
  */
 function libelle(onglet: Onglet): string {
   switch (onglet.sorte) {
+    // `API-32` : le quatrième membre de l'union. Le compilateur l'a réclamé ici aussi — c'est ce que
+    // ce `switch` existe pour faire.
+    case 'instance':
+      return onglet.instance
     case 'console':
       return `console ${onglet.numero}`
     case 'diagramme':
@@ -263,7 +267,9 @@ describe('le renommage d’une connexion (`26`)', () => {
     const renomme = renommerLaConnexion(etat, analytics, 'entrepot')
 
     // La connexion visée bouge… et sa voisine reste où elle est.
-    expect(renomme.onglets.map((onglet) => onglet.key.database)).toEqual(['entrepot', 'shop'])
+    expect(
+      renomme.onglets.map((onglet) => (onglet.sorte === 'instance' ? null : onglet.key.database)),
+    ).toEqual(['entrepot', 'shop'])
     // L'onglet actif était celui de `shop`, ouvert en second : il ne change pas d'identité.
     expect(renomme.actif).toBe(idOnglet({ ...items, key: shop }))
 
@@ -313,10 +319,9 @@ describe('le renommage d’une connexion (`26`)', () => {
     const etat = ouvrir(ouvrir(AUCUN_ONGLET, orders), { ...orders, key: dev })
     const renomme = renommerLaConnexion(etat, dev, 'entrepot')
 
-    expect(renomme.onglets.map((onglet) => onglet.key)).toEqual([
-      analytics,
-      { ...dev, database: 'entrepot' },
-    ])
+    expect(
+      renomme.onglets.map((onglet) => (onglet.sorte === 'instance' ? null : onglet.key)),
+    ).toEqual([analytics, { ...dev, database: 'entrepot' }])
   })
 
   it('réindexe les tables indexées par identifiant d’onglet', () => {

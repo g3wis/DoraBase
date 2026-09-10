@@ -32,6 +32,7 @@ test('un fichier absent donne un état neuf sans projet', () => {
     kind: 'fresh',
     projects: [],
     preferences: PREFERENCES_PAR_DEFAUT,
+    instances: [],
   })
 })
 
@@ -45,11 +46,17 @@ test('un fichier lu rend ses projets', () => {
     },
   ]
   expect(
-    interpreter({ kind: 'loaded', projects: projets, preferences: PREFERENCES_PAR_DEFAUT }),
+    interpreter({
+      kind: 'loaded',
+      projects: projets,
+      preferences: PREFERENCES_PAR_DEFAUT,
+      instances: [],
+    }),
   ).toEqual({
     kind: 'loaded',
     projects: projets,
     preferences: PREFERENCES_PAR_DEFAUT,
+    instances: [],
   })
 })
 

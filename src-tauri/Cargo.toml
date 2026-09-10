@@ -36,6 +36,20 @@ ts-rs = "12.0.1"
 chacha20poly1305 = { version = "0.11.0", features = ["getrandom", "rand_core"] }
 keyring = "4.1.6"
 tokio-postgres = "0.7.18"
+# **Le vérificateur SCRAM-SHA-256 d'un mot de passe de rôle** (`API-32`, 9 septembre 2026).
+#
+# Les cinq crates sont **déjà dans l'arbre**, tirées par `postgres-protocol` qui s'en sert pour
+# l'authentification SCRAM du pilote ; les versions sont donc épinglées sur les siennes, pour ne pas
+# faire cohabiter deux `sha2` ou deux `hmac` dans le binaire. Voir `engine/postgres/scram.rs` pour ce
+# que ce hachage côté client achète, et pourquoi il n'est pas facultatif ici.
+hmac = "0.13"
+sha2 = "0.11"
+base64 = "0.22"
+rand = "0.10"
+# La normalisation SASLprep du mot de passe (RFC 4013), qu'un serveur PostgreSQL applique avant de
+# hacher : sans elle, un mot de passe non-ASCII produirait un vérificateur que le pilote ne
+# retrouverait pas à la connexion suivante — un compte verrouillé, sans message.
+stringprep = "0.1"
 # **Le TLS de `06f`, en `rustls`.** Le choix est tranché dans la spec : le pilote MongoDB n'offre pas
 # `native-tls`, et ni lui ni `mysql_async` n'acceptent un `ClientConfig` arbitraire — donc le trousseau
 # du système n'est atteignable nulle part uniformément, et l'argument qui militait pour `native-tls`
