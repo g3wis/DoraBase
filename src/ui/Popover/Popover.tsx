@@ -133,10 +133,11 @@ export function Popover({
     }
   }, [ouvert, align])
 
-  // **Sur la racine, qui contient le déclencheur *et* le panneau** : le départ n'est réel que
-  // lorsque le pointeur quitte l'ensemble. Un délai de grâce absorbe l'interstice de 2px que
-  // `top: calc(100% + var(--space-1))` laisse entre les deux — voir `useSortieDuPointeur`.
-  const sortie = useSortieDuPointeur(ouvert && fermerEnSortant, () => setOuvert(false))
+  // **Les deux boîtes, et non le sous-arbre** : le panneau pend en dessous et souvent à gauche d'un
+  // déclencheur de 18 px, donc le chemin qui mène de l'un à l'autre passe par des pixels qui
+  // n'appartiennent ni à l'un ni à l'autre. C'est leur boîte englobante qui le couvre — voir
+  // `useSortieDuPointeur`, où `API-35` explique pourquoi aucun délai ne pouvait le faire.
+  useSortieDuPointeur(ouvert && fermerEnSortant, () => setOuvert(false), [racine, panneau])
 
   const declencheur = cloneElement(children, {
     'aria-haspopup': 'dialog',
@@ -158,8 +159,6 @@ export function Popover({
           fermer()
         }
       }}
-      onPointerLeave={sortie.onPointerLeave}
-      onPointerEnter={sortie.onPointerEnter}
       onBlur={(evenement) => {
         // Le focus quitte l'ensemble déclencheur + panneau : `relatedTarget` est l'élément qui
         // le reçoit, et `null` quand la fenêtre elle-même le perd — auquel cas on ne ferme pas,

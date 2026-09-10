@@ -56,6 +56,92 @@ test('descendre du « … » vers le menu ne le ferme pas', async ({ page }) => 
   await expect(page.getByRole('button', { name: 'Renommer…' })).toBeVisible()
 })
 
+/* **Le trajet qui a motivé `API-35`, et le seul que le précédent ne prenait pas.** Celui du dessus
+   descend tout droit, à l'abscisse du « … » : il n'a que trois pixels à franchir, et n'importe quel
+   délai les couvre. Le geste réel ne descend pas tout droit — le panneau pend **à gauche** d'un
+   déclencheur de 18 px, donc on longe la ligne avant de descendre, et on longe *sur la ligne*, qui
+   n'appartient ni au déclencheur ni au panneau. Le sursis y courait pendant tout le trajet.
+
+   Le pas de 10 ms n'est pas une durée à absorber mais une main à imiter : quatre-vingt-dix pixels en
+   dix-huit pas, soit un demi-millier de pixels par seconde — un geste ordinaire, et deux cent
+   quarante millisecondes. Ce que le test garde n'est donc **pas** que le délai vaut plus que cela,
+   mais que le trajet ne compte pas comme un départ (règle n° 3 : un test calé sur une durée réelle
+   est un tirage au sort). */
+test('longer la ligne vers le menu ne compte pas comme un départ', async ({ page }) => {
+  await page
+    .getByRole('treeitem', { name: /analytics/ })
+    .first()
+    .hover()
+  const declencheur = page.getByRole('button', { name: 'Actions de analytics' })
+  const depart = await declencheur.boundingBox()
+  await declencheur.click()
+  await expect(page.getByRole('dialog', { name: 'Actions' })).toBeVisible()
+  const arrivee = await page.getByRole('button', { name: 'Renommer…' }).boundingBox()
+  if (!depart || !arrivee) throw new Error('le déclencheur et l’entrée doivent être mesurables')
+
+  const y = depart.y + depart.height / 2
+  for (let x = depart.x + depart.width / 2; x > arrivee.x + 20; x -= 5) {
+    await page.mouse.move(x, y)
+    await page.waitForTimeout(10)
+  }
+
+  // **Mesuré avant de descendre**, et c'est là toute la question : le menu doit encore être là quand
+  // la main arrive au-dessus de lui. Le vérifier après la descente laisserait croire que le trajet
+  // est sans danger alors qu'il ne le serait que parce qu'on l'a fini.
+  await expect(page.getByRole('dialog', { name: 'Actions' })).toBeVisible()
+  await page.mouse.move(arrivee.x + arrivee.width / 2, arrivee.y + arrivee.height / 2)
+  await expect(page.getByRole('button', { name: 'Renommer…' })).toBeVisible()
+})
+
+/* **Le menu s'efface au lieu de se fermer, et c'est la moitié qu'aucune assertion de fermeture ne
+   voit.** Le panneau vit dans la gouttière `.actions`, que `TreeRow` masque hors survol : au coin
+   arrondi du panneau, ou à quelques pixels de son bord, le pointeur n'est ni sur la ligne ni sur le
+   panneau. `useSortieDuPointeur` l'y garde **ouvert** — c'est tout l'objet d'`API-35` — et sans la
+   ceinture de `TreeRow` il devient *invisible* pendant qu'on traverse, ce qui se rapporte comme une
+   disparition sans en être une. Pire : `visibility: hidden` le retire du test de survol, donc plus
+   rien ne peut le ramener.
+
+   **Le `blur` n'est pas une commodité de test, c'est le décor** (règle n° 5). Chromium focalise un
+   bouton au clic, donc `:focus-within` tient la gouttière visible et rend les deux causes
+   indiscernables ; **WebKit ne le fait pas** — la convention macOS —, si bien que sous WKWebView, où
+   le défaut a été signalé, il ne reste que le survol. Sans cette ligne, ce test est vert sous
+   Chromium pour une raison qui n'existe pas là où le défaut vit, et c'est exactement ce qui a laissé
+   retirer la ceinture deux fois. */
+test('sans focus sur le déclencheur, le menu ne s’efface pas quand on l’approche', async ({
+  page,
+}) => {
+  await page
+    .getByRole('treeitem', { name: /analytics/ })
+    .first()
+    .hover()
+  await page.getByRole('button', { name: 'Actions de analytics' }).click()
+  const panneau = page.getByRole('dialog', { name: 'Actions' })
+  await expect(panneau).toBeVisible()
+  const boite = await panneau.boundingBox()
+  if (!boite) throw new Error('le panneau doit être mesurable')
+
+  // L'état dans lequel WebKit laisse la page après un clic sur un bouton.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+
+  // Trois points de l'entourage immédiat : le coin arrondi, puis un pixel de chaque côté du panneau.
+  // Aucun n'est sur la ligne, aucun n'est sur le panneau, et l'on va pourtant vers celui-ci.
+  const approches: readonly [number, number][] = [
+    [boite.x + 1, boite.y + 1],
+    [boite.x - 3, boite.y + 40],
+    [boite.x + boite.width + 3, boite.y + 40],
+  ]
+  for (const [x, y] of approches) {
+    await page.mouse.move(x, y)
+    expect(await panneau.evaluate((element) => getComputedStyle(element).visibility)).toBe(
+      'visible',
+    )
+  }
+
+  // Et l'on arrive : le menu est toujours là, et cliquable.
+  await page.getByRole('button', { name: 'Renommer…' }).click()
+  await expect(page.getByLabel('Nouveau nom de analytics')).toBeFocused()
+})
+
 test('le clic droit sur une connexion ouvre les mêmes actions, au pointeur', async ({ page }) => {
   const ligne = page.getByRole('treeitem', { name: /analytics/ }).first()
   await ligne.click({ button: 'right' })

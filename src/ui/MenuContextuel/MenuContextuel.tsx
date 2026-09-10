@@ -53,15 +53,21 @@ const MARGE = 8
  * qu'aucune assertion de visibilité s'en aperçoive — c'est le défaut n° 35, et le test interroge donc
  * `elementFromPoint`.
  *
- * # Les trois fermetures
+ * # Les quatre fermetures
  *
  * `Échap`, le clic ailleurs, et le défilement. Les deux premières sont celles de `Popover` et pour
  * les mêmes raisons. La troisième lui est propre : un menu posé en coordonnées de fenêtre ne suit pas
  * le contenu qui défile sous lui, et resterait pointé sur une valeur qui n'y est plus.
+ *
+ * **Et une quatrième, assumée : s'éloigner du panneau le ferme** — un menu qu'on a quitté à la souris
+ * n'est plus celui qu'on visait. `useSortieDuPointeur` en tient la zone, débord compris : celui-ci
+ * n'est pas un confort ici mais une nécessité, ce menu s'ouvrant **avec son coin sous le pointeur**,
+ * d'où la moitié des directions le quitteraient au premier pixel. Le clavier n'est pas concerné —
+ * sans pointeur, pas de mouvement de pointeur.
  */
 export function MenuContextuel({ x, y, entrees, onFermer, label }: MenuContextuelProps) {
   const panneau = useRef<HTMLDivElement>(null)
-  const sortie = useSortieDuPointeur(true, onFermer)
+  useSortieDuPointeur(true, onFermer, [panneau])
 
   useEffect(() => {
     const premier = panneau.current?.querySelector('button')
@@ -108,12 +114,6 @@ export function MenuContextuel({ x, y, entrees, onFermer, label }: MenuContextue
       role="menu"
       aria-label={label}
       style={{ left: x, top: y }}
-      /* **Sortir du panneau le ferme**, et c'est une quatrième fermeture assumée : un menu qu'on a
-         quitté à la souris n'est plus celui qu'on visait. Le délai de grâce de `useSortieDuPointeur`
-         évite de le perdre en coupant un angle. Le clavier n'est pas concerné — sans pointeur, pas de
-         départ de pointeur. */
-      onPointerLeave={sortie.onPointerLeave}
-      onPointerEnter={sortie.onPointerEnter}
     >
       {entrees.map((entree) => (
         <button

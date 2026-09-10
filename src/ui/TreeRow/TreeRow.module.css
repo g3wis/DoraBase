@@ -154,14 +154,31 @@
   visibility: hidden;
 }
 
-/* Deux révélations. Le survol est le geste courant ; le focus est la seule voie sans souris — une
+/* Trois révélations. Le survol est le geste courant ; le focus est la seule voie sans souris — une
  * action qui n'existe qu'au survol n'existe pas au clavier.
  *
- * Un menu **ouvert** doit aussi rester visible quand la souris s'en va vers son panneau : c'est
- * acquis sans troisième règle, le panneau étant un descendant de cette enveloppe. Un
- * `:has([aria-expanded="true"])` avait été posé en ceinture ; le retirer ne changeait aucune mesure,
- * donc il n'est pas là — même arbitrage que l'`align-items: stretch` de la grille. */
+ * **La troisième est un menu ouvert, et elle a été retirée deux fois de trop** (`API-35`). Elle
+ * avait été posée « en ceinture », puis ôtée au motif que la retirer ne changeait aucune mesure ; le
+ * raisonnement qui l'accompagnait était juste et l'observation aussi — le panneau étant un
+ * descendant de cette enveloppe, le survoler suffit à la garder visible, et le focus resté sur le
+ * « … » couvre le reste du temps. Les deux moitiés sont vraies **sous Chromium**, et c'est tout ce
+ * que ce dépôt sait mesurer.
+ *
+ * **WebKit ne focalise pas un bouton au clic** — la convention macOS, où le focus clavier ne suit
+ * pas la souris. Sous WKWebView, donc dans l'application réelle et nulle part ailleurs,
+ * `:focus-within` est faux pendant toute la vie du menu, et il ne reste que le survol. Or le
+ * pointeur qui va du « … » au panneau franchit des pixels qui ne sont ni sur la ligne ni sur le
+ * panneau : le coin arrondi, l'entourage immédiat, le débord que `useSortieDuPointeur` tolère. La
+ * gouttière y repasse en `visibility: hidden`, donc **le menu ne se ferme pas : il s'efface** — et,
+ * `visibility: hidden` le retirant du test de survol, rien ne peut plus le ramener. C'est le
+ * signalement d'`API-35`, et c'est la moitié qu'aucun test de fermeture ne voit.
+ *
+ * La ceinture ne dépend, elle, d'aucun moteur : `aria-expanded` est un fait du composant. Le test de
+ * `27` qui la garde **retire le focus** avant de mesurer, faute de quoi il serait vert sous Chromium
+ * pour une raison qui n'existe pas là où le défaut vit (règle n° 5 : un décor qui rend deux causes
+ * indiscernables ne mesure que le décor). */
 .wrap:hover .actions,
-.wrap:focus-within .actions {
+.wrap:focus-within .actions,
+.wrap:has([aria-expanded="true"]) .actions {
   visibility: visible;
 }

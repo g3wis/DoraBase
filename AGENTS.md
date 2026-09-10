@@ -1453,6 +1453,85 @@ message long n'a pour juge que les tests unitaires, qui ne mesurent pas les pixe
 fenêtre visible ou le résultat complet ? », qui n'est pas tranché ; `engine::export` est ce sur quoi
 il se construira, et c'est précisément pourquoi le sérialiseur y est déjà.
 
+### Un panneau ne se quitte pas en allant vers lui (9 septembre 2026, `API-35`)
+
+Les menus « … » se refermaient sous la main : « ils sont trop sensibles, et disparaissent parfois
+pendant que le curseur traverse l'espace entre les trois points et le popup ». La fermeture au départ
+du pointeur est voulue — un menu qu'on a quitté à la souris n'est plus celui qu'on visait —, mais
+elle mesurait la mauvaise chose.
+
+**Elle demandait au DOM une question de géométrie.** `onPointerLeave` était posé sur l'élément qui
+*contient* le déclencheur et le panneau, et un délai de grâce de 150 ms devait absorber l'interstice
+de 3 px que `Popover` laisse entre les deux. Or un « … » de 18 px ouvre un panneau de 200 px **en
+dessous et à gauche** : entre les deux il y a la ligne d'arbre elle-même, qui n'est ni l'un ni
+l'autre. Aller du déclencheur au menu, c'est donc *sortir*, et le sursis courait pendant tout le
+trajet. Mesuré : une pause de 200 ms à vingt pixels du « … », **sur la ligne dont c'est le menu**,
+suffisait à le perdre.
+
+**Le pointeur n'a pas quitté le panneau tant qu'il est dans la boîte qui contient le déclencheur *et*
+le panneau.** Cette boîte couvre le passage quelle que soit la façon de le prendre — droit, en
+diagonale, ou en longeant la ligne. Aucune valeur de délai ne pouvait l'exprimer : la question n'est
+pas *combien de temps* on met à traverser, mais *si l'on traverse*. Un délai calé sur la durée d'un
+geste réel aurait été un tirage au sort (règle n° 3), une main lente ne mettant pas le temps d'une
+main rapide. Cinq points à ne pas défaire :
+
+- **c'est un `pointermove` sur le document, et non les gestionnaires d'entrée et de sortie d'un
+  élément.** Ceux-ci ne parlent que de descendance dans le DOM, et le passage entre un déclencheur et
+  son panneau n'est le descendant de personne. C'est le même motif que le `elementFromPoint` du
+  défaut n° 35 : ce qui est « dans » la mise en page et ce qui est « sous le pointeur » sont deux
+  questions différentes, et la seconde ne se pose qu'en coordonnées ;
+- **le délai de grâce reste, et il ne garde plus la traversée** — seulement l'aller-retour : un
+  dépassement du bord du panneau, puis le retour. C'est la moitié que la zone ne porte pas ;
+- **un débord de 5 px, et il existe pour `MenuContextuel`.** Celui-ci s'ouvre **avec son coin sous le
+  pointeur** : sans débord, la moitié des directions le quittent au premier pixel, un menu qu'on
+  vient d'ouvrir au clic droit. La valeur est celle que le produit accorde déjà à une cible étroite —
+  l'`inset: -5px` de la zone attrapable du chevron d'arbre ;
+- **sortir de la fenêtre ne ferme plus**, faute de mouvement à observer. C'est voulu, et c'est
+  l'arbitrage que `Popover` prend déjà sur la perte de focus : revenir à l'application ne doit pas
+  refermer le panneau qu'on y avait laissé ;
+- **et la ceinture de `TreeRow` est revenue, après avoir été écartée à tort.** Le panneau du « … »
+  vit dans la gouttière `.actions`, que la ligne masque hors survol, et le pointeur traverse
+  désormais légitimement des pixels où le survol est faux — le coin arrondi du panneau, son
+  entourage immédiat, le débord. La `:has([aria-expanded="true"])` retirée autrefois semblait donc
+  redevenue nécessaire ; un sabotage a répondu que non, `:focus-within` tenant la gouttière visible,
+  le focus restant sur le « … » du premier au dernier instant. **Cette réponse était celle de
+  Chromium, et de lui seul.** Le correctif a été livré sans la ceinture, et le signalement est
+  revenu à l'identique : « ça le fait toujours ».
+
+**WebKit ne focalise pas un bouton au clic**, et c'est ce qui a fait passer la ceinture pour
+inutile. C'est la convention macOS — le focus clavier ne suit pas la souris —, donc sous WKWebView, et
+là seulement, `:focus-within` est faux pendant toute la vie du menu et il ne reste que le survol. La
+gouttière repasse alors en `visibility: hidden` dès que le pointeur touche l'entourage du panneau :
+**le menu ne se ferme pas, il s'efface** — et `visibility: hidden` le retirant du test de survol,
+plus rien ne peut le ramener. Deux leçons, et la seconde coûte plus cher que la première :
+
+- **une disparition n'est pas une fermeture**, et aucune assertion de fermeture ne la voit. Il a
+  fallu mesurer la `visibility` calculée pour que quelque chose morde ;
+- **un sabotage ne prouve que dans le décor où il tourne.** Celui qui a écarté la ceinture était
+  correctement appliqué, correctement vert, et faux — parce que Chromium apportait une garantie que
+  l'application n'a pas. La règle n° 1 ne dit donc pas assez : *un sabotage vert doit aussi être
+  interrogé sur ce qui le rend vert*. Ici la réponse — « le focus » — était une propriété du
+  navigateur de test, pas du produit. Le remède est dans le décor (règle n° 5) : le test **retire le
+  focus** avant de mesurer, ce qui reproduit sous Chromium la seule condition qui compte. La note
+  d'origine, elle, se contentait de constater que le retrait ne changeait rien ; c'est ce constat
+  sans cause qui a laissé refaire l'erreur.
+
+**Deux niveaux de test, et chacun garde ce que l'autre ne peut pas.** Le geste vit dans `27` — on
+longe la ligne vers le menu, à cinq pixels par pas et dix millisecondes, et le menu doit être encore
+là **avant** qu'on descende dessus ; le vérifier après la descente laisserait croire que le trajet
+est sans danger alors qu'il ne le serait que parce qu'on l'a fini. Les deux constantes, elles, vivent
+dans un test unitaire où **les boîtes sont posées et non mesurées** : ce n'est pas une mesure de mise
+en page (règle n° 9), c'est l'arithmétique de la zone, et c'est la seule façon de tenir l'horloge à la
+milliseconde — aucune main ne peut viser cinq pixels ni cent millisecondes. Chacune des cinq
+assertions tombe sous son propre sabotage, et aucune sous celui d'une autre.
+
+**Ce qui reste à voir à l'œil** : le geste sous WKWebView — c'est de là qu'est venu le second
+signalement, et rien de cet outillage n'y va. Et une conséquence de la même différence de focus,
+laissée hors périmètre : sous WKWebView, le `Échap` de `Popover` est écouté sur une enveloppe que
+rien ne focalise au clic, donc il ne referme pas un menu ouvert à la souris. Les deux autres
+fermetures — le clic ailleurs, le départ du pointeur — répondent, et `MenuContextuel` n'est pas
+concerné, lui qui focalise sa première entrée au montage.
+
 ### Les filtres suivent la colonne (3 septembre 2026)
 
 Le popover d'en-tête proposait **les mêmes cinq opérateurs à toutes les colonnes**, et les quatre
@@ -2939,6 +3018,13 @@ manière de reprendre des données sans que `serde` les efface en silence.
   donc en `position: fixed`, sa géométrie posée au pixel par le composant, et la mesure qui
   l'atteste passe par `elementFromPoint` : c'est la seule qui distingue « présent dans la mise en
   page » de « réellement sous le pointeur ».
+- **WebKit ne focalise pas un `<button>` au clic** — la convention macOS, où le focus clavier ne
+  suit pas la souris. Chromium le fait, donc **toute garantie adossée à `:focus`, `:focus-within` ou
+  à `document.activeElement` après un clic est vraie sous Playwright et fausse dans l'application**.
+  Un test qui en dépend sans le savoir est vert pour une raison qui n'existe pas là où le produit
+  tourne ; la parade est de `blur()` avant de mesurer. Deux conséquences déjà rencontrées : la
+  gouttière du « … » qui s'efface (`API-35`), et le `Échap` de `Popover`, écouté sur une enveloppe
+  que rien ne focalise.
 - **Un WebSocket refusé par la CSP lève un `SecurityError` synchrone** sous WKWebView ; il
   n'échoue pas silencieusement. Du code qui ne l'attrape pas plante net.
 - **Une app lancée depuis le Finder n'hérite pas du `PATH` du shell.** macOS lui en donne
