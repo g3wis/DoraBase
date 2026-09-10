@@ -71,18 +71,25 @@ test('la coquille a les dimensions du mockup', async ({ page }) => {
   ])
 })
 
-test('ouvrir une table depuis l’arbre ouvre un onglet, et la sidebar liste ses colonnes', async ({
+test('ouvrir une table depuis l’arbre ouvre un onglet, et retire « Colonnes de » de la sidebar', async ({
   page,
 }) => {
   await deplierUnEnvironnement(page)
   await page.getByRole('treeitem', { name: /analytics/ }).dblclick()
   await page.getByRole('treeitem', { name: 'public' }).dblclick()
+
   await page.getByRole('treeitem', { name: /^orders 1\.9/ }).click()
 
   await expect(page.getByRole('tab', { name: /orders/ })).toHaveAttribute('aria-selected', 'true')
-  await expect(page.getByText('Colonnes de orders')).toBeVisible()
-  // Dans la **sidebar** : depuis `10c`, le même nom apparaît aussi en en-tête de la grille.
-  await expect(page.locator('section').getByText('total_cents')).toBeVisible()
+  // **`API-44`** : la section redisait sept colonnes que l'en-tête de la grille nomme déjà, et
+  // qu'un clic sur « Structure » liste en entier. Elle prenait cette hauteur sur l'arbre.
+  //
+  // Mesuré sur la grille rendue, et non sur le clic : la table s'ouvre en deux temps — la structure
+  // arrive avant les lignes —, et une assertion négative posée trop tôt serait verte pour la
+  // mauvaise raison, la section n'ayant encore rien à afficher (règle n° 15).
+  await page.waitForSelector('[role=grid]')
+  await expect(page.getByRole('columnheader', { name: /total_cents/ }).first()).toBeVisible()
+  await expect(page.getByText(/^Colonnes de/)).toHaveCount(0)
 })
 
 test('les trois colonnes se partagent la largeur, et la grille en garde l’essentiel', async ({

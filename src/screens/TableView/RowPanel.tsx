@@ -3,6 +3,7 @@ import { Icon } from '../../design/icons/Icon'
 import type { ColumnInfo, DatabaseKey, Relation, Value } from '../../domain/engine'
 import { useT } from '../../i18n/LanguageContext'
 import { cx } from '../../ui/cx'
+import { glypheDeType } from '../../ui/glypheDeType'
 import { MenuContextuel } from '../../ui/MenuContextuel/MenuContextuel'
 import type { PasserelleDetail } from '../Workbench/useDetailTable'
 import { rendreValeur, texteDeValeur } from './cellule'
@@ -14,7 +15,7 @@ import styles from './RowPanel.module.css'
 import { useLigneLiee } from './useLigneLiee'
 import type { PasserelleLignes } from './useLignes'
 
-type Onglet = 'champs' | 'json' | 'liens'
+type Onglet = 'champs' | 'json'
 
 /**
  * Le temps de survol avant l'aperçu.
@@ -64,10 +65,15 @@ type RowPanelProps = {
  * cadre de la colonne (`22`) : deux barres de chrome empilées là où la capture n'en montre qu'une
  * auraient été le prix de les garder ici.
  *
- * **Les trois onglets ne sont pas trois vues du même contenu.** Champs rend les colonnes dans
- * l'ordre du catalogue ; JSON rend la ligne entière en objet, ce qui sert à la recopier ; Liens
- * rend les relations de la **table**, et c'est le seul des trois qui ne dépend pas de la ligne
- * sélectionnée.
+ * **Les deux onglets ne sont pas deux vues du même contenu.** Champs rend les colonnes dans
+ * l'ordre du catalogue ; JSON rend la ligne entière en objet, ce qui sert à la recopier.
+ *
+ * **Il y en avait un troisième, « Liens »** (`API-49`), et c'est le seul qui ne dépendait pas de la
+ * ligne sélectionnée : il listait les relations de la *table*, loin des colonnes qu'elles
+ * concernent. Chaque relation est désormais écrite **sur la colonne qu'elle touche**, sous son nom,
+ * et rien ne s'est perdu au change — une relation porte les colonnes de cette table (`columns`) dans
+ * les deux sens, et `columns` est le catalogue entier, donc chacune trouve sa ligne. Le compte est
+ * le même, l'endroit est le bon, et il y a un onglet de moins à visiter pour savoir où mène une clé.
  */
 export function RowPanel({
   cle,
@@ -144,6 +150,8 @@ export function RowPanel({
     passerelleLignes,
   )
 
+  const liens = liensOrdonnes(relations, columns)
+
   // **Rien plutôt qu'une phrase.** Sans ligne sélectionnée, ce panneau affichait « Sélectionnez une
   // ligne pour en voir le détail. » ; l'en-tête permanent du cadre rend la colonne lisible sans elle,
   // et une phrase qui décrit un geste évident finit par se lire comme du remplissage (`22`).
@@ -156,7 +164,6 @@ export function RowPanel({
           [
             { id: 'champs', label: t('tableView.rowPanel.tabs.fields'), icon: 'cols' },
             { id: 'json', label: t('tableView.rowPanel.tabs.json'), icon: 'json' },
-            { id: 'liens', label: t('tableView.rowPanel.tabs.links'), icon: 'link' },
           ] as const
         ).map((vue) => (
           <button
@@ -200,7 +207,16 @@ export function RowPanel({
                       aurait forcé à choisir laquelle des deux données il copie. */}
                   <dt
                     className={styles.etiquette}
-                    onMouseEnter={(evenement) => armer(evenement.currentTarget, colonne.name)}
+                    /* **La coupure se mesure sur le nom, pas sur la ligne de clé** (`API-49`).
+                       Celle-ci porte un glyphe de type et une icône de clé, qui ne se coupent pas :
+                       mesurer son propre débordement dirait qu'un nom tient alors qu'il est rogné —
+                       ou l'inverse. `armer` posé sur elle n'aurait plus jamais rien révélé, un
+                       aperçu qui cesse de paraître sans que rien n'échoue : la famille du `var()`
+                       mort. */
+                    onMouseEnter={(evenement) => {
+                      const nom = evenement.currentTarget.querySelector('[data-nom]')
+                      if (nom instanceof HTMLElement) armer(nom, colonne.name)
+                    }}
                     onMouseLeave={desarmer}
                     onContextMenu={(evenement) =>
                       ouvrirLeMenu(
@@ -211,7 +227,23 @@ export function RowPanel({
                       )
                     }
                   >
-                    {colonne.name}
+                    {/* **Un glyphe de type par clé** (`API-49`), à largeur fixe pour que les noms
+                        s'alignent — c'est la marque de la section « Colonnes de » de la sidebar, et
+                        `glypheDeType` est le seul endroit qui la décide. `aria-hidden` : « # » n'a
+                        rien à dire à une voix, et il entrerait dans le terme sans une espace
+                        (piège n° 1). */}
+                    <span className={styles.marque} aria-hidden="true">
+                      {glypheDeType(colonne.category)}
+                    </span>
+                    <span className={styles.nom} data-nom="">
+                      {colonne.name}
+                    </span>
+                    {colonne.key === 'primary' && (
+                      <Icon name="key" size={11} strokeWidth={2} className={styles.cle} />
+                    )}
+                    {colonne.key === 'foreign' && (
+                      <Icon name="fk" size={11} strokeWidth={2} className={styles.fk} />
+                    )}
                   </dt>
                   <dd
                     className={styles.valeur}
@@ -223,16 +255,56 @@ export function RowPanel({
                   >
                     {rendreValeur(valeur)}
                   </dd>
-                  {colonne.key === 'primary' && (
-                    <Icon name="key" size={11} strokeWidth={2} className={styles.cle} />
-                  )}
-                  {colonne.key === 'foreign' && (
-                    <Icon name="fk" size={11} strokeWidth={2} className={styles.fk} />
-                  )}
                 </div>
               )
             })}
           </dl>
+        )}
+
+        {/* **Les liens ont leur propre section, sous les champs** (`API-49`, second tour, à la
+            demande). Ils vivaient d'abord sur la ligne de clé de leur colonne, ce qui répondait à
+            « où mène ce champ » sans jamais laisser lire le schéma d'un coup : une ligne de clé
+            portait alors trois natures de chose — un type, une identité, une destination — et le
+            nom de la colonne, qui est ce qu'on cherche, s'y trouvait au milieu. Deux sections
+            disent deux questions.
+
+            **Chaque ligne renomme donc sa colonne**, puisqu'elle n'est plus à côté d'elle : c'est
+            ce que l'onglet « Liens » écrivait déjà, et sans ce nom la section serait une liste de
+            destinations sans départ.
+
+            **Rien quand il n'y a rien.** Une section vide, ou une phrase « aucune clé étrangère »,
+            occuperait de la place pour dire ce que son absence dit déjà — c'est la raison qui a fait
+            partir la phrase « Sélectionnez une ligne » de ce même panneau. */}
+        {onglet === 'champs' && liens.length > 0 && (
+          <section className={styles.liens}>
+            <h3 className={styles.liensTitre}>{t('tableView.rowPanel.linksTitle')}</h3>
+            {liens.map((lien) => (
+              <div
+                key={lien.constraintName}
+                className={cx(styles.lien, lien.direction === 'incoming' && styles.lienEntrant)}
+                /* Le `title` porte le lien en entier : l'ellipse coupe, et rien d'autre ici ne
+                   rendrait ce qu'elle a coupé — l'aperçu du survol prolongé appartient à la donnée
+                   de la ligne, pas au schéma. */
+                title={libelleDuLien(lien)}
+              >
+                <Icon name="fk" size={11} strokeWidth={2} className={styles.lienIcone} />
+                <span className={styles.lienDepart}>{lien.columns.join(', ')}</span>
+                {/* La flèche est **retirée de l'arbre d'accessibilité**, un verbe masqué la
+                    remplaçant avec ses espaces : une voix qui rendrait « user_id → users.id » ne
+                    dirait plus laquelle référence l'autre (pièges n° 1 et n° 2, la leçon du
+                    diagramme). */}
+                <span aria-hidden="true">{lien.direction === 'outgoing' ? '→' : '←'}</span>
+                <span className={styles.pourLaVoix}>
+                  {t(
+                    lien.direction === 'outgoing'
+                      ? 'tableView.rowPanel.references'
+                      : 'tableView.rowPanel.referencedBy',
+                  )}
+                </span>
+                <span className={styles.lienCible}>{cibleDuLien(lien)}</span>
+              </div>
+            ))}
+          </section>
         )}
 
         {onglet === 'json' && (
@@ -253,25 +325,6 @@ export function RowPanel({
             <JsonColore texte={documentJson(columns, ligne)} />
           </div>
         )}
-
-        {onglet === 'liens' &&
-          (relations.length === 0 ? (
-            <p className={styles.vide}>{t('tableView.rowPanel.noForeignKey')}</p>
-          ) : (
-            <ul className={styles.liens}>
-              {relations.map((r) => (
-                <li
-                  key={r.constraintName}
-                  className={r.direction === 'incoming' ? styles.entrante : undefined}
-                >
-                  <Icon name="fk" size={12} strokeWidth={2} />
-                  {r.direction === 'outgoing'
-                    ? `${r.columns.join(', ')} → ${r.targetTable}.${r.targetColumns.join(', ')}`
-                    : `${r.targetTable}.${r.targetColumns.join(', ')} → ${r.columns.join(', ')}`}
-                </li>
-              ))}
-            </ul>
-          ))}
 
         {/* **La règle du handoff, appliquée telle qu'elle est écrite.** L'aperçu n'apparaît que si
             la table cible porte un champ de la liste blanche ; sinon, rien — pas de dump
@@ -338,4 +391,44 @@ export function RowPanel({
       )}
     </aside>
   )
+}
+
+/**
+ * Les liens de la table, **dans l'ordre des champs qui les portent**.
+ *
+ * Les deux sections se lisent l'une sous l'autre : ranger les liens dans l'ordre du catalogue leur
+ * donne le même ordre que la liste au-dessus, donc on retrouve un champ à la même place dans les
+ * deux. L'ordre que le moteur rend, lui, groupe les sortantes puis les entrantes — vrai de la
+ * contrainte, sans rapport avec ce qu'on lit.
+ *
+ * `Relation.columns` porte toujours les colonnes de *cette* table — celles qui référencent pour une
+ * sortante, celles qui sont référencées pour une entrante —, donc la même clé de tri répond aux
+ * deux. Et comme `columns` est le catalogue entier de la table, aucun lien ne se retrouve sans
+ * rang : c'est ce qui autorise à retirer l'onglet « Liens » sans rien taire (`API-49`).
+ *
+ * **Le tri est stable**, donc deux liens partant de la même colonne gardent l'ordre du moteur — la
+ * seule chose qui les sépare, et elle est déterministe.
+ */
+function liensOrdonnes(
+  relations: readonly Relation[],
+  columns: readonly ColumnInfo[],
+): readonly Relation[] {
+  const rang = (relation: Relation) => {
+    const places = relation.columns.map((nom) => columns.findIndex((c) => c.name === nom))
+    // Une colonne absente du catalogue rendrait `-1` et passerait devant tout : elle va à la fin.
+    const connues = places.filter((place) => place >= 0)
+    return connues.length === 0 ? columns.length : Math.min(...connues)
+  }
+  return [...relations].sort((a, b) => rang(a) - rang(b))
+}
+
+/** L'autre bout d'un lien : la table et les colonnes qu'il désigne. */
+function cibleDuLien(relation: Relation): string {
+  return `${relation.targetTable}.${relation.targetColumns.join(', ')}`
+}
+
+/** Le lien en entier, pour l'infobulle qui rend ce que l'ellipse a coupé. */
+function libelleDuLien(relation: Relation): string {
+  const fleche = relation.direction === 'outgoing' ? '→' : '←'
+  return `${relation.columns.join(', ')} ${fleche} ${cibleDuLien(relation)}`
 }

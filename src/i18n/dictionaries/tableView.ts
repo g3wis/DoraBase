@@ -103,10 +103,13 @@ export const tableViewFr: Dictionnaire = {
     tabs: {
       fields: 'Champs',
       json: 'JSON',
-      links: 'Liens',
     },
     copyJson: 'Copier le JSON de la ligne',
-    noForeignKey: 'Aucune clé étrangère.',
+    linksTitle: 'Liens',
+    // Les deux sens d'un lien, **avec leurs espaces** : la flèche est masquée aux voix, et ce verbe
+    // la remplace au milieu de « user_id » et « users.id » (piège n° 1).
+    references: ' référence ',
+    referencedBy: ' est référencée par ',
     linkedRow: (p) => `Ligne liée · ${p.table}`,
     detectedFields: (p) => `— ${p.champs} détecté${(p.count as number) > 1 ? 's' : ''}`,
     copyAsInsert: 'Copier la ligne en INSERT',
@@ -272,10 +275,11 @@ export const tableViewEn: Dictionnaire = {
     tabs: {
       fields: 'Fields',
       json: 'JSON',
-      links: 'Links',
     },
     copyJson: 'Copy the row’s JSON',
-    noForeignKey: 'No foreign key.',
+    linksTitle: 'Links',
+    references: ' references ',
+    referencedBy: ' is referenced by ',
     linkedRow: (p) => `Linked row · ${p.table}`,
     detectedFields: (p) => `— ${p.champs} detected`,
     copyAsInsert: 'Copy row as INSERT',

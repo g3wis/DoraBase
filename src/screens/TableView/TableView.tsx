@@ -96,12 +96,6 @@ type TableViewProps = {
   columns: readonly ColumnInfo[]
   passerelle?: PasserelleLignes
   /**
-   * Publie filtres et tri vers l'écran de travail, qui en annote la liste de colonnes de la
-   * sidebar. **Un seul état, deux lecteurs** : une copie dans la sidebar divergerait à la
-   * première modification.
-   */
-  onEtatChange?: (etat: { filters: readonly Filter[]; sort: readonly SortKey[] }) => void
-  /**
    * Remonte la fenêtre lue et la ligne choisie.
    *
    * **La barre d'état et le panneau de ligne vivent au-dessus de cette vue**, parce que le mockup
@@ -236,7 +230,6 @@ export function TableView({
   moteur,
   columns,
   passerelle,
-  onEtatChange,
   onLectureChange,
   rang = null,
   onRangChange,
@@ -313,14 +306,6 @@ export function TableView({
   )
 
   const { fenetre, loading, error, relire } = useLignes(cle, query, passerelle, rafraichissement)
-
-  // **Un bloc, pas une flèche concise** : une flèche concise *retourne* la valeur du rappel, et
-  // React la prend pour une fonction de nettoyage — « destroy is not a function » au démontage dès
-  // que le rappel rend autre chose que `undefined`. Trouvé par un test dont le rappel poussait dans
-  // un tableau, ce qui rend un nombre.
-  useEffect(() => {
-    onEtatChange?.({ filters, sort })
-  }, [filters, sort, onEtatChange])
 
   /**
    * Les entrées « lire comme » du menu d'en-tête — **vides pour toute colonne qui n'est pas

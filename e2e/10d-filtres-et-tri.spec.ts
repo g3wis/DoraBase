@@ -138,13 +138,6 @@ test('le popover d’opérateur s’ouvre sous son champ et se ferme sur Échap'
   await expect(panneau).toBeHidden()
 })
 
-test('la sidebar annote la colonne filtrée', async ({ page }) => {
-  await page.getByLabel('Filtrer status').fill('paid')
-  await page.getByLabel('Filtrer status').press('Enter')
-
-  await expect(page.locator('section').getByText('filtré')).toBeVisible()
-})
-
 /** La couleur de fond de l'en-tête d'une colonne, telle que le navigateur la calcule. */
 async function fondDeColonne(page: import('@playwright/test').Page, colonne: string) {
   return page

@@ -5,6 +5,7 @@ import { useT } from '../../i18n/LanguageContext'
 import { raccourci } from '../../shell/plateforme'
 import { Badge } from '../../ui/Badge/Badge'
 import { ColumnRow } from '../../ui/ColumnRow/ColumnRow'
+import { glypheDeType } from '../../ui/glypheDeType'
 import { type EntreeDeMenu, MenuContextuel } from '../../ui/MenuContextuel/MenuContextuel'
 import { Sidebar } from '../../ui/Sidebar/Sidebar'
 import { SidebarFilterBar } from '../../ui/SidebarFilterBar/SidebarFilterBar'
@@ -141,22 +142,21 @@ export type ExplorerSidebarProps = {
    */
   modificationsEnAttenteDe?: (cible: CibleDeSuppression) => number
   /**
-   * La section contextuelle « Colonnes de *table* » des écrans de travail (`A5` → `A9`).
+   * La section contextuelle « Colonnes de *table* » — l'objet qu'on regarde sans l'avoir ouvert.
    *
-   * Absente dans `A4`, où aucune table n'est ouverte : le handoff ne la montre que sous un
-   * onglet actif. Les annotations « filtré » et « tri ↓ » du mockup viendront avec `10d`, qui
-   * crée l'état qu'elles reflètent — les inventer ici afficherait un état que rien ne produit.
+   * **Jamais sous une table ouverte** (`API-44`) : l'onglet nomme déjà chaque colonne en en-tête
+   * de grille et les liste en entier dans sa vue Structure, donc la section y redisait un extrait
+   * de ce qu'on avait sous les yeux, en prenant de la hauteur sur l'arbre. C'est l'appelant qui en
+   * décide — la sidebar ne connaît pas les onglets.
+   *
+   * Ce qui reste : l'explorateur sans onglet, et la console mongo, où c'est « Schéma déduit » qui
+   * paraît (`13c`). Les annotations « filtré » et « tri ↓ » du mockup sont parties avec la section
+   * qui les portait : elles ne décrivaient qu'une grille ouverte.
    */
   columns?: {
     table: string
     columns: readonly ColumnInfo[]
     loading?: boolean
-    /**
-     * Ce que `A5` annote sur une colonne : « filtré », « tri ↓ ». Rendu en accent, à la place du
-     * type. **L'état vient de la vue de table** (`10d`) : une copie ici divergerait au premier
-     * filtre modifié.
-     */
-    annotations?: Readonly<Record<string, string>>
   }
   /** Voir `Sidebar` : `fill` dans l'écran de travail, où un `SplitPane` porte la largeur. */
   width?: 'standard' | 'wide' | 'fill'
@@ -553,20 +553,15 @@ export function ExplorerSidebar({
                     // et de clé étrangère pour `user_id`, et un glyphe de type pour les autres.
                     typeIcon={colonne.key === 'primary' ? 'key' : colonne.key ? 'fk' : undefined}
                     typeIconColor={colonne.key === 'primary' ? 'var(--gold)' : 'var(--info)'}
-                    typeGlyph={colonne.key ? undefined : glypheDe(colonne.category)}
+                    typeGlyph={colonne.key ? undefined : glypheDeType(colonne.category)}
                     meta={
-                      columns.annotations?.[colonne.name] ??
                       // **La fréquence prend la place du type quand elle est partielle** — c'est
                       // ce que le mockup d'`A8` montre : `channel 98 %`. Un champ à 100 % affiche
                       // son type : répéter « 100 % » sur quinze lignes noierait les deux qui ne
                       // le sont pas, et ce sont celles-là qui comptent.
-                      frequenceLisible(colonne) ??
-                      colonne.typeName
+                      frequenceLisible(colonne) ?? colonne.typeName
                     }
-                    metaActive={
-                      columns.annotations?.[colonne.name] !== undefined ||
-                      frequenceLisible(colonne) !== null
-                    }
+                    metaActive={frequenceLisible(colonne) !== null}
                   />
                 ))}
                 {columns.columns.length > APERCU_COLONNES && (
@@ -599,27 +594,6 @@ function compteDe(
   if (!modifications || noeud.kind !== 'object') return undefined
   if (noeud.label !== modifications.table || noeud.schema !== modifications.schema) return undefined
   return String(modifications.compte)
-}
-
-/**
- * Le glyphe de catégorie du mockup : `T` pour du texte, `#` pour un nombre, `⏱` pour une date.
- *
- * La catégorie vient de l'adaptateur (`06a`) et non d'une analyse du nom de type : dériver
- * « int8 » ou « bpchar » dans l'écran l'obligerait à connaître les types de sept moteurs.
- */
-function glypheDe(category: ColumnInfo['category']): string {
-  switch (category) {
-    case 'number':
-      return '#'
-    case 'timestamp':
-      return '⏱'
-    case 'json':
-      return '{}'
-    case 'uuid':
-      return 'ID'
-    default:
-      return 'T'
-  }
 }
 
 /**

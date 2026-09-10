@@ -16,25 +16,52 @@ test.beforeEach(async ({ page }) => {
   await page.waitForSelector('[aria-label="Détail de la ligne 1"]')
 })
 
-test('le panneau fait 296 px, ses étiquettes 96, et l’en-tête du cadre 34', async ({ page }) => {
+test('le panneau fait 296 px, et l’en-tête du cadre 34', async ({ page }) => {
   const mesures = await page.evaluate(() => {
     const panneau = document.querySelector('[aria-label="Détail de la ligne 1"]')
-    const etiquette = panneau?.querySelector('dt')
     // **L'en-tête n'est plus dans le panneau** : il appartient au cadre de la colonne depuis `22`,
     // pour survivre à la bascule de vue et au panneau des modifications. Sa mesure reste celle du
     // mockup — c'est la même barre, elle a changé de contenu, pas de hauteur.
     const entete = document.querySelector('[role=separator] ~ * header')
-    if (!panneau || !etiquette || !entete) return null
+    if (!panneau || !entete) return null
     return {
       // La largeur **calculée** : le rectangle inclurait le filet gauche.
       panneau: getComputedStyle(panneau).width,
-      etiquette: getComputedStyle(etiquette).width,
       entete: getComputedStyle(entete).height,
     }
   })
   expect(mesures?.panneau).toBe('296px')
-  expect(mesures?.etiquette).toBe('96px')
   expect(mesures?.entete).toBe('34px')
+})
+
+/**
+ * **La clé au-dessus, la valeur au-dessous** (`API-49`) — le mockup les mettait côte à côte, avec
+ * une étiquette de 96 px qui ne laissait à la donnée qu'un tiers du panneau.
+ *
+ * Ce test mesure **l'empilement et la largeur rendue**, non un ordre de grandeur : sans le
+ * `flex-direction: column`, les deux boîtes se partagent la ligne — leurs bords haut coïncident et
+ * la valeur perd la moitié de sa largeur. C'est une égalité, pas une comparaison (règle n° 18).
+ */
+test('la clé est au-dessus de sa valeur, et chacune occupe toute la largeur', async ({ page }) => {
+  const mesures = await page.evaluate(() => {
+    const champ = document.querySelector('[aria-label="Détail de la ligne 1"] dl > div')
+    const dt = champ?.querySelector('dt')
+    const dd = champ?.querySelector('dd')
+    if (!champ || !dt || !dd) return null
+    const boites = { champ: champ.getBoundingClientRect(), dt: dt.getBoundingClientRect() }
+    return {
+      // Le bas de la clé est au niveau du haut de la valeur, aux arrondis près : elles sont
+      // empilées, pas côte à côte.
+      empile: Math.round(dd.getBoundingClientRect().top - boites.dt.bottom),
+      largeurDeLaCle: Math.round(boites.dt.width),
+      largeurDuChamp: Math.round(boites.champ.width),
+      // La valeur est **décalée** pour s'aligner sur le nom de sa clé, jamais rétrécie de 96 px.
+      retrait: Math.round(dd.getBoundingClientRect().left - boites.champ.left),
+    }
+  })
+  expect(mesures?.empile).toBe(0)
+  expect(mesures?.largeurDeLaCle).toBe(mesures?.largeurDuChamp)
+  expect(mesures?.retrait).toBeLessThan(30)
 })
 
 test('l’aperçu de ligne liée apparaît et nomme ses champs détectés', async ({ page }) => {
@@ -66,10 +93,21 @@ test('le bouton « Copier la ligne en INSERT » occupe toute la largeur', async 
   expect(mesures?.hauteur).toBe(29)
 })
 
-test('les trois onglets rendent trois contenus distincts', async ({ page }) => {
+test('les deux onglets rendent deux contenus distincts', async ({ page }) => {
   const panneau = page.getByLabel('Détail de la ligne 1')
 
   await expect(panneau.locator('dl')).toBeVisible()
+  // **Il y en avait un troisième, « Liens »** (`API-49`) : il listait les relations de la table dans
+  // un onglet où l'on n'allait pas. C'est une **section** de celui-ci, sous la liste des champs, donc
+  // le lien de `user_id` se lit sans changer d'onglet.
+  await expect(page.getByRole('tab', { name: 'Liens' })).toHaveCount(0)
+  const liens = panneau.getByRole('heading', { name: 'Liens' })
+  await expect(liens).toBeVisible()
+  await expect(panneau.getByText('users.id')).toBeVisible()
+  // **Sous la liste, et non au-dessus** : c'est l'ordre demandé, et jsdom ne peut pas en juger.
+  const dl = await panneau.locator('dl').boundingBox()
+  const titre = await liens.boundingBox()
+  expect(titre?.y).toBeGreaterThan((dl?.y ?? 0) + (dl?.height ?? 0) - 1)
 
   await page.getByRole('tab', { name: 'JSON' }).click()
   await expect(panneau.locator('pre')).toContainText('"total_cents"')
@@ -87,8 +125,8 @@ test('les trois onglets rendent trois contenus distincts', async ({ page }) => {
   })
   expect(couleurs?.cle).not.toBe(couleurs?.nombre)
 
-  await page.getByRole('tab', { name: 'Liens' }).click()
-  await expect(panneau.getByText('user_id → users.id')).toBeVisible()
+  await page.getByRole('tab', { name: 'Champs' }).click()
+  await expect(panneau.locator('dl')).toBeVisible()
   await expect(panneau.locator('pre')).toHaveCount(0)
 })
 

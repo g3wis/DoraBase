@@ -526,20 +526,24 @@ describe('Workbench', () => {
     ).toBeInTheDocument()
   })
 
-  it('la sidebar liste les colonnes de la table ouverte, pas avant', async () => {
+  it('la sidebar liste les colonnes de l’objet choisi, et les retire dès qu’il est ouvert', async () => {
     const utilisateur = userEvent.setup()
     monter()
     await ouvrirLArbreJusquAuSchema(utilisateur)
     expect(screen.queryByText(/^Colonnes de/)).not.toBeInTheDocument()
 
+    // Choisir sans ouvrir : c'est là que la section sert — on regarde une table qu'on n'a pas
+    // encore ouverte.
     const table = await screen.findByRole('table')
-    await utilisateur.dblClick(within(table).getByText('orders'))
-
-    expect(await screen.findByText('Colonnes de orders')).toBeInTheDocument()
-    // `created_at` apparaît deux fois une fois la table ouverte — dans la sidebar et dans
-    // l'en-tête de la grille. C'est celle de la sidebar qui est en cause ici.
-    const section = screen.getByText('Colonnes de orders').parentElement as HTMLElement
+    await utilisateur.click(within(table).getByText('orders'))
+    const section = (await screen.findByText('Colonnes de orders')).parentElement as HTMLElement
     await waitFor(() => expect(within(section).getByText('created_at')).toBeInTheDocument())
+
+    // **Et elle part à l'ouverture** (`API-44`) : l'en-tête de la grille nomme déjà chaque colonne,
+    // et « Structure » les liste en entier.
+    await utilisateur.dblClick(within(table).getByText('orders'))
+    await screen.findByRole('grid')
+    await waitFor(() => expect(screen.queryByText(/^Colonnes de/)).not.toBeInTheDocument())
   })
 
   it('« Ouvrir les données » du panneau droit ouvre l’onglet, et n’annonce plus A5', async () => {
@@ -555,22 +559,6 @@ describe('Workbench', () => {
     await utilisateur.click(action)
 
     expect(screen.getByRole('tab', { name: /orders/ })).toBeInTheDocument()
-  })
-
-  it('la sidebar annote la colonne triée, d’après l’état de la vue de table', async () => {
-    const utilisateur = userEvent.setup()
-    monter()
-    await ouvrirLArbreJusquAuSchema(utilisateur)
-    await utilisateur.click(await screen.findByRole('treeitem', { name: /^orders/ }))
-
-    const section = (await screen.findByText('Colonnes de orders')).parentElement as HTMLElement
-    await waitFor(() => expect(within(section).getByText('created_at')).toBeInTheDocument())
-    expect(within(section).queryByText(/tri/)).not.toBeInTheDocument()
-
-    await utilisateur.click(screen.getByRole('button', { name: 'Trier par created_at' }))
-
-    // L'annotation reflète l'état de la grille — un seul état, deux lecteurs.
-    await waitFor(() => expect(within(section).getByText('tri ↑')).toBeInTheDocument())
   })
 
   it('« Structure » bascule vers la structure, et « Données » ramène la grille', async () => {
@@ -2123,17 +2111,6 @@ describe('mode édition', () => {
     expect(screen.getByLabelText('Modifications en attente de la table')).toBeInTheDocument()
     // Mais plus aucune cellule ne s'ouvre.
     expect(screen.queryByRole('button', { name: /Modifier/ })).not.toBeInTheDocument()
-  })
-
-  it('la colonne modifiée est annotée dans la sidebar', async () => {
-    const utilisateur = userEvent.setup()
-    monter()
-    await ouvrirEtEditer(utilisateur)
-    await modifier(utilisateur)
-
-    const section = (await screen.findByText('Colonnes de orders')).parentElement as HTMLElement
-    // « modifié » prime sur le type et sur « tri ↓ » : c'est l'état qui attend une action.
-    await waitFor(() => expect(within(section).getByText('modifié')).toBeInTheDocument())
   })
 
   it('le mode est par onglet : basculer l’un ne bascule pas l’autre', async () => {
