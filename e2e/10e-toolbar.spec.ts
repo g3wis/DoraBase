@@ -199,15 +199,18 @@ test.describe('l’attente du rafraîchissement', () => {
  * travail, comme l'utilisateur.
  */
 test.describe('mode édition', () => {
-  test('le bouton ouvre l’édition, et le clavier ferme celle qu’il a ouverte', async ({ page }) => {
-    const bascule = page.getByRole('button', { name: 'Mode édition' })
-    await expect(bascule).toHaveAttribute('aria-pressed', 'false')
+  test('la bascule ouvre l’édition, et le clavier ferme celle qu’elle a ouverte', async ({
+    page,
+  }) => {
+    const bascule = page.getByRole('switch', { name: 'Verrouiller la table' })
+    // Coché vaut **verrouillé** : au repos la table est en lecture seule.
+    await expect(bascule).toBeChecked()
     // Rien n'est éditable tant que rien n'est ouvert : sans ce témoin, la mesure d'après passerait
     // sur un écran qui aurait toujours été en édition.
     await expect(page.getByRole('button', { name: 'Modifier status' })).toHaveCount(0)
 
     await bascule.click()
-    await expect(bascule).toHaveAttribute('aria-pressed', 'true')
+    await expect(bascule).not.toBeChecked()
     // C'est **ceci** que la galerie ne peut pas montrer : la grille de l'onglet a suivi le bouton.
     await expect(page.getByRole('button', { name: 'Modifier status' }).first()).toBeVisible()
     await expect(page.getByRole('button', { name: 'Ajouter une ligne' })).toBeVisible()
@@ -219,31 +222,50 @@ test.describe('mode édition', () => {
     // specs de `11a`–`11c`. Ce fichier ne tourne que sous le projet `macos` : le projet `windows`
     // n'exécute que les `*.windows.spec.ts`.
     await page.keyboard.press('Meta+e')
-    await expect(bascule).toHaveAttribute('aria-pressed', 'false')
+    await expect(bascule).toBeChecked()
     await expect(page.getByRole('button', { name: 'Modifier status' })).toHaveCount(0)
   })
 
-  test('la pastille inverse le fond et l’encre, et le crayon ne bouge pas', async ({ page }) => {
-    const bascule = page.getByRole('button', { name: 'Mode édition' })
+  test('la pastille glisse et l’accent change de verrou', async ({ page }) => {
+    const bascule = page.getByRole('switch', { name: 'Verrouiller la table' })
 
+    // La pastille est le premier enfant, les deux cellules suivent — gauche « ouvert », droite
+    // « fermé ». On mesure la **position rendue** et non la déclaration : `transform` se lit en
+    // matrice, et c'est l'abscisse de la boîte qui dit où la pastille est vraiment tombée.
     const lire = () =>
-      bascule.evaluate((e) => ({
-        fond: getComputedStyle(e).backgroundColor,
-        encre: getComputedStyle(e).color,
-        icone: e.querySelector('use')?.getAttribute('href'),
-      }))
+      bascule.evaluate((e) => {
+        const [pastille, gauche, droite] = [...e.children] as [
+          HTMLElement,
+          HTMLElement,
+          HTMLElement,
+        ]
+        const boite = (n: HTMLElement) => Math.round(n.getBoundingClientRect().x)
+        return {
+          pastille: boite(pastille),
+          gauche: { x: boite(gauche), encre: getComputedStyle(gauche).color },
+          droite: { x: boite(droite), encre: getComputedStyle(droite).color },
+        }
+      })
 
-    const eteinte = await lire()
+    const verrouille = await lire()
+    // Verrouillé, la pastille est **sur la cellule de droite**, celle du cadenas fermé, et c'est
+    // ce verrou-là qui porte l'accent. Comparer les deux cellules entre elles suffit ici, à la
+    // différence d'un décor où elles se ressembleraient : l'une est accentuée, l'autre non, et
+    // c'est précisément la propriété demandée.
+    expect(verrouille.pastille).toBe(verrouille.droite.x)
+    expect(verrouille.droite.encre).not.toBe(verrouille.gauche.encre)
+
     await bascule.click()
-    const allumee = await lire()
+    // La transition dure 140 ms : on attend la position, on ne la lit pas sèchement (règle n° 15).
+    await expect.poll(async () => (await lire()).pastille).toBe((await lire()).gauche.x)
 
-    // **Le fond *et* l'encre**, non une teinte posée sur un fond inchangé : c'est ce qui fait tenir
-    // la distinction sans la couleur, l'icône restant la même dans les deux états.
-    expect(allumee.fond).not.toBe(eteinte.fond)
-    expect(allumee.encre).not.toBe(eteinte.encre)
-    // Le crayon des deux côtés : un bouton dit l'acte qu'il offre, pas l'état où il se trouve.
-    expect(eteinte.icone).toBe('#i-pencil')
-    expect(allumee.icone).toBe('#i-pencil')
+    const ouvert = await lire()
+    // L'accent a changé de côté, et les deux verrous sont restés à leur place — c'est ce qui
+    // distingue cette bascule d'un bouton qui échangerait son icône.
+    expect(ouvert.gauche.encre).toBe(verrouille.droite.encre)
+    expect(ouvert.droite.encre).toBe(verrouille.gauche.encre)
+    expect(ouvert.gauche.x).toBe(verrouille.gauche.x)
+    expect(ouvert.droite.x).toBe(verrouille.droite.x)
   })
 
   /**
@@ -259,8 +281,7 @@ test.describe('mode édition', () => {
    * mieux qu'un compte de pixels : deux lignes veulent dire que la largeur est retombée.
    */
   test('l’infobulle tient sur une ligne et reste dans la fenêtre', async ({ page }) => {
-    const bascule = page.getByRole('button', { name: 'Mode édition' })
-    await bascule.hover()
+    await page.getByRole('switch', { name: 'Verrouiller la table' }).hover()
     const info = page.getByRole('tooltip')
     await expect(info).toBeVisible()
 
@@ -334,7 +355,7 @@ test.describe('mode édition', () => {
         return { haut: Math.round(zone.scrollTop), fond: zone.scrollHeight - zone.clientHeight }
       })
 
-    await page.getByRole('button', { name: 'Mode édition' }).click()
+    await page.getByRole('switch', { name: 'Verrouiller la table' }).click()
     // Le témoin de départ : sans lui, une grille déjà en bas passerait le test sans rien prouver.
     expect((await position()).haut).toBe(0)
 

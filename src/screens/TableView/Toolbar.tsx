@@ -4,7 +4,7 @@ import type { ColumnInfo, Filter, RowLimit, SortKey } from '../../domain/engine'
 import { useT } from '../../i18n/LanguageContext'
 import { raccourci } from '../../shell/plateforme'
 import { Chip } from '../../ui/Chip/Chip'
-import { cx } from '../../ui/cx'
+import { IconSwitch } from '../../ui/IconSwitch/IconSwitch'
 import { Popover } from '../../ui/Popover/Popover'
 import { Tooltip } from '../../ui/Tooltip/Tooltip'
 import styles from './Toolbar.module.css'
@@ -160,20 +160,24 @@ type ToolbarProps = {
   sql: string | null
   onRefresh: () => void
   /**
-   * Le mode édition de l'onglet, et sa bascule.
+   * Le mode de l'onglet — lecture ou édition —, et sa bascule.
    *
-   * **Un bouton, parce qu'un geste qu'on ne peut pas deviner n'existe pas.** `11b` n'ouvrait
-   * l'édition qu'au `⌘E` de l'écran de travail, annoncé par une phrase de la barre d'état — 26 px
-   * de texte qui *disent* le raccourci sans rien offrir à cliquer. C'est la raison qui a déjà fait
-   * doubler le `⇧`-clic du diagramme et le renommage des consoles : un chemin unique au clavier est
-   * un chemin que personne ne trouve.
+   * **Un contrôle visible, parce qu'un geste qu'on ne peut pas deviner n'existe pas.** `11b`
+   * n'ouvrait l'édition qu'au `⌘E` de l'écran de travail, annoncé par une phrase de la barre
+   * d'état — 26 px de texte qui *disent* le raccourci sans rien offrir à cliquer. C'est la raison
+   * qui a déjà fait doubler le `⇧`-clic du diagramme et le renommage des consoles.
    *
-   * **Le nom ne bouge pas, `aria-pressed` porte l'état.** Un bouton qui s'appellerait tour à tour
-   * « Éditer » puis « Quitter l'édition » changerait de nom sous le doigt qui vient de le trouver ;
-   * c'est le motif ARIA de la bascule, celui du choix d'une table dans le diagramme et de l'épingle
-   * du panneau de détail.
+   * **Une bascule à deux verrous, et non un bouton qui s'allume** (`API-48`, sur un design
+   * fourni). Un bouton dit l'*acte* qu'il offre, donc il ne peut pas montrer un verrou — c'est ce
+   * qui avait fait revenir le crayon en `API-28`. Une bascule ne dit pas un acte : elle montre
+   * **les deux états côte à côte** et celui qu'on tient, si bien que le cadenas fermé redevient
+   * lisible, lu contre le cadenas ouvert plutôt que seul.
    *
-   * Absent, le bouton ne paraît pas — la galerie monte cette barre sans écran autour d'elle, et
+   * Ce que le bouton portait et qui reste : le mode est celui de l'**onglet**, donc l'état vient
+   * d'en haut, `⌘E` appelle la même fonction, et le nom du contrôle ne bouge pas — c'est
+   * `aria-checked` qui porte la position, pour qui ne voit ni la pastille ni l'accent.
+   *
+   * Absent, le contrôle ne paraît pas — la galerie monte cette barre sans écran autour d'elle, et
    * l'aiguillage du mode vit dans l'onglet, pas ici.
    */
   edition?: boolean
@@ -302,35 +306,13 @@ export function Toolbar({
         }}
       />
 
-      {/* **La bascule d'abord, le `+` ensuite** : c'est elle qui fait paraître celui-ci, et les deux
-          se lisent comme une paire — on ouvre l'édition, la ligne à ajouter s'ouvre à côté. Elle
-          appartient au groupe de gauche pour la raison qui y a mis le `+` : à gauche ce qui agit sur
-          les lignes, à droite ce qui les regarde. */}
-      {onBasculerEdition !== undefined && (
-        <Tooltip label={t('tableView.toolbar.editModeHint', { raccourci: raccourci('E') })}>
-          <button
-            type="button"
-            className={cx(styles.carre, edition && styles.actif)}
-            onClick={onBasculerEdition}
-            aria-pressed={edition}
-            aria-label={t('tableView.toolbar.editMode')}
-          >
-            {/* **Le crayon dans les deux états, et non un verrou qui deviendrait crayon** (rapporté
-                à l'usage : « l'interface n'est pas claire »). Le verrou disait l'état *courant* —
-                « c'est fermé » — là où un bouton doit dire l'**acte** qu'il offre : on ne devinait
-                pas qu'il ouvrait quelque chose, on lisait un cadenas. C'est le partage avec la barre
-                d'état, qui garde ses deux icônes parce qu'elle **décrit** là où le bouton **agit**.
-                Ce qui reste de l'argument d'accessibilité : la pastille n'inverse pas une teinte,
-                elle inverse le fond *et* l'encre, comme le couple de vues d'`A9` — et `aria-pressed`
-                porte l'état pour qui ne voit ni l'un ni l'autre. */}
-            <Icon name="pencil" size={14} strokeWidth={1.9} />
-          </button>
-        </Tooltip>
-      )}
-
       {/* **Contre le stepper, et non dans la moitié droite.** La barre se lit en deux temps : à
           gauche ce qui décide des lignes qu'on voit — relire, la limite, les filtres —, à droite ce
-          qui les regarde. Ajouter une ligne appartient au premier groupe. */}
+          qui les regarde. Ajouter une ligne appartient au premier groupe.
+
+          Il ne touche donc plus la bascule de mode, partie à droite (`API-48`) : ce qui les liait
+          n'était pas la place mais la cause, et elle tient toujours — le `+` ne paraît qu'en
+          édition, donc c'est la bascule qui le fait apparaître, d'un bout de la barre à l'autre. */}
       {onAjouterUneLigne !== undefined && (
         <button
           type="button"
@@ -405,6 +387,34 @@ export function Toolbar({
           <Icon name="dl" size={14} strokeWidth={1.9} />
         </button>
       </Tooltip>
+
+      {/* **Le mode se pose au bout de la barre**, à la demande (`API-48`). Il n'agit ni sur les
+          lignes qu'on lit — c'est la moitié gauche — ni sur ce qu'on en regarde : il dit ce que la
+          grille **accepte**, donc il est le dernier lu, comme un interrupteur au bord d'un tableau
+          de bord. C'est aussi le seul contrôle de la barre dont l'effet porte sur toute la grille.
+
+          **`checked` vaut « verrouillé »**, soit l'inverse de `edition` : c'est le sens du design,
+          où la position de droite porte le cadenas fermé. Le nom accessible suit — on nomme le
+          verrouillage, pas l'édition —, et il ne change pas d'une position à l'autre.
+
+          L'infobulle, elle, **change** : elle dit ce que le clic va faire, ce que deux cadenas ne
+          peuvent pas écrire. Une infobulle décrit, elle ne nomme pas — c'est le nom qui doit
+          tenir bon, pas la description. */}
+      {onBasculerEdition !== undefined && (
+        <Tooltip
+          label={t(edition ? 'tableView.toolbar.lockHint' : 'tableView.toolbar.unlockHint', {
+            raccourci: raccourci('E'),
+          })}
+        >
+          <IconSwitch
+            checked={!edition}
+            onCheckedChange={onBasculerEdition}
+            label={t('tableView.toolbar.lockLabel')}
+            iconOff="unlock"
+            iconOn="lock"
+          />
+        </Tooltip>
+      )}
     </div>
   )
 }

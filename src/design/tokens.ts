@@ -113,6 +113,7 @@ export type TokenName =
   | 'shadow-logo'
   | 'shadow-modal'
   | 'shadow-popover'
+  | 'shadow-switch'
   | 'shadow-window'
   | 'space-1'
   | 'space-2'
@@ -272,6 +273,7 @@ export const tokens: Record<TokenName, string> = {
   'shadow-logo': 'var(--shadow-logo)',
   'shadow-modal': 'var(--shadow-modal)',
   'shadow-popover': 'var(--shadow-popover)',
+  'shadow-switch': 'var(--shadow-switch)',
   'shadow-window': 'var(--shadow-window)',
   'space-1': 'var(--space-1)',
   'space-2': 'var(--space-2)',

@@ -233,11 +233,11 @@ describe('rafraîchir relit tout ce que l’écran montre', () => {
     await waitFor(() => expect(readRows).toHaveBeenCalled())
 
     // La vue ne possède pas ce mode, elle le reçoit : sans quoi l’écrire, la barre n’offre rien à
-    // cliquer plutôt qu’un bouton qui ne ferait rien.
-    expect(screen.queryByRole('button', { name: 'Mode édition' })).toBeNull()
+    // cliquer plutôt qu’un contrôle qui ne ferait rien.
+    expect(screen.queryByRole('switch', { name: 'Verrouiller la table' })).toBeNull()
   })
 
-  it('le bouton bascule le mode édition, et aria-pressed le dit des deux côtés', async () => {
+  it('la bascule ouvre le mode édition, et la position tenue le dit des deux côtés', async () => {
     const utilisateur = userEvent.setup()
 
     // Contrôlé depuis un parent, comme l’écran de travail le fait : c’est **la bascule** qui rend
@@ -269,22 +269,28 @@ describe('rafraîchir relit tout ce que l’écran montre', () => {
       </>,
     )
 
-    const bascule = screen.getByRole('button', { name: 'Mode édition' })
-    expect(bascule).toHaveAttribute('aria-pressed', 'false')
-    // **Le `+` n’est pas là tant que l’édition ne l’est pas**, et c’est ce qui rend la paire
-    // lisible : la bascule fait paraître son voisin.
+    const bascule = screen.getByRole('switch', { name: 'Verrouiller la table' })
+    // **Coché vaut « verrouillé »**, donc l’inverse du mode édition : c’est le sens du design, où
+    // la position de droite porte le cadenas fermé. Une bascule qui dirait « édition » cochée
+    // laisserait le cadenas fermé du côté allumé, ce qui est le contraire de ce qu’il dessine.
+    expect(bascule).toBeChecked()
+    // **Le `+` n’est pas là tant que l’édition ne l’est pas** : la bascule le fait paraître à
+    // l’autre bout de la barre, ce qui reste sa raison d’être même une fois les deux séparés.
     expect(screen.queryByRole('button', { name: 'Ajouter une ligne' })).toBeNull()
 
     await utilisateur.click(bascule)
-    expect(bascule).toHaveAttribute('aria-pressed', 'true')
+    expect(bascule).not.toBeChecked()
     expect(screen.getByRole('button', { name: 'Ajouter une ligne' })).toBeInTheDocument()
 
+    // Le nom **n’a pas bougé** : c’est `aria-checked` qui distingue les deux positions, et le
+    // même élément qui répond au second clic.
+    expect(screen.getByRole('switch', { name: 'Verrouiller la table' })).toBe(bascule)
     await utilisateur.click(bascule)
-    expect(bascule).toHaveAttribute('aria-pressed', 'false')
+    expect(bascule).toBeChecked()
     expect(screen.queryByRole('button', { name: 'Ajouter une ligne' })).toBeNull()
   })
 
-  it('le crayon reste le crayon, et le nom ne bouge pas non plus', async () => {
+  it('les deux verrous sont là en permanence, et l’accent désigne celui qu’on tient', async () => {
     const utilisateur = userEvent.setup()
 
     function Ecran() {
@@ -298,8 +304,6 @@ describe('rafraîchir relit tout ce que l’écran montre', () => {
           passerelle={{ readRows: async () => FENETRE_LUE } as unknown as PasserelleLignes}
           edition={edition}
           onBasculerEdition={() => setEdition((precedent) => !precedent)}
-          // Le `+` demande en plus de quoi écrire ce qu'il ajoute : sans lui, il ne paraîtrait pas
-          // même en édition, et le test mesurerait son absence pour la mauvaise raison.
           onAttenteChange={() => {}}
         />
       )
@@ -313,19 +317,20 @@ describe('rafraîchir relit tout ce que l’écran montre', () => {
       </>,
     )
 
-    const bascule = screen.getByRole('button', { name: 'Mode édition' })
-    // **Le crayon au repos, et non un verrou** (rapporté à l’usage : « l’interface n’est pas
-    // claire »). Un bouton dit l’**acte** qu’il offre ; un cadenas disait l’état courant, et rien
-    // n’annonçait qu’on pouvait l’ouvrir. La barre d’état, elle, garde ses deux icônes : elle
-    // décrit là où le bouton agit.
-    expect(bascule.querySelector('use')?.getAttribute('href')).toBe('#i-pencil')
+    const bascule = screen.getByRole('switch', { name: 'Verrouiller la table' })
+    const verrous = () => [...bascule.querySelectorAll('use')].map((u) => u.getAttribute('href'))
+
+    // **Les deux dessins sont là dans les deux positions**, dans cet ordre — le cadenas ouvert à
+    // gauche, le fermé à droite. C’est ce qui les rend lisibles : un cadenas fermé lu seul dit
+    // l’état sans annoncer qu’on peut l’ouvrir, lu contre son voisin il dit les deux. C’est aussi
+    // ce qu’`API-28` reprochait au bouton, et que deux positions règlent.
+    expect(verrous()).toEqual(['#i-unlock', '#i-lock'])
 
     await utilisateur.click(bascule)
-    // Ni le nom ni l’icône ne bougent : un bouton qui se renommerait ou changerait de dessin sous
-    // le doigt se chercherait à nouveau à chaque bascule. C’est `aria-pressed` qui distingue les
-    // deux états — et, à l’écran, la pastille sombre que `10e-toolbar.spec.ts` mesure.
-    expect(screen.getByRole('button', { name: 'Mode édition' })).toBe(bascule)
-    expect(bascule.querySelector('use')?.getAttribute('href')).toBe('#i-pencil')
+
+    // Rien ne change de dessin ni de place : ce qui bouge est la pastille et l’accent, que
+    // `10e-toolbar.spec.ts` mesure — jsdom ne calcule aucune couleur ni aucune position.
+    expect(verrous()).toEqual(['#i-unlock', '#i-lock'])
   })
 
   it('un triple clic n’émet qu’une relecture', async () => {
