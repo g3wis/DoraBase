@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, type Locator, test } from '@playwright/test'
 import { deplierUnEnvironnement } from './pourLesTests'
 
 /*
@@ -12,6 +12,16 @@ import { deplierUnEnvironnement } from './pourLesTests'
  */
 /** Les poubelles de la grille, désignées par leur nom accessible — voir le `beforeEach`. */
 const POUBELLE = 'button[aria-label^="Supprimer la ligne"]'
+
+/** La visibilité **calculée** du numéro de la ligne visée : la première boîte de sa gouttière. */
+function visibiliteDuNumero(ligne: Locator) {
+  return ligne
+    .locator('[role=gridcell]')
+    .first()
+    .locator('span > span')
+    .first()
+    .evaluate((numero) => getComputedStyle(numero).visibility)
+}
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/?demo')
@@ -52,26 +62,30 @@ test('la poubelle paraît au survol de la ligne, pas seulement de son numéro', 
   // Et le numéro s'efface, puisque les deux occupent la même place : les actions n'ont plus de fond
   // à elles (il se composait avec celui de la ligne survolée), donc un numéro resté visible
   // passerait sous la poubelle.
-  const visibiliteDuNumero = () =>
-    ligne
-      .locator('[role=gridcell]')
-      .first()
-      .locator('span > span')
-      .first()
-      .evaluate((numero) => getComputedStyle(numero).visibility)
-  expect(await visibiliteDuNumero()).toBe('hidden')
+  expect(await visibiliteDuNumero(ligne)).toBe('hidden')
 
   // Et le survol appartient à *cette* ligne : la voisine ne montre rien, et garde son numéro.
   const voisine = page.locator('[role=grid] [role=row][aria-selected]').nth(3)
   await expect(voisine.locator(POUBELLE)).toBeHidden()
-  expect(
-    await voisine
-      .locator('[role=gridcell]')
-      .first()
-      .locator('span > span')
-      .first()
-      .evaluate((numero) => getComputedStyle(numero).visibility),
-  ).toBe('visible')
+  expect(await visibiliteDuNumero(voisine)).toBe('visible')
+})
+
+test("hors édition, survoler une ligne n'efface pas son numéro", async ({ page }) => {
+  // La bascule est un interrupteur : on la referme, plutôt que d'écrire un second `beforeEach` —
+  // et cela vérifie au passage que le retour à la lecture rend la gouttière à son numéro.
+  await page.keyboard.press('Meta+e')
+  const ligne = page.locator('[role=grid] [role=row][aria-selected]').nth(2)
+  await expect(ligne.locator(POUBELLE)).toHaveCount(0)
+
+  await ligne.locator('[role=gridcell]').nth(3).hover()
+  // **Rien à mettre à sa place, donc rien à effacer.** Le masquage a d'abord été posé sur la ligne :
+  // hors édition, le numéro disparaissait sous le pointeur en laissant un vide.
+  expect(await visibiliteDuNumero(ligne)).toBe('visible')
+
+  // Et sur la gouttière elle-même, qui était le seul survol de la version d'avant : le défaut y
+  // existait déjà, en plus étroit.
+  await ligne.locator('[role=gridcell]').first().hover()
+  expect(await visibiliteDuNumero(ligne)).toBe('visible')
 })
 
 test("elle est rouge tant qu'elle supprime, neutre quand elle annule", async ({ page }) => {

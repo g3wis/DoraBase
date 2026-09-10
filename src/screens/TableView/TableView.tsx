@@ -692,8 +692,17 @@ export function TableView({
             !supprimee
               ? () => setDocumentJsonOuvert({ sorte: 'editer', cle, rang: ligne.rang })
               : undefined
+          // Ce qui décide du masquage du numéro : il n'y a qu'à l'effacer si quelque chose vient
+          // l'occuper. La ligne annonce *quand*, la cellule dit *si*.
+          const avecActions = surSuppression !== undefined || surEditionJson !== undefined
           return (
-            <span className={cx(styles.gouttiereWrap, supprimee && styles.gouttiereSupprimee)}>
+            <span
+              className={cx(
+                styles.gouttiereWrap,
+                avecActions && styles.gouttiereAvecActions,
+                supprimee && styles.gouttiereSupprimee,
+              )}
+            >
               <span
                 className={cx(
                   styles.gouttiere,
@@ -702,7 +711,7 @@ export function TableView({
               >
                 {ligne.sorte === 'ajoutee' ? `+${ligne.rang}` : ligne.rang}
               </span>
-              {(surSuppression || surEditionJson) && (
+              {avecActions && (
                 <span className={styles.actions}>
                   {surEditionJson && (
                     <button
