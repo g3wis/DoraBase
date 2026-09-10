@@ -38,6 +38,11 @@ fn known_hosts_utilisateur() -> std::path::PathBuf {
         .join("known_hosts")
 }
 
+/// L'administration d'une instance (`API-32`) : les sept lectures, et le SQL des gestes.
+mod admin;
+/// Le vérificateur SCRAM d'un mot de passe de rôle (`API-32`) — haché **ici**, jamais envoyé en clair.
+pub mod scram;
+
 pub struct PostgresAdapter {
     client: Client,
     /// Le proxy quand la variante en déclare un — SSH ou Cloud SQL.
@@ -218,6 +223,62 @@ impl PostgresAdapter {
     /// Pas de `if not exists` : un schéma qui existe déjà doit se **dire**, sinon le gestionnaire
     /// annoncerait une création qui n'a rien créé. C'est la même règle que le refus d'une connexion
     /// en double, qui ne génère pas de suffixe.
+    /// Les sept lectures d'administration, et l'exécution d'un geste (`API-32`).
+    ///
+    /// **Des méthodes inhérentes, et non des entrées du contrat de moteur** : voir l'en-tête de
+    /// `instances/mod.rs` pour la raison. `AnyEngine::administration` est ce qui les choisit, et
+    /// nomme les quatre autres moteurs un par un.
+    pub async fn admin_overview(
+        &self,
+        host: &str,
+        port: u16,
+        secret_location: Option<String>,
+    ) -> Result<crate::instances::InstanceOverview, EngineError> {
+        let version = self.version().await?;
+        admin::overview(&self.client, version, host, port, secret_location).await
+    }
+
+    pub async fn admin_databases(
+        &self,
+    ) -> Result<Vec<crate::instances::InstanceDatabase>, EngineError> {
+        admin::databases(&self.client).await
+    }
+
+    pub async fn admin_roles(&self) -> Result<Vec<crate::instances::InstanceRole>, EngineError> {
+        admin::roles(&self.client).await
+    }
+
+    pub async fn admin_privileges(
+        &self,
+    ) -> Result<Vec<crate::instances::InstancePrivilege>, EngineError> {
+        admin::privileges(&self.client).await
+    }
+
+    pub async fn admin_sessions(
+        &self,
+    ) -> Result<Vec<crate::instances::InstanceSession>, EngineError> {
+        admin::sessions(&self.client).await
+    }
+
+    pub async fn admin_extensions(
+        &self,
+    ) -> Result<Vec<crate::instances::InstanceExtension>, EngineError> {
+        admin::extensions(&self.client).await
+    }
+
+    pub async fn admin_settings(
+        &self,
+    ) -> Result<Vec<crate::instances::InstanceSetting>, EngineError> {
+        admin::settings(&self.client).await
+    }
+
+    pub async fn admin_executer(
+        &self,
+        action: &crate::instances::InstanceAction,
+    ) -> Result<crate::instances::InstanceOutcome, EngineError> {
+        admin::executer(&self.client, action).await
+    }
+
     pub async fn create_schema(&self, name: &str) -> Result<(), EngineError> {
         let nom = name.trim();
         if nom.is_empty() {
@@ -518,6 +579,18 @@ fn instruction_colonne(sql: &str) -> String {
         .unwrap_or_else(|| "cette colonne".to_owned())
 }
 
+/// Le SQL d'un geste d'administration, **sans connexion** (`API-32`).
+///
+/// Exposée au niveau du module parce que la confirmation doit pouvoir s'afficher sur une instance
+/// dont la connexion vient de tomber : échouer là-dessus donnerait un encart vide devant un bouton
+/// actif. C'est la même fonction que celle qu'`admin_executer` emploie — voir l'en-tête d'`admin.rs`
+/// pour ce que cette unicité garantit.
+pub fn planifier_administration(
+    action: &crate::instances::InstanceAction,
+) -> crate::instances::InstancePlan {
+    admin::planifier(action)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -804,7 +877,11 @@ mod tests_db {
     /// L'adresse de la base de test, **jamais codée en dur** : le port diffère entre le
     /// conteneur local (55432, choisi pour ne croiser aucun autre projet de la machine) et
     /// le service de la CI (5432).
-    fn variante_de_test() -> (ConnectionSettings, Option<Secret>) {
+    /// **`pub(super)` depuis `API-32`**, comme `adaptateur` et pour la même raison : le test du mot
+    /// de passe ouvre une **seconde** connexion, avec le rôle qu'il vient de créer, et il lui faut
+    /// l'adresse du décor. En écrire une seconde lecture ferait vivre deux fois l'analyse de
+    /// `DORABASE_TEST_PG`.
+    pub(super) fn variante_de_test() -> (ConnectionSettings, Option<Secret>) {
         let url = std::env::var("DORABASE_TEST_PG")
             .expect("DORABASE_TEST_PG doit être défini pour les tests de base");
         let analysee: tokio_postgres::Config = url
@@ -841,7 +918,10 @@ mod tests_db {
         (variante, secret)
     }
 
-    async fn adaptateur() -> PostgresAdapter {
+    /// **`pub(super)` depuis `API-32`** : le module d'administration ouvre la même connexion, sur
+    /// le même décor, et en écrire un second ferait vivre deux fois la lecture de `DORABASE_TEST_PG`
+    /// et son analyse — la règle n° 17 dans un test.
+    pub(super) async fn adaptateur() -> PostgresAdapter {
         let (variante, secret) = variante_de_test();
         PostgresAdapter::connect(&variante, secret.as_ref())
             .await
@@ -3246,6 +3326,477 @@ mod tests_db {
         assert!(
             !adaptateur.connexion_perdue(),
             "une erreur de requête laisse la connexion en place"
+        );
+    }
+}
+
+/// Le gestionnaire d'instances contre une **vraie** base (`API-32`).
+///
+/// # Ce que ces tests gardent, et ce qu'ils ne peuvent pas garder
+///
+/// Les sept lectures sont du SQL de catalogue : leur seul mode de défaillance est de ne pas
+/// s'exécuter — une colonne mal nommée, un transtypage manquant, une fonction absente d'une version
+/// du serveur. C'est **exactement** ce qu'aucun test en pur ne peut voir, et c'est ce que ceux-ci
+/// vérifient : que chaque requête part, revient, et rend des lignes dont les champs obligatoires
+/// sont remplis.
+///
+/// Ce qu'ils ne gardent pas est le **contenu** : le décor est partagé par des tests parallèles, et
+/// une base créée par l'un paraîtrait dans le compte de l'autre. C'est la leçon de la comparaison de
+/// deux lectures d'une base vivante — ce qui bouge n'est pas seulement les statistiques, c'est tout
+/// ce qu'un autre test peut créer. Les assertions portent donc sur ce qui ne dépend d'aucun autre
+/// test : la présence de `postgres` parmi les bases, celle du rôle avec lequel on est connecté, et
+/// la cohérence interne de chaque ligne.
+#[cfg(all(test, feature = "db-tests"))]
+mod tests_db_administration {
+    use super::tests_db::*;
+    use super::PostgresAdapter;
+    use crate::instances::{InstanceAction, InstanceGesture};
+    use crate::secrets::Secret;
+
+    #[tokio::test]
+    async fn la_vue_d_ensemble_se_lit_en_un_releve() {
+        let adaptateur = adaptateur().await;
+        let vue = adaptateur
+            .admin_overview("localhost", 5432, Some("Trousseau".to_owned()))
+            .await
+            .expect("la vue d'ensemble doit se lire");
+
+        assert!(
+            vue.server_version.starts_with("PostgreSQL"),
+            "{:?}",
+            vue.server_version
+        );
+        // Au moins la nôtre : le compte est celui de tout le serveur, donc il ne peut pas être nul
+        // pendant qu'on l'interroge. C'est l'assertion qui ne dépend d'aucun autre test.
+        assert!(vue.connections >= 1, "{}", vue.connections);
+        assert!(vue.max_connections > 0, "{}", vue.max_connections);
+        assert!(vue.databases >= 1, "{}", vue.databases);
+        assert!(vue.roles >= 1, "{}", vue.roles);
+        assert_eq!(vue.identity.secret_location.as_deref(), Some("Trousseau"));
+        // L'hôte est celui qu'on lui passe — celui qui est *joint*, `127.0.0.1` derrière un proxy —
+        // et non celui que le serveur croit être.
+        assert_eq!(vue.identity.host, "localhost");
+        assert!(!vue.identity.role.is_empty());
+        // Les onze gestes sont rendus, chacun une fois : c'est ce dont toutes les sections dépendent
+        // pour désactiver leurs boutons.
+        assert_eq!(vue.capabilities.len(), InstanceGesture::TOUS.len());
+        for capacite in &vue.capabilities {
+            // Un geste permis n'a **pas** de raison : elle s'afficherait en infobulle d'un contrôle
+            // actif, comme une limite qui n'existe pas.
+            assert_eq!(capacite.allowed, capacite.reason.is_none(), "{capacite:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn les_bases_se_lisent_avec_leur_proprietaire_et_leur_encodage() {
+        let bases = adaptateur()
+            .await
+            .admin_databases()
+            .await
+            .expect("les bases doivent se lire");
+
+        // `postgres` existe sur toute installation, et n'est créée par aucun test.
+        let postgres = bases
+            .iter()
+            .find(|base| base.name == "postgres")
+            .expect("la base postgres");
+        assert!(!postgres.owner.is_empty());
+        assert!(!postgres.encoding.is_empty());
+        assert!(!postgres.collation.is_empty());
+        assert!(!postgres.is_template);
+
+        // Les modèles sont **listés**, et marqués : c'est ce qui permet à l'écran de refuser leur
+        // suppression avec sa raison plutôt que de laisser le serveur le faire.
+        assert!(
+            bases.iter().any(|base| base.is_template),
+            "template0 et template1 doivent paraître, marqués"
+        );
+    }
+
+    #[tokio::test]
+    async fn les_roles_se_lisent_avec_leurs_attributs_et_les_predefinis_sont_marques() {
+        let adaptateur = adaptateur().await;
+        let vue = adaptateur.admin_overview("h", 1, None).await.expect("vue");
+        let roles = adaptateur
+            .admin_roles()
+            .await
+            .expect("les rôles doivent se lire");
+
+        let notre = roles
+            .iter()
+            .find(|role| role.name == vue.identity.role)
+            .expect("le rôle avec lequel on est connecté doit paraître");
+        // On est connecté, donc ce rôle peut se connecter : la seule assertion d'attribut qui ne
+        // dépende ni de la configuration du décor ni d'un autre test.
+        assert!(notre.can_login);
+        assert!(!notre.system, "notre rôle n'est pas un rôle prédéfini");
+
+        // **Les rôles prédéfinis sont listés et marqués**, jamais tus : c'est l'arbitrage des
+        // schémas de catalogue d'`API-33`. Ne pas les montrer ferait chercher d'où vient un droit.
+        assert!(
+            roles
+                .iter()
+                .any(|role| role.system && role.name.starts_with("pg_")),
+            "les rôles pg_* doivent paraître, marqués"
+        );
+    }
+
+    #[tokio::test]
+    async fn la_matrice_ecarte_les_roles_predefinis_et_les_modeles() {
+        let privileges = adaptateur()
+            .await
+            .admin_privileges()
+            .await
+            .expect("les privilèges doivent se lire");
+
+        assert!(!privileges.is_empty());
+        // Les rôles prédéfinis n'ont pas `LOGIN` : ils rempliraient la matrice d'une dizaine de
+        // lignes identiques. Ils restent dans la section « Utilisateurs », où leur existence compte.
+        assert!(!privileges
+            .iter()
+            .any(|cellule| cellule.role.starts_with("pg_")));
+        assert!(!privileges
+            .iter()
+            .any(|cellule| cellule.database.starts_with("template")));
+        // Le propriétaire d'une base y a tout : `has_database_privilege` tient compte du
+        // propriétaire, de l'appartenance à un rôle et de `PUBLIC` — ce qu'un croisement d'ACL
+        // brutes manquerait.
+        assert!(privileges.iter().any(|cellule| cellule.connect));
+    }
+
+    #[tokio::test]
+    async fn notre_propre_session_est_marquee_comme_telle() {
+        // **C'est le seul champ de cette section dont la valeur fausse ferme l'écran** : terminer sa
+        // propre session referme la connexion de l'onglet, et la lecture suivante répond « aucune
+        // connexion ouverte ». Le cœur le marque, l'écran désactive l'entrée avec sa raison.
+        let sessions = adaptateur()
+            .await
+            .admin_sessions()
+            .await
+            .expect("les sessions doivent se lire");
+
+        let notres: Vec<_> = sessions.iter().filter(|session| session.is_self).collect();
+        assert_eq!(notres.len(), 1, "exactement une session est la nôtre");
+        assert!(notres[0].client == "local" || !notres[0].client.is_empty());
+    }
+
+    #[tokio::test]
+    async fn les_extensions_disent_la_base_ou_elles_ont_ete_lues() {
+        let extensions = adaptateur()
+            .await
+            .admin_extensions()
+            .await
+            .expect("les extensions doivent se lire");
+
+        // `plpgsql` est installée par défaut sur toute base créée depuis `template1`.
+        let plpgsql = extensions
+            .iter()
+            .find(|extension| extension.name == "plpgsql")
+            .expect("plpgsql doit paraître");
+        assert!(plpgsql.installed_version.is_some());
+        // **La portée est portée par la donnée**, non par une phrase que l'écran inventerait :
+        // `pg_extension` est un catalogue par base, et la colonne le dit.
+        assert!(!plpgsql.database.is_empty());
+
+        // Les disponibles non installées sont listées aussi : sans elles, l'action « installer »
+        // n'aurait rien à proposer.
+        assert!(extensions
+            .iter()
+            .any(|extension| extension.installed_version.is_none()));
+    }
+
+    #[tokio::test]
+    async fn les_parametres_disent_lesquels_se_reglent() {
+        let parametres = adaptateur()
+            .await
+            .admin_settings()
+            .await
+            .expect("les paramètres doivent se lire");
+
+        let bloc = parametres
+            .iter()
+            .find(|parametre| parametre.name == "block_size")
+            .expect("block_size doit paraître");
+        // `internal` : le serveur le calcule à la compilation. Proposer de le régler donnerait un
+        // champ qui échoue toujours — le défaut n° 36 avec un aller-retour en plus.
+        assert_eq!(bloc.context, "internal");
+        assert!(!bloc.settable);
+
+        let connexions = parametres
+            .iter()
+            .find(|parametre| parametre.name == "max_connections")
+            .expect("max_connections doit paraître");
+        assert!(connexions.settable);
+    }
+
+    /// Le chemin d'écriture, de bout en bout : créer un rôle, le modifier, le supprimer.
+    ///
+    /// **Un seul test pour les trois**, et c'est délibéré : ils portent sur le *même* rôle, et les
+    /// séparer demanderait soit trois rôles — donc trois noms à ne pas croiser entre tests
+    /// parallèles — soit un ordre d'exécution que `cargo test` ne garantit pas.
+    ///
+    /// Le nom porte l'identifiant du processus : le décor est partagé, et deux exécutions
+    /// simultanées de la suite se disputeraient un rôle de nom fixe. C'est la leçon des schémas
+    /// jetables de l'introspection, appliquée à un rôle.
+    #[tokio::test]
+    async fn un_role_se_cree_se_modifie_et_se_supprime() {
+        let adaptateur = adaptateur().await;
+        let vue = adaptateur.admin_overview("h", 1, None).await.expect("vue");
+        let nom = format!("dorabase_essai_{}", std::process::id());
+        let attributs = crate::instances::RoleAttributes {
+            can_login: false,
+            superuser: false,
+            create_db: false,
+            create_role: false,
+        };
+
+        let issue = adaptateur
+            .admin_executer(&InstanceAction::CreateRole {
+                name: nom.clone(),
+                attributes: attributs,
+                verifier: None,
+            })
+            .await
+            .expect("la création doit aboutir");
+        // **Ce que l'exécution rend est ce qui est parti** : la même composition que le plan, et
+        // c'est ce qui fait tenir la promesse de la confirmation.
+        assert_eq!(
+            issue.statements,
+            crate::engine::postgres::planifier_administration(&InstanceAction::CreateRole {
+                name: nom.clone(),
+                attributes: attributs,
+                verifier: None,
+            })
+            .statements
+        );
+
+        let cree = adaptateur
+            .admin_roles()
+            .await
+            .expect("relecture")
+            .into_iter()
+            .find(|role| role.name == nom)
+            .expect("le rôle créé doit paraître");
+        assert!(!cree.can_login, "créé sans LOGIN, comme demandé");
+
+        // La bascule dans les deux sens : c'est ce que `mots_des_attributs` garantit en écrivant les
+        // quatre attributs à chaque fois, et ce qu'un `ALTER` partiel n'aurait pas fait.
+        adaptateur
+            .admin_executer(&InstanceAction::AlterRole {
+                name: nom.clone(),
+                attributes: crate::instances::RoleAttributes {
+                    can_login: true,
+                    ..attributs
+                },
+                verifier: None,
+            })
+            .await
+            .expect("la modification doit aboutir");
+        let modifie = adaptateur
+            .admin_roles()
+            .await
+            .expect("relecture")
+            .into_iter()
+            .find(|role| role.name == nom)
+            .expect("le rôle modifié doit paraître");
+        assert!(modifie.can_login);
+
+        adaptateur
+            .admin_executer(&InstanceAction::DropRole {
+                name: nom.clone(),
+                reassign_to: vue.identity.role.clone(),
+            })
+            .await
+            .expect("la suppression doit aboutir");
+        assert!(
+            !adaptateur
+                .admin_roles()
+                .await
+                .expect("relecture")
+                .iter()
+                .any(|role| role.name == nom),
+            "le rôle supprimé ne doit plus paraître"
+        );
+    }
+
+    /// **Le test décisif du mot de passe** : poser le vérificateur, puis **se connecter avec**.
+    ///
+    /// # Pourquoi celui-ci et pas un vecteur figé
+    ///
+    /// Le hachage a quatre étapes — SASLprep, PBKDF2, deux HMAC — et un format de sortie. Un test qui
+    /// comparerait ma sortie à ma propre sortie d'hier ne vérifierait que ma boucle ; le vecteur de
+    /// la RFC, dans `scram.rs`, ne couvre que PBKDF2. Ce qui reste — l'ordre des dérivations, le nom
+    /// des deux messages, la place du sel dans la chaîne, l'encodage — n'a qu'un juge : **le
+    /// serveur**, qui refait le calcul à la connexion suivante.
+    ///
+    /// Si quoi que ce soit diffère, l'authentification échoue. C'est exactement le mode de
+    /// défaillance qu'on redoute — un rôle verrouillé sans message —, et il devient ici une ligne
+    /// rouge.
+    #[tokio::test]
+    async fn un_mot_de_passe_pose_par_nous_ouvre_une_connexion() {
+        use crate::engine::postgres::scram;
+
+        let adaptateur = adaptateur().await;
+        let nom = format!("dorabase_mdp_{}", std::process::id());
+        let secret = "un mot de passe d'essai";
+
+        // **Le mot de passe part avec la création**, dans le même ordre que les attributs : c'est
+        // ce que le formulaire compose depuis le 10 septembre 2026.
+        let issue = adaptateur
+            .admin_executer(&InstanceAction::CreateRole {
+                name: nom.clone(),
+                attributes: crate::instances::RoleAttributes {
+                    can_login: true,
+                    superuser: false,
+                    create_db: false,
+                    create_role: false,
+                },
+                verifier: Some(scram::verificateur(secret).expect("le hachage")),
+            })
+            .await;
+
+        // **La connexion se tente, puis le rôle est retiré quoi qu'il arrive** : un décor partagé ne
+        // doit pas garder les rôles des exécutions précédentes, et une assertion qui échoue avant le
+        // nettoyage en laisserait un derrière elle.
+        let (mut variante, _) = variante_de_test();
+        let proprietaire = variante.username.clone();
+        variante.username = nom.clone();
+        let connexion = PostgresAdapter::connect(&variante, Some(&Secret::new(secret))).await;
+
+        let retrait = adaptateur
+            .admin_executer(&InstanceAction::DropRole {
+                name: nom.clone(),
+                reassign_to: proprietaire,
+            })
+            .await;
+
+        issue.expect("la création avec mot de passe doit aboutir");
+        match connexion {
+            Ok(ouverte) => ouverte.close().await,
+            Err(erreur) => panic!(
+                "le rôle doit pouvoir se connecter avec le mot de passe dont nous avons posé le \
+                 vérificateur — sinon le hachage ne correspond pas à celui du serveur : {erreur}"
+            ),
+        }
+        retrait.expect("le retrait doit aboutir");
+    }
+
+    /// Le **changement** de mot de passe sur un rôle qui en avait déjà un.
+    ///
+    /// Distinct du test précédent, qui pose le premier à la création : ce qui est vérifié ici est
+    /// qu'`ALTER ROLE … PASSWORD` **remplace**, donc que l'ancien ne s'authentifie plus. Sans la
+    /// seconde moitié, un ordre qui n'aurait rien fait passerait — le nouveau mot de passe étant
+    /// alors le seul essayé.
+    #[tokio::test]
+    async fn changer_un_mot_de_passe_remplace_l_ancien() {
+        use crate::engine::postgres::scram;
+
+        let adaptateur = adaptateur().await;
+        let nom = format!("dorabase_chg_{}", std::process::id());
+        let attributs = crate::instances::RoleAttributes {
+            can_login: true,
+            superuser: false,
+            create_db: false,
+            create_role: false,
+        };
+
+        adaptateur
+            .admin_executer(&InstanceAction::CreateRole {
+                name: nom.clone(),
+                attributes: attributs,
+                verifier: Some(scram::verificateur("le premier").expect("hachage")),
+            })
+            .await
+            .expect("la création doit aboutir");
+
+        let change = adaptateur
+            .admin_executer(&InstanceAction::AlterRole {
+                name: nom.clone(),
+                attributes: attributs,
+                verifier: Some(scram::verificateur("le second").expect("hachage")),
+            })
+            .await;
+
+        let (mut variante, _) = variante_de_test();
+        let proprietaire = variante.username.clone();
+        variante.username = nom.clone();
+        let avec_le_nouveau =
+            PostgresAdapter::connect(&variante, Some(&Secret::new("le second"))).await;
+        let avec_l_ancien =
+            PostgresAdapter::connect(&variante, Some(&Secret::new("le premier"))).await;
+
+        let retrait = adaptateur
+            .admin_executer(&InstanceAction::DropRole {
+                name: nom.clone(),
+                reassign_to: proprietaire,
+            })
+            .await;
+
+        change.expect("le changement doit aboutir");
+        match avec_le_nouveau {
+            Ok(ouverte) => ouverte.close().await,
+            Err(erreur) => panic!("le nouveau mot de passe doit ouvrir : {erreur}"),
+        }
+        // **Et l'ancien ne doit plus** : sans cette moitié, un `ALTER` qui n'aurait rien changé
+        // passerait, puisque le seul mot de passe essayé serait celui de la création.
+        if let Ok(ouverte) = avec_l_ancien {
+            ouverte.close().await;
+            retrait.expect("le retrait doit aboutir");
+            panic!("l'ancien mot de passe ne doit plus ouvrir de connexion");
+        }
+        retrait.expect("le retrait doit aboutir");
+    }
+
+    /// Le vérificateur est **ce qui part**, et le mot de passe n'y paraît nulle part.
+    #[tokio::test]
+    async fn l_ordre_du_mot_de_passe_ne_porte_pas_le_mot_de_passe() {
+        use crate::engine::postgres::scram;
+
+        let secret = "pencil";
+        let plan = crate::engine::postgres::planifier_administration(&InstanceAction::AlterRole {
+            name: "bi".to_owned(),
+            attributes: crate::instances::RoleAttributes {
+                can_login: true,
+                superuser: false,
+                create_db: false,
+                create_role: false,
+            },
+            verifier: Some(scram::verificateur(secret).expect("le hachage")),
+        });
+        let sql = plan.statements.join("\n");
+
+        assert!(sql.contains("SCRAM-SHA-256$4096:"), "{sql}");
+        // **Le point du geste entier** : ce que la confirmation affiche, et ce que le serveur reçoit,
+        // ne contient pas la saisie. Sans cette assertion, un repli sur `PASSWORD 'pencil'` passerait
+        // — et c'est exactement le repli qu'on écrit quand le hachage échoue.
+        assert!(!sql.contains(secret), "{sql}");
+        // Et la note dit ce que le SQL ne dit pas : que cette chaîne n'est pas réversible.
+        assert!(plan.note.contains("vérificateur"), "{}", plan.note);
+    }
+
+    /// Un échec au milieu d'un geste à plusieurs ordres **nomme le rang**.
+    ///
+    /// « DROP ROLE a échoué » et « le deuxième des trois ordres a échoué, les deux premiers sont
+    /// passés » ne décrivent pas le même état du serveur, et c'est le second qu'il faut pour savoir
+    /// quoi faire.
+    #[tokio::test]
+    async fn un_geste_a_plusieurs_ordres_dit_lequel_a_echoue() {
+        let erreur = adaptateur()
+            .await
+            .admin_executer(&InstanceAction::DropRole {
+                name: format!("dorabase_absent_{}", std::process::id()),
+                reassign_to: "postgres".to_owned(),
+            })
+            .await
+            .expect_err("un rôle absent doit être refusé");
+
+        assert!(erreur.message.contains("sur 3"), "{}", erreur.message);
+        // Et le premier ordre est nommé : `REASSIGN OWNED BY` est celui qui échoue sur un rôle
+        // inexistant, non le `DROP ROLE` qu'on croirait fautif.
+        assert!(
+            erreur.message.contains("REASSIGN OWNED"),
+            "{}",
+            erreur.message
         );
     }
 }

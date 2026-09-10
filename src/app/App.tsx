@@ -2,16 +2,26 @@ import { lazy, Suspense, useEffect, useState } from 'react'
 import {
   createConsole,
   deleteConsole,
+  deleteInstance,
   renameConsole,
   saveConsole,
+  saveInstance,
   savePreferences,
 } from '../data/commandes'
 import { useConfiguration } from '../data/useConfiguration'
 import { Sprite } from '../design/icons/Sprite'
-import type { Database, EnvironmentId, Preferences, Project } from '../domain/config'
+import type {
+  Database,
+  EnvironmentId,
+  ManagedInstance,
+  Preferences,
+  Project,
+} from '../domain/config'
 import type { AvailableUpdate } from '../domain/maj'
 import { LanguageProvider, langueAppliquee } from '../i18n/LanguageContext'
 import { DumpDialogs, type SensDuDump } from '../screens/Dump/DumpDialogs'
+import { DeleteInstanceDialog } from '../screens/Instances/DeleteInstanceDialog'
+import { NewInstance } from '../screens/Instances/NewInstance'
 import {
   renommerLaConnexion,
   renommerLeProjet,
@@ -105,6 +115,26 @@ export function App() {
    * la valeur retenue (bornée). Les deux ne peuvent donc pas diverger.
    */
   const [preferences, setPreferences] = useState<Preferences>(PREFERENCES_PAR_DEFAUT)
+  /**
+   * Les instances managées déclarées (`API-32`), lues avec les projets.
+   *
+   * **Le même montage que `projects`** : le disque au démarrage, les commandes ensuite, et ce sont
+   * elles qui rendent la liste à jour — donc les deux ne peuvent pas diverger. Un état séparé plutôt
+   * qu'un champ de `projects` : une instance n'appartient à aucun projet.
+   */
+  const [instances, setInstances] = useState<ManagedInstance[]>([])
+  /**
+   * L'instance dont la modale de déclaration est ouverte.
+   *
+   * `{}` déclare une neuve, `{ instance }` en modifie une — **un seul état pour les deux usages**,
+   * comme `edition` pour les connexions : c'est la même modale, et deux drapeaux indépendants
+   * permettraient de l'ouvrir en création *et* en édition à la fois.
+   */
+  const [instanceOuverte, setInstanceOuverte] = useState<{ instance?: ManagedInstance } | null>(
+    null,
+  )
+  /** L'instance dont on confirme le retrait. */
+  const [instanceARetirer, setInstanceARetirer] = useState<ManagedInstance | null>(null)
   const [preferencesOuvertes, setPreferencesOuvertes] = useState(false)
   /**
    * La mise à jour que la notification a trouvée, quand c'est elle qui a ouvert les préférences.
@@ -140,6 +170,7 @@ export function App() {
     if (configuration.kind === 'chargement') return
     setProjects(configuration.projects)
     setPreferences(configuration.preferences)
+    setInstances(configuration.instances)
   }, [configuration])
 
   /**
@@ -297,6 +328,10 @@ export function App() {
             // Les cinq gestes de `23c` rendent la liste entière : la reposer ici évite un second
             // aller-retour, et supprime la fenêtre pendant laquelle l'arbre montrerait l'ancien état.
             onProjets={setProjects}
+            instances={instances}
+            onDeclareInstance={() => setInstanceOuverte({})}
+            onEditInstance={(instance) => setInstanceOuverte({ instance })}
+            onRemoveInstance={setInstanceARetirer}
             onRenameProject={async (project, nom) => {
               const issue = await renommerLeProjet({ project, name: nom })
               setProjects(issue.projects)
@@ -316,6 +351,61 @@ export function App() {
             }}
           />
           {dump && <DumpDialogs sens={dump} projects={projects} onClose={() => setDump(null)} />}
+          {/* **Les deux modales d'instance, dans la branche de l'écran de travail** (`API-32`).
+              Contrairement aux préférences et au parcours de création, le geste n'existe **que** là :
+              la zone d'instances vit sous l'arbre, et l'écran d'accueil n'a pas de sidebar. Les
+              monter plus haut ferait exister un état que rien ne pourrait déclencher — l'inverse du
+              défaut n° 89, et tout aussi faux. */}
+          {instanceOuverte !== null && (
+            <NewInstance
+              {...(instanceOuverte.instance === undefined
+                ? {}
+                : { edition: instanceOuverte.instance })}
+              onClose={() => setInstanceOuverte(null)}
+              onEnregistrer={async (requete) => {
+                setInstances(
+                  await saveInstance({
+                    id: requete.id,
+                    label: requete.label,
+                    engine: requete.engine,
+                    connection: {
+                      host: requete.host,
+                      port: requete.port,
+                      defaultDatabase: requete.defaultDatabase,
+                      username: requete.username,
+                      // **`null` toujours** : la référence du secret est posée par le cœur, jamais
+                      // par l'écran — lui laisser composer la chaîne dupliquerait la convention, et
+                      // une convention dupliquée diverge (`08e`).
+                      password: null,
+                      sslMode: requete.sslMode,
+                      caCertificate: null,
+                      authDatabase: null,
+                      // Une connexion d'administration n'est **jamais** en lecture seule : tout ce
+                      // que cet écran fait est d'écrire. Le garde-fou est ailleurs — la confirmation
+                      // qui montre le SQL.
+                      readOnly: false,
+                      reconnectOnStartup: requete.reconnectOnStartup,
+                      tunnel: requete.tunnel,
+                    },
+                    production: requete.production,
+                    confirmWrites: requete.confirmWrites,
+                    password: requete.password,
+                  }),
+                )
+              }}
+            />
+          )}
+          {instanceARetirer !== null && (
+            <DeleteInstanceDialog
+              instance={instanceARetirer}
+              onClose={() => setInstanceARetirer(null)}
+              onRetirer={async () => {
+                const issue = await deleteInstance(instanceARetirer.id)
+                setInstances(issue.instances)
+                return issue.secretResiduel
+              }}
+            />
+          )}
           {(connexionOuverte !== null || edition) && (
             <NewConnection
               onClose={() => {

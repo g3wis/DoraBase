@@ -51,7 +51,10 @@ test('la poignée du partage s’annonce comme un séparateur horizontal', async
 test('glisser la poignée du bas redimensionne en hauteur, et la taille survit', async ({
   page,
 }) => {
-  const poignee = page.locator('[role=separator][aria-orientation=horizontal]').first()
+  // **`.last()` et non `.first()`** : depuis `API-32`, la sidebar porte elle-même un partage
+  // empilé — la zone d'instances —, dont la poignée est un séparateur horizontal et vient d'abord
+  // dans le document. Celle de la console est la dernière.
+  const poignee = page.locator('[role=separator][aria-orientation=horizontal]').last()
   const boite = await poignee.boundingBox()
   if (!boite) throw new Error('la poignée doit être visible')
 

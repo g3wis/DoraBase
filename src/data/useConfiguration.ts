@@ -18,7 +18,14 @@ export type EtatDeDemarrage =
   | { kind: 'chargement' }
   | EtatDeConfiguration
   /** La commande elle-même a échoué — pont cassé, panique. Distinct d'un fichier illisible. */
-  | { kind: 'injoignable'; projects: never[]; preferences: Preferences; reason: string }
+  | {
+      kind: 'injoignable'
+      projects: never[]
+      preferences: Preferences
+      /** Vide, comme les projets : rien n'est connu du disque quand le pont ne répond pas. */
+      instances: never[]
+      reason: string
+    }
 
 export function useConfiguration(charger: () => Promise<ConfigLoad> = loadConfig): EtatDeDemarrage {
   const [etat, setEtat] = useState<EtatDeDemarrage>({ kind: 'chargement' })
@@ -38,6 +45,7 @@ export function useConfiguration(charger: () => Promise<ConfigLoad> = loadConfig
           setEtat({
             kind: 'injoignable',
             projects: [],
+            instances: [],
             // Les défauts : sans jetons, le message qui explique la panne serait illisible.
             preferences: PREFERENCES_PAR_DEFAUT,
             reason: messageDe(cause),

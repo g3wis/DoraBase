@@ -52,6 +52,19 @@ export function WorkbenchTabs({
         renommable: onglet.nom !== undefined,
       }
     }
+    /* **Une instance porte l'icône `srv` et une encre neutre** (`API-32`). Les quatre teintes de la
+       bande nomment des *natures d'objet* — table, vue, console — et une instance n'en est pas une :
+       c'est un serveur qu'on administre. C'est déjà la raison pour laquelle le diagramme est en
+       `--ink-2`. */
+    if (onglet.sorte === 'instance') {
+      return {
+        id: idOnglet(onglet),
+        icon: 'srv' as const,
+        iconColor: 'var(--ink-2)',
+        accentColor: 'var(--accent)',
+        label: onglet.instance,
+      }
+    }
     if (onglet.sorte === 'diagramme') {
       return {
         id: idOnglet(onglet),

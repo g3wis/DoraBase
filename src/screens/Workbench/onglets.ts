@@ -92,6 +92,24 @@ export type OngletDiagramme = {
 }
 
 /**
+ * Une instance managée ouverte dans un onglet (`API-32`).
+ *
+ * **Le seul onglet qui ne porte pas de `DatabaseKey`**, et c'est ce qui le définit : il ne parle
+ * d'aucune base. Une instance est un **serveur**, joint avec un compte d'administration, et elle
+ * vit à côté des projets — pas dedans. Lui inventer un triplet `projet/base/environnement` pour
+ * qu'elle ressemble aux autres aurait demandé de choisir un projet arbitraire, et cette valeur
+ * fausse aurait fini par voyager quelque part.
+ *
+ * Conséquence portée par `idOnglet` et `viseeParLId` : les deux fonctions doivent traiter cette
+ * sorte **avant** de lire `key`, et non par un bras attrape-tout.
+ */
+export type OngletInstance = {
+  sorte: 'instance'
+  /** L'identifiant figé de l'instance — celui du registre et de la référence de secret. */
+  instance: string
+}
+
+/**
  * Ce qu'un onglet de l'écran de travail peut être.
  *
  * **Une union, depuis `12a`.** L'onglet était « une table ouverte » ; `A7` en fait aussi une console,
@@ -99,7 +117,7 @@ export type OngletDiagramme = {
  * pour un seul écran. Le diagramme de schéma est le troisième membre, et il y entre pour la même
  * raison : c'est un contenu du centre, qui se ferme et se réordonne comme les autres.
  */
-export type Onglet = OngletTable | OngletConsole | OngletDiagramme
+export type Onglet = OngletTable | OngletConsole | OngletDiagramme | OngletInstance
 
 /**
  * L'identité d'un onglet, **dérivée de la base et de ce qu'il ouvre**.
@@ -111,9 +129,16 @@ export type Onglet = OngletTable | OngletConsole | OngletDiagramme
  * échoue. C'est le défaut n° 16 par avance : un bras attrape-tout absorbe le membre suivant.
  */
 export function idOnglet(onglet: Onglet): string {
+  // **Avant la lecture de `key`, et c'est structurel** : un onglet d'instance n'en a pas. Le
+  // préfixe `instance/` sépare cet espace de celui des coordonnées, qui portent toujours deux `/`
+  // dans leur première partie — un identifiant d'instance n'en contient aucun, `InstanceId` ne
+  // laissant passer que lettres, chiffres et tirets.
+  if (onglet.sorte === 'instance') return `instance/${onglet.instance}`
   const { project, database, environment } = onglet.key
   const coordonnees = `${project}/${database}/${environment}`
   switch (onglet.sorte) {
+    // `instance` est traité au-dessus : ce `switch` ne voit que les trois sortes qui portent une
+    // `DatabaseKey`, et le compilateur le sait par rétrécissement.
     case 'table':
       return `${coordonnees}::${onglet.schema}.${onglet.table}`
     case 'diagramme':
@@ -235,6 +260,35 @@ function memeBase(a: DatabaseKey, b: DatabaseKey): boolean {
   return a.project === b.project && a.database === b.database && a.environment === b.environment
 }
 
+/**
+ * Ouvre l'onglet d'une instance, ou **active celui qui l'est déjà** (`API-32`).
+ *
+ * Comme `ouvrir` et `ouvrirDiagramme`, contrairement à `ouvrirConsole` : deux onglets sur la même
+ * instance montreraient les mêmes tableaux, avec deux sections et deux relevés qui divergeraient. On
+ * ouvre une seconde console *parce qu'on veut* garder la première ; personne ne veut deux fois la
+ * même instance.
+ */
+export function ouvrirInstance(etat: EtatOnglets, instance: string): EtatOnglets {
+  const onglet: OngletInstance = { sorte: 'instance', instance }
+  const id = idOnglet(onglet)
+  if (etat.onglets.some((existant) => idOnglet(existant) === id)) {
+    return { onglets: etat.onglets, actif: id }
+  }
+  return { onglets: [...etat.onglets, onglet], actif: id }
+}
+
+/**
+ * Ferme les onglets d'une instance retirée (`API-32`).
+ *
+ * **Le pendant de `sansLesOngletsDe` pour un objet hors projet.** Laisser l'onglet ouvert
+ * afficherait les tableaux d'une instance que le registre ne tient plus : la première lecture
+ * répondrait « aucune connexion ouverte », sur un écran qui n'a plus de déclaration derrière lui.
+ */
+export function sansLOngletDInstance(etat: EtatOnglets, instance: string): EtatOnglets {
+  const id = idOnglet({ sorte: 'instance', instance })
+  return fermer(etat, id)
+}
+
 export function reordonner(etat: EtatOnglets, ids: readonly string[]): EtatOnglets {
   const parId = new Map(etat.onglets.map((onglet) => [idOnglet(onglet), onglet]))
   const onglets = ids.map((id) => parId.get(id)).filter((onglet): onglet is Onglet => !!onglet)
@@ -271,6 +325,11 @@ export function viseeParLId(
   },
   id: string,
 ): boolean {
+  // **Un onglet d'instance n'est visé par aucun retrait de projet ou de connexion** : il
+  // n'appartient à aucun des deux. Sans cette garde, `split('/')` sur `instance/pg-prod` rendrait
+  // `['instance', 'pg-prod']`, donc un « projet » nommé `instance` — et retirer un projet ainsi
+  // nommé fermerait toutes les instances.
+  if (id.startsWith('instance/')) return false
   // `??` plutôt qu'un `!` : `split` rend toujours au moins un élément, mais l'affirmer au
   // compilateur pour une ligne n'apprend rien à personne — la valeur par défaut est vraie.
   const [coordonnees = ''] = id.split('::')
@@ -365,7 +424,12 @@ export function renommerLaConnexion(
   if (nouveau === key.database) return etat
 
   const onglets = etat.onglets.map((onglet) =>
-    memeBase(onglet.key, key) ? { ...onglet, key: { ...onglet.key, database: nouveau } } : onglet,
+    // **Un onglet d'instance n'est jamais visé** : il ne porte pas de connexion, donc il n'y a rien
+    // à y renommer. La garde est sur la sorte et non sur la présence de `key` — c'est le
+    // compilateur qui doit refuser l'accès, pas un `?.` qui le rendrait `undefined` en silence.
+    onglet.sorte !== 'instance' && memeBase(onglet.key, key)
+      ? { ...onglet, key: { ...onglet.key, database: nouveau } }
+      : onglet,
   )
   return {
     onglets,

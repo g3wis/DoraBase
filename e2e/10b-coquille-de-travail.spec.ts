@@ -26,7 +26,9 @@ test('la coquille a les dimensions du mockup', async ({ page }) => {
     // Le panneau de gauche du `SplitPane` extérieur : c'est lui qui porte la largeur, la
     // sidebar étant en variante `fill`. Le mesurer sur la sidebar elle-même mesurerait une
     // largeur qu'elle ne décide plus.
-    const separateurs = [...document.querySelectorAll('[role=separator]')]
+    const separateurs = [
+      ...document.querySelectorAll('[role=separator][aria-orientation=vertical]'),
+    ]
     const sidebar = separateurs[0]?.previousElementSibling?.getBoundingClientRect()
     const bande = document.querySelector('[role=tablist]')?.parentElement?.parentElement
     return {
@@ -36,17 +38,19 @@ test('la coquille a les dimensions du mockup', async ({ page }) => {
       sidebar: sidebar ? Math.round(sidebar.width) : null,
       // Comme la barre de titre : la hauteur calculée, le filet bas en plus dans le rectangle.
       bande: bande ? getComputedStyle(bande).height : null,
-      poignees: [...document.querySelectorAll('[role=separator]')].map((p) =>
-        Math.round(p.getBoundingClientRect().width),
+      poignees: [...document.querySelectorAll('[role=separator][aria-orientation=vertical]')].map(
+        (p) => Math.round(p.getBoundingClientRect().width),
       ),
       // La zone attrapable, elle, déborde : c'est un pseudo-élément, donc invisible aux mesures de
       // boîte. Elle se constate au point (voir la spec du séparateur dans `geometrie-reelle`).
-      saisie: [...document.querySelectorAll('[role=separator]')].map((p) => {
-        const boite = p.getBoundingClientRect()
-        const gauche = document.elementFromPoint(boite.left - 2, boite.top + 40)
-        const droite = document.elementFromPoint(boite.right + 2, boite.top + 40)
-        return [p.contains(gauche) || gauche === p, p.contains(droite) || droite === p]
-      }),
+      saisie: [...document.querySelectorAll('[role=separator][aria-orientation=vertical]')].map(
+        (p) => {
+          const boite = p.getBoundingClientRect()
+          const gauche = document.elementFromPoint(boite.left - 2, boite.top + 40)
+          const droite = document.elementFromPoint(boite.right + 2, boite.top + 40)
+          return [p.contains(gauche) || gauche === p, p.contains(droite) || droite === p]
+        },
+      ),
     }
   })
 
@@ -105,7 +109,9 @@ test('les trois colonnes se partagent la largeur, et la grille en garde l’esse
   // gauche, donc le centre recevait 296 px et la grille tombait à **zéro** pixel de large. Aucun
   // test ne mesurait le centre — chacun vérifiait la colonne qui l'intéressait.
   const mesures = await page.evaluate(() => {
-    const separateurs = [...document.querySelectorAll('[role=separator]')]
+    const separateurs = [
+      ...document.querySelectorAll('[role=separator][aria-orientation=vertical]'),
+    ]
     const grille = document.querySelector('[role=grid]')
     // **La colonne de droite se mesure par sa poignée**, comme la sidebar juste au-dessus : depuis
     // `22`, son cadre est une mise en page sans nom accessible — et le panneau de ligne qu'elle
@@ -136,7 +142,9 @@ test('la barre d’état court sur toute la largeur, sous les trois colonnes', a
 
   const mesures = await page.evaluate(() => {
     const barre = document.querySelector('[role=status]')?.getBoundingClientRect()
-    const separateurs = [...document.querySelectorAll('[role=separator]')]
+    const separateurs = [
+      ...document.querySelectorAll('[role=separator][aria-orientation=vertical]'),
+    ]
     const panneau = separateurs[1]?.nextElementSibling?.getBoundingClientRect()
     return {
       largeur: Math.round(barre?.width ?? 0),
@@ -222,7 +230,12 @@ test('fermer le dernier onglet laisse l’écran de travail debout', async ({ pa
   await page.getByRole('button', { name: 'Fermer orders' }).click()
 
   await expect(page.getByRole('tab')).toHaveCount(0)
-  await expect(page.getByRole('tree')).toBeVisible()
+  // **L'arbre nommé, non « un arbre »** : depuis `API-32` la sidebar en porte deux — les projets, et
+  // les instances managées sous eux. Un `getByRole('tree')` nu désigne les deux, et Playwright
+  // refuse alors d'agir.
+  await expect(
+    page.getByRole('tree', { name: 'Projets, environnements et connexions' }),
+  ).toBeVisible()
   await expect(page.getByRole('table')).toBeVisible()
 })
 
@@ -234,10 +247,12 @@ test('sans sélection, les deux colonnes restent et le message occupe le centre'
   await expect(page.getByText('Sélectionner une entité pour commencer')).toBeVisible()
   await expect(page.getByRole('tablist')).toHaveCount(0)
   // Deux poignées, comme dans la coquille pleine : la largeur réglée survit à l'état vide.
-  await expect(page.locator('[role=separator]')).toHaveCount(2)
+  await expect(page.locator('[role=separator][aria-orientation=vertical]')).toHaveCount(2)
 
   const mesures = await page.evaluate(() => {
-    const separateurs = [...document.querySelectorAll('[role=separator]')]
+    const separateurs = [
+      ...document.querySelectorAll('[role=separator][aria-orientation=vertical]'),
+    ]
     const sidebar = separateurs[0]?.previousElementSibling?.getBoundingClientRect()
     const colonne = separateurs[1]?.nextElementSibling?.getBoundingClientRect()
     // Les deux logos : celui du centre à 72 px, celui de la colonne à 40. Tous deux décolorés.

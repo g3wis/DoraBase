@@ -1820,6 +1820,334 @@ rien ne focalise au clic, donc il ne referme pas un menu ouvert à la souris. Le
 fermetures — le clic ailleurs, le départ du pointeur — répondent, et `MenuContextuel` n'est pas
 concerné, lui qui focalise sa première entrée au montage.
 
+### Le gestionnaire d'instances (8 septembre 2026, `API-32`)
+
+Le produit savait ouvrir une **base** ; il ne savait rien dire du **serveur** qui la porte. Gérer les
+rôles, les bases, les privilèges et les sessions d'une instance demandait de sortir de DoraBase pour
+`psql`. Une seconde zone de la sidebar liste désormais les instances managées, et chacune ouvre un
+onglet à sept sections.
+
+**Une instance n'est pas une connexion de plus, et c'est la décision qui tient tout le reste.** Une
+`Database` désigne **une base** dans un projet, pour un environnement, et sert à en lire les
+données ; une `ManagedInstance` désigne **le serveur**, joint avec un compte d'administration. Les
+deux peuvent viser le même hôte sans que cela veuille dire quoi que ce soit. Les fondre aurait
+demandé qu'une `Database` porte un drapeau « c'est aussi une instance », donc que chaque écran qui
+liste des connexions sache l'écarter, et que le registre de projets se mette à porter des objets
+qui n'appartiennent à aucun environnement. Elles vivent donc à côté des projets — ce que la seconde
+zone de la sidebar dit à l'œil.
+
+**Ce qui a été tranché avant d'écrire** (les quatre points que le ticket laissait ouverts) : le
+rafraîchissement est **à la demande seule** ; le **journal des actions** reste hors périmètre ; un
+rôle sans droits voit l'instance **en lecture, chaque geste refusé nommé** ; et le ticket est livré
+d'une passe, gestes destructeurs compris.
+
+#### Ce qui est réemployé, et ce qui ne l'est pas
+
+- **Le registre de connexions est le même**, sous la clé `instance/<id>`. Ce qu'il détient est un
+  adaptateur ouvert et le proxy qui va avec ; rien de cela ne dépend de ce que la connexion
+  *désigne*. Un second registre aurait dupliqué l'ouverture, la fermeture avec attente de port, les
+  quatre états et leur sérialisation — pour ranger le même objet ailleurs. Deux segments contre les
+  trois d'un triplet : les deux espaces de clés sont disjoints sans convention de plus, un
+  `InstanceId` ne laissant passer que lettres, chiffres et tirets.
+- **La référence de secret suit la même règle** : `instance/<id>`, dérivée et donc stable. C'est
+  l'arbitrage de `reference_de`, appliqué à un objet hors projet.
+- **`connection_states` n'est pas réemployée**, en revanche : elle rend des triplets, et une
+  instance n'en est pas un. Les faire cohabiter dans une liste obligerait l'écran à démêler deux
+  sortes de clés — la convention dupliquée que cette commande a justement écartée. `instance_state`
+  est donc une commande à part, sur le **même** registre.
+- **Le panneau « Proxy / tunnel » d'`A2` est le composant, pas une copie.** Une instance managée se
+  joint par un bastion aussi souvent qu'une base ; en réécrire un jeu de champs aurait fait vivre
+  deux fois les trois visages de proxy, leur validation et leur conversion (règle n° 17).
+- **`Engine::nom` a quitté `engine/` pour `config/`.** C'est une propriété du type, pas de la couche
+  qui s'y connecte, et `config` en a eu besoin pour dire quel moteur n'est pas managé. Deux tables
+  de noms auraient fini par écrire « MySql » d'un côté et « MySQL » de l'autre, dans deux messages
+  que le même utilisateur peut lire à une minute d'intervalle.
+- **`RadioGroup` gagne un `disabled` par option**, et `TreeRow` un `indent`. Les deux sont des
+  exceptions étroites, documentées sur place : le bloc « Moteur » désactive trois options sur
+  quatre, et la liste d'instances est une liste de **feuilles** posée sous un arbre — sans
+  `INDENT[0] + 16`, ses icônes tomberaient 16 px à gauche de celles des projets, dans la même
+  colonne visuelle et à un palier apparent d'écart.
+
+#### Le fichier de configuration, et le défaut qu'il rend possible
+
+`instances` s'ajoute à la racine du fichier avec `#[serde(default)]` : **aucun cran de migration**,
+la règle des champs ajoutés de `27a`. Mais le fichier est réécrit **entier** à chaque
+enregistrement, donc *tout ce qu'une écriture ne porte pas, elle l'efface*. C'est le mode de
+défaillance propre à ce format, et il est silencieux — aucun test de projet ne le verrait.
+
+Deux parades, et elles se complètent :
+
+- **`save` prend les instances en paramètre**, sans variante à trois arguments. Une signature qui
+  les aurait laissées de côté aurait fait qu'enregistrer un projet efface toutes les instances
+  déclarées ; il n'y a donc pas de chemin qui les oublie par omission. Un test le démontre en le
+  provoquant délibérément, pour que la conséquence soit écrite noir sur blanc.
+- **`ecrire_le_reste_intact` remplace huit recopies.** Les trois lignes « relire les préférences,
+  écrire » vivaient à huit endroits de `config/commands.rs`, chacun n'ayant pensé qu'aux
+  préférences ; ajouter les instances y aurait fait huit corrections dont la neuvième, écrite
+  demain, aurait manqué. C'est la leçon de `programme::repertoire_personnel` transposée : la
+  question « que faut-il préserver en écrivant ? » n'a qu'une réponse, elle doit n'avoir qu'un lieu.
+
+**`confirm_writes` porte `#[serde(default = "vrai")]`**, non le défaut du type : un `bool` retomberait
+à `false`, ce qui ferait d'une mise à jour de DoraBase une levée silencieuse du garde-fou — exactement
+ce que `Guards` refuse, et la parade est la même.
+
+#### Le garde-fou : la confirmation montre le SQL exact
+
+Une confirmation ordinaire demande « êtes-vous sûr ? ». Celle-ci répond à « sûr de **quoi** ? » : les
+ordres sont affichés, dans l'ordre où ils partent, tels que le serveur les recevra.
+
+**Une seule composition, employée deux fois.** `planifier` rend les ordres à la confirmation,
+`executer` les envoie — la même fonction, dans le même fichier. C'est la règle de `preview_updates`
+(`11c`) : « s'il n'est pas exactement celui qui partira, il est pire qu'absent », et c'est ici
+qu'elle compte le plus, cet écran étant le seul du produit qui supprime des rôles et des bases.
+
+Cinq points à ne pas défaire :
+
+- **L'écran renvoie le geste, jamais les ordres qu'on vient de lui montrer.** Lui faire renvoyer le
+  SQL ferait exécuter une chaîne venue de la webview, et « ce que vous voyez est ce qui part »
+  deviendrait « ce que vous nous renvoyez est ce qui part » — deux choses très différentes le jour
+  où quelque chose s'interpose. Un test unitaire le garde, sur l'argument passé à la commande.
+- **La note vit hors de l'encart.** Elle dit ce que le SQL ne dit pas — pourquoi trois ordres,
+  pourquoi `RESTRICT` et non `CASCADE`, que `REASSIGN OWNED` se rejoue base par base. Un commentaire
+  SQL l'aurait mise *dans* ce qui part, et le premier lecteur à copier le bloc pour le rejouer dans
+  `psql` aurait emporté nos explications avec.
+- **`CREATE ROLE` n'a pas de mot de passe** ; c'est `SetRolePassword` qui en pose un, ensuite, et il
+  a fallu résoudre la promesse pour l'écrire — voir « Le mot de passe d'un rôle » plus bas. Deux
+  gestes et non un, parce qu'ils n'ont pas la même forme : celui-ci se compose de ce que le
+  formulaire porte, l'autre doit **hacher** une saisie avant même de pouvoir montrer son SQL. Les
+  fondre aurait fait dépendre la création d'un aller-retour de plus, pour un champ que la moitié des
+  rôles n'ont pas.
+- **`ALTER ROLE` écrit les quatre attributs dans les deux sens.** `ALTER ROLE x LOGIN` ne retire
+  **pas** `SUPERUSER` : une composition qui n'écrirait que les attributs cochés ferait un ordre qui
+  n'enlève rien — décocher « superutilisateur » n'aurait aucun effet, en silence. Les huit mots
+  rendent `CREATE` et `ALTER` exacts avec une seule composition.
+- **Aucune transaction, et ce n'est pas un oubli.** `CREATE DATABASE`, `DROP DATABASE` et
+  `ALTER SYSTEM` sont refusés dans un bloc transactionnel par le serveur lui-même. Envelopper le
+  reste ferait coexister deux régimes dont la différence ne se lirait nulle part. Le seul geste à
+  plusieurs ordres est `DROP ROLE`, et son échec au deuxième laisse un état **nommable** — le
+  message dit le rang et l'ordre fautif, parce que « le deuxième des trois est passé » et « DROP
+  ROLE a échoué » ne décrivent pas le même état du serveur.
+
+#### Ce que le compte a le droit de faire, dit avant d'essayer
+
+La vue d'ensemble lit `pg_roles` et rend **onze capacités**, chacune avec sa raison de refus. Un
+bouton qui part et revient avec « permission denied for database » est le défaut n° 36 avec un
+aller-retour en plus : on apprend l'interdit *après* avoir agi, et sur un serveur de production.
+
+**Trois attributs, onze réponses — et la fonction ne prétend pas l'exhaustivité.** Elle lit
+`rolsuper`, `rolcreatedb` et `rolcreaterole`, qui décident de la majorité des refus ; elle ne peut
+pas prédire ceux qui dépendent de l'objet visé — supprimer une base demande d'en être propriétaire,
+terminer la session d'un autre demande `pg_signal_backend`. C'est assumé, et c'est le bon partage :
+ce que cette liste évite est le cas courant, non toute erreur possible. Prétendre l'exhaustivité
+demanderait un `has_*_privilege` par ligne de chaque section, donc de refaire la lecture entière à
+chaque relevé, pour transformer un refus rare en grisé.
+
+**Trois refus sont portés par la ligne, non par le compte**, et les trois sont désactivés *avec leur
+raison* : une base modèle ne se supprime pas, un rôle prédéfini non plus, et **sa propre session ne
+se termine pas** — celui-là est le seul dont la valeur fausse fermerait l'écran, `pg_terminate_backend`
+sur son propre backend réussissant. C'est le cœur qui marque la ligne (`isSelf`) : comparer des PID
+côté front demanderait de lui envoyer le nôtre, donc une seconde vérité sur la question la plus
+coûteuse.
+
+`aria-disabled` et non `disabled` partout : un `<button disabled>` ne reçoit ni focus ni survol, donc
+son infobulle serait inatteignable — exactement là où elle est le plus utile (piège n° 3).
+
+#### Le rafraîchissement, et ce qui remplace le mouvement
+
+**Aucun minuteur.** Un relevé périodique ferait bouger un tableau sous les yeux de qui le lit,
+interrogerait un serveur de production que personne ne regarde, et rendrait toute capture de
+fidélité instable. Ce qui le remplace est la **phrase** : « relevé il y a 12 s » dit l'âge de ce
+qu'on voit, et le bouton dit comment en avoir un neuf. « Pas encore relevé » n'est pas « à jour » —
+quatre états, pas deux, la règle de « jamais tentée n'est pas hors ligne » appliquée à une lecture.
+
+**Chaque section se lit à sa première visite**, la vue d'ensemble exceptée : elle porte les
+capacités, dont les six autres dépendent. La garde vit dans une **ref**, non dans l'état des
+lectures : une fonction qui lirait l'état changerait d'identité à chaque réponse, donc les effets
+qui l'appellent repartiraient — une lecture en boucle, et sur un serveur de production. Une
+reconnexion vide la ref, sans quoi une section dont la lecture a échoué pendant la coupure resterait
+sur son message d'erreur.
+
+#### Les sept lectures, et une portée qui se dit
+
+`overview` est **une seule requête** : les six tuiles décrivent le même instant, et six lectures
+successives rendraient six instants voisins — la phrase « relevé il y a 12 s » deviendrait fausse
+d'une manière que personne ne pourrait voir. Deux valeurs y sont volontairement absentes plutôt
+qu'approchées : l'`uptime` quand le rôle n'a pas le droit de le lire, et la **taille totale** dès
+qu'une base échappe à la mesure — une somme partielle s'afficherait comme la taille de l'instance en
+en taisant une part, sur un nombre que personne ne pourrait recouper.
+
+**Les extensions sont celles de la base de service, et l'écran le dit.** `pg_extension` est un
+catalogue **par base** : les lire toutes demanderait une connexion par base — une poignée de main,
+un tunnel, et un refus pour chaque base sans `CONNECT`, sur une section qu'on ouvre en passant.
+Une section qui tairait sa portée se lirait comme la liste des extensions du serveur, ce qu'elle
+n'est pas : c'est l'honnêteté des deux nombres de la barre d'état du diagramme, sur une autre
+affirmation.
+
+**Les rôles prédéfinis sont listés, écartés de la matrice.** Ils existent, donc ils ne sont pas tus —
+l'arbitrage des schémas de catalogue d'`API-33` — mais ils n'ont pas `LOGIN`, donc ils rempliraient
+la matrice d'une dizaine de lignes identiques. Depuis le 9 septembre 2026 ils vivent dans le second
+tableau de la section, avec les autres rôles de groupe : voir plus bas.
+
+**La matrice n'est pas un `DataTable`**, et pour deux raisons : ses colonnes sont une *donnée* — les
+bases de l'instance — et surtout **chaque cellule est un contrôle**. Le sigle affiché (`ALL`, `CTc`,
+`Tc`, `c`, `—`) est composé par l'écran, jamais par le cœur : un `grant` porte sur **un** privilège,
+et rendre la chaîne obligerait le front à la défaire pour savoir quoi révoquer. Les lettres gardent
+l'ordre `C T c` quels que soient les privilèges présents — sans ordre fixe, `cT` et `Tc` diraient la
+même chose et deux lignes ne se compareraient plus d'un coup d'œil.
+
+#### Cinq correctifs rapportés à l'usage (9 septembre 2026)
+
+- **L'âge du relevé se dit en paliers**, non toujours en secondes. Il n'y a aucun rafraîchissement
+  automatique : un onglet laissé ouvert une nuit annonçait « relevé il y a 41 400 s », un nombre que
+  personne ne convertit de tête — donc une phrase qui cessait de dire ce pour quoi elle existe,
+  l'ordre de grandeur de ce qu'on regarde, **précisément quand elle compte le plus**. `ageLisible`
+  délègue à `dureeLisible`, la même échelle que la durée d'une session : les deux répondent à
+  « depuis combien de temps », dans la même barre à quelques pixels l'une de l'autre, et deux
+  échelles voisines mais distinctes se seraient lues comme deux unités.
+- **Les actions d'une ligne d'instance sont un menu « … », non deux carrés nus.** Deux boutons de
+  18 px occupent 45 px depuis le bord droit, là où la gouttière réservée en fait 24 : ils se
+  peignaient par-dessus la version et le badge d'état. La parade évidente — élargir la gouttière —
+  aurait coûté 45 px de libellé **en permanence** pour deux gestes rares. `RowMenu` règle les deux, et
+  c'est ce que portent déjà les lignes de projet, d'environnement et de connexion : deux formes
+  d'actions de ligne dans la même colonne auraient été deux conventions à apprendre.
+
+  **Et le test de recouvrement est resté vert sous sabotage** (règle n° 1). Mesurer un chevauchement
+  demande une ligne assez pleine pour que les deux boîtes se touchent, et aucun libellé du décor ne
+  l'est : la gouttière retirée, rien ne se recouvrait *encore*. Ce qui est vrai de tout décor est que
+  **ce que la ligne réserve à droite suffit à ce qu'elle y pose** — sinon le recouvrement n'attend
+  que le premier nom d'instance un peu long. C'est la cause qui est gardée, comme pour l'opacité des
+  liens du diagramme.
+- **La largeur de la colonne d'actions est celle de son en-tête, non celle de ses boutons.**
+  « Réduite au minimum » avait été pris pour le minimum des deux carrés : 52 px, où « actions »
+  devenait `actio…`, et 34 px sur les sections à un seul bouton, où il devenait `a…`. Un en-tête
+  tronqué à une lettre ne nomme plus rien, et c'est la **seule** colonne dont le contenu ne dise pas
+  de quoi elle parle. `LARGEUR_ACTIONS` vaut 72 px, la même pour une ou deux actions : une colonne
+  qui changerait de largeur d'une section à l'autre ferait sauter la première colonne de données en
+  changeant d'onglet.
+- **La section Sessions dit qui a ouvert la connexion, autant que le serveur puisse le dire.** Le PID
+  de `pg_stat_activity` est celui du **backend serveur** — jamais du client, qui tourne le plus
+  souvent ailleurs et dont rien du protocole ne transporte l'identité système. Remonter au processus
+  qui s'est connecté est donc **impossible**, et prétendre le contraire aurait été inventer une
+  colonne. Ce que le serveur sait est ce que le client **déclare** : `application_name`, posé par
+  `psql`, un pilote JDBC ou DoraBase. Pour un processus interne — l'autovacuum, le writer — il n'y a
+  pas de client à nommer, et `backend_type` prend le relais : sans lui, la ligne d'un
+  `autovacuum launcher` n'aurait ni utilisateur, ni base, ni nom. Un `application_name` vide est la
+  valeur par défaut du protocole et non un nom, d'où le `nullif` qui laisse jouer le repli.
+- **La section Utilisateurs sépare ceux qui se connectent des rôles de groupe.** Elle les listait
+  tous — un rôle de groupe et un `pg_monitor` au milieu des comptes —, et une section qui s'appelle
+  « Utilisateurs » sans montrer des utilisateurs ne dit pas ce qu'elle montre. Le partage suit
+  `rolcanlogin`, la seule marque du catalogue : **un utilisateur est un rôle qui peut se connecter**.
+  Les groupes vivent dans un second tableau **replié**, la facture des schémas de catalogue du
+  gestionnaire de schémas — ils existent, on les nomme dans « membre de » et dans la matrice, donc
+  les masquer ferait chercher d'où vient un droit. Trois conséquences : les prédéfinis `pg_*` ne font
+  **pas** un troisième tableau (ce sont des groupes, et trois listes pour deux questions n'aident
+  personne) ; la colonne « connexion » est partie, qui aurait dit « oui » sur toutes les lignes de
+  l'un et « non » sur toutes celles de l'autre ; et **le partage se fait après le filtre**, sans quoi
+  chercher « pg_ » ferait disparaître les rôles prédéfinis des deux tableaux au lieu de les rendre
+  dans le leur.
+
+#### Le mot de passe d'un rôle : haché ici, jamais envoyé (9 septembre 2026)
+
+**Il vit dans le formulaire d'édition du rôle depuis le 10 septembre** (rapporté à l'usage : « placer
+ça dans le même menu que le menu édition »). Il a d'abord été une troisième action de ligne, avec sa
+propre modale — c'est une **propriété du rôle**, qu'on change en même temps qu'on lui retire
+`SUPERUSER`, et deux entrées pour « modifier ce rôle » demandaient de savoir laquelle porte quoi
+avant de cliquer. Quatre conséquences :
+
+- **L'objection qui l'avait séparé tombe avec le champ vide.** Elle valait « la création prendrait un
+  aller-retour de hachage pour un champ que la moitié des rôles n'ont pas » : vide, il n'y a ni
+  hachage ni `PASSWORD` dans l'ordre. Ce n'est payé que par ceux qui s'en servent — et c'est ce qui a
+  permis d'en doter aussi la **création**, la réserve notée plus bas ayant disparu du même coup.
+- **Un seul ordre, non deux.** `ALTER ROLE x LOGIN … PASSWORD '…'` est une seule instruction ; deux
+  ordres pourraient s'appliquer à moitié — les attributs posés, le mot de passe non —, et ce geste
+  n'a aucune transaction pour l'en empêcher.
+- **`None` laisse en place, il n'efface pas.** Un `PASSWORD NULL` *retirerait* le mot de passe : la
+  règle du champ vide de `mettre_a_jour`, et un test en **négatif** garde qu'aucun `PASSWORD`
+  n'apparaît quand la saisie est vide — un ordre valide qui rendrait le rôle injoignable ne se
+  verrait pas autrement.
+- **Le geste n'est destructeur que s'il porte un mot de passe.** Un changement d'attributs se défait
+  en décochant ; un mot de passe remplace ce que rien ne rend.
+
+Et `InstanceGesture::SetRolePassword` est parti avec l'action : c'est `alterRole` qui gouverne le
+champ, et un geste sans appelant aurait été le drapeau mort d'`11a` sous une autre forme.
+
+Le geste avait été **écarté** en livrant `API-32`, et la raison tenait : la confirmation promet de
+montrer le SQL exact qui part, or un `PASSWORD '…'` ne s'affiche qu'en clair — dans une fenêtre qu'on
+montre à son voisin — ou masqué, ce qui fait mentir la promesse. Demandé, il a fallu lever le conflit
+plutôt que choisir un des deux mauvais côtés.
+
+**Ce qui part est le vérificateur SCRAM-SHA-256, calculé côté client** (`postgres/scram.rs`), c'est-à-
+dire exactement la valeur que `pg_authid.rolpassword` stockera. C'est ce que fait `\password` de
+`psql`, et cela lève trois choses d'un coup : le mot de passe ne traverse pas le réseau, il n'atterrit
+ni dans `log_statement` ni dans `pg_stat_activity`, et l'ordre **peut s'afficher sans rien divulguer**
+— il n'est pas réversible. La promesse est tenue au lieu d'être contournée.
+
+Cinq points à ne pas défaire :
+
+- **Le sel est tiré une fois, et c'est pourquoi `scram_verifier` est une commande à part.** Si le
+  vérificateur était calculé à la composition du plan *et* à l'exécution, les deux tireraient deux
+  sels : l'encart montrerait un ordre qui n'est pas celui qui part — la promesse retournée contre
+  elle-même. L'écran demande donc le vérificateur, puis le porte dans l'action ; le plan et
+  l'exécution partagent alors la même chaîne. C'est le seul geste du produit où ce piège existe.
+- **SASLprep est appliquée, et son refus est un refus.** PostgreSQL normalise le mot de passe
+  (RFC 4013) avant de hacher ; sans cette étape, un espace insécable ou une ligature produirait un
+  vérificateur que le pilote ne retrouverait pas à la connexion suivante — **un compte verrouillé,
+  sans message**. Là où le serveur prend la chaîne telle quelle quand le profil la refuse, nous
+  refusons : accepter reviendrait à poser ce compte verrouillé sciemment.
+- **`Hi` est écrit à la main**, huit lignes de XOR : la crate `pbkdf2` aurait demandé d'appairer sa
+  version avec celles de `hmac` et `digest`, dont deux exemplaires cohabitent déjà dans l'arbre. Les
+  cinq crates employées sont épinglées sur les versions de `postgres-protocol`, qui s'en sert pour
+  l'authentification SCRAM du pilote — aucune n'entre dans le binaire qui n'y était pas.
+- **Le geste est marqué destructeur**, bien qu'il ne retire rien : il **remplace** un mot de passe que
+  rien ne rend, et qui n'existe en clair nulle part. C'est le seul geste non destructeur du lot dont
+  on ne revient pas.
+- **Deux champs, et le second n'est pas une formalité.** Un mot de passe posé ne se relit nulle part ;
+  une faute de frappe verrouille le rôle sans que rien le dise, et le seul remède est d'en poser un
+  autre. C'est le seul formulaire du produit qui demande une confirmation de saisie. Aucune règle de
+  robustesse en revanche : ce que le serveur exige est décidé par son administrateur, éventuellement
+  par `passwordcheck`, et en inventer une refuserait des mots de passe que la base accepte.
+
+**Ce que les tests garantissent, et pourquoi il en faut trois niveaux.** Le hachage a quatre étapes et
+un format de sortie ; figer ma propre sortie ne vérifierait que ma propre boucle. `Hi` est donc
+comparé au vecteur de la **RFC 7914**, le format est gelé à sel fixe, et le reste — l'ordre des
+dérivations, le nom des deux messages, la place du sel, l'encodage — n'a qu'un juge : **le serveur**.
+`un_mot_de_passe_pose_par_nous_ouvre_une_connexion` pose le vérificateur puis **se connecte avec le
+mot de passe**. Vérifié par sabotage : intervertir « Client Key » et « Server Key » rend
+« password authentication failed », c'est-à-dire exactement le compte verrouillé qu'on redoute.
+
+**Un rôle sans `LOGIN` ne se voit pas proposer de mot de passe**, avec sa raison : PostgreSQL
+l'accepterait, mais rien ne s'en servirait jamais.
+
+#### Ce qui n'a pas été fait, et pourquoi
+
+- **La déclaration n'est atteignable que depuis l'écran de travail.** La zone vit sous l'arbre, et
+  l'écran d'accueil n'a pas de sidebar : un utilisateur sans aucun projet ne peut donc pas déclarer
+  d'instance. Le monter plus haut ferait exister un état que rien ne pourrait déclencher — l'inverse
+  du défaut n° 89, et tout aussi faux. À reprendre si l'usage dit que c'est une impasse.
+- **Un nom de rôle ne se change pas.** `ALTER ROLE … RENAME TO` invalide le mot de passe stocké côté
+  serveur pour les rôles à `md5`, et traverse tous les `GRANT` qui nomment le rôle : c'est un geste à
+  concevoir, pas une case à cocher.
+- **Une base ne se renomme pas** : cela casserait toute connexion déclarée qui la vise, et DoraBase
+  n'a aucun moyen de les suivre.
+- **Les privilèges s'arrêtent à la base.** Le palier schéma › table reste à dessiner, comme le ticket
+  le note.
+- **`kubectl`, Cloud SQL et le tunnel SSH fonctionnent**, le panneau étant celui d'`A2` ; mais aucune
+  instance n'a été ouverte derrière un proxy dans un test.
+
+#### Ce qui reste à voir à l'œil
+
+- **Ouvrir une vraie instance PostgreSQL depuis la fenêtre native.** Les neuf tests sur base réelle
+  couvrent les sept lectures et le cycle créer / modifier / supprimer d'un rôle ; ce qu'ils ne
+  couvrent pas est le parcours complet — déclarer, enregistrer le secret dans le Trousseau, rouvrir
+  l'application, et retrouver l'instance ouverte sans redemander son mot de passe. C'est le geste
+  qui prouve la référence de secret, et Playwright ne pilote pas WKWebView.
+- **Un compte non superutilisateur.** Tout le décor de test et tous les tests de base tournent avec
+  un superutilisateur : la liste des gestes refusés est vérifiée en pur, jamais contre un vrai rôle
+  limité. C'est pourtant le cas d'usage que la vue d'ensemble sert le mieux.
+- **Un serveur à vingt bases et cinquante rôles.** La matrice défile dans son conteneur — mesuré —
+  mais sa lisibilité à cette échelle n'a jamais été regardée.
+- **Les sept sections en « Nuit »**, comme les dix écrans : toute la suite mesure le clair.
+
 ### Les filtres suivent la colonne (3 septembre 2026)
 
 Le popover d'en-tête proposait **les mêmes cinq opérateurs à toutes les colonnes**, et les quatre

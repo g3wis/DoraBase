@@ -35,6 +35,24 @@ impl Engine {
     /// `match` **exhaustif** casse la compilation à l'ajout d'un huitième moteur et dont
     /// l'assertion tombe ensuite si ce moteur n'est pas entré ici. Les deux étapes sont
     /// nécessaires ; l'une seule laisserait l'oubli passer.
+    /// Le nom du moteur **tel qu'un message le nomme** — « PostgreSQL », « MongoDB ».
+    ///
+    /// **Ici et non dans `engine/`**, où il vivait : c'est une propriété du type, pas de la couche
+    /// qui s'y connecte, et `config` en a besoin depuis `API-32` pour dire quel moteur n'est pas
+    /// managé. Deux tables de noms auraient fini par écrire « MySql » d'un côté et « MySQL » de
+    /// l'autre, dans deux messages que le même utilisateur peut lire à une minute d'intervalle.
+    pub fn nom(self) -> &'static str {
+        match self {
+            Engine::PostgreSql => "PostgreSQL",
+            Engine::MySql => "MySQL",
+            Engine::Sqlite => "SQLite",
+            Engine::MongoDb => "MongoDB",
+            Engine::Redis => "Redis",
+            Engine::Snowflake => "Snowflake",
+            Engine::BigQuery => "BigQuery",
+        }
+    }
+
     pub fn tous() -> [Engine; Self::TOTAL] {
         [
             Engine::PostgreSql,
@@ -860,6 +878,130 @@ impl Default for Guards {
             prod_read_only: true,
             refuse_unrestricted_writes: true,
             keep_inverse_patch: true,
+        }
+    }
+}
+
+/// L'identifiant **stable** d'une instance managée (`API-32`).
+///
+/// # Pourquoi un identifiant distinct du libellé
+///
+/// C'est exactement la raison d'`EnvironmentId`, appliquée à une instance : il est à la fois la clé
+/// du registre de connexions (`instance/<id>`) et la référence du mot de passe dans le Trousseau. Un
+/// identifiant qui suivrait le libellé rendrait le secret introuvable au premier renommage — sans
+/// erreur, sans message, avec une instance qui redemanderait son mot de passe sans raison visible.
+///
+/// Il est donc dérivé du libellé **une fois**, à la déclaration, puis figé. Renommer une instance
+/// change son libellé seul, et installe la divergence assumée que le projet a déjà acceptée pour un
+/// environnement et pour une connexion.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[ts(export_to = "config.ts")]
+#[ts(type = "string")]
+pub struct InstanceId(String);
+
+impl InstanceId {
+    /// Dérive un identifiant d'un libellé, par la règle d'`EnvironmentId`.
+    ///
+    /// **La même fonction, délibérément** : deux règles de dérivation voisines mais distinctes
+    /// finiraient par diverger, et rien ne le dirait — la référence de secret d'une instance et
+    /// celle d'un environnement se lisent au même endroit du Trousseau.
+    ///
+    /// Le résultat n'est **pas garanti unique** ; c'est le registre d'instances qui refuse un
+    /// doublon, comme un projet refuse deux environnements de même identifiant.
+    pub fn depuis_le_libelle(libelle: &str) -> Self {
+        Self(
+            EnvironmentId::depuis_le_libelle(libelle)
+                .as_str()
+                .to_owned(),
+        )
+    }
+
+    /// Reprend un identifiant déjà écrit — configuration lue, décor de test.
+    pub fn brut(valeur: impl Into<String>) -> Self {
+        Self(valeur.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for InstanceId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// Une instance de serveur **managée** (`API-32`).
+///
+/// # Ce qu'elle n'est pas
+///
+/// Ce n'est pas une connexion de plus. Une `Database` désigne **une base** dans un projet, pour un
+/// environnement, et sert à en lire les données ; une instance désigne **le serveur**, joint avec un
+/// compte d'administration, et sert à en gérer les bases, les rôles et les privilèges. Les deux
+/// pourraient viser le même hôte sans que cela veuille dire quoi que ce soit : l'une est déclarée par
+/// un projet, l'autre vit à côté des projets — c'est ce que la seconde zone de la sidebar dit à
+/// l'œil.
+///
+/// Les fondre aurait demandé qu'une `Database` porte un drapeau « c'est aussi une instance », donc
+/// que chaque écran qui liste des connexions sache l'écarter, et que le registre de projets se
+/// mette à porter des objets qui n'appartiennent à aucun environnement.
+///
+/// # PostgreSQL seul, et le champ `engine` existe quand même
+///
+/// La modale rend les trois autres moteurs **désactivés avec leur raison** plutôt que masqués : ils
+/// viennent après, et masquer dirait « jamais ». Le champ persiste ce choix pour que le jour où
+/// MySQL arrive, aucune migration ne soit nécessaire — et pour que le refus côté Rust porte sur une
+/// valeur lue, non sur une supposition.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "config.ts")]
+pub struct ManagedInstance {
+    /// L'identité figée : clé du registre, référence du secret.
+    pub id: InstanceId,
+    /// Ce que la ligne de la sidebar affiche. Se renomme ; l'identifiant, non.
+    pub label: String,
+    pub engine: Engine,
+    /// Hôte, port, base de service, utilisateur admin, mode SSL, proxy — tout le formulaire.
+    ///
+    /// **Le même type que pour une connexion, et c'est ce qui donne le panneau « Proxy / tunnel »
+    /// gratuitement.** Une instance managée se joint par un bastion aussi souvent qu'une base ; en
+    /// réécrire un jeu de champs propre aurait fait vivre deux fois les trois visages de proxy, leur
+    /// validation et leur ouverture — la règle n° 17 par avance.
+    pub connection: ConnectionSettings,
+    /// Ce qui déclenche le rappel des bandes destructrices.
+    ///
+    /// **Un drapeau, jamais le libellé** : la règle d'`EnvironmentDeclaration::production`, pour la
+    /// raison qui y est écrite. Une instance nommée « live » et marquée production est protégée ;
+    /// une instance nommée « prod » que personne n'a marquée ne l'est pas.
+    #[serde(default)]
+    pub production: bool,
+    /// « Confirmer chaque écriture » — la première des deux bascules de la modale.
+    ///
+    /// **Allumée par défaut, y compris pour une instance écrite avant ce champ.** `bool` retomberait
+    /// à `false` sous `serde(default)`, ce qui ferait d'une mise à jour de DoraBase une levée
+    /// silencieuse du garde-fou : c'est exactement ce que `Guards` refuse, et la parade est la même —
+    /// un défaut explicite plutôt que celui du type.
+    #[serde(default = "vrai")]
+    pub confirm_writes: bool,
+}
+
+/// Le défaut de `confirm_writes`. `serde(default = …)` veut un chemin de fonction, pas une valeur.
+fn vrai() -> bool {
+    true
+}
+
+impl ManagedInstance {
+    /// Le nom que l'écran affiche : le libellé, ou l'identifiant s'il est vide.
+    ///
+    /// La règle de `Database` — `label?.trim() || name` —, ici avec l'identifiant en dernier recours :
+    /// une ligne de sidebar sans texte serait inatteignable au clic autant qu'au clavier.
+    pub fn nom_affiche(&self) -> &str {
+        let libelle = self.label.trim();
+        if libelle.is_empty() {
+            self.id.as_str()
+        } else {
+            libelle
         }
     }
 }

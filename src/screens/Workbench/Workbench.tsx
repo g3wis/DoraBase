@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { rowAsInsert as rowAsInsertTauri } from '../../data/commandes'
-import type { Database, EnvironmentId, Project } from '../../domain/config'
-import type { DatabaseKey, RowWindow, TableSummary, Value } from '../../domain/engine'
+import type { Database, EnvironmentId, ManagedInstance, Project } from '../../domain/config'
+import type {
+  ConnectionState,
+  DatabaseKey,
+  RowWindow,
+  TableSummary,
+  Value,
+} from '../../domain/engine'
 import { useT } from '../../i18n/LanguageContext'
 import { modificateurActif } from '../../shell/plateforme'
 import { SelectionIndicator } from '../../shell/SelectionIndicator/SelectionIndicator'
@@ -36,6 +42,9 @@ import { DetailPanel } from '../Explorer/DetailPanel'
 import { ExplorerSidebar } from '../Explorer/ExplorerSidebar'
 import { ObjectTable } from '../Explorer/ObjectTable'
 import { type GestesEnvironnement, ProjectEditor } from '../Explorer/ProjectEditor'
+import { InstancesPanel } from '../Instances/InstancesPanel'
+import { InstanceView } from '../Instances/InstanceView'
+import { PASSERELLE_INSTANCES, type PasserelleInstances } from '../Instances/instanceCommands'
 import { SchemaManager } from '../SchemaManager/SchemaManager'
 import { PASSERELLE_SCHEMAS, type PasserelleSchemas } from '../SchemaManager/schemaCommands'
 import { DdlPanel } from '../Structure/DdlPanel'
@@ -66,10 +75,12 @@ import {
   ouvrir,
   ouvrirConsole,
   ouvrirDiagramme,
+  ouvrirInstance,
   reindexerParConnexion,
   renommerLaConnexion,
   renommerLaConsole,
   reordonner,
+  sansLOngletDInstance,
   viseeParLId,
 } from './onglets'
 import { PASSERELLE_TAURI, type PasserelleArbre, useArbre } from './useArbre'
@@ -177,6 +188,19 @@ type WorkbenchProps = {
    * la même liste des deux côtés, plutôt que deux voies vers la même lecture.
    */
   passerelleSchemas?: PasserelleSchemas
+  /**
+   * Les instances managées déclarées (`API-32`), telles que la seconde zone de la sidebar les liste.
+   *
+   * **À côté des projets, non dedans** : une instance n'appartient à aucun projet — c'est un serveur
+   * joint avec un compte d'administration. Leur donner un projet d'accueil aurait demandé d'en
+   * choisir un arbitrairement, et cette valeur fausse aurait fini par voyager.
+   */
+  instances?: readonly ManagedInstance[]
+  passerelleInstances?: PasserelleInstances
+  /** Ouvre la déclaration d'une instance. Absent, le `+` de la zone ne paraît pas. */
+  onDeclareInstance?: () => void
+  onEditInstance?: (instance: ManagedInstance) => void
+  onRemoveInstance?: (instance: ManagedInstance) => void
   /** Retirer une déclaration de connexion, ou un projet (`08j`). */
   onDelete?: (cible: CibleDeSuppression) => Promise<{ leftoverSecrets: string[] }>
   /**
@@ -253,6 +277,11 @@ export function Workbench({
   passerelleExport = PASSERELLE_EXPORT,
   passerelleTransaction = PASSERELLE_TRANSACTION,
   passerelleSchemas = PASSERELLE_SCHEMAS,
+  instances = [],
+  passerelleInstances = PASSERELLE_INSTANCES,
+  onDeclareInstance,
+  onEditInstance,
+  onRemoveInstance,
 }: WorkbenchProps) {
   // **Le premier `useT` de cet écran**, et il n'en faut qu'un : tout le texte vit dans les
   // composants qu'il assemble. Celui-ci sert la seule phrase que l'écran doit **choisir** plutôt
@@ -374,6 +403,76 @@ export function Workbench({
    * clique ailleurs.
    */
   const diagramme = actif?.sorte === 'diagramme' ? actif : null
+  /**
+   * L'instance dont l'onglet est au premier plan (`API-32`) — la quatrième vue de l'union.
+   *
+   * Comme le diagramme, elle ne passe **pas** par `contexte` : celui-ci retombe sur la sélection de
+   * l'arbre, qui parle de projets et de bases. Une instance sait de quel serveur elle parle depuis
+   * son propre onglet.
+   */
+  const instanceActive = actif?.sorte === 'instance' ? actif : null
+
+  /**
+   * L'état de la connexion d'administration de chaque instance, par identifiant.
+   *
+   * **Un état local et non `connection_states`** : celle-ci rend des triplets
+   * `projet/base/environnement`, et une instance n'en est pas un — les faire cohabiter obligerait
+   * l'écran à démêler deux sortes de clés, la convention dupliquée que `connection_states` a
+   * justement écartée. Le registre, lui, est bien le même : c'est la *lecture* qui est séparée.
+   */
+  const [etatsInstances, setEtatsInstances] = useState<Readonly<Record<string, ConnectionState>>>(
+    {},
+  )
+
+  /**
+   * Ouvre la connexion d'administration d'une instance.
+   *
+   * **`enCours` n'est pas nécessaire ici, contrairement à `assurerLOuverture`** : le registre rend
+   * la connexion existante plutôt que d'en ouvrir une seconde, et l'écran passe par « connexion en
+   * cours » — ce qui grise le bouton. Ce que la garde protégerait est une seconde poignée de main,
+   * que `ConnectionRegistry::ouvrir` refuse déjà.
+   */
+  const ouvrirLInstance = useCallback(
+    async (id: string) => {
+      setEtatsInstances((precedent) => ({ ...precedent, [id]: { kind: 'connecting' } }))
+      try {
+        const etat = await passerelleInstances.openInstance(id)
+        setEtatsInstances((precedent) => ({ ...precedent, [id]: etat }))
+      } catch (cause) {
+        setEtatsInstances((precedent) => ({
+          ...precedent,
+          [id]: { kind: 'offline', reason: messageDErreur(cause) },
+        }))
+      }
+    },
+    [passerelleInstances],
+  )
+
+  /**
+   * Une instance retirée ferme son onglet et perd son état.
+   *
+   * **Sur la liste déclarée, comme la purge du cache de l'arbre** : brancher chaque retrait
+   * demanderait de connaître tous les chemins qui en produisent un, et le prochain l'oublierait.
+   * Ce que le registre ne tient plus ne doit plus être affiché.
+   */
+  useEffect(() => {
+    const declarees = new Set(instances.map((instance) => instance.id))
+    setEtatOnglets((etat) => {
+      let suivant = etat
+      for (const onglet of etat.onglets) {
+        if (onglet.sorte === 'instance' && !declarees.has(onglet.instance)) {
+          suivant = sansLOngletDInstance(suivant, onglet.instance)
+        }
+      }
+      return suivant
+    })
+    setEtatsInstances((precedent) => {
+      const retenus = Object.entries(precedent).filter(([id]) => declarees.has(id))
+      return retenus.length === Object.keys(precedent).length
+        ? precedent
+        : Object.fromEntries(retenus)
+    })
+  }, [instances])
 
   /**
    * Les structures du schéma que le diagramme dessine.
@@ -1182,7 +1281,24 @@ export function Workbench({
               }
         }
       />
-      {consoleActive && cleConsole ? (
+      {instanceActive ? (
+        /* L'écran d'une instance managée (`API-32`). **Remonté par identifiant à chaque rendu**, et
+           non gardé dans l'onglet : la déclaration change quand on la modifie, et l'onglet
+           montrerait sinon l'hôte d'avant. C'est ce que le gestionnaire de schémas fait déjà pour
+           sa connexion. */
+        instanceDeclaree(instances, instanceActive.instance) === undefined ? null : (
+          <InstanceView
+            // Une instance par onglet : changer d'instance remet la section et les relevés à zéro,
+            // ce qui est le comportement voulu — les tableaux d'un serveur n'ont rien à dire d'un
+            // autre. Même raison que la `key` du diagramme et de la console.
+            key={instanceActive.instance}
+            instance={instanceDeclaree(instances, instanceActive.instance) as ManagedInstance}
+            etat={etatsInstances[instanceActive.instance] ?? { kind: 'never' }}
+            passerelle={passerelleInstances}
+            onOuvrir={() => void ouvrirLInstance(instanceActive.instance)}
+          />
+        )
+      ) : consoleActive && cleConsole ? (
         // La console SQL (`12a`). Elle occupe la largeur du centre ; le panneau droit
         // reste celui de l'écran, et `12c` lui donnera un contenu utile.
         <ConsoleView
@@ -1569,220 +1685,270 @@ export function Workbench({
           min={196}
           max={360}
           start={
-            <ExplorerSidebar
-              // **212 px, la largeur standard de `A5` → `A9`, y compris quand le centre montre
-              // `A4`.** Le handoff donne 252 px à `A4` et 212 aux écrans de travail ; dans une
-              // coquille unique, ce ne peut pas être les deux — la colonne sauterait de 40 px à
-              // l'ouverture d'un onglet. Le `SplitPane` la rend de toute façon réglable, ce
-              // qu'un mockup figé ne peut pas exprimer. Écart consigné dans `AGENTS.md`.
-              width="fill"
-              projects={projects}
-              deplies={deplies}
-              charge={charge}
-              etatDe={etatDeBase}
-              // La pastille de compte sur la table ouverte (`11b`) : le même modèle que le bandeau.
-              modifications={
-                table && attente.length > 0
-                  ? { table: table.table, schema: table.schema, compte: attente.length }
-                  : undefined
-              }
-              // Le « … » d'une ligne de base mène à la même modale que le menu de la pastille
-              // (`08g`) : deux chemins vers un seul écran, et c'est voulu — l'arbre est là où
-              // l'utilisateur regarde ses bases, la pastille là où il regarde son projet.
-              // La sidebar nomme la base ; le projet, lui, connaît son objet `Database`.
-              onEditDatabase={(nomProjet, nomBase, environnement) => {
-                const base = projects
-                  .find((projet) => projet.name === nomProjet)
-                  ?.databases.find(
-                    (declaration) =>
-                      declaration.name === nomBase && declaration.environment === environnement,
-                  )
-                if (base) onEditDatabase?.(nomProjet, base)
-              }}
-              /* **Ouvrir un diagramme ouvre sa connexion**, comme ouvrir une console (1er
+            /* **Deux zones empilées dans une seule colonne** (`API-32`) : l'arbre des projets, et
+               les instances managées sous lui. Un `SplitPane` d'axe vertical, dont la poignée porte
+               le filet de séparation — en dessiner un dans le panneau bas en ferait deux collés, le
+               défaut que `Sidebar.fill` a déjà corrigé.
+
+               **Une zone et non un onglet** : les deux listes se lisent *ensemble* — on regarde une
+               base, et l'on va voir sur quelle instance elle vit. Une bascule cacherait l'une pour
+               montrer l'autre, et remplacerait un coup d'œil par deux clics.
+
+               **`sized="end"`, donc c'est la zone d'instances qui porte la hauteur réglée** : l'arbre
+               prend ce qui reste, comme il le fait déjà de la largeur. L'inverse aurait fait grandir
+               la liste d'instances quand la fenêtre grandit, ce que personne ne demande — on ajoute
+               une instance tous les six mois, on déplie un schéma toutes les minutes. */
+            <SplitPane
+              storageKey="workbench:instances"
+              orientation="vertical"
+              sized="end"
+              /* **124 px : le bandeau, quatre lignes, et la respiration de l'arbre.** 18 px de
+                 bandeau, 5 px de haut, quatre lignes de 22, 5 px de bas — la hauteur qui montre ce
+                 qu'on a sans prendre à l'arbre plus qu'il ne faut. Au-delà de quatre instances la
+                 zone défile, et la poignée est là pour ceux qui en ont dix.
+
+                 Le plancher est de 46 px : le bandeau et **une** ligne. Descendre plus bas
+                 masquerait la première instance sans le dire, et le `+` avec elle — donc le geste
+                 qui fait exister la zone. */
+              defaultSize={124}
+              min={46}
+              max={420}
+              start={
+                <ExplorerSidebar
+                  // **212 px, la largeur standard de `A5` → `A9`, y compris quand le centre montre
+                  // `A4`.** Le handoff donne 252 px à `A4` et 212 aux écrans de travail ; dans une
+                  // coquille unique, ce ne peut pas être les deux — la colonne sauterait de 40 px à
+                  // l'ouverture d'un onglet. Le `SplitPane` la rend de toute façon réglable, ce
+                  // qu'un mockup figé ne peut pas exprimer. Écart consigné dans `AGENTS.md`.
+                  width="fill"
+                  projects={projects}
+                  deplies={deplies}
+                  charge={charge}
+                  etatDe={etatDeBase}
+                  // La pastille de compte sur la table ouverte (`11b`) : le même modèle que le bandeau.
+                  modifications={
+                    table && attente.length > 0
+                      ? { table: table.table, schema: table.schema, compte: attente.length }
+                      : undefined
+                  }
+                  // Le « … » d'une ligne de base mène à la même modale que le menu de la pastille
+                  // (`08g`) : deux chemins vers un seul écran, et c'est voulu — l'arbre est là où
+                  // l'utilisateur regarde ses bases, la pastille là où il regarde son projet.
+                  // La sidebar nomme la base ; le projet, lui, connaît son objet `Database`.
+                  onEditDatabase={(nomProjet, nomBase, environnement) => {
+                    const base = projects
+                      .find((projet) => projet.name === nomProjet)
+                      ?.databases.find(
+                        (declaration) =>
+                          declaration.name === nomBase && declaration.environment === environnement,
+                      )
+                    if (base) onEditDatabase?.(nomProjet, base)
+                  }}
+                  /* **Ouvrir un diagramme ouvre sa connexion**, comme ouvrir une console (1er
                  septembre 2026). Le menu d'un schéma n'est atteignable que si la ligne de la base
                  est dépliée, donc la connexion répondait — mais « répondait » n'est pas « répond » :
                  six commandes de configuration en ferment sans que l'arbre se replie, et le
                  diagramme se serait alors ouvert sur une toile vide. C'est le quatrième point
                  d'ouverture, et il suit la même règle que les trois autres. */
-              onOpenDiagram={(project, database, environment, schema) => {
-                void assurerLOuverture({ project, database, environment })
-                setEtatOnglets((etat) =>
-                  ouvrirDiagramme(etat, { project, database, environment }, schema),
-                )
-              }}
-              /* **Le gestionnaire de schémas part du menu de la connexion** (`API-33`), comme la
+                  onOpenDiagram={(project, database, environment, schema) => {
+                    void assurerLOuverture({ project, database, environment })
+                    setEtatOnglets((etat) =>
+                      ouvrirDiagramme(etat, { project, database, environment }, schema),
+                    )
+                  }}
+                  /* **Le gestionnaire de schémas part du menu de la connexion** (`API-33`), comme la
                  création d'une console : le geste part du palier qui connaît son contexte. La
                  sidebar nomme la connexion ; l'écran, lui, retrouve sa déclaration. */
-              onManageSchemas={(project, database, environment) =>
-                setSchemasAGerer({ project, database, environment })
-              }
-              onRenameDatabase={onRenameDatabase === undefined ? undefined : renommerUneConnexion}
-              onEditProject={onRenameProject === undefined ? undefined : ouvrirLEditionDe}
-              consoles={
-                onCreateConsole === undefined
-                  ? undefined
-                  : {
-                      onCreer: (project, database, environment) => {
-                        void creerUneConsole(project, database, environment)
-                      },
-                      onRenommer: (project, database, environment, nom, nouveau) => {
-                        void renommerUneConsole(project, database, environment, nom, nouveau)
-                      },
-                      onRetirer: (project, database, environment, nom) => {
-                        if (onDeleteConsole === undefined) return
-                        void onDeleteConsole(project, database, environment, nom)
-                        // L'onglet ouvert sur cette console se ferme avec elle : le laisser
-                        // écrirait dans une console retirée à la frappe suivante.
-                        setConsolesOuvertes((precedent) =>
-                          Object.fromEntries(
-                            Object.entries(precedent).filter(
-                              ([, ouverte]) =>
-                                !(
-                                  ouverte.project === project &&
-                                  ouverte.database === database &&
-                                  ouverte.environment === environment &&
-                                  ouverte.nom === nom
+                  onManageSchemas={(project, database, environment) =>
+                    setSchemasAGerer({ project, database, environment })
+                  }
+                  onRenameDatabase={
+                    onRenameDatabase === undefined ? undefined : renommerUneConnexion
+                  }
+                  onEditProject={onRenameProject === undefined ? undefined : ouvrirLEditionDe}
+                  consoles={
+                    onCreateConsole === undefined
+                      ? undefined
+                      : {
+                          onCreer: (project, database, environment) => {
+                            void creerUneConsole(project, database, environment)
+                          },
+                          onRenommer: (project, database, environment, nom, nouveau) => {
+                            void renommerUneConsole(project, database, environment, nom, nouveau)
+                          },
+                          onRetirer: (project, database, environment, nom) => {
+                            if (onDeleteConsole === undefined) return
+                            void onDeleteConsole(project, database, environment, nom)
+                            // L'onglet ouvert sur cette console se ferme avec elle : le laisser
+                            // écrirait dans une console retirée à la frappe suivante.
+                            setConsolesOuvertes((precedent) =>
+                              Object.fromEntries(
+                                Object.entries(precedent).filter(
+                                  ([, ouverte]) =>
+                                    !(
+                                      ouverte.project === project &&
+                                      ouverte.database === database &&
+                                      ouverte.environment === environment &&
+                                      ouverte.nom === nom
+                                    ),
                                 ),
+                              ),
+                            )
+                          },
+                        }
+                  }
+                  // **Retirer une base ferme ses onglets**, et l'écran de travail est le seul à pouvoir
+                  // le faire : un onglet survivant lirait une base dont la déclaration est partie.
+                  onDelete={
+                    onDelete === undefined
+                      ? undefined
+                      : async (cible) => {
+                          const issue = await onDelete(cible)
+                          setEtatOnglets((etat) => sansLesOngletsDe(etat, cible))
+                          setAttentes((precedent) =>
+                            Object.fromEntries(
+                              Object.entries(precedent).filter(([id]) => !viseeParLId(cible, id)),
                             ),
-                          ),
-                        )
-                      },
-                    }
-              }
-              // **Retirer une base ferme ses onglets**, et l'écran de travail est le seul à pouvoir
-              // le faire : un onglet survivant lirait une base dont la déclaration est partie.
-              onDelete={
-                onDelete === undefined
-                  ? undefined
-                  : async (cible) => {
-                      const issue = await onDelete(cible)
-                      setEtatOnglets((etat) => sansLesOngletsDe(etat, cible))
-                      setAttentes((precedent) =>
-                        Object.fromEntries(
-                          Object.entries(precedent).filter(([id]) => !viseeParLId(cible, id)),
-                        ),
+                          )
+                          return issue
+                        }
+                  }
+                  // Ce qui serait perdu, compté **avant** de le perdre : la confirmation le dit.
+                  modificationsEnAttenteDe={(cible) =>
+                    Object.entries(attentes)
+                      .filter(([id]) => viseeParLId(cible, id))
+                      .reduce((total, [, enAttente]) => total + enAttente.length, 0)
+                  }
+                  selectedId={selection?.id ?? null}
+                  onSelect={(noeud) => {
+                    setSelection(noeud)
+                    // **Sélectionner charge ce qu'on va regarder**, le dépliage n'étant plus le geste du
+                    // clic : un schéma sélectionné mais jamais déplié montrerait sinon une liste d'objets
+                    // vide dans `A4`. Sur une connexion, cela ouvre la connexion — ce que le clic simple
+                    // faisait déjà quand il dépliait, et ce qui rend vraie la pastille d'état de sa ligne.
+                    // Sans effet sur ce qui est déjà chargé.
+                    charger(noeud)
+                    // Une **feuille** de l'arbre est un objet : la sélectionner l'ouvre. Un simple
+                    // clic suffit, parce qu'une feuille n'a pas d'autre geste — pas de dépliage à
+                    // distinguer. Dans la liste du centre, où sélectionner remplit le panneau de
+                    // détail, il faut au contraire un double-clic.
+                    // **Aucun repli sur un environnement d'écran** : ces gardes portaient
+                    // `noeud.environment ?? environnement`, donc un nœud sans environnement ouvrait la
+                    // connexion d'un environnement arbitraire — sur le mauvais serveur, sans le dire.
+                    // Tout nœud d'objet en porte un ; l'exiger le prouve au compilateur.
+                    if (
+                      noeud.kind === 'object' &&
+                      noeud.project &&
+                      noeud.database &&
+                      noeud.schema &&
+                      noeud.environment
+                    ) {
+                      setEtatOnglets((etat) =>
+                        ouvrir(etat, {
+                          sorte: 'table',
+                          key: {
+                            project: noeud.project as string,
+                            database: noeud.database as string,
+                            environment: noeud.environment as EnvironmentId,
+                          },
+                          schema: noeud.schema as string,
+                          table: noeud.label,
+                          kind: noeud.icon === 'view' ? 'view' : 'table',
+                        }),
                       )
-                      return issue
                     }
-              }
-              // Ce qui serait perdu, compté **avant** de le perdre : la confirmation le dit.
-              modificationsEnAttenteDe={(cible) =>
-                Object.entries(attentes)
-                  .filter(([id]) => viseeParLId(cible, id))
-                  .reduce((total, [, enAttente]) => total + enAttente.length, 0)
-              }
-              selectedId={selection?.id ?? null}
-              onSelect={(noeud) => {
-                setSelection(noeud)
-                // **Sélectionner charge ce qu'on va regarder**, le dépliage n'étant plus le geste du
-                // clic : un schéma sélectionné mais jamais déplié montrerait sinon une liste d'objets
-                // vide dans `A4`. Sur une connexion, cela ouvre la connexion — ce que le clic simple
-                // faisait déjà quand il dépliait, et ce qui rend vraie la pastille d'état de sa ligne.
-                // Sans effet sur ce qui est déjà chargé.
-                charger(noeud)
-                // Une **feuille** de l'arbre est un objet : la sélectionner l'ouvre. Un simple
-                // clic suffit, parce qu'une feuille n'a pas d'autre geste — pas de dépliage à
-                // distinguer. Dans la liste du centre, où sélectionner remplit le panneau de
-                // détail, il faut au contraire un double-clic.
-                // **Aucun repli sur un environnement d'écran** : ces gardes portaient
-                // `noeud.environment ?? environnement`, donc un nœud sans environnement ouvrait la
-                // connexion d'un environnement arbitraire — sur le mauvais serveur, sans le dire.
-                // Tout nœud d'objet en porte un ; l'exiger le prouve au compilateur.
-                if (
-                  noeud.kind === 'object' &&
-                  noeud.project &&
-                  noeud.database &&
-                  noeud.schema &&
-                  noeud.environment
-                ) {
-                  setEtatOnglets((etat) =>
-                    ouvrir(etat, {
-                      sorte: 'table',
-                      key: {
-                        project: noeud.project as string,
-                        database: noeud.database as string,
-                        environment: noeud.environment as EnvironmentId,
-                      },
-                      schema: noeud.schema as string,
-                      table: noeud.label,
-                      kind: noeud.icon === 'view' ? 'view' : 'table',
-                    }),
-                  )
-                }
-                /* **Un clic sur une console l'ouvre**, comme un clic sur une table ouvre la table.
+                    /* **Un clic sur une console l'ouvre**, comme un clic sur une table ouvre la table.
                    L'onglet est relié à la console : il porte son texte et lui renvoie chaque
                    frappe. Rouvrir une console déjà ouverte réactive son onglet plutôt que d'en
                    créer un second — c'est `ouvrirConsole` qui le garantit, par l'identité qu'on
                    lui donne. */
-                if (
-                  noeud.kind === 'console' &&
-                  noeud.project &&
-                  noeud.database &&
-                  noeud.environment &&
-                  noeud.console !== undefined
-                ) {
-                  const identite = {
-                    project: noeud.project,
-                    database: noeud.database,
-                    environment: noeud.environment,
-                    nom: noeud.console,
-                  }
-                  const texte =
-                    projects
-                      .find((projet) => projet.name === identite.project)
-                      ?.databases.find(
-                        (base) =>
-                          base.name === identite.database &&
-                          base.environment === identite.environment,
-                      )
-                      ?.consoles.find((console) => console.name === identite.nom)?.sql ?? ''
-                  /* **Le clic ouvre la connexion autant que la console.** Elle l'est déjà quand la
+                    if (
+                      noeud.kind === 'console' &&
+                      noeud.project &&
+                      noeud.database &&
+                      noeud.environment &&
+                      noeud.console !== undefined
+                    ) {
+                      const identite = {
+                        project: noeud.project,
+                        database: noeud.database,
+                        environment: noeud.environment,
+                        nom: noeud.console,
+                      }
+                      const texte =
+                        projects
+                          .find((projet) => projet.name === identite.project)
+                          ?.databases.find(
+                            (base) =>
+                              base.name === identite.database &&
+                              base.environment === identite.environment,
+                          )
+                          ?.consoles.find((console) => console.name === identite.nom)?.sql ?? ''
+                      /* **Le clic ouvre la connexion autant que la console.** Elle l'est déjà quand la
                      ligne de la base a été dépliée — c'est ce qui a fait paraître la console —, mais
                      pas quand cette ouverture a **échoué** : les consoles s'affichent malgré l'échec,
                      délibérément, et le clic doit donc retenter plutôt qu'ouvrir un onglet inerte. */
-                  void assurerLOuverture({
-                    project: identite.project,
-                    database: identite.database,
-                    environment: identite.environment,
-                  })
-                  setEtatOnglets((etat) => {
-                    const suivant = ouvrirConsole(
-                      etat,
-                      {
+                      void assurerLOuverture({
                         project: identite.project,
                         database: identite.database,
                         environment: identite.environment,
-                      },
-                      dialecteDe(identite.project, identite.database, identite.environment),
-                      identite.nom,
-                    )
-                    const id = suivant.actif as string
-                    setTextes((precedent) => ({ ...precedent, [id]: texte }))
-                    setConsolesOuvertes((precedent) => ({ ...precedent, [id]: identite }))
-                    return suivant
-                  })
-                }
-              }}
-              onToggle={basculer}
-              onAddDatabase={onNewDatabase}
-              onNewProject={onNewProject}
-              onOpenPreferences={onOpenPreferences}
-              onRefresh={rafraichirTout}
-              // **La section décrit ce qu'on regarde sans l'avoir ouvert, et rien d'autre**
-              // (`API-44`). Sous une table ouverte, l'en-tête de la grille nomme déjà chaque
-              // colonne et la vue Structure les liste en entier avec leur type : la section y
-              // redisait sept d'entre elles, et prenait cette hauteur sur l'arbre.
-              //
-              // Elle **reste** sous une console, et c'est le point de `13c` : le mockup d'`A8`
-              // montre « Schéma déduit » pendant qu'on écrit une commande, les champs d'une
-              // collection étant ce qu'on y regarde. La condition porte donc sur l'onglet **actif**
-              // — un onglet de table ouvert ailleurs dans la bande ne dit rien de ce qui est à
-              // l'écran.
-              columns={
-                detail && table === null
-                  ? { table: detail.name, columns: detail.columns, loading }
-                  : undefined
+                      })
+                      setEtatOnglets((etat) => {
+                        const suivant = ouvrirConsole(
+                          etat,
+                          {
+                            project: identite.project,
+                            database: identite.database,
+                            environment: identite.environment,
+                          },
+                          dialecteDe(identite.project, identite.database, identite.environment),
+                          identite.nom,
+                        )
+                        const id = suivant.actif as string
+                        setTextes((precedent) => ({ ...precedent, [id]: texte }))
+                        setConsolesOuvertes((precedent) => ({ ...precedent, [id]: identite }))
+                        return suivant
+                      })
+                    }
+                  }}
+                  onToggle={basculer}
+                  onAddDatabase={onNewDatabase}
+                  onNewProject={onNewProject}
+                  onOpenPreferences={onOpenPreferences}
+                  onRefresh={rafraichirTout}
+                  // **La section décrit ce qu'on regarde sans l'avoir ouvert, et rien d'autre**
+                  // (`API-44`). Sous une table ouverte, l'en-tête de la grille nomme déjà chaque
+                  // colonne et la vue Structure les liste en entier avec leur type : la section y
+                  // redisait sept d'entre elles, et prenait cette hauteur sur l'arbre.
+                  //
+                  // Elle **reste** sous une console, et c'est le point de `13c` : le mockup d'`A8`
+                  // montre « Schéma déduit » pendant qu'on écrit une commande, les champs d'une
+                  // collection étant ce qu'on y regarde. La condition porte donc sur l'onglet
+                  // **actif** — un onglet de table ouvert ailleurs dans la bande ne dit rien de ce
+                  // qui est à l'écran.
+                  columns={
+                    detail && table === null
+                      ? { table: detail.name, columns: detail.columns, loading }
+                      : undefined
+                  }
+                />
+              }
+              end={
+                <InstancesPanel
+                  instances={instances}
+                  etats={etatsInstances}
+                  selectedId={instanceActive?.instance ?? null}
+                  onSelect={(instance) => {
+                    /* **Le clic ouvre l'onglet et la connexion**, comme un clic sur une console.
+                       L'ouverture est demandée par l'écran d'instance à son montage ; ici on se
+                       contente de l'onglet, pour que l'ordre soit toujours le même — l'écran
+                       apparaît, puis dit qu'il se connecte. */
+                    setEtatOnglets((etat) => ouvrirInstance(etat, instance.id))
+                  }}
+                  {...(onDeclareInstance === undefined ? {} : { onDeclare: onDeclareInstance })}
+                  {...(onEditInstance === undefined ? {} : { onEdit: onEditInstance })}
+                  {...(onRemoveInstance === undefined ? {} : { onRemove: onRemoveInstance })}
+                />
               }
             />
           }
@@ -1863,11 +2029,11 @@ export function Workbench({
                   />
                 }
               />
-            ) : consoleActive || diagramme ? (
-              // **Une console occupe toute la largeur ; un diagramme aussi, et pour la même
-              // raison.** Le panneau droit n'a rien à y montrer — il proposerait la ligne
-              // sélectionnée d'une grille qui n'existe pas —, et un dessin est ce qui profite le
-              // plus de la largeur qu'on lui laisse.
+            ) : consoleActive || diagramme || instanceActive ? (
+              // **Une console occupe toute la largeur ; un diagramme aussi, et une instance de
+              // même.** Le panneau droit n'a rien à y montrer — il proposerait la ligne sélectionnée
+              // d'une grille qui n'existe pas —, et ces trois-là profitent de la largeur qu'on leur
+              // laisse : une matrice de rôles × bases plus que tout le reste.
               centre
             ) : (
               <SplitPane
@@ -2065,6 +2231,29 @@ export function Workbench({
       )}
     </div>
   )
+}
+
+/**
+ * Le message d'un rejet, quelle qu'en soit la forme.
+ *
+ * Le pont rend un `EngineError` — un objet à `message` — quand le cœur refuse, et une chaîne quand
+ * c'est lui qui échoue. Les deux doivent s'afficher : un `[object Object]` dans une pastille d'état
+ * serait pire que rien.
+ */
+function messageDErreur(cause: unknown): string {
+  if (typeof cause === 'string') return cause
+  if (cause && typeof cause === 'object' && 'message' in cause) {
+    return String((cause as { message: unknown }).message)
+  }
+  return String(cause)
+}
+
+/** La déclaration d'une instance, retrouvée par son identifiant figé — jamais par son libellé. */
+function instanceDeclaree(
+  instances: readonly ManagedInstance[],
+  id: string,
+): ManagedInstance | undefined {
+  return instances.find((instance) => instance.id === id)
 }
 
 function correspond(objet: TableSummary, type: TypeObjet): boolean {

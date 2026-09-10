@@ -1,0 +1,122 @@
+/* La vue d'ensemble d'une instance (`API-32`). */
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  padding: var(--space-6);
+}
+
+/*
+ * Six tuiles, en grille auto-ajustée.
+ *
+ * `auto-fit` plutôt qu'un nombre de colonnes fixe : l'onglet partage sa largeur avec la sidebar,
+ * dont la poignée se déplace. Six colonnes figées feraient déborder la zone sur une fenêtre étroite,
+ * et la règle du produit est qu'aucun contenu ne franchit le bord droit.
+ */
+.tuiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: var(--space-3);
+}
+
+.bloc {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.titre {
+  margin: 0;
+  font: var(--weight-bold) var(--text-caps-sm) var(--font-ui);
+  letter-spacing: var(--tracking-caps-sm);
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/*
+ * L'identité de la connexion : une liste de définitions, deux colonnes.
+ *
+ * `<dl>` et non un tableau : ce sont des paires clé-valeur, pas des lignes comparables entre elles,
+ * et un lecteur d'écran les annonce comme telles sans qu'on ait rien à écrire.
+ */
+.identite {
+  display: grid;
+  grid-template-columns: 132px 1fr;
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+}
+
+.cle {
+  font: var(--weight-semibold) var(--text-label) var(--font-ui);
+  color: var(--ink-2);
+}
+
+/* Une valeur technique est en mono — la règle du produit depuis `08b`. */
+.valeur {
+  margin: 0;
+  font: var(--weight-medium) var(--text-dense) var(--font-mono);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.gestes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(216px, 1fr));
+  gap: var(--space-2) var(--space-5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.permis,
+.refuse {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font: var(--weight-medium) var(--text-label) var(--font-ui);
+}
+
+.permis {
+  color: var(--ink);
+}
+
+/*
+ * Un geste refusé s'efface, il ne rougit pas.
+ *
+ * Le rouge dit « attention » ; ici il n'y a rien à craindre, seulement quelque chose qu'on ne peut
+ * pas faire. Et la distinction ne tient pas à la couleur seule : le glyphe change, et le verdict est
+ * écrit en texte masqué.
+ */
+.refuse {
+  color: var(--ink-3);
+}
+
+.verdict {
+  flex: none;
+  width: 12px;
+  text-align: center;
+  font-family: var(--font-mono);
+}
+
+.permis .verdict {
+  color: var(--success);
+}
+
+/*
+ * Le texte que seule une voix lit — `clip-path`, jamais `display: none`, qui le retirerait de
+ * l'arbre d'accessibilité.
+ */
+.masque {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.cadre {
+  margin: 0;
+  font: var(--weight-medium) var(--text-meta) var(--font-ui);
+  color: var(--ink-meta);
+}

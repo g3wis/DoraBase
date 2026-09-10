@@ -1,0 +1,179 @@
+/*
+ * L'écran d'une instance managée (`API-32`).
+ *
+ * Trois bandes empilées — fil d'Ariane 34 px, sections 34 px, barre d'outils 36 px — puis le
+ * contenu, qui prend le reste et défile seul. Les cotes sont celles des bandes du produit : le fil
+ * d'Ariane de l'explorateur et la `Toolbar` de la grille, réemployées plutôt que réinventées.
+ */
+.root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--paper);
+}
+
+.filDAriane {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex: none;
+  height: 34px;
+  padding: 0 var(--space-5);
+  border-bottom: 1px solid var(--divider-2);
+  background: var(--bar);
+  box-sizing: border-box;
+}
+
+.chemin {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.icone {
+  flex: none;
+  color: var(--engine-pg);
+}
+
+.hote {
+  font: var(--weight-medium) var(--text-dense) var(--font-mono);
+  color: var(--ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.separateur {
+  flex: none;
+  color: var(--ink-4);
+}
+
+.sectionCourante {
+  font: var(--weight-semibold) var(--text-dense) var(--font-ui);
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+/*
+ * Le rôle de la session, en méta mono, à droite.
+ *
+ * **Visible en permanence**, parce que c'est l'information qui décide de ce que cet écran autorise :
+ * la lire dans une infobulle, ou seulement dans la vue d'ensemble, obligerait à changer de section
+ * pour savoir avec quoi l'on agit.
+ */
+.role {
+  flex: none;
+  font: var(--weight-medium) var(--text-meta) var(--font-mono);
+  color: var(--ink-meta);
+  white-space: nowrap;
+}
+
+.bande {
+  display: flex;
+  align-items: center;
+  flex: none;
+  height: 34px;
+  padding: 0 var(--space-5);
+  border-bottom: 1px solid var(--divider-2);
+  background: var(--paper);
+  box-sizing: border-box;
+  /* Sept segments dépassent une fenêtre étroite : la bande défile plutôt que d'écraser les
+     libellés — et jamais la racine avec elle. */
+  overflow-x: auto;
+  overscroll-behavior: none;
+}
+
+.barre {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: none;
+  height: 36px;
+  padding: 0 var(--space-5);
+  border-bottom: 1px solid var(--divider-2);
+  background: var(--bar);
+  box-sizing: border-box;
+}
+
+.rafraichir {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.rafraichir:hover:not(:disabled) {
+  background: var(--hover-row);
+  color: var(--ink);
+}
+
+.rafraichir:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.rafraichir:disabled {
+  color: var(--ink-4);
+  cursor: default;
+}
+
+/* L'âge du relevé. Ce qui remplace le mouvement d'un rafraîchissement périodique. */
+.releve {
+  font: var(--weight-medium) var(--text-meta) var(--font-mono);
+  color: var(--ink-meta);
+  white-space: nowrap;
+}
+
+/* La clé de lecture de la matrice, dans la barre : visible **pendant** qu'on lit, non après avoir
+   défilé jusqu'en bas. */
+.legende {
+  font: var(--weight-medium) var(--text-meta) var(--font-ui);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+/* Le filtre prend la place restante, à droite. */
+.filtre {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.contenu {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: none;
+}
+
+.etat {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-4);
+  padding: var(--space-6);
+}
+
+.message {
+  margin: 0;
+  padding: var(--space-6);
+  font: var(--weight-medium) var(--text-label) var(--font-ui);
+  color: var(--ink-2);
+}
+
+.etat .message {
+  padding: 0;
+}

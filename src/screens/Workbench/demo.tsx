@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type {
+  ConnectionSettings,
   Database,
   EnvironmentColor,
   EnvironmentDeclaration,
   EnvironmentId,
+  ManagedInstance,
   Preferences,
   Project,
 } from '../../domain/config'
@@ -17,8 +19,11 @@ import type {
   TableSummary,
   TransactionStatement,
 } from '../../domain/engine'
+import type { InstanceAction } from '../../domain/instances'
 import { LanguageProvider, langueAppliquee } from '../../i18n/LanguageContext'
 import type { PasserelleExport } from '../Console/exportResultat'
+import type { PasserelleInstances } from '../Instances/instanceCommands'
+import { NewInstance } from '../Instances/NewInstance'
 import { NewConnection } from '../NewConnection/NewConnection'
 import { ParcoursDeCreation } from '../NewProject/ParcoursDeCreation'
 import { PreferencesDialog } from '../Preferences/PreferencesDialog'
@@ -835,6 +840,361 @@ const PASSERELLE_LIGNES: PasserelleLignes = {
 const rowAsInsert = async () =>
   'INSERT INTO "public"."orders" ("id", "user_id", "status")\nVALUES (184220, 44019, \'paid\');'
 
+/** Des réglages de connexion neutres, pour les deux instances du décor. */
+const REGLAGES_DEMO: ConnectionSettings = {
+  host: 'localhost',
+  port: 5432,
+  defaultDatabase: 'postgres',
+  username: 'postgres',
+  password: null,
+  sslMode: 'prefer',
+  caCertificate: null,
+  authDatabase: null,
+  readOnly: false,
+  reconnectOnStartup: false,
+  tunnel: null,
+}
+
+/**
+ * Les instances managées du décor de démonstration (`API-32`).
+ *
+ * **Aucun nom réel** — ni du commanditaire, ni d'un de ses projets : la règle du dépôt, et un décor
+ * d'instance porte justement des hôtes et des noms de rôles.
+ *
+ * **Deux instances, dont une marquée production** : sans la seconde, le badge `PROD` et le rappel de
+ * la bande de confirmation ne seraient visibles nulle part dans `?demo` — donc invérifiables autrement
+ * qu'à l'œil dans la fenêtre native, que Playwright ne pilote pas.
+ */
+const INSTANCES_DEMO: ManagedInstance[] = [
+  {
+    id: 'pg-atelier',
+    label: 'PG atelier',
+    engine: 'postgresql',
+    connection: { ...REGLAGES_DEMO, host: 'localhost', port: 5432, defaultDatabase: 'postgres' },
+    production: false,
+    confirmWrites: true,
+  },
+  {
+    id: 'pg-halle',
+    label: 'PG halle',
+    engine: 'postgresql',
+    connection: { ...REGLAGES_DEMO, host: 'db.interne', port: 5432, defaultDatabase: 'postgres' },
+    production: true,
+    confirmWrites: true,
+  },
+]
+
+/**
+ * Le décor des sept lectures d'administration.
+ *
+ * **Il n'exécute rien.** `runInstanceAction` rend un compte rendu plausible sans rien changer : une
+ * écriture simulée qui « réussit » toujours ne prouverait rien du moteur, et c'est ce que les tests
+ * Rust sur PostgreSQL vérifient. Ce qui se vérifie ici est le **parcours** — la confirmation
+ * s'ouvre, montre le SQL, et le bouton part.
+ *
+ * `planInstanceAction`, en revanche, rend un SQL **de la forme exacte** que le cœur compose : le
+ * pont ne répond pas en Chromium, et un texte d'une autre forme ne prouverait rien de l'encart ni de
+ * son défilement. C'est l'arbitrage du SQL prévu de `11c`, appliqué ici.
+ */
+const PASSERELLE_INSTANCES_DEMO: PasserelleInstances = {
+  openInstance: async () => ({
+    kind: 'connected',
+    serverVersion: 'PostgreSQL 17.6',
+    tunnelLocalPort: null,
+  }),
+  closeInstance: async () => {},
+  instanceOverview: async (id: string) => ({
+    serverVersion: 'PostgreSQL 17.6',
+    uptimeSeconds: 273_600,
+    connections: 7,
+    maxConnections: 100,
+    databases: 4,
+    roles: 6,
+    totalSizeBytes: 268_435_456,
+    identity: {
+      host: id === 'pg-halle' ? 'db.interne' : 'localhost',
+      port: 5432,
+      role: 'postgres',
+      database: 'postgres',
+      tls: true,
+      tlsCipher: 'TLSv1.3 / TLS_AES_256_GCM_SHA384',
+      secretLocation: 'Trousseau',
+    },
+    capabilities: [
+      { gesture: 'createDatabase', allowed: true, reason: null },
+      { gesture: 'alterDatabase', allowed: true, reason: null },
+      { gesture: 'dropDatabase', allowed: true, reason: null },
+      { gesture: 'createRole', allowed: true, reason: null },
+      { gesture: 'alterRole', allowed: true, reason: null },
+      { gesture: 'dropRole', allowed: true, reason: null },
+      { gesture: 'grantPrivilege', allowed: true, reason: null },
+      { gesture: 'terminateSession', allowed: true, reason: null },
+      { gesture: 'createExtension', allowed: true, reason: null },
+      { gesture: 'dropExtension', allowed: true, reason: null },
+      // **Un geste refusé dans le décor**, et c'est délibéré : sans lui, l'infobulle qui nomme la
+      // raison ne serait visible nulle part, et un écran où tout est permis ne distingue pas un
+      // bouton actif d'un bouton qui l'est resté par oubli (règle n° 5).
+      {
+        gesture: 'setParameter',
+        allowed: false,
+        reason: 'le rôle n’a pas l’attribut SUPERUSER',
+      },
+    ],
+  }),
+  instanceDatabases: async () => [
+    {
+      name: 'atelier',
+      owner: 'postgres',
+      encoding: 'UTF8',
+      collation: 'fr_FR.UTF-8',
+      sizeBytes: 178_257_920,
+      connections: 3,
+      isTemplate: false,
+      allowConnections: true,
+    },
+    {
+      name: 'inventaire',
+      owner: 'atelier_etl',
+      encoding: 'UTF8',
+      collation: 'fr_FR.UTF-8',
+      sizeBytes: 65_011_712,
+      connections: 1,
+      isTemplate: false,
+      allowConnections: true,
+    },
+    {
+      name: 'template1',
+      owner: 'postgres',
+      encoding: 'UTF8',
+      collation: 'fr_FR.UTF-8',
+      sizeBytes: 7_340_032,
+      connections: 0,
+      isTemplate: true,
+      allowConnections: true,
+    },
+  ],
+  instanceRoles: async () => [
+    {
+      name: 'postgres',
+      canLogin: true,
+      superuser: true,
+      createDb: true,
+      createRole: true,
+      replication: true,
+      bypassRls: true,
+      validUntil: null,
+      memberOf: [],
+      ownedDatabases: 2,
+      system: false,
+    },
+    {
+      name: 'atelier_etl',
+      canLogin: true,
+      superuser: false,
+      createDb: false,
+      createRole: false,
+      replication: false,
+      bypassRls: false,
+      validUntil: '2027-01-01 00:00:00+01',
+      memberOf: ['atelier_lecture'],
+      ownedDatabases: 1,
+      system: false,
+    },
+    // Un rôle **sans** LOGIN : c'est ce qui rend l'icône `lock` visible à côté de la clé.
+    {
+      name: 'atelier_lecture',
+      canLogin: false,
+      superuser: false,
+      createDb: false,
+      createRole: false,
+      replication: false,
+      bypassRls: false,
+      validUntil: null,
+      memberOf: [],
+      ownedDatabases: 0,
+      system: false,
+    },
+    {
+      name: 'pg_monitor',
+      canLogin: false,
+      superuser: false,
+      createDb: false,
+      createRole: false,
+      replication: false,
+      bypassRls: false,
+      validUntil: null,
+      memberOf: [],
+      ownedDatabases: 0,
+      system: true,
+    },
+  ],
+  instancePrivileges: async () => [
+    { role: 'postgres', database: 'atelier', create: true, temporary: true, connect: true },
+    { role: 'postgres', database: 'inventaire', create: true, temporary: true, connect: true },
+    { role: 'atelier_etl', database: 'atelier', create: true, temporary: true, connect: true },
+    // Les quatre sigles de la maquette sont donc tous représentés : `ALL`, `Tc`, `c`, `—`.
+    { role: 'atelier_etl', database: 'inventaire', create: false, temporary: true, connect: true },
+    {
+      role: 'atelier_lecture',
+      database: 'atelier',
+      create: false,
+      temporary: false,
+      connect: true,
+    },
+    {
+      role: 'atelier_lecture',
+      database: 'inventaire',
+      create: false,
+      temporary: false,
+      connect: false,
+    },
+  ],
+  instanceSessions: async () => [
+    {
+      pid: 4821,
+      user: 'postgres',
+      database: 'postgres',
+      client: 'local',
+      process: 'DoraBase',
+      state: 'active',
+      durationSeconds: 2,
+      isSelf: true,
+    },
+    {
+      pid: 4903,
+      user: 'atelier_etl',
+      database: 'atelier',
+      client: '10.20.0.14',
+      process: 'psql',
+      state: 'idle in transaction',
+      durationSeconds: 512,
+      isSelf: false,
+    },
+    // Un processus interne du serveur : ni rôle ni base, ce qui rend le tiret cadratin visible.
+    {
+      pid: 4102,
+      user: null,
+      database: null,
+      client: 'local',
+      // Un processus interne : pas de client à nommer, c'est `backend_type` qui prend le relais.
+      process: 'autovacuum launcher',
+      state: null,
+      durationSeconds: 273_500,
+      isSelf: false,
+    },
+  ],
+  instanceExtensions: async () => [
+    {
+      name: 'plpgsql',
+      installedVersion: '1.0',
+      defaultVersion: '1.0',
+      database: 'postgres',
+      schema: 'pg_catalog',
+    },
+    {
+      name: 'pg_stat_statements',
+      installedVersion: '1.11',
+      defaultVersion: '1.11',
+      database: 'postgres',
+      schema: 'public',
+    },
+    {
+      name: 'pgcrypto',
+      installedVersion: null,
+      defaultVersion: '1.3',
+      database: 'postgres',
+      schema: null,
+    },
+  ],
+  instanceSettings: async () => [
+    {
+      name: 'block_size',
+      value: '8192',
+      unit: null,
+      context: 'internal',
+      source: 'default',
+      pendingRestart: false,
+      settable: false,
+    },
+    {
+      name: 'max_connections',
+      value: '100',
+      unit: null,
+      context: 'postmaster',
+      source: 'configuration file',
+      pendingRestart: true,
+      settable: true,
+    },
+    {
+      name: 'work_mem',
+      value: '4096',
+      unit: 'kB',
+      context: 'user',
+      source: 'default',
+      pendingRestart: false,
+      settable: true,
+    },
+  ],
+  // Le SQL composé exactement comme le cœur le compose : c'est ce qui rend l'encart mesurable.
+  planInstanceAction: async (action: InstanceAction) => {
+    switch (action.kind) {
+      case 'dropRole':
+        return {
+          statements: [
+            `REASSIGN OWNED BY "${action.name}" TO "${action.reassignTo}";`,
+            `DROP OWNED BY "${action.name}";`,
+            `DROP ROLE "${action.name}";`,
+          ],
+          note: 'Trois ordres, parce qu’un DROP ROLE seul échoue dès que le rôle possède quoi que ce soit. Les deux premiers ne portent que sur la base courante.',
+          destructive: true,
+        }
+      case 'dropDatabase':
+        return {
+          statements: [`DROP DATABASE "${action.name}";`],
+          note: 'Sans IF EXISTS et sans FORCE : une base absente doit se dire, et FORCE couperait les sessions des autres sans les nommer.',
+          destructive: true,
+        }
+      case 'terminateSession':
+        return {
+          statements: [`SELECT pg_terminate_backend(${action.pid});`],
+          note: 'pg_terminate_backend annule la transaction en cours et ferme la session.',
+          destructive: true,
+        }
+      case 'alterRole':
+      case 'createRole':
+        return {
+          statements: [
+            `${action.kind === 'createRole' ? 'CREATE' : 'ALTER'} ROLE "${action.name}" LOGIN${
+              action.verifier === null ? '' : ` PASSWORD '${action.verifier}'`
+            };`,
+          ],
+          note:
+            action.verifier === null
+              ? 'Les quatre attributs sont posés ensemble, y compris ceux qui n’ont pas changé.'
+              : 'Ce que l’ordre porte n’est pas le mot de passe mais son vérificateur SCRAM-SHA-256, calculé par DoraBase : c’est exactement la valeur que pg_authid stockera. Il n’est pas réversible.',
+          destructive: action.verifier !== null,
+        }
+      case 'dropExtension':
+        return {
+          statements: [`DROP EXTENSION "${action.name}" RESTRICT;`],
+          note: 'RESTRICT et non CASCADE : l’ordre échoue si quelque chose dépend de l’extension.',
+          destructive: true,
+        }
+      default:
+        return {
+          statements: ['-- le décor de démonstration n’exécute rien'],
+          note: '',
+          destructive: false,
+        }
+    }
+  },
+  runInstanceAction: async () => ({ statements: [], message: 'le décor n’exécute rien' }),
+  // Le décor ne hache rien — il rend une chaîne de la **forme** que le cœur produit, pour que
+  // l'encart de confirmation soit mesurable sans base réelle. C'est l'arbitrage du SQL prévu.
+  scramVerifier: async () =>
+    'SCRAM-SHA-256$4096:ZGVjb3JkZWRlbW9uc3RyYQ==$c3RvY2tlZQ==:c2VydmV1cg==',
+}
+
 export function WorkbenchDemo() {
   // **La démo monte `A2` en mode édition**, et ce n'est pas de la décoration. Elle se contentait
   // d'inscrire la cible dans le titre du document, ce qui vérifiait un *proxy* du chemin : un test
@@ -912,6 +1272,17 @@ export function WorkbenchDemo() {
       },
     }),
     [],
+  )
+  /**
+   * La modale de déclaration d'une instance, en démonstration (`API-32`).
+   *
+   * **La démo n'enregistre rien** : `onEnregistrer` ne fait rien et ferme. Ce qui se vérifie ici est
+   * que la modale s'ouvre, sur la bonne instance en édition, et que son bloc « Moteur » n'offre que
+   * PostgreSQL — trois faits que la galerie ne peut pas prouver, puisqu'elle monte le composant sans
+   * la sidebar qui le déclenche.
+   */
+  const [instanceOuverte, setInstanceOuverte] = useState<{ instance?: ManagedInstance } | null>(
+    null,
   )
 
   useEffect(() => {
@@ -1101,6 +1472,14 @@ export function WorkbenchDemo() {
       )}
       <Workbench
         projects={projets}
+        /* **Une instance dans le décor** (`API-32`), et un décor qui distingue : voir
+           `INSTANCES_DEMO`. Sans elle, la seconde zone de la sidebar serait vide dans `?demo`, et
+           l'écran d'instance ne serait vérifiable que dans la fenêtre native — que Playwright ne
+           pilote pas. */
+        instances={INSTANCES_DEMO}
+        passerelleInstances={PASSERELLE_INSTANCES_DEMO}
+        onDeclareInstance={() => setInstanceOuverte({})}
+        onEditInstance={(instance) => setInstanceOuverte({ instance })}
         onOpenPreferences={() => setPreferencesOuvertes(true)}
         rowHeight={preferences.rowHeight}
         passerelle={PASSERELLE}
@@ -1341,6 +1720,16 @@ export function WorkbenchDemo() {
         onProjets={setProjets}
         gestesEnvironnement={gestesEnvironnement}
       />
+      {instanceOuverte !== null && (
+        <NewInstance
+          {...(instanceOuverte.instance === undefined ? {} : { edition: instanceOuverte.instance })}
+          onClose={() => setInstanceOuverte(null)}
+          onEnregistrer={async () => {}}
+          // Le sélecteur de fichier natif ne répond pas hors de la webview : le décor rend `null`,
+          // ce que le panneau traite comme une annulation. Même arbitrage que `A2`.
+          onBrowseKey={async () => null}
+        />
+      )}
     </LanguageProvider>
   )
 }

@@ -22,7 +22,9 @@ test('le panneau fait 296 px, et l’en-tête du cadre 34', async ({ page }) => 
     // **L'en-tête n'est plus dans le panneau** : il appartient au cadre de la colonne depuis `22`,
     // pour survivre à la bascule de vue et au panneau des modifications. Sa mesure reste celle du
     // mockup — c'est la même barre, elle a changé de contenu, pas de hauteur.
-    const entete = document.querySelector('[role=separator] ~ * header')
+    // **Le séparateur est nommé par son orientation** : la zone d'instances (`API-32`) en pose un
+    // second, horizontal, dans la sidebar — un `[role=separator]` nu prendrait celui-là.
+    const entete = document.querySelector('[role=separator][aria-orientation=vertical] ~ * header')
     if (!panneau || !entete) return null
     return {
       // La largeur **calculée** : le rectangle inclurait le filet gauche.

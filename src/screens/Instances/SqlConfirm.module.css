@@ -1,0 +1,97 @@
+/*
+ * Le garde-fou des gestes d'administration (`API-32`).
+ *
+ * L'encart sombre reprend la facture des blocs de SQL du produit — `--dark`, `--on-dark`, mono —
+ * plutôt qu'une couleur à lui : un bloc de SQL se reconnaît à sa forme, et en dessiner une seconde
+ * ferait chercher ce qui les distingue.
+ */
+.corps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-6);
+}
+
+.production {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-panel);
+  background: var(--danger-bg);
+  font: var(--weight-medium) var(--text-label) var(--font-ui);
+  color: var(--danger-ink);
+}
+
+.titreSql {
+  font: var(--weight-bold) var(--text-caps-sm) var(--font-ui);
+  letter-spacing: var(--tracking-caps-sm);
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/*
+ * Les ordres, dans l'ordre où ils partent.
+ *
+ * `white-space: pre` et non `pre-wrap` : une ligne de SQL repliée se lit comme deux ordres, et c'est
+ * exactement la confusion qu'un écran qui supprime des rôles ne peut pas se permettre. Ce qui
+ * dépasse défile — dans son propre conteneur, jamais en poussant la modale.
+ */
+.sql {
+  margin: 0;
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-panel);
+  background: var(--dark);
+  color: var(--on-dark);
+  font: var(--weight-medium) var(--text-label) / var(--leading-code) var(--font-mono);
+  line-height: 1.55;
+  white-space: pre;
+  overflow-x: auto;
+  overscroll-behavior: none;
+}
+
+/* Ce que le SQL ne dit pas. Hors de l'encart, délibérément : voir l'en-tête de `SqlConfirm`. */
+.note {
+  margin: 0;
+  font: var(--weight-medium) var(--text-label) var(--font-ui);
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+
+.erreur {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-panel);
+  background: var(--danger-bg);
+  font: var(--weight-medium) var(--text-label) var(--font-ui);
+  color: var(--danger-ink);
+}
+
+.pied {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  width: 100%;
+}
+
+/*
+ * Le rouge du bouton d'exécution, pour un geste qui retire.
+ *
+ * **Une classe ici et non une variante de `Button`** : voir la note du composant. Les trois jetons
+ * sont ceux du danger, déjà employés par les bandes d'avertissement — aucune couleur littérale
+ * n'entre ici.
+ */
+.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--on-dark);
+}
+
+.danger:hover:not(:disabled) {
+  background: var(--danger-ink);
+  border-color: var(--danger-ink);
+}

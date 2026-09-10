@@ -20,7 +20,15 @@ export type ConfigLoad = { "kind": "fresh" } | { "kind": "loaded", projects: Arr
  * Les préférences (`15a`), **toujours présentes** : leur défaut est une valeur, pas une
  * absence. Une configuration écrite avant `15a` en rend les valeurs du handoff.
  */
-preferences: Preferences, } | { "kind": "unreadable", reason: string, 
+preferences: Preferences, 
+/**
+ * Les instances managées (`API-32`), lues avec les projets.
+ *
+ * **Dans la même issue de lecture, et non par une commande à part.** Elles vivent dans le
+ * même fichier ; deux commandes en feraient deux lectures, donc deux instants, et l'écran
+ * aurait à composer deux réponses dont l'une peut échouer sans l'autre.
+ */
+instances: Array<ManagedInstance>, } | { "kind": "unreadable", reason: string, 
 /**
  * Où l'original a été mis de côté, à montrer pour qu'il soit récupérable.
  */
@@ -323,6 +331,22 @@ refuseUnrestrictedWrites: boolean,
 keepInversePatch: boolean, };
 
 /**
+ * L'identifiant **stable** d'une instance managée (`API-32`).
+ *
+ * # Pourquoi un identifiant distinct du libellé
+ *
+ * C'est exactement la raison d'`EnvironmentId`, appliquée à une instance : il est à la fois la clé
+ * du registre de connexions (`instance/<id>`) et la référence du mot de passe dans le Trousseau. Un
+ * identifiant qui suivrait le libellé rendrait le secret introuvable au premier renommage — sans
+ * erreur, sans message, avec une instance qui redemanderait son mot de passe sans raison visible.
+ *
+ * Il est donc dérivé du libellé **une fois**, à la déclaration, puis figé. Renommer une instance
+ * change son libellé seul, et installe la divergence assumée que le projet a déjà acceptée pour un
+ * environnement et pour une connexion.
+ */
+export type InstanceId = string;
+
+/**
  * La langue de l'interface (26 août 2026).
  *
  * **Le même mécanisme que `Theme`** : une variante `Systeme` que l'écran résout lui-même,
@@ -331,6 +355,65 @@ keepInversePatch: boolean, };
  * le réglage choisi, jamais la langue résolue.
  */
 export type Language = "fr" | "en" | "systeme";
+
+/**
+ * Une instance de serveur **managée** (`API-32`).
+ *
+ * # Ce qu'elle n'est pas
+ *
+ * Ce n'est pas une connexion de plus. Une `Database` désigne **une base** dans un projet, pour un
+ * environnement, et sert à en lire les données ; une instance désigne **le serveur**, joint avec un
+ * compte d'administration, et sert à en gérer les bases, les rôles et les privilèges. Les deux
+ * pourraient viser le même hôte sans que cela veuille dire quoi que ce soit : l'une est déclarée par
+ * un projet, l'autre vit à côté des projets — c'est ce que la seconde zone de la sidebar dit à
+ * l'œil.
+ *
+ * Les fondre aurait demandé qu'une `Database` porte un drapeau « c'est aussi une instance », donc
+ * que chaque écran qui liste des connexions sache l'écarter, et que le registre de projets se
+ * mette à porter des objets qui n'appartiennent à aucun environnement.
+ *
+ * # PostgreSQL seul, et le champ `engine` existe quand même
+ *
+ * La modale rend les trois autres moteurs **désactivés avec leur raison** plutôt que masqués : ils
+ * viennent après, et masquer dirait « jamais ». Le champ persiste ce choix pour que le jour où
+ * MySQL arrive, aucune migration ne soit nécessaire — et pour que le refus côté Rust porte sur une
+ * valeur lue, non sur une supposition.
+ */
+export type ManagedInstance = { 
+/**
+ * L'identité figée : clé du registre, référence du secret.
+ */
+id: InstanceId, 
+/**
+ * Ce que la ligne de la sidebar affiche. Se renomme ; l'identifiant, non.
+ */
+label: string, engine: Engine, 
+/**
+ * Hôte, port, base de service, utilisateur admin, mode SSL, proxy — tout le formulaire.
+ *
+ * **Le même type que pour une connexion, et c'est ce qui donne le panneau « Proxy / tunnel »
+ * gratuitement.** Une instance managée se joint par un bastion aussi souvent qu'une base ; en
+ * réécrire un jeu de champs propre aurait fait vivre deux fois les trois visages de proxy, leur
+ * validation et leur ouverture — la règle n° 17 par avance.
+ */
+connection: ConnectionSettings, 
+/**
+ * Ce qui déclenche le rappel des bandes destructrices.
+ *
+ * **Un drapeau, jamais le libellé** : la règle d'`EnvironmentDeclaration::production`, pour la
+ * raison qui y est écrite. Une instance nommée « live » et marquée production est protégée ;
+ * une instance nommée « prod » que personne n'a marquée ne l'est pas.
+ */
+production: boolean, 
+/**
+ * « Confirmer chaque écriture » — la première des deux bascules de la modale.
+ *
+ * **Allumée par défaut, y compris pour une instance écrite avant ce champ.** `bool` retomberait
+ * à `false` sous `serde(default)`, ce qui ferait d'une mise à jour de DoraBase une levée
+ * silencieuse du garde-fou : c'est exactement ce que `Guards` refuse, et la parade est la même —
+ * un défaut explicite plutôt que celui du type.
+ */
+confirmWrites: boolean, };
 
 /**
  * Les préférences de l'application (`15a`).

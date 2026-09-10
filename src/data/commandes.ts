@@ -4,6 +4,8 @@ import type {
   ConnectionSettings,
   ConsoleRequest,
   Engine,
+  InstanceId,
+  ManagedInstance,
   Preferences,
   Project,
   VisibleSchemasRequest,
@@ -26,6 +28,20 @@ import type {
   UpdatePlan,
   Value,
 } from '../domain/engine'
+import type {
+  DeleteInstanceResult,
+  InstanceAction,
+  InstanceDatabase,
+  InstanceExtension,
+  InstanceOutcome,
+  InstanceOverview,
+  InstancePlan,
+  InstancePrivilege,
+  InstanceRole,
+  InstanceSession,
+  InstanceSetting,
+  SaveInstanceRequest,
+} from '../domain/instances'
 import type { AvailableUpdate } from '../domain/maj'
 import { PREFERENCES_PAR_DEFAUT } from '../screens/Preferences/preferences'
 
@@ -434,12 +450,18 @@ export function etatDe(
  * ce qui écraserait le fichier qu'on vient de refuser d'ouvrir.
  */
 export type EtatDeConfiguration =
-  | { kind: 'fresh'; projects: Project[]; preferences: Preferences }
-  | { kind: 'loaded'; projects: Project[]; preferences: Preferences }
+  | { kind: 'fresh'; projects: Project[]; preferences: Preferences; instances: ManagedInstance[] }
+  | { kind: 'loaded'; projects: Project[]; preferences: Preferences; instances: ManagedInstance[] }
   | {
       kind: 'blocked'
       projects: Project[]
       preferences: Preferences
+      /**
+       * Vide, comme les projets : un fichier qu'on n'a pas su lire ne dit rien de ses instances,
+       * et en montrer une reviendrait à proposer d'ouvrir une connexion d'administration décrite
+       * par un fichier en quarantaine.
+       */
+      instances: ManagedInstance[]
       reason: string
       quarantinedTo?: string
     }
@@ -447,9 +469,14 @@ export type EtatDeConfiguration =
 export function interpreter(issue: ConfigLoad): EtatDeConfiguration {
   switch (issue.kind) {
     case 'fresh':
-      return { kind: 'fresh', projects: [], preferences: PREFERENCES_PAR_DEFAUT }
+      return { kind: 'fresh', projects: [], preferences: PREFERENCES_PAR_DEFAUT, instances: [] }
     case 'loaded':
-      return { kind: 'loaded', projects: issue.projects, preferences: issue.preferences }
+      return {
+        kind: 'loaded',
+        projects: issue.projects,
+        preferences: issue.preferences,
+        instances: issue.instances,
+      }
     case 'unreadable':
       return {
         kind: 'blocked',
@@ -458,6 +485,7 @@ export function interpreter(issue: ConfigLoad): EtatDeConfiguration {
         // afficher le message qui explique le blocage : sans jetons, l'écran d'erreur serait
         // lui-même illisible.
         preferences: PREFERENCES_PAR_DEFAUT,
+        instances: [],
         reason: issue.reason,
         quarantinedTo: issue.quarantinedTo,
       }
@@ -466,7 +494,103 @@ export function interpreter(issue: ConfigLoad): EtatDeConfiguration {
         kind: 'blocked',
         projects: [],
         preferences: PREFERENCES_PAR_DEFAUT,
+        instances: [],
         reason: `le fichier de configuration est en version ${issue.found}, cette version de DoraBase comprend la version ${issue.supported}`,
       }
   }
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Le gestionnaire d'instances (`API-32`).
+ *
+ * **Aucune de ces commandes ne reçoit de réglages de connexion ni de SQL** : l'écran envoie un
+ * identifiant d'instance, et un geste nommé quand il y en a un. Voir l'en-tête de
+ * `instances/commands.rs` pour ce que ce partage garantit.
+ * --------------------------------------------------------------------------------------------- */
+
+/** Déclare une instance, ou met à jour celle que `id` désigne. Rend la liste entière. */
+export async function saveInstance(request: SaveInstanceRequest): Promise<ManagedInstance[]> {
+  return invoke<ManagedInstance[]>('save_instance', { request })
+}
+
+/** Retire une instance, son secret, et ferme sa connexion. */
+export async function deleteInstance(id: InstanceId): Promise<DeleteInstanceResult> {
+  return invoke<DeleteInstanceResult>('delete_instance', { id })
+}
+
+export async function openInstance(id: InstanceId): Promise<ConnectionState> {
+  return invoke<ConnectionState>('open_instance', { id })
+}
+
+export async function closeInstance(id: InstanceId): Promise<void> {
+  return invoke<void>('close_instance', { id })
+}
+
+export async function instanceState(id: InstanceId): Promise<ConnectionState> {
+  return invoke<ConnectionState>('instance_state', { id })
+}
+
+export async function instanceOverview(id: InstanceId): Promise<InstanceOverview> {
+  return invoke<InstanceOverview>('instance_overview', { id })
+}
+
+export async function instanceDatabases(id: InstanceId): Promise<InstanceDatabase[]> {
+  return invoke<InstanceDatabase[]>('instance_databases', { id })
+}
+
+export async function instanceRoles(id: InstanceId): Promise<InstanceRole[]> {
+  return invoke<InstanceRole[]>('instance_roles', { id })
+}
+
+export async function instancePrivileges(id: InstanceId): Promise<InstancePrivilege[]> {
+  return invoke<InstancePrivilege[]>('instance_privileges', { id })
+}
+
+export async function instanceSessions(id: InstanceId): Promise<InstanceSession[]> {
+  return invoke<InstanceSession[]>('instance_sessions', { id })
+}
+
+export async function instanceExtensions(id: InstanceId): Promise<InstanceExtension[]> {
+  return invoke<InstanceExtension[]>('instance_extensions', { id })
+}
+
+export async function instanceSettings(id: InstanceId): Promise<InstanceSetting[]> {
+  return invoke<InstanceSetting[]>('instance_settings', { id })
+}
+
+/**
+ * Le vérificateur SCRAM d'un mot de passe de rôle (9 septembre 2026).
+ *
+ * **Le mot de passe traverse le pont une fois, le vérificateur en revient.** C'est lui, et lui seul,
+ * qui atteint le serveur et l'écran : il n'est pas réversible, donc la confirmation peut montrer
+ * l'ordre exact sans rien divulguer. Voir `engine/postgres/scram.rs` pour les trois raisons.
+ *
+ * **À demander avant de composer le geste** : le sel est aléatoire, donc deux calculs donneraient
+ * deux ordres différents — celui qu'on montre et celui qui part.
+ */
+export async function scramVerifier(password: string): Promise<string> {
+  return invoke<string>('scram_verifier', { password })
+}
+
+/**
+ * Le SQL d'un geste, **avant** de partir.
+ *
+ * Composé par le cœur et non par l'écran : la confirmation promet de montrer *ce qui part*, et deux
+ * compositions finiraient par diverger (règle n° 17).
+ */
+export async function planInstanceAction(action: InstanceAction): Promise<InstancePlan> {
+  return invoke<InstancePlan>('plan_instance_action', { action })
+}
+
+/**
+ * Exécute un geste.
+ *
+ * **L'écran renvoie le geste, jamais les ordres qu'on vient de lui montrer** : lui faire renvoyer le
+ * SQL ferait exécuter une chaîne venue de la webview.
+ */
+export async function runInstanceAction(
+  id: InstanceId,
+  action: InstanceAction,
+): Promise<InstanceOutcome> {
+  return invoke<InstanceOutcome>('run_instance_action', { id, action })
 }

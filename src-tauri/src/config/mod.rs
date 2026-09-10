@@ -10,6 +10,8 @@
 pub mod commands;
 mod enregistrer;
 mod environnements;
+/// Les instances managées (`API-32`) : leur déclaration, leur secret, leur retrait.
+mod instances;
 mod model;
 mod query;
 mod store;
@@ -25,10 +27,15 @@ pub use commands::{
     UpdateVariantRequest, VisibleSchemasRequest,
 };
 pub use enregistrer::{enregistrer, reference_de, NouvelleBase, SaveError};
+pub use instances::{
+    cle_de_registre, declarer, moteur_manage, reference_de_instance, retirer, DeclarationInstance,
+    InstanceError, SuppressionInstance,
+};
 pub use model::{
     Accent, ConnectionSettings, Console, Database, Engine, EnvironmentColor,
-    EnvironmentDeclaration, EnvironmentId, Guards, ModelError, Preferences, Project, Proxy,
-    ProxyCloudSql, ProxyKubernetes, ProxySsh, SavedQuery, SecretRef, SslMode, Theme, Tunnel,
+    EnvironmentDeclaration, EnvironmentId, Guards, InstanceId, ManagedInstance, ModelError,
+    Preferences, Project, Proxy, ProxyCloudSql, ProxyKubernetes, ProxySsh, SavedQuery, SecretRef,
+    SslMode, Theme, Tunnel,
 };
 pub use query::{databases_available, validate};
 pub use store::{load, save, ConfigStore, LoadOutcome, StoreError, VERSION_COURANTE};

@@ -13,7 +13,7 @@ test('glisser la poignée ne sélectionne aucun texte', async ({ page }) => {
 
   // La poignée de la sidebar : celle qui traverse la grille en s'élargissant, donc celle qui
   // surlignait le plus de texte.
-  const poignee = page.getByRole('separator').first()
+  const poignee = page.getByRole('separator', { includeHidden: false }).first()
   const boite = await poignee.boundingBox()
   if (!boite) throw new Error('la poignée doit être visible')
 
@@ -43,7 +43,7 @@ test('glisser la poignée ne sélectionne aucun texte', async ({ page }) => {
 test('la sélection redevient possible après le glissement', async ({ page }) => {
   await page.goto('/?demo')
   await page.waitForSelector('[role=tree]')
-  const poignee = page.getByRole('separator').first()
+  const poignee = page.getByRole('separator', { includeHidden: false }).first()
   const boite = await poignee.boundingBox()
   if (!boite) throw new Error('la poignée doit être visible')
 

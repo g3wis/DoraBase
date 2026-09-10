@@ -27,8 +27,12 @@ test('le DDL est dans la colonne de droite, sous l’en-tête du cadre', async (
     const ddl = document
       .querySelector('aside[aria-label^="DDL de public.orders"]')
       ?.getBoundingClientRect()
-    const separateurs = [...document.querySelectorAll('[role=separator]')]
-    const entete = document.querySelector('[role=separator] ~ * header')?.getBoundingClientRect()
+    const separateurs = [
+      ...document.querySelectorAll('[role=separator][aria-orientation=vertical]'),
+    ]
+    const entete = document
+      .querySelector('[role=separator][aria-orientation=vertical] ~ * header')
+      ?.getBoundingClientRect()
     const colonne = separateurs[1]?.nextElementSibling?.getBoundingClientRect()
     return tableau && ddl && entete && colonne ? { tableau, ddl, entete, colonne } : null
   })
@@ -52,7 +56,9 @@ test('le centre de la structure occupe toute la largeur laissée par la colonne'
   page,
 }) => {
   const mesures = await page.evaluate(() => {
-    const separateurs = [...document.querySelectorAll('[role=separator]')]
+    const separateurs = [
+      ...document.querySelectorAll('[role=separator][aria-orientation=vertical]'),
+    ]
     const centre = separateurs[1]?.previousElementSibling?.getBoundingClientRect()
     const tableau = [...document.querySelectorAll('table')]
       .find((t) => /Colonnes de public\.orders/.test(t.querySelector('caption')?.textContent ?? ''))

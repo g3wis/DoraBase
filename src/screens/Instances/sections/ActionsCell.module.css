@@ -1,0 +1,49 @@
+/* La colonne d'actions, première et réduite au minimum (`API-32`). */
+.root {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.bouton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
+.bouton:hover {
+  background: var(--hover-row);
+  color: var(--ink);
+}
+
+.bouton:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+/*
+ * Un geste refusé : grisé, mais **toujours focalisable et survolable**.
+ *
+ * C'est ce que `aria-disabled` achète et que `disabled` retirerait : l'infobulle qui nomme la raison
+ * reste atteignable, à la souris comme au clavier. Le curseur redevient celui du texte pour dire que
+ * rien ne se passera au clic.
+ */
+.bouton[aria-disabled="true"] {
+  color: var(--ink-4);
+  cursor: default;
+}
+
+.bouton[aria-disabled="true"]:hover {
+  background: none;
+  color: var(--ink-4);
+}

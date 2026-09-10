@@ -96,3 +96,19 @@
   color: inherit;
   opacity: 0.85;
 }
+
+/*
+ * Une option désactivée (`API-32`).
+ *
+ * Grisée, mais le `<label>` reste **survolable** : c'est lui qui porte le `title` qui dit pourquoi,
+ * et c'est l'`<input>` masqué qui porte le `disabled`. Un `<fieldset disabled>` aurait tout éteint ;
+ * ici trois options sur quatre le sont, et la quatrième doit rester cliquable.
+ */
+.desactivee {
+  color: var(--ink-4);
+  cursor: default;
+}
+
+.desactivee:hover {
+  background: none;
+}

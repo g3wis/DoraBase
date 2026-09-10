@@ -1,0 +1,98 @@
+/*
+ * La seconde zone de la sidebar : les instances managées (`API-32`).
+ *
+ * Elle vit dans le panneau bas d'un `SplitPane` d'axe vertical, dont la poignée porte le filet de
+ * séparation — 1 px de `--divider`, exactement comme celle qui sépare la sidebar du centre. En
+ * dessiner un ici en ferait deux collés, le défaut que `Sidebar.fill` a déjà corrigé.
+ *
+ * Le fond est celui de la sidebar : les deux zones sont **une** colonne, et un fond différent en
+ * ferait deux panneaux voisins.
+ */
+.root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--paper-alt);
+  font: var(--weight-semibold) var(--text-dense) var(--font-ui);
+}
+
+/*
+ * Le bandeau « INSTANCES » et son `+`.
+ *
+ * `SidebarSectionTitle` porte les capitales et la hauteur de 18 px ; ce conteneur ne fait que lui
+ * adjoindre le bouton, à droite. `flex: none` — la liste défile, le bandeau reste.
+ */
+.entete {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: none;
+  padding-right: var(--space-2);
+  padding-top: var(--space-2);
+}
+
+/*
+ * Le `+` de la déclaration.
+ *
+ * 18 px, la cote de la maquette, et non les 22 px de `SidebarToolbarButton` : celui-ci vit dans une
+ * bande de 28 px, celui-là à côté d'un bandeau de 18. Le survol reste `--hover-row`, le même que la
+ * bande de tête et que les lignes d'arbre — ce n'est pas un état inventé, c'est celui d'une action
+ * de chrome, et une icône nue sans retour au survol se lit comme une décoration.
+ */
+.ajouter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.ajouter:hover {
+  background: var(--hover-row);
+  color: var(--ink);
+}
+
+.ajouter:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.liste {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* Pas de rebond élastique sous WKWebView — voir la note de `reset.css`. */
+  overscroll-behavior: none;
+  padding: var(--space-2) 0;
+}
+
+/*
+ * La gouttière du « … », réservée sur **toutes** les lignes (9 septembre 2026).
+ *
+ * 24 px, la valeur de l'arbre du dessus, et pour la même raison : ne la réserver que sur les lignes
+ * qui portent un menu décalerait les badges d'une ligne à l'autre. C'est `TreeRow` qui peint le
+ * déclencheur, au survol et au focus seulement.
+ *
+ * **Elle valait 40 px et ne suffisait pas** : deux boutons de 18 px occupent 45 px depuis le bord,
+ * donc ils recouvraient la version et le badge d'état. Le menu remplace les deux boutons — voir la
+ * note d'`InstancesPanel`.
+ */
+.liste [data-depth] {
+  padding-right: 24px;
+}
+
+.vide {
+  margin: 0;
+  padding: var(--space-2) var(--space-5);
+  font: var(--weight-medium) var(--text-label) var(--font-ui);
+  color: var(--ink-2);
+}

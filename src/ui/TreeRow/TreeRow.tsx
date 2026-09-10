@@ -30,6 +30,18 @@ export type TreeDepth = 0 | 1 | 2 | 3 | 4
 
 type TreeRowProps = {
   depth: TreeDepth
+  /**
+   * L'indentation, quand elle ne suit pas le palier (`API-32`).
+   *
+   * **Une exception, pas un second système.** `INDENT` reste la règle : elle est mesurée sur le
+   * mockup, et un écran qui poserait ses propres valeurs ferait diverger deux tables comme la CSS
+   * l'avait déjà fait. Le cas qui l'a fait naître est la liste d'instances, une liste **de feuilles**
+   * posée sous l'arbre : sans chevron, ses icônes tombent 16 px à gauche de celles des projets, dans
+   * la même colonne visuelle et à un palier apparent d'écart. La valeur qu'elle passe est
+   * `INDENT[0] + 16` — c'est-à-dire exactement la cadence « vers une feuille » que cette table
+   * décrit, appliquée depuis le palier 0.
+   */
+  indent?: string
   label: string
   icon?: IconName
   iconColor?: string
@@ -106,6 +118,7 @@ type TreeRowProps = {
 // écarte volontairement toute récursion tant qu'aucun écran n'en impose la forme.
 export function TreeRow({
   depth,
+  indent,
   label,
   icon,
   iconColor,
@@ -195,7 +208,7 @@ export function TreeRow({
       // `aria-*` — sont communs aux deux, et cette branche n'est pas interactive de toute façon.
       <div
         className={className}
-        style={{ paddingLeft: INDENT[depth] }}
+        style={{ paddingLeft: indent ?? INDENT[depth] }}
         data-depth={depth}
         {...(rest as HTMLAttributes<HTMLDivElement>)}
       >
@@ -208,7 +221,7 @@ export function TreeRow({
     <button
       type="button"
       className={className}
-      style={{ paddingLeft: INDENT[depth] }}
+      style={{ paddingLeft: indent ?? INDENT[depth] }}
       data-depth={depth}
       {...rest}
       // **La cible du clic départage les deux gestes.** Un `<button>` dans un `<button>` serait

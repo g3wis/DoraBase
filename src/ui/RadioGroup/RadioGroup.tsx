@@ -9,6 +9,25 @@ export type RadioOption<T extends string> = {
   prefix?: ReactNode
   /** Classe additionnelle pour l'habillage propre à une option — `prod` en rouge. */
   className?: string
+  /**
+   * Désactive **cette** option seule (`API-32`).
+   *
+   * Distinct du `disabled` du groupe, qui verrouille les trois champs d'`A2` en édition : ici une
+   * partie des choix reste offerte. Le cas qui l'a fait naître est le bloc « Moteur » du
+   * gestionnaire d'instances, où PostgreSQL est le seul managé et où les trois autres sont rendus
+   * **désactivés avec leur raison** plutôt que masqués — masquer dirait « jamais » là où c'est un
+   * « pas encore ».
+   *
+   * Porté par l'`<input>`, et le `<label>` prend l'apparence grisée : le `<fieldset>` ne peut pas
+   * désactiver une option sur quatre.
+   */
+  disabled?: boolean
+  /**
+   * Pourquoi cette option est refusée. Posé sur le `<label>`, **pas sur l'`<input>`** : celui-ci est
+   * masqué visuellement, donc il ne se survole pas — l'infobulle serait inatteignable, ce qui est le
+   * piège n° 3 de la liste d'accessibilité par un autre bout.
+   */
+  title?: string
 }
 
 type RadioGroupProps<T extends string> = {
@@ -64,7 +83,13 @@ export function RadioGroup<T extends string>({
       {options.map((option) => (
         <label
           key={option.value}
-          className={cx(styles.option, option.value === value && styles.active, option.className)}
+          className={cx(
+            styles.option,
+            option.value === value && styles.active,
+            option.disabled === true && styles.desactivee,
+            option.className,
+          )}
+          title={option.title}
         >
           <input
             type="radio"
@@ -72,6 +97,7 @@ export function RadioGroup<T extends string>({
             className={styles.input}
             value={option.value}
             checked={option.value === value}
+            disabled={option.disabled}
             onChange={() => onValueChange(option.value)}
           />
           {/* Le préfixe est **décoratif** : le monogramme « Pg » abrège un nom déjà donné

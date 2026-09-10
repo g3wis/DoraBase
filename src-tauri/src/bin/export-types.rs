@@ -34,6 +34,11 @@ use dorabase_lib::engine::{
     RowWindow, SchemaInfo, TableDetail, TableSummary, TransactionMode, TransactionState,
     UpdatePlan,
 };
+use dorabase_lib::instances::commands::{DeleteInstanceResult, SaveInstanceRequest};
+use dorabase_lib::instances::{
+    InstanceAction, InstanceDatabase, InstanceExtension, InstanceOutcome, InstanceOverview,
+    InstancePlan, InstancePrivilege, InstanceRole, InstanceSession, InstanceSetting,
+};
 use dorabase_lib::maj::AvailableUpdate;
 use dorabase_lib::secrets::SecretMechanism;
 use ts_rs::TS;
@@ -124,6 +129,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Inspection::export_all(&config)?;
     DumpRequest::export_all(&config)?;
     DumpFailure::export_all(&config)?;
+
+    // Le gestionnaire d'instances (`API-32`). `SaveInstanceRequest` entraîne `ConnectionSettings`
+    // et `Engine` ; les sept lectures et les deux gestes sont nommés parce qu'aucune racine ne les
+    // atteint — une commande qui rend `Vec<InstanceRole>` n'a pas de type d'enveloppe.
+    SaveInstanceRequest::export_all(&config)?;
+    DeleteInstanceResult::export_all(&config)?;
+    InstanceOverview::export_all(&config)?;
+    InstanceDatabase::export_all(&config)?;
+    InstanceRole::export_all(&config)?;
+    InstancePrivilege::export_all(&config)?;
+    InstanceSession::export_all(&config)?;
+    InstanceExtension::export_all(&config)?;
+    InstanceSetting::export_all(&config)?;
+    InstanceAction::export_all(&config)?;
+    InstancePlan::export_all(&config)?;
+    InstanceOutcome::export_all(&config)?;
 
     println!("projections TypeScript écrites dans {REPERTOIRE_DOMAINE}");
     Ok(())

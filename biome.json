@@ -51,7 +51,8 @@
         "src/domain/config.ts",
         "src/domain/engine.ts",
         "src/domain/maj.ts",
-        "src/domain/dump.ts"
+        "src/domain/dump.ts",
+        "src/domain/instances.ts"
       ],
       "formatter": {
         "enabled": false
