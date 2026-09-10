@@ -41,9 +41,6 @@
   text-align: center;
   font-size: var(--text-meta);
   color: var(--ink-5);
-  /* Le numéro s'efface quand les actions paraissent : les deux occupent la même place, et c'est la
-     **ligne** qui l'annonce (`VirtualGrid`, `--row-number`). */
-  visibility: var(--row-number, visible);
 }
 
 /* La gouttière d'une ligne ajoutée : `+1`, dans la teinte d'alerte des modifications en attente,
@@ -145,6 +142,17 @@
 
 .actions:focus-within {
   visibility: visible;
+}
+
+/* **Le numéro ne s'efface que s'il a quelque chose à laisser passer** — donc seulement quand la
+   cellule porte des actions, ce qu'elle seule sait (mode édition, moteur documentaire). Le masquage
+   a d'abord été posé sur la ligne, avec `--row-number` : hors édition, survoler une ligne faisait
+   alors disparaître son numéro **sans rien mettre à sa place**. Rapporté à l'usage, et le défaut
+   était antérieur — la version d'avant l'effaçait déjà au survol de la seule gouttière.
+   La ligne continue d'annoncer *quand* effacer, la cellule décide *si* c'est le cas : c'est la
+   distinction qui manquait, et elle appartient à celui des deux qui connaît son contenu. */
+.gouttiereAvecActions .gouttiere {
+  visibility: var(--row-number, visible);
 }
 
 /* Une ligne déjà marquée garde ses actions visibles en permanence : la marque ne doit pas dépendre

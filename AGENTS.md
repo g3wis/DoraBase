@@ -851,6 +851,15 @@ qu'il portait et que le rendu ne dit pas.
     rend donc ces 8 px par des marges négatives ; un `flex: none` sur les boutons aurait « corrigé »
     le rendu en rendant ces marges inertes.
 
+  **Et le numéro ne s'efface que s'il a quelque chose à laisser passer** (rapporté à l'usage : « hors
+  mode édition, le numéro disparaît au survol »). Le masquage avait été posé sur la **ligne**, à côté
+  du canal qui révèle les actions — or une ligne se survole tout le temps, et hors édition il n'y a
+  rien à mettre à la place : le numéro s'en allait pour laisser un vide. Le défaut était **antérieur**
+  et le nouveau survol l'a seulement rendu visible : la version d'avant l'effaçait déjà au survol de
+  la seule gouttière. La ligne annonce donc *quand* effacer, et la cellule — seule à savoir si elle
+  porte des actions — dit *si* c'est le cas. C'est la règle du canal hérité par son bon bout : ce
+  qu'un ancêtre ne peut pas savoir ne doit pas être décidé par lui.
+
   **Deux sabotages sur quatre sont restés verts, et les deux fautes sont dans le test** (règle
   n° 1) : une assertion qui ne comparait que les **marges** du bouton ne pouvait pas voir un
   écrasement symétrique — c'est la **largeur** qui mord —, et un `height: 100%` sur le conteneur
