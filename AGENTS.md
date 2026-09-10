@@ -825,6 +825,45 @@ qu'il portait et que le rendu ne dit pas.
   `pointer-events: none`, donc la mesure rend toujours ce qu'il y a **dessous** — verte pour une
   raison qui n'a rien à voir avec la question posée.
 
+- **La poubelle d'une ligne se découvre au survol de la ligne, non de son numéro** (10 septembre
+  2026, `API-45`). Elle ne paraissait qu'au survol de la **gouttière** — 30 px de piste : il fallait
+  viser cette bande pour savoir qu'un geste existe, ce qui est la forme la plus étroite du « chemin
+  unique » que le bouton d'édition et le `⇧`-clic du diagramme ont déjà corrigée. Quatre points :
+  - **c'est la ligne qui annonce son survol, par deux propriétés personnalisées** — `--row-actions`
+    et `--row-number`, déclarées sur `.tr` de `VirtualGrid`. Les classes d'un module CSS sont
+    hachées, donc `A5` ne peut pas écrire `.tr:hover .actions` chez lui ; et les propriétés
+    personnalisées **héritent**, ce qui est exactement le canal qu'il faut — la ligne n'a rien à
+    savoir de ce que ses cellules contiennent. Les deux valeurs d'arrêt sont posées sur `.tr` plutôt
+    que laissées au repli de `var()` chez l'appelant : sinon elles vivraient à deux endroits ;
+  - **la poubelle est rouge, mais le rouge suit l'acte et non le bouton.** Le même bouton, sur une
+    ligne déjà marquée, **annule** la suppression : il garde la croix et l'encre neutre. Peindre les
+    deux en rouge ferait dire « attention » au geste de repli, et une poubelle y annoncerait une
+    suppression là où le clic la défait — c'est le crayon du bouton d'édition, qui dit l'**acte**
+    offert et jamais l'état courant. `--danger-ink`, non `--danger`, qui est une **surface** ;
+  - **les actions n'ont plus de fond.** Leur `--hover-row` se composait avec celui de la ligne
+    survolée : une case plus sombre que le reste de la ligne, à l'endroit précis où l'on regarde. Ce
+    qu'il cachait — le numéro — s'efface désormais par le même canal que celui qui les révèle ;
+  - **et le « rembourrage autour de l'icône » n'était pas un débordement, c'était un écrasement.**
+    Une cellule de grille porte 8 px de rembourrage de chaque côté, or la gouttière ne fait que
+    30 px : la boîte n'en laissait que 14, donc `flex-shrink` **rétrécissait** un bouton de 18 px à
+    14 de large pour 18 de haut, et la paire d'icônes d'une table NoSQL de même. Rien ne dépassait —
+    un conteneur en flex centre son contenu, donc l'excès se répartit des deux côtés. Le conteneur
+    rend donc ces 8 px par des marges négatives ; un `flex: none` sur les boutons aurait « corrigé »
+    le rendu en rendant ces marges inertes.
+
+  **Deux sabotages sur quatre sont restés verts, et les deux fautes sont dans le test** (règle
+  n° 1) : une assertion qui ne comparait que les **marges** du bouton ne pouvait pas voir un
+  écrasement symétrique — c'est la **largeur** qui mord —, et un `height: 100%` sur le conteneur
+  était **inerte** depuis toujours, un pourcentage contre une hauteur automatique valant `auto`. Le
+  premier a demandé une assertion de plus, le second a été retiré : la hauteur vient de la boîte du
+  numéro, dont la hauteur de ligne est celle de la cellule. Même famille que le `grid-column` mort du
+  31 août.
+
+  **Et `getByRole` ne trouve rien de ce qui est en `visibility: hidden`** — l'élément quitte l'arbre
+  d'accessibilité. C'est précisément l'état qu'on vient mesurer : un premier jet cherchait le rôle,
+  trouvait zéro poubelle et concluait que le mode édition ne s'était pas ouvert. Les locators de ce
+  test passent donc par le nom accessible **en attribut**.
+
 ### Le gestionnaire de schémas (8 septembre 2026, `API-33`)
 
 Une connexion PostgreSQL montrait **tous** ses schémas non-système dans l'arbre, sans qu'on puisse en

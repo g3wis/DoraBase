@@ -669,10 +669,11 @@ export function TableView({
         // **`+2` plutôt qu'un rang** : une ligne ajoutée n'a pas de place dans la table, seulement
         // un ordre d'arrivée. Lui donner un rang la ferait passer pour la 501ᵉ ligne lue.
         //
-        // **Les actions remplacent le numéro au survol**, motif repris de `TreeRow` :
-        // `visibility: hidden` par défaut, révélée par `:hover`/`:focus-within`. Une ligne déjà
-        // marquée pour suppression les garde visibles en permanence — la marque ne doit pas
-        // dépendre du survol pour se voir.
+        // **Les actions remplacent le numéro au survol de la ligne**, motif repris de `TreeRow` :
+        // cachées par défaut, révélées par le survol de la ligne — annoncé par `VirtualGrid` en
+        // `--row-actions` (`API-45`) — ou par `:focus-within`. Une ligne déjà marquée pour
+        // suppression les garde visibles en permanence : la marque ne doit pas dépendre du survol
+        // pour se voir.
         cell: (ligne) => {
           const cle = cleDe(ligne)
           const supprimee = cle !== null && estMarqueePourSuppression(attente, cle)
@@ -716,7 +717,7 @@ export function TableView({
                   {surSuppression && (
                     <button
                       type="button"
-                      className={styles.supprimerLigne}
+                      className={cx(styles.supprimerLigne, !supprimee && styles.destructif)}
                       // **« Retirer la nouvelle ligne » pour une ligne ajoutée**, jamais
                       // « Supprimer » : même vocabulaire que la croix du panneau (`PendingPanel`), et
                       // surtout un nom distinct de celui d'une ligne lue — sans quoi une ligne
@@ -731,7 +732,19 @@ export function TableView({
                       }
                       onClick={surSuppression}
                     >
-                      <Icon name="x" size={11} strokeWidth={2.4} />
+                      {/*
+                       * **La poubelle quand le clic supprime, la croix quand il annule**
+                       * (`API-45`). Une poubelle sur une ligne déjà marquée annoncerait une
+                       * suppression là où le clic la défait — et c'est le même arbitrage que le
+                       * crayon du bouton d'édition : une icône dit l'**acte** qu'on offre, jamais
+                       * l'état courant. Retirer une ligne ajoutée supprime bien quelque chose,
+                       * donc elle porte la poubelle comme une ligne lue.
+                       */}
+                      {supprimee ? (
+                        <Icon name="x" size={12} strokeWidth={2.4} />
+                      ) : (
+                        <Icon name="trash" size={12} strokeWidth={1.9} />
+                      )}
                     </button>
                   )}
                 </span>
