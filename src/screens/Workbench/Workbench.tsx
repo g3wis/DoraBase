@@ -1,14 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { rowAsInsert as rowAsInsertTauri } from '../../data/commandes'
 import type { Database, EnvironmentId, Project } from '../../domain/config'
-import type {
-  DatabaseKey,
-  Filter,
-  RowWindow,
-  SortKey,
-  TableSummary,
-  Value,
-} from '../../domain/engine'
+import type { DatabaseKey, RowWindow, TableSummary, Value } from '../../domain/engine'
 import { useT } from '../../i18n/LanguageContext'
 import { modificateurActif } from '../../shell/plateforme'
 import { SelectionIndicator } from '../../shell/SelectionIndicator/SelectionIndicator'
@@ -327,12 +320,6 @@ export function Workbench({
   const [type, setType] = useState<TypeObjet>('tables')
   const [filtre, setFiltre] = useState('')
   const [objetChoisi, setObjetChoisi] = useState<string | null>(null)
-  // Les filtres et le tri de la table ouverte, publiés par `TableView` (`10d`) : la sidebar les
-  // annote, sans en tenir de copie.
-  const [etatRequete, setEtatRequete] = useState<{
-    filters: readonly Filter[]
-    sort: readonly SortKey[]
-  }>({ filters: [], sort: [] })
   // La lecture en cours, remontée par la vue de table : la barre d'état et le panneau de ligne
   // vivent **ici**, parce que le mockup les place hors du centre — le panneau longe tout le corps,
   // la barre court sur toute la largeur.
@@ -1342,7 +1329,6 @@ export function Workbench({
           moteur={moteurActuel}
           columns={detail?.columns ?? []}
           passerelle={passerelleLignes}
-          onEtatChange={setEtatRequete}
           onLectureChange={setLecture}
           rang={rangChoisi}
           onRangChange={setRangChoisi}
@@ -1783,22 +1769,19 @@ export function Workbench({
               onNewProject={onNewProject}
               onOpenPreferences={onOpenPreferences}
               onRefresh={rafraichirTout}
-              // **La section suit l'objet lu, pas l'onglet ouvert.** Le mockup d'`A8` montre
-              // « Schéma déduit » dans la sidebar *pendant* qu'une console est active : les champs
-              // d'une collection sont ce qu'on regarde en écrivant une commande. La condition
-              // portait sur `table`, ce qui faisait disparaître la section dès qu'on passait sur la
-              // console — et rendait `13c` inatteignable.
+              // **La section décrit ce qu'on regarde sans l'avoir ouvert, et rien d'autre**
+              // (`API-44`). Sous une table ouverte, l'en-tête de la grille nomme déjà chaque
+              // colonne et la vue Structure les liste en entier avec leur type : la section y
+              // redisait sept d'entre elles, et prenait cette hauteur sur l'arbre.
               //
-              // Les annotations, elles, restent propres à la vue de table : « filtré » et « tri ↓ »
-              // décrivent l'état d'une grille, qui n'existe pas sous une console.
+              // Elle **reste** sous une console, et c'est le point de `13c` : le mockup d'`A8`
+              // montre « Schéma déduit » pendant qu'on écrit une commande, les champs d'une
+              // collection étant ce qu'on y regarde. La condition porte donc sur l'onglet **actif**
+              // — un onglet de table ouvert ailleurs dans la bande ne dit rien de ce qui est à
+              // l'écran.
               columns={
-                detail
-                  ? {
-                      table: detail.name,
-                      columns: detail.columns,
-                      loading,
-                      annotations: table ? annotationsDe(etatRequete, attente) : undefined,
-                    }
+                detail && table === null
+                  ? { table: detail.name, columns: detail.columns, loading }
                   : undefined
               }
             />
@@ -2082,35 +2065,6 @@ export function Workbench({
       )}
     </div>
   )
-}
-
-/**
- * Ce que la sidebar écrit à droite d'une colonne : « filtré », « tri ↓ », « tri ↑ ».
- *
- * Les mots viennent du mockup, la flèche du sens. Une colonne à la fois filtrée et triée porte
- * les deux — le mockup n'en montre pas d'exemple, et taire l'un des deux états serait pire que
- * les écrire ensemble.
- */
-function annotationsDe(
-  etat: { filters: readonly Filter[]; sort: readonly SortKey[] },
-  attente: EnAttente,
-): Record<string, string> {
-  const annotations: Record<string, string> = {}
-  for (const filtre of etat.filters) annotations[filtre.column] = 'filtré'
-  for (const critere of etat.sort) {
-    const fleche = critere.direction === 'ascending' ? '↑' : '↓'
-    annotations[critere.column] = annotations[critere.column]
-      ? `filtré · tri ${fleche}`
-      : `tri ${fleche}`
-  }
-  // **« modifié » prime** : c'est l'état le plus récent et le seul qui attend une action. Le mockup
-  // de `A6` remplace bien « bpchar » et « tri ↓ » par « modifié » sur les colonnes touchées.
-  // Une **ligne ajoutée** n'annote rien : ses colonnes ne sont pas modifiées dans les lignes que
-  // la sidebar décrit, et les marquer ferait chercher un changement invisible dans la grille.
-  for (const modification of attente) {
-    if (modification.sorte === 'cellule') annotations[modification.column] = 'modifié'
-  }
-  return annotations
 }
 
 function correspond(objet: TableSummary, type: TypeObjet): boolean {

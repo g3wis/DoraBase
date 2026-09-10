@@ -4,7 +4,8 @@
  *   panneau     296px, fond --paper-alt
  *   en-tête     34px, « Ligne 3 » en 700 12px Nunito, « id 184217 » en 500 11px mono encre .45
  *   onglets     36px, filet bas 2px accent sur l'actif, 700 11px Nunito
- *   champs      étiquettes 96px en 600 11px Nunito encre .5, valeurs en 500 11.5px mono
+ *   champs      clé au-dessus, valeur au-dessous (`API-49`) — le mockup les mettait côte à côte,
+ *               étiquette de 96px : voir la note de `.champ`
  *   ligne liée  encadré blanc radius 9px, titre en capitales 9.5px encre .4
  *   bouton      27px pleine largeur, radius 8px, fond blanc, bordure 1px --border
  *
@@ -113,14 +114,26 @@
   margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  /* Un champ occupe deux lignes depuis `API-49`, donc l'écart entre deux champs doit être plus
+     franc que l'écart interne — sinon la clé de l'un se lit avec la valeur de l'autre. */
+  gap: var(--space-4);
 }
 
+/*
+ * **La clé au-dessus, la valeur au-dessous — et c'est un second changement de parti** (`API-49`).
+ *
+ * Le mockup les mettait côte à côte, étiquette de 96 px et valeur dans les 160 qui restaient. Dans
+ * une colonne de 296 px, cela laissait à la donnée un tiers de la largeur du panneau : un
+ * identifiant, un horodatage ou une ligne de JSON y étaient coupés d'office, et l'ellipse devenait
+ * la règle plutôt que le cas limite. Empilées, les deux disposent de toute la largeur, et le nom de
+ * colonne — le plus court des deux — n'en confisque plus la moitié.
+ *
+ * Ce qui ne change pas : **une ligne chacune, coupée à l'ellipse**. Ce qui est coupé reste
+ * atteignable — survol prolongé pour lire la valeur en entier, clic droit pour la copier.
+ */
 .champ {
   display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  min-height: 21px;
+  flex-direction: column;
 }
 
 /*
@@ -135,20 +148,48 @@
  * `min-width: 0` sur les deux : sans lui, un enfant flex refuse de descendre sous la largeur de son
  * contenu et l'ellipse ne se déclenche jamais — c'est la faute classique de `text-overflow`.
  */
+
+/* La ligne de clé : le glyphe de type, le nom, l'icône de clé. Les liens ont leur section, sous la
+   liste — voir `.liens`. */
 .etiquette {
-  flex: none;
-  width: 96px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
   min-width: 0;
-  overflow: hidden;
   font-size: var(--text-label);
   font-weight: var(--weight-semibold);
   color: var(--ink-8);
+}
+
+/*
+ * Le glyphe de type, **à largeur fixe**.
+ *
+ * Sans elle, `#`, `T` et `{}` ne mesurent pas la même chose et chaque nom de colonne démarre à une
+ * abscisse différente : une liste de dix-huit champs devient un bord gauche en dents de scie. La
+ * cote est celle de deux caractères mono, `{}` et `ID` étant les plus larges.
+ */
+.marque {
+  flex: none;
+  width: 15px;
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  font-weight: var(--weight-medium);
+  color: var(--ink-4);
+}
+
+/* Le nom, et c'est lui qui cède : les liens et les icônes disent où mène la colonne, et un nom
+   tronqué se relit au survol prolongé. */
+.nom {
+  min-width: 0;
+  overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
 .valeur {
-  flex: 1;
+  /* `padding-left` égal à la marque plus son écart : la valeur s'aligne sur le nom de sa clé, ce qui
+     est ce qui rend les deux lignes lisibles comme un seul champ. */
+  padding-left: calc(15px + var(--space-3));
   min-width: 0;
   margin: 0;
   font-family: var(--font-mono);
@@ -174,7 +215,7 @@
  * 0,75 contre 1 — et c'est voulu : la liste au repos doit rester lisible, c'est le survol qui gagne un
  * cran, pas le repos qui en perd trois.
  */
-.champ:hover .etiquette,
+.champ:hover .nom,
 .champ:hover .valeur {
   color: var(--ink);
 }
@@ -219,29 +260,83 @@
   color: var(--info);
 }
 
+/*
+ * La seconde section de l'onglet « Champs » : les liens de la table.
+ *
+ * `margin-top: auto` appartient à l'aperçu de ligne liée, qui reste **en bas** du panneau ; celle-ci
+ * suit la liste des champs dans le flux, séparée par un écart franc et un titre. Deux sections, deux
+ * questions : la première dit ce que la ligne contient, la seconde ce que la table touche.
+ */
 .liens {
-  list-style: none;
-  margin: 0;
-  padding: 0;
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  padding-top: var(--space-4);
+}
+
+.liensTitre {
+  margin: 0;
+  font-size: var(--text-caps-sm);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-caps-sm);
+  text-transform: uppercase;
+  color: var(--ink-4);
+}
+
+/*
+ * Un lien : la colonne de départ, la flèche, l'autre bout de la clé.
+ *
+ * En mono, parce que ce sont des noms d'objets de la base et non des mots de l'interface — la même
+ * raison qui met les valeurs en mono.
+ */
+.lien {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
   font-family: var(--font-mono);
   font-size: var(--text-label);
   font-weight: var(--weight-medium);
-  color: var(--ink-6);
-}
-
-.liens li {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
   color: var(--info);
 }
 
-/* Une relation entrante se lit dans l'autre sens : le mockup grise sa ligne. */
-.entrante {
+/* Une relation entrante se lit dans l'autre sens : le mockup grisait sa ligne dans l'onglet
+   « Liens », et la teinte suit ici. Ce n'est pas la couleur seule qui porte le sens — la flèche
+   change de sens, et le verbe masqué le dit à qui ne voit ni l'une ni l'autre. */
+.lienEntrant {
   color: var(--ink-3);
+}
+
+.lienIcone {
+  flex: none;
+}
+
+/*
+ * **C'est la cible qui cède, jamais le départ.** Le nom de la colonne de cette table est ce qui
+ * relie la ligne à la liste au-dessus : tronqué, on ne sait plus de quel champ on parle, alors qu'une
+ * cible tronquée garde son nom de table et se relit dans l'infobulle.
+ */
+.lienDepart {
+  flex: none;
+  white-space: nowrap;
+}
+
+.lienCible {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Un texte que seules les voix lisent — `clip-path` et non `display: none`, qui le retirerait de
+   l'arbre d'accessibilité au lieu de le masquer. La convention de `StructureView`. */
+.pourLaVoix {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .liee {
@@ -310,13 +405,6 @@
 .copier:hover {
   background: var(--hover-bg);
   border-color: var(--hover-border);
-}
-
-.vide {
-  margin: 0;
-  padding: var(--space-8) var(--space-6);
-  font-size: var(--text-dense);
-  color: var(--ink-2);
 }
 
 /*

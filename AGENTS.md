@@ -1021,6 +1021,98 @@ qu'il portait et que le rendu ne dit pas.
   trouvait zéro poubelle et concluait que le mode édition ne s'était pas ouvert. Les locators de ce
   test passent donc par le nom accessible **en attribut**.
 
+### La sidebar ne redit pas la table qu'on a ouverte (10 septembre 2026, `API-44`)
+
+La section « Colonnes de *table* » du bas de la sidebar paraissait aussi **sous un onglet de table**,
+où elle redisait sept colonnes que l'en-tête de la grille nomme déjà et que « Structure » liste en
+entier avec leur type — en prenant cette hauteur sur l'arbre. Elle ne paraît plus que là où elle
+apprend quelque chose : l'objet qu'on **regarde sans l'avoir ouvert**, dans l'arbre ou dans la liste
+du centre.
+
+**Elle reste sous une console, et c'est le point de `13c`** : le mockup d'`A8` montre « Schéma
+déduit » pendant qu'on écrit une commande, les champs d'une collection étant ce qu'on y regarde. La
+condition porte donc sur l'onglet **actif** — un onglet de table ouvert ailleurs dans la bande ne dit
+rien de ce qui est à l'écran —, et c'est l'écran de travail qui la porte, la sidebar ne connaissant
+pas les onglets.
+
+**Et tout le câblage des annotations est parti avec.** « filtré », « tri ↓ » et « modifié » ne
+décrivaient qu'une grille ouverte : sans la section sous une table, `TableView.onEtatChange`,
+l'état `etatRequete` de l'écran de travail, `annotationsDe` et le champ `annotations` de
+`ExplorerSidebar.columns` ne pouvaient plus rien atteindre. Les laisser en place aurait fait une
+chaîne de quatre déclarations que rien ne dénonce, avec le commentaire qui en promet l'inverse —
+le motif du `var()` mort et du `grid-column` inerte, sur quatre fichiers au lieu d'un.
+
+### Le panneau de ligne : la clé au-dessus, et les liens dans leur section (10 septembre 2026, `API-49`)
+
+L'onglet « Champs » du panneau droit d'`A5` mettait la clé et la valeur **côte à côte**, étiquette de
+96 px et valeur dans les 160 qui restaient : dans une colonne de 296 px, la donnée n'avait qu'un tiers
+du panneau, donc un identifiant, un horodatage ou une ligne de JSON étaient coupés d'office —
+l'ellipse était la règle plutôt que le cas limite. Empilées, les deux disposent de toute la largeur,
+et le nom de colonne — le plus court des deux — n'en confisque plus la moitié. Ce qui ne change pas :
+**une ligne chacune**, coupée à l'ellipse, le survol prolongé rendant la valeur en entier et le clic
+droit la copiant.
+
+Cinq décisions à ne pas défaire :
+
+- **un glyphe de type, non une icône du sprite.** Celui-ci n'en porte aucune pour les catégories de
+  `06c` — `clock` et `json` mis à part —, et en dessiner cinq serait inventer des pixels que le
+  handoff ne décrit pas. C'est la marque que la section « Colonnes de » emploie déjà, et elle vit
+  désormais dans **un seul endroit**, `ui/glypheDeType.ts` : deux tables de glyphes divergent au
+  premier type ajouté, et c'est déjà ce qui sépare celle-ci de la `marqueDe` de `DetailPanel`, qui
+  mêle la clé au type et rend `◷` là où celle-ci rend `⏱`. Les fondre changerait le rendu de deux
+  écrans — à reprendre par un passage de design, pas au passage ;
+- **le glyphe est à largeur fixe.** Sans elle, `#`, `T` et `{}` ne mesurent pas la même chose et
+  chaque nom démarre à une abscisse différente : une liste de dix-huit champs devient un bord gauche
+  en dents de scie ;
+- **l'onglet « Liens » est parti, et rien ne s'est perdu au change.** Il listait les relations de la
+  *table*, loin des colonnes qu'elles concernent. Une `Relation` porte les colonnes de *cette* table
+  dans les deux sens — celles qui référencent pour une sortante, celles qui sont référencées pour une
+  entrante — et `columns` est le catalogue entier : chaque relation trouve donc sa ligne. Une clé
+  composite paraît sur chacune de ses colonnes, et c'est voulu : la question qu'on se pose devant un
+  champ est « où mène celui-ci », et taire le lien sur la seconde moitié y répondrait par un silence ;
+- **les liens sont une seconde section, sous les champs** (10 septembre 2026, second tour, à la
+  demande). Ils ont d'abord vécu **sur la ligne de clé** de leur colonne, ce qui répondait à « où mène
+  ce champ » sans jamais laisser lire le schéma d'un coup : une ligne de clé portait alors trois
+  natures de chose — un type, une identité, une destination — et le nom de la colonne, qui est ce
+  qu'on cherche, s'y trouvait au milieu. Deux sections disent deux questions : la première ce que la
+  ligne contient, la seconde ce que la table touche. Trois conséquences :
+  - **chaque ligne renomme sa colonne**, puisqu'elle n'est plus à côté d'elle — c'est ce que l'onglet
+    « Liens » écrivait déjà, et sans ce nom la section serait une liste de destinations sans départ.
+    C'est **la cible** qui cède à l'ellipse, jamais le départ : tronqué, on ne sait plus de quel champ
+    on parle, alors qu'une cible tronquée garde son nom de table et se relit dans l'infobulle ;
+  - **l'ordre est celui du catalogue, non celui du moteur**, qui groupe les sortantes puis les
+    entrantes. Les deux sections se lisent l'une sous l'autre : un champ doit être à la même place
+    dans les deux. Le tri est stable, donc deux liens partant de la même colonne gardent l'ordre du
+    moteur, la seule chose qui les sépare et elle est déterministe ;
+  - **rien quand il n'y a rien.** Une section vide, ou une phrase « aucune clé étrangère »,
+    occuperait de la place pour dire ce que son absence dit déjà — la raison qui a fait partir
+    « Sélectionnez une ligne » de ce même panneau.
+
+  La flèche est **retirée de l'arbre d'accessibilité**, un verbe masqué en `clip-path` la remplaçant
+  avec ses espaces : une voix qui rendrait « user_id → users.id » ne dirait plus laquelle référence
+  l'autre (pièges n° 1 et n° 2, la leçon du diagramme). Le sens ne tient donc pas à la couleur seule ;
+- **et la coupure se mesure sur le nom, pas sur la ligne de clé.** Celle-ci porte un glyphe et une
+  icône, qui ne se coupent pas, et le nom se clippe lui-même : le débordement propre du `<dt>` est
+  donc toujours nul, et `armer` posé sur lui n'aurait plus jamais rien révélé — un aperçu qui cesse
+  de paraître sans que rien n'échoue, la famille du `var()` mort. Il vise donc le `<span>` du nom.
+
+**Ce que les tests unitaires ne pouvaient pas juger** : l'empilement, la largeur rendue, et que la
+section des liens soit bien **sous** la liste (règle n° 9). Un test de bout en bout mesure donc que le
+bas de la clé touche le haut de sa valeur et que la clé occupe **toute** la largeur du champ — une
+égalité, non une comparaison (règle n° 18) : côte à côte, les deux boîtes partagent la ligne et
+l'inégalité tiendrait encore.
+
+**Et le test unitaire garde le déplacement, non la présence.** « Le lien est dans la section » reste
+vrai si on le rend *aussi* sur la ligne de clé : l'assertion qui distingue « déplacé » de
+« dupliqué » est la **négative**, portée sur le champ. Vérifié par un sabotage qui le remet à ses
+deux places, là où les trois assertions positives restaient vertes.
+
+**Ce qui reste à voir à l'œil** : le panneau sous WKWebView. Le rendu a été regardé dans Chromium, en
+« Cahier » et en « Nuit ». Et une table à plusieurs liens sur une base réelle : `orders` n'en porte
+qu'un dans le décor de `?demo`, donc une section de liens longue — et son écart avec l'aperçu de
+ligne liée, qui reste collé en bas du panneau — n'a pour juge que le test unitaire, qui ne mesure
+aucun pixel.
+
 ### Le gestionnaire de schémas (8 septembre 2026, `API-33`)
 
 Une connexion PostgreSQL montrait **tous** ses schémas non-système dans l'arbre, sans qu'on puisse en

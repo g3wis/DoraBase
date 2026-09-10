@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { Sprite } from '../../design/icons/Sprite'
@@ -51,6 +51,24 @@ const RELATION: Relation = {
   targetSchema: 'public',
   targetTable: 'users',
   targetColumns: ['id'],
+}
+
+/**
+ * **Une entrante en plus de la sortante, et c'est le décor qui rend le défaut visible** (règle n° 5).
+ *
+ * Avec la seule sortante, « chaque lien est écrit sur sa colonne » passerait sur une implémentation
+ * qui ne saurait traiter qu'un sens — et c'est précisément l'erreur naturelle, `relationDe` ne
+ * rendant que les sortantes.
+ */
+const RELATION_ENTRANTE: Relation = {
+  constraintName: 'order_items_order_id_fkey',
+  direction: 'incoming',
+  cardinality: 'many',
+  // Pour une entrante, `columns` est la colonne de **cette** table, celle qui est référencée.
+  columns: ['id'],
+  targetSchema: 'public',
+  targetTable: 'order_items',
+  targetColumns: ['order_id'],
 }
 
 const REFERENCE_LONGUE = '041ff6ac-ca09-4c57-b1fe-e4055c074abf-suite-qui-deborde-de-la-colonne'
@@ -134,6 +152,25 @@ function monter({
     </>,
   )
   return { readRows, describeTable, rendu }
+}
+
+/**
+ * Le bloc d'un champ, depuis le nom de sa colonne.
+ *
+ * Par le `<dt>` et non par un `[class*=]` : c'est le terme, et son bloc est son parent. Un sélecteur
+ * de classe se périmerait au premier renommage de la feuille de style.
+ */
+/** La section « Liens », par son titre — le seul en-tête du panneau. */
+function sectionDesLiens(): HTMLElement {
+  return screen.getByRole('heading', { name: 'Liens' }).parentElement as HTMLElement
+}
+
+function champDe(colonne: string): HTMLElement {
+  const terme = screen
+    .getAllByRole('term')
+    .find((dt) => dt.querySelector('[data-nom]')?.textContent === colonne)
+  if (!terme) throw new Error(`aucun champ « ${colonne} » dans le panneau`)
+  return terme.parentElement as HTMLElement
 }
 
 describe('panneau de ligne', () => {
@@ -225,8 +262,7 @@ describe('panneau de ligne', () => {
 
   /** La cellule de valeur d'un champ, par le nom de sa colonne. */
   function valeurDe(colonne: string) {
-    const champ = screen.getByText(colonne).parentElement as HTMLElement
-    return champ.querySelector('dd') as HTMLElement
+    return champDe(colonne).querySelector('dd') as HTMLElement
   }
 
   it('le clic droit sur la valeur copie la valeur, telle qu’elle s’affiche', async () => {
@@ -281,23 +317,73 @@ describe('panneau de ligne', () => {
     expect(writeText).not.toHaveBeenCalled()
   })
 
-  it('le bouton de copie n’apparaît pas sur les autres onglets', async () => {
+  it('le bouton de copie du JSON n’apparaît que sur l’onglet JSON', async () => {
     const utilisateur = userEvent.setup()
     monter()
     // Sur Champs, il n'y a pas de JSON à copier — et un bouton qui copierait « la ligne » depuis un
     // onglet qui ne la montre pas en JSON serait une promesse sur un format invisible.
     expect(screen.queryByRole('button', { name: 'Copier le JSON de la ligne' })).toBeNull()
 
-    await utilisateur.click(screen.getByRole('tab', { name: 'Liens' }))
-    expect(screen.queryByRole('button', { name: 'Copier le JSON de la ligne' })).toBeNull()
+    await utilisateur.click(screen.getByRole('tab', { name: 'JSON' }))
+    expect(screen.getByRole('button', { name: 'Copier le JSON de la ligne' })).toBeInTheDocument()
   })
 
-  it('l’onglet Liens rend les relations de la table', async () => {
-    const utilisateur = userEvent.setup()
+  /**
+   * **Deux onglets, et le troisième n'a pas été perdu en route** (`API-49`).
+   *
+   * « Liens » était un onglet à part, donc un endroit où l'on n'allait pas ; c'est une **section**
+   * de l'onglet « Champs », sous la liste. Ce test garde les deux moitiés du changement : l'onglet
+   * n'existe plus, et les relations se lisent sans changer d'onglet — un compte qui tomberait à zéro
+   * serait le pire résultat possible, une information tue sans que rien l'annonce.
+   */
+  it('« Liens » est une section de l’onglet Champs, plus un onglet', async () => {
+    monter({ relations: [RELATION, RELATION_ENTRANTE] })
+
+    expect(screen.queryByRole('tab', { name: 'Liens' })).toBeNull()
+    expect(screen.getAllByRole('tab')).toHaveLength(2)
+
+    const liens = sectionDesLiens()
+    // **Chaque ligne renomme sa colonne**, puisqu'elle n'est plus à côté d'elle : sans ce nom, la
+    // section serait une liste de destinations sans départ.
+    expect(within(liens).getByText('user_id')).toBeInTheDocument()
+    expect(within(liens).getByText('users.id')).toBeInTheDocument()
+    expect(within(liens).getByText('order_items.order_id')).toBeInTheDocument()
+
+    // **Le sens n'est pas porté par la couleur seule** : la flèche est masquée aux voix, un verbe
+    // la remplace, et c'est lui qui dit laquelle référence l'autre (pièges n° 1 et n° 2).
+    expect(within(liens).getByText('référence', { exact: false })).toBeInTheDocument()
+    expect(within(liens).getByText('est référencée par', { exact: false })).toBeInTheDocument()
+
+    // **Et les deux sections sont bien deux**, dans cet ordre : la clé de `user_id` ne porte plus
+    // son lien. Le mesurer sur le champ, et non sur la page, est ce qui distingue « déplacé » de
+    // « dupliqué » — les deux laisseraient les assertions ci-dessus vertes.
+    expect(within(champDe('user_id')).queryByText('users.id')).toBeNull()
+  })
+
+  it('la section des liens suit l’ordre des champs, et disparaît quand il n’y en a pas', () => {
+    // L'entrante porte `id`, la sortante `user_id` : le moteur les rend dans l'autre ordre, et
+    // c'est le catalogue qui décide, pour qu'un champ soit à la même place dans les deux sections.
+    monter({ relations: [RELATION, RELATION_ENTRANTE] })
+    const departs = within(sectionDesLiens())
+      .getAllByText(/^(id|user_id)$/)
+      .map((element) => element.textContent)
+    expect(departs).toEqual(['id', 'user_id'])
+
+    // **Rien plutôt qu'une section vide.** Une phrase « aucune clé étrangère » occuperait de la
+    // place pour dire ce que son absence dit déjà.
+    cleanup()
+    monter({ relations: [] })
+    expect(screen.queryByRole('heading', { name: 'Liens' })).toBeNull()
+  })
+
+  it('chaque clé porte le glyphe de sa catégorie', () => {
     monter()
 
-    await utilisateur.click(screen.getByRole('tab', { name: 'Liens' }))
-    expect(screen.getByText('user_id → users.id')).toBeInTheDocument()
+    // Le même glyphe que la section « Colonnes de » de la sidebar, décidé au même endroit —
+    // `glypheDeType`. Deux tables de glyphes divergeraient au premier type ajouté.
+    expect(within(champDe('id')).getByText('#')).toBeInTheDocument()
+    expect(within(champDe('status')).getByText('T')).toBeInTheDocument()
+    expect(within(champDe('shipped_at')).getByText('⏱')).toBeInTheDocument()
   })
 })
 

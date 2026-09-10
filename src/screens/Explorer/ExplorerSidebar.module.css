@@ -52,9 +52,10 @@
   color: var(--ink-2);
 }
 
-/* La section contextuelle « Colonnes de <table> » des écrans de travail (A5 → A9). Elle vient
-   sous l'arbre, séparée par 5px comme le mockup, et ne défile pas avec lui : le mockup la place
-   dans le même flux, sous les lignes d'arbre. */
+/* La section contextuelle « Colonnes de <table> » — l'objet qu'on regarde sans l'avoir ouvert, et
+   « Schéma déduit » sous une console mongo. Elle vient sous l'arbre, séparée par 5px comme le
+   mockup, et ne défile pas avec lui : le mockup la place dans le même flux, sous les lignes
+   d'arbre. */
 .colonnes {
   flex: none;
   padding-top: var(--space-2);
