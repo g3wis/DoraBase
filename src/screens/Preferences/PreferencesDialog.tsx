@@ -111,7 +111,12 @@ export function PreferencesDialog({
   return (
     <Modal
       title={t('preferences.title')}
-      icon="gear"
+      /* **`slid`, comme les deux boutons qui ouvrent cet écran** (`API-46`). L'engrenage tenait la
+         place depuis `15a` ; il a cédé quand la bande de la sidebar a dû le rendre lisible à 14 px, et
+         un même objet ne peut pas porter deux glyphes selon l'endroit où on le nomme. Le rouage reste
+         celui de la section « Général » juste en dessous, qui est autre chose : des options générales,
+         non l'écran entier. */
+      icon="slid"
       onClose={onClose}
       compact
       className={styles.modale}

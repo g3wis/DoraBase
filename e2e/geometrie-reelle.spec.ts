@@ -699,7 +699,15 @@ test('la bande d’actions tient dans la colonne, à hauteur fixe', async ({ pag
   expect(m.dansLaColonne).toBe(true)
   // 22 px, la hauteur d'une ligne d'arbre : la bande n'introduit pas une troisième unité verticale
   // dans une colonne qui en a déjà deux.
-  expect(m.carres).toEqual([[22, 22]])
+  //
+  // **Deux carrés depuis `API-46`**, et non un : l'engrenage a rejoint la bande, en fin de bande. Les
+  // deux cotes sont écrites l'une après l'autre plutôt que comparées entre elles — c'est une égalité,
+  // pas un ordre de grandeur (règle n° 18) —, et `dansLaBande` couvre au passage ce que la fin de
+  // bande peut casser : une action poussée hors du bord droit par le `margin-left: auto`.
+  expect(m.carres).toEqual([
+    [22, 22],
+    [22, 22],
+  ])
 })
 
 /**

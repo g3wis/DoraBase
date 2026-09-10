@@ -93,7 +93,12 @@ type WorkbenchProps = {
    * le seul chemin entre les préférences et les deux grilles du produit.
    */
   rowHeight?: number
-  /** Ouvre les préférences (`15a`). Absent, l'engrenage reste désactivé avec sa raison. */
+  /**
+   * Ouvre les préférences (`15a`). **Depuis `API-46`, c'est la bande en tête de la sidebar qui le
+   * porte**, et non plus la barre de titre — laquelle n'a donc plus aucune action dans cet écran.
+   *
+   * Absent, le bouton n'est pas rendu du tout : un carré grisé annoncerait un réglage inatteignable.
+   */
   onOpenPreferences?: () => void
   projects: readonly Project[]
   passerelle?: PasserelleArbre
@@ -1486,8 +1491,10 @@ export function Workbench({
           }}
         />
       )}
+      {/* **La barre n'a plus d'action** (`API-46`) : l'engrenage est descendu dans la bande de tête de
+          la sidebar, où il vit à côté du panneau qu'il règle. `TitleBar` ne rend rien quand personne
+          n'écoute, donc il n'y a pas de carré grisé à sa place. */}
       <TitleBar
-        onOpenPreferences={onOpenPreferences}
         // **Rien du tout quand rien n'est sélectionné** (`25b`), et aucune empreinte réservée : le
         // centre n'a alors que son logo (`API-47`) — la barre garde ses 40 px et les actions ne
         // bougent pas. C'est déjà ce que `A1` montre dans le handoff.
@@ -1774,6 +1781,7 @@ export function Workbench({
               onToggle={basculer}
               onAddDatabase={onNewDatabase}
               onNewProject={onNewProject}
+              onOpenPreferences={onOpenPreferences}
               onRefresh={rafraichirTout}
               // **La section suit l'objet lu, pas l'onglet ouvert.** Le mockup d'`A8` montre
               // « Schéma déduit » dans la sidebar *pendant* qu'une console est active : les champs

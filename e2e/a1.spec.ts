@@ -27,6 +27,31 @@ import { expect, test } from '@playwright/test'
 // 977 pixels d'écart sur 1,1 million pour `A2`, 504 pour `A3`, tous dans ces trois zones. Une capture
 // qu'on rafraîchit sans le dire cesse d'être une référence.
 //
+// **Les cinq références régénérées le 10 septembre 2026** (`API-46`), pour deux causes qui se
+// distinguent dans les diffs, chacune à l'abscisse attendue :
+//
+//   1. le bouton des préférences a quitté le coin droit de la barre de titre pour la bande en tête de
+//      la sidebar, à côté du « + ». C'est ce qui bouge entre x=41 et x=213, la bande, dans
+//      `a2-nouvelle-connexion`, `a2-tunnel` et `a3-echec` ;
+//   2. le glyphe des préférences n'est plus l'engrenage mais `slid`, deux curseurs : à 14 px, les huit
+//      dents du rouage se rejoignaient en un anneau où rien ne disait « réglages » (vu à la loupe, à
+//      `deviceScaleFactor` élevé). Il change donc **partout où les préférences se nomment**, dont la
+//      barre de titre de l'accueil — 47 et 24 pixels dans `a1-accueil` et `a1-etape-projet`, tous
+//      dans la boîte de 13 px du bouton, x=1330..1342.
+//
+// **Et une troisième cause est née de la rencontre avec `API-47`**, arrivé le même jour : le centre
+// de la barre — logo compris — est centré dans la place que lui laissent ses voisins, et l'écran de
+// travail n'a plus de zone d'actions à sa droite. Le logo y est donc **treize pixels plus à droite
+// que sur l'accueil**, la moitié des 26 px du bouton disparu (mesuré : 696 contre 683). C'est ce qui
+// fait bouger la rangée du haut jusqu'à x=1341 dans les trois références qui montrent l'écran de
+// travail derrière la modale. Deux écrans, deux abscisses de logo : la conséquence est assumée — un
+// emplacement réservé pour un bouton absent serait la boîte fantôme que ce fichier refuse déjà pour
+// le centre, et personne ne voit les deux écrans à la fois.
+//
+// `a1-accueil` **garde son bouton là où il était** : cet écran n'a pas d'arborescence, donc pas de
+// bande où le mettre. Si son diff avait porté ailleurs que sur le glyphe, c'est que le retrait de la
+// barre était allé trop loin.
+//
 // **La géométrie, elle, a été vérifiée au chiffre avant de toucher aux références** : même abscisse de
 // texte, même corps, valeur centrée dans un champ de 30 px, boîtes de 32 et 19 px inchangées — ce que
 // les mesures de `a2-nouvelle-connexion` et `a4-barre-de-titre` affirment indépendamment. Une capture

@@ -26,8 +26,18 @@ import styles from './SidebarToolbar.module.css'
 export function SidebarToolbar({ children }: { children: ReactNode }) {
   return (
     // `role="toolbar"` : un groupe de contrôles de même nature. C'est ce qui fait annoncer « barre
-    // d'outils, 1 élément » plutôt qu'un bouton isolé au milieu de rien.
-    <div className={styles.root} role="toolbar" aria-label="Actions de l’arborescence">
+    // d'outils, 2 éléments » plutôt que deux boutons isolés au milieu de rien.
+    //
+    // **« du panneau », et non « de l'arborescence » depuis `API-46`** : la bande porte désormais les
+    // préférences, qui ne sont pas une action de l'arbre. Un nom de groupe plus étroit que ce qu'il
+    // contient est le piège n° 20 sous une autre forme — la promesse survit à ce qu'elle décrivait.
+    //
+    // **Et il n'y a pas de « fin de bande »**, quoi qu'en dise l'envie de ranger : une variante avec
+    // les préférences poussées à droite a été écrite puis retirée le jour même. Elle rangeait ce qui
+    // crée d'un côté et ce qui configure de l'autre — juste dans un menu, illisible dans 22 px de
+    // haut, où une icône seule à l'autre bout se lit comme égarée plutôt que comme rangée. Une prop
+    // sans appelant n'est qu'un emplacement que le prochain écran remplira sans savoir pourquoi.
+    <div className={styles.root} role="toolbar" aria-label="Actions du panneau">
       {children}
     </div>
   )

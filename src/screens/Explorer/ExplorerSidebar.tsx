@@ -41,6 +41,16 @@ export type ExplorerSidebarProps = {
    * qu'un contrôle absent (défaut n° 36). C'est le cas de la galerie, où aucune commande ne répond.
    */
   onNewProject?: () => void
+  /**
+   * Ouvre les préférences (`API-46`), depuis la fin de la bande de tête.
+   *
+   * **C'est le seul point d'entrée dans l'écran de travail** : l'engrenage a quitté la barre de titre,
+   * qui n'y porte plus aucune action. Il y reste sur l'accueil, faute d'arborescence où le mettre.
+   *
+   * Absent, le bouton n'est pas rendu — jamais rendu inerte : c'est la règle de `onNewProject` juste
+   * au-dessus, et le cas de la galerie, où aucune modale ne répond.
+   */
+  onOpenPreferences?: () => void
   onRefresh?: () => void
   /**
    * Ce qu'on peut faire d'une console depuis l'arbre — créer, renommer, retirer.
@@ -180,6 +190,7 @@ export function ExplorerSidebar({
   onSelect,
   onAddDatabase,
   onNewProject,
+  onOpenPreferences,
   onRefresh,
   consoles,
   onOpenDiagram,
@@ -357,14 +368,35 @@ export function ExplorerSidebar({
              icône nue sans « + » se lisait comme un raccourci vers un projet déjà là, pas comme un
              geste d'ajout — la même confusion que le `+` de la grille (`AGENTS.md`) écarte pour une
              ligne. */
-          onNewProject && (
+          (onNewProject || onOpenPreferences) && (
             <SidebarToolbar>
-              <SidebarToolbarButton
-                icon="plus"
-                label={t('explorer.sidebar.newProject')}
-                title={t('explorer.sidebar.newProjectTitle', { raccourci: raccourci('N') })}
-                onClick={onNewProject}
-              />
+              {onNewProject && (
+                <SidebarToolbarButton
+                  icon="plus"
+                  label={t('explorer.sidebar.newProject')}
+                  title={t('explorer.sidebar.newProjectTitle', { raccourci: raccourci('N') })}
+                  onClick={onNewProject}
+                />
+              )}
+              {/* **Les préférences, à gauche avec le reste** (`API-46`, à la demande, second tour).
+                  Une fin de bande poussée à droite a existé une demi-heure : elle disait « ce qui crée
+                  d'un côté, ce qui configure de l'autre », un rangement que les menus tiennent bien
+                  mais qui, dans 22 px de haut, ne se lisait pas comme une séparation — juste comme une
+                  icône égarée. Deux carrés côte à côte forment un groupe, ce que `role="toolbar"`
+                  annonce déjà.
+
+                  **Et le glyphe n'est pas l'engrenage** : à 14 px, ses huit dents se rejoignent en un
+                  anneau, et rien n'y dit « réglages » — vu à la loupe, pas supposé. `slid` porte deux
+                  curseurs, la seule forme de ce sprite qui reste lisible à cette taille. Elle est
+                  employée **partout où les préférences se nomment**, jamais ici seulement : le même
+                  bouton ne peut pas changer de dessin selon l'écran. */}
+              {onOpenPreferences && (
+                <SidebarToolbarButton
+                  icon="slid"
+                  label={t('explorer.sidebar.preferences')}
+                  onClick={onOpenPreferences}
+                />
+              )}
             </SidebarToolbar>
           )
         }

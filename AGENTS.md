@@ -260,6 +260,69 @@ qu'il portait et que le rendu ne dit pas.
   **Les cinq captures de fidélité d'`a1.spec.ts` sont périmées par ce changement et régénérées avec
   lui** — la règle n° 6, et la barre de titre est le décor le plus partagé du produit.
 
+- **Et elle n'a plus aucune action dans l'écran de travail** (10 septembre 2026, `API-46`, à la
+  demande). Le bouton des préférences est descendu dans la **bande en tête de la sidebar**, contre le
+  « + », où il vit à côté du panneau qu'il règle plutôt qu'au coin opposé de la fenêtre ; la barre est
+  redevenue ce que `25a` avait fait d'elle, un indicateur **passif** — et depuis `API-47`, arrivé le
+  même jour, elle n'a plus qu'une zone qui porte quelque chose, son centre et son logo. Son parcours
+  clavier compte désormais zéro arrêt. Sept points à ne pas défaire :
+  - **il reste dans la barre sur l'accueil**, et c'est la seule raison pour laquelle `A1` n'a pas
+    reperdu ses préférences : cet écran n'a pas d'arborescence, donc pas de bande où le mettre. Le
+    retirer partout aurait rejoué mot pour mot le défaut du 26 août 2026 — un réglage inatteignable
+    sur le premier écran du produit. Le diff d'`a1-accueil` ne porte que sur le **glyphe**, dans la
+    boîte de 13 px du bouton : il n'a pas bougé d'un pixel, et c'est le signal qui l'atteste ;
+  - **`TitleBar` ne rend plus le bouton quand personne ne l'écoute**, là où il était *désactivé avec
+    sa raison*. Ce grisé était juste tant que tous les écrans du produit passaient le gestionnaire et
+    que la galerie était le seul appelant à ne pas le faire ; il serait devenu un carré mort annonçant
+    un réglage inatteignable **alors qu'il est à trente pixels de là**. C'est l'arbitrage de
+    `onNewProject` dans la même bande, et le défaut n° 36 par l'autre bout. La clé
+    `preferencesDisabledTitle` est partie avec l'état qu'elle décrivait (règle n° 20) ;
+  - **à gauche, contre le « + »** — et une fin de bande poussée à droite a existé une demi-heure avant
+    d'être retirée (rapporté à l'usage : « aligne l'icône à gauche à côté du + »). Elle rangeait ce
+    qui *crée* d'un côté et ce qui *configure* de l'autre, l'ordre que les menus du produit tiennent
+    déjà ; dans 22 px de haut, cette séparation ne se lisait pas comme un rangement mais comme une
+    icône égarée à l'autre bout. Deux carrés voisins forment un groupe, ce que `role="toolbar"`
+    annonce déjà. Le slot `fin` de `SidebarToolbar` est parti avec son seul appelant : une prop sans
+    appelant n'est qu'un emplacement que le prochain écran remplira sans savoir pourquoi ;
+  - **et le glyphe n'est plus l'engrenage, c'est `slid`, deux curseurs** (rapporté à l'usage : « on ne
+    voit pas que c'est un icône settings »). À 14 px, les huit dents du rouage se rejoignent en un
+    anneau avec un point au milieu : rien n'y dit « réglages ». Quatre points :
+    - **c'est une mesure, pas un jugement.** Cinq tracés ont été rendus *dans la bande*, capturés et
+      regardés à la loupe — un rouage à six dents, un rouage à quatre, des curseurs verticaux, des
+      curseurs à poignées carrées, et celui-ci. C'est la méthode qui a le plus payé, appliquée à
+      treize pixels pour la seconde fois après les marques du diagramme ;
+    - **`i-slid` a été redessinée pour cela** : deux rails au lieu de trois — à 14 px, trois rails à
+      cinq unités d'écart se touchent — et le rail est **coupé** de part et d'autre de la poignée,
+      sans quoi le trait qui la traverse en fait une tache. Elle n'avait jamais servi depuis son
+      extraction du handoff ; ce bouton est son premier appelant ;
+    - **elle change partout où les préférences se nomment** — la bande, la barre de titre de
+      l'accueil, l'en-tête d'`A10` —, jamais ici seulement : le même bouton ne peut pas porter deux
+      dessins selon l'écran, et un écran ne peut pas s'annoncer autrement que le bouton qui l'ouvre.
+      Les cinq captures de fidélité d'`a1` en dépendaient, dont `a1-accueil`, où le diff ne porte que
+      sur la boîte de 13 px du bouton ;
+    - **le rouage reste celui de la section « Général » d'`A10`**, et ce n'est pas une exception à la
+      règle d'au-dessus : cette section n'est pas l'écran, ce sont des options générales *dans*
+      l'écran. Un même glyphe pour les deux aurait fait annoncer la partie par le nom du tout ;
+  - **le logo de la barre s'est décalé de treize pixels dans l'écran de travail**, et c'est la
+    rencontre avec `API-47` du même jour : le centre — logo compris — est centré dans la place que lui
+    laissent ses voisins, or la zone d'actions y est désormais vide. Mesuré : 696 contre 683 sur
+    l'accueil, soit la moitié des 26 px du bouton parti. Deux écrans, deux abscisses de logo, et c'est
+    assumé — réserver un emplacement pour un bouton absent serait la boîte fantôme que ce fichier
+    refuse déjà pour le centre, et personne ne voit les deux écrans à la fois. C'est la troisième
+    cause de diff des captures d'`a1`, celle qu'aucun des deux chantiers n'aurait produite seul ;
+  - **la bande s'appelle « Actions du panneau »**, et non plus « Actions de l'arborescence ». Un nom de
+    groupe plus étroit que ce qu'il contient est encore la règle n° 20 : les préférences ne sont pas
+    une action de l'arbre, et la voix les annoncerait sous un nom qui a cessé d'être vrai ;
+  - **et deux niveaux de test, parce que rien d'un seul n'aurait suffi.** La vitrine ne peut pas
+    prouver que le bouton est branché à l'écran qui monte la modale (règle n° 8) ; jsdom ne calcule
+    aucune mise en page, donc le voisinage des deux carrés et le « au-dessus de l'arbre » que la
+    demande formule n'ont pour juge qu'un test de bout en bout (règle n° 9). Les assertions de
+    géométrie sont des **égalités** — l'écart entre les deux carrés vaut le `gap` de la bande, deux
+    carrés de 22 px, le bas du bouton au-dessus du haut de l'arbre — et non des comparaisons entre
+    deux valeurs du même rendu (règle n° 18) : « le second est à droite du premier » resterait vrai
+    avec le `margin-left: auto` qu'on vient de retirer. Le contrôle positif du contrat de glissement a
+    dû **changer de décor** au passage : il vérifie qu'il y a bien un contrôle à bloquer, et la barre
+    n'en porte plus dans l'écran de travail.
 - **L'engrenage était un soleil.** `i-gear` était un cercle et six rayons — le tracé d'un soleil, pas
   d'un rouage —, et il annonçait les préférences dans la barre de titre comme dans l'en-tête de leur
   modale. Redessiné en rouage à huit dents le 26 août 2026. Quatre captures de fidélité en

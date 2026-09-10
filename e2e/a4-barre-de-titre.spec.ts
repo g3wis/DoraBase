@@ -185,17 +185,22 @@ test('la pastille porte la couleur déclarée de l’environnement', async ({ pa
 })
 
 /**
- * Le parcours clavier de la barre : **un seul arrêt**, les préférences.
+ * Le parcours clavier de la barre : **aucun arrêt** dans l'écran de travail (`API-46`).
  *
  * Il en comptait quatre — la pastille, le sélecteur et les deux icônes —, puis deux, puis un depuis
- * le retrait du bouton de console (26 août 2026), qui n'ouvrait rien.
+ * le retrait du bouton de console (26 août 2026), puis zéro : l'engrenage est descendu dans la bande
+ * en tête de la sidebar, et la barre n'a plus d'action du tout. Elle n'est plus qu'un indicateur
+ * passif, ce qu'elle était déjà par ailleurs.
  *
- * **Mesuré sur `/?demo` et non sur la galerie**, et ce n'est pas un détour : en galerie la barre est
- * montée sans `onOpenPreferences`, donc son engrenage est *désactivé avec sa raison* (`09f`) — un
- * bouton désactivé n'est pas un arrêt de tabulation, et le compte y vaudrait un. C'est l'état du
- * décor, pas celui du produit.
+ * **Ce que ce test garde vraiment**, et pourquoi il compte encore : `TitleBar` ne rend pas
+ * l'engrenage quand personne ne l'écoute, plutôt que de le rendre grisé. Un carré désactivé n'est pas
+ * un arrêt de tabulation non plus — donc le compte serait le même —, d'où la seconde assertion : le
+ * bouton n'est *pas dans le DOM* de la barre. Sans elle, un engrenage mort y passerait inaperçu.
+ *
+ * **Mesuré sur `/?demo`, jamais sur la galerie** : c'est l'assemblage qui décide, et la galerie monte
+ * la barre sans écran autour d'elle (règle n° 8).
  */
-test('le parcours clavier de la barre compte un arrêt', async ({ page }) => {
+test('la barre de l’écran de travail n’a plus d’arrêt clavier ni d’engrenage', async ({ page }) => {
   await page.goto('/?demo')
   await page.waitForSelector('[role=tree]')
 
@@ -211,7 +216,48 @@ test('le parcours clavier de la barre compte un arrêt', async ({ page }) => {
       }),
     )
   }
-  expect(arrets).toEqual(['Préférences', 'hors de la barre'])
+  expect(arrets).toEqual(['hors de la barre', 'hors de la barre'])
+
+  // Et l'engrenage n'y est pas non plus, même désactivé.
+  await expect(
+    page.locator('[data-tauri-drag-region] button[aria-label="Préférences"]'),
+  ).toHaveCount(0)
+})
+
+/**
+ * **Le bouton des préférences est dans la bande au-dessus de l'arborescence** (`API-46`, à la
+ * demande), collé au « + ».
+ *
+ * Le test d'assemblage de `ExplorerSidebar` prouve l'appartenance et le câblage ; ce qu'il ne peut
+ * pas prouver est que le bouton est **là où l'on croit** dans l'écran entier, jsdom ne calculant
+ * aucune mise en page (règle n° 9). D'où les deux mesures : les deux carrés sont voisins à l'écart de
+ * la bande près, et la bande est au-dessus de l'arbre — la demande dans ses termes.
+ */
+test('les préférences suivent le « + », au-dessus de l’arborescence', async ({ page }) => {
+  await page.goto('/?demo')
+  await page.waitForSelector('[role=tree]')
+
+  await expect(page.getByRole('toolbar', { name: /Actions du panneau/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Préférences' })).toBeVisible()
+
+  const cotes = await page.evaluate(() => {
+    const bande = document.querySelector('[role=toolbar]') as HTMLElement
+    const plus = bande.querySelector('button[aria-label="Nouveau projet"]') as HTMLElement
+    const reglages = bande.querySelector('button[aria-label="Préférences"]') as HTMLElement
+    const arbre = document.querySelector('[role=tree]') as HTMLElement
+    return {
+      ecart: reglages.getBoundingClientRect().left - plus.getBoundingClientRect().right,
+      gap: Number.parseFloat(getComputedStyle(bande).gap),
+      bas: reglages.getBoundingClientRect().bottom,
+      hautDeLArbre: arbre.getBoundingClientRect().top,
+    }
+  })
+
+  // **Une égalité, pas un ordre de grandeur** (règle n° 18) : l'écart entre les deux carrés est celui
+  // de la bande, donc ils sont voisins. Un « le second est à droite du premier » resterait vrai avec
+  // un `margin-left: auto` qui l'enverrait au bord opposé — l'état écrit puis retiré le jour même.
+  expect(cotes.ecart).toBeCloseTo(cotes.gap, 1)
+  expect(cotes.bas).toBeLessThanOrEqual(cotes.hautDeLArbre)
 })
 
 /**
@@ -315,10 +361,22 @@ test('un nom de projet long ne pousse pas les actions hors de la barre', async (
  * Le script de Tauri (`window/scripts/drag.js`) traite l'attribut nu comme « clics directs
  * seulement » : la barre étant couverte par ses enfants, seule la bande de fond répondait.
  * `deep` étend le glissement au sous-arbre, et tout élément cliquable sur le chemin le bloque.
+ *
+ * **Mesuré sur l'accueil depuis `API-46`, et non sur la galerie.** L'assertion qui compte est le
+ * contrôle positif — « il y a bien un contrôle à bloquer » —, or la barre n'en porte plus aucun dans
+ * l'écran de travail : l'engrenage est descendu dans la bande de la sidebar. L'accueil est le dernier
+ * écran à le monter ici, faute d'arborescence où le mettre, donc le seul décor où ce test mesure
+ * encore quelque chose. En galerie il aurait continué de passer *par accident* tant que la barre y
+ * rendait un engrenage grisé — un `<button>` compte, même désactivé.
  */
 test('la barre de titre est glissable en profondeur, et ses contrôles bloquent le glissement', async ({
   page,
 }) => {
+  await page.goto('/')
+  // **Attendre le bouton, non la barre** : `goto` rend la main au chargement du document, avant le
+  // montage de React. Une lecture sèche après une navigation date la mesure du mauvais instant
+  // (règle n° 15), et ce test-ci est tombé sur un runner chargé avant qu'on l'attende.
+  await page.waitForSelector('[data-tauri-drag-region] button')
   const contrat = await page.evaluate(() => {
     const barre = document.querySelector('[data-tauri-drag-region]')
     if (!barre) return null

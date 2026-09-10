@@ -110,23 +110,25 @@ test('la barre n’a que deux zones, le centre et les actions', () => {
   expect(barre(container).children).toHaveLength(2)
 })
 
-test('sans gestionnaire, l’engrenage est désactivé et dit pourquoi', () => {
-  render(
+test('sans gestionnaire, la barre ne rend aucune action', () => {
+  const { container } = render(
     <LanguageProvider preferences={{ language: 'fr' }}>
       <Sprite />
       <TitleBar />
     </LanguageProvider>,
   )
-  // La règle de `09f`, et la leçon du défaut n° 36 : un bouton cliquable et inerte se lit comme une
-  // panne. Il est donc désactivé, avec son infobulle.
-  //
-  // **Et elle ne nomme plus d'écran** (26 août 2026). Elle renvoyait vers l'écran de travail, qui
-  // n'existe pas tant qu'aucun projet n'est déclaré — c'est précisément l'état où `A1`, qui ne
-  // passait pas le gestionnaire, l'affichait. Aucun écran du produit ne monte plus la barre sans ;
-  // la galerie est le dernier appelant.
-  const engrenage = screen.getByRole('button', { name: 'Préférences' })
-  expect(engrenage).toBeDisabled()
-  expect(engrenage).toHaveAttribute('title', expect.stringContaining('exemplaire de la barre'))
+  // **Il était désactivé avec sa raison jusqu'à `API-46`**, ce qui était juste tant que tous les
+  // écrans du produit passaient le gestionnaire et que la galerie était le seul appelant à ne pas le
+  // faire. L'écran de travail le monte désormais sans — l'engrenage vit dans la bande en tête de sa
+  // sidebar —, et un carré grisé y annoncerait un réglage inatteignable alors qu'il est à trente
+  // pixels de là. C'est la leçon du défaut n° 36 par l'autre bout : un contrôle qui ne fait rien est
+  // pire qu'un contrôle absent.
+  expect(screen.queryByRole('button', { name: 'Préférences' })).toBeNull()
+
+  // Et les deux zones restent deux — centre et actions depuis `API-47` : le retrait ne défait pas la
+  // composition de la barre, il vide la seconde. Sans cette assertion, une barre qui perdrait sa
+  // zone d'actions passerait aussi.
+  expect(barre(container).children).toHaveLength(2)
 })
 
 test('avec un gestionnaire, l’engrenage l’appelle', async () => {
