@@ -1,6 +1,6 @@
 [package]
 name = "dorabase"
-version = "0.9.0"
+version = "0.10.0"
 description = "Explorateur de bases de données desktop"
 authors = ["DoraBase"]
 edition = "2021"
