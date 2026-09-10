@@ -41,6 +41,9 @@
   text-align: center;
   font-size: var(--text-meta);
   color: var(--ink-5);
+  /* Le numéro s'efface quand les actions paraissent : les deux occupent la même place, et c'est la
+     **ligne** qui l'annonce (`VirtualGrid`, `--row-number`). */
+  visibility: var(--row-number, visible);
 }
 
 /* La gouttière d'une ligne ajoutée : `+1`, dans la teinte d'alerte des modifications en attente,
@@ -50,22 +53,44 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Le conteneur de la gouttière : le numéro, et la croix de suppression qui le remplace au survol
-   (`A6`). `position: relative` en fait le référentiel de la croix, posée en absolu par-dessus. */
+/* Le conteneur de la gouttière : le numéro, et la poubelle de suppression qui le remplace au survol
+   de la ligne (`A6`, `API-45`). `position: relative` en fait le référentiel des actions, posées en
+   absolu par-dessus. */
 .gouttiereWrap {
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 100%;
-  height: 100%;
+  /* **Les 8 px de rembourrage de la cellule, rendus à la gouttière** — la moitié « marges » du
+     signalement d'`API-45`, et son effet n'est pas celui qu'on croit. La piste ne fait que 30 px,
+     donc la boîte de rembourrage n'en laissait que 14 : un bouton de 18 px y était **rétréci** par
+     `flex-shrink` à 14 de large pour 18 de haut, et la paire d'icônes d'une table NoSQL (18 + 2 +
+     18 contre 32) l'était de même. Ce n'est pas un débordement — un conteneur en flex centre son
+     contenu, donc l'excès se répartissait des deux côtés et rien ne dépassait la case ; c'est une
+     forme écrasée, que seule une mesure de la **largeur** du bouton dénonce.
+     Un `flex: none` sur les boutons aurait « corrigé » le rendu en rendant ces marges inertes :
+     une seule mécanique, et c'est celle qui donne la place.
+     Un `position: absolute` sur la case aurait fait le même travail — `inset: 0` se résolvant
+     contre la boîte de rembourrage — mais `.row` centre ses cellules au lieu de les étirer : la
+     case, vidée de son contenu en flux, serait tombée à zéro de haut.
+     Pas de hauteur ici : elle vient de la boîte du numéro, dont la hauteur de ligne est celle de la
+     cellule (`calc(var(--pitch) - 1px)`), donc de la case entière. Un `height: 100%` y a vécu, et
+     il était **inerte** — un pourcentage contre un conteneur de hauteur automatique vaut `auto`. */
+  margin: 0 -8px;
+  width: calc(100% + 16px);
 }
 
-/* Le conteneur des actions de la ligne — la croix de suppression, et depuis `18g` l'icône
+/* Le conteneur des actions de la ligne — la poubelle de suppression, et depuis `18g` l'icône
    « éditer en JSON » d'une table NoSQL. Motif repris de `TreeRow` : cachées par défaut, révélées
    au survol ou au focus — jamais un survol inventé ailleurs que sur ce qui ouvre déjà un geste
    (voir AGENTS.md, « Aucun état de survol »). Les deux actions partagent le même conteneur plutôt
-   que chacune son propre calque : une gouttière plus large n'a qu'un survol à gérer, pas deux. */
+   que chacune son propre calque : une gouttière plus large n'a qu'un survol à gérer, pas deux.
+
+   **Le survol qui les révèle est celui de la ligne entière**, hérité de `VirtualGrid` par
+   `--row-actions` (`API-45`) : la gouttière seule est une bande de 30 px, et un geste qui ne se
+   découvre qu'en la visant ne se découvre pas. Aucun fond : le numéro qu'elles remplacent s'efface
+   par le même canal, et un `--hover-row` posé ici se composait avec celui de la ligne — donc une
+   case plus sombre que le reste de la ligne survolée, à l'endroit précis où l'on regarde. */
 .actions {
   position: absolute;
   inset: 0;
@@ -73,8 +98,7 @@
   align-items: center;
   justify-content: center;
   gap: 2px;
-  visibility: hidden;
-  background: var(--hover-row);
+  visibility: var(--row-actions, hidden);
 }
 
 .supprimerLigne,
@@ -82,8 +106,12 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  /* La cote est portée par `width`/`height`, donc le rembourrage est mis à zéro plutôt que laissé
+     à celui qu'un agent utilisateur donne à un `<button>` : sans lui, la boîte de 18 px serait
+     celle du **contenu** et la cible ferait 18 + 2 × padding — soit la moitié de la gouttière. */
+  padding: 0;
+  width: 18px;
+  height: 18px;
   border: none;
   border-radius: var(--radius-badge);
   background: none;
@@ -99,17 +127,28 @@
   color: var(--ink);
 }
 
-.gouttiereWrap:hover .actions,
+/* **Le rouge suit l'acte, pas le bouton** (`API-45`). Il est porté par la seule action de la grille
+   dont le clic **retire** une ligne ; le même bouton, sur une ligne déjà marquée, annule cette
+   suppression — un geste de repli, qui garde l'encre neutre et la croix. Peindre les deux en rouge
+   ferait dire « attention » à ce qui rend la ligne à son état.
+   `--danger-ink` plutôt que `--danger`, qui est une couleur de **surface** — un jeton nommé pour une
+   surface ne sert jamais d'encre (la leçon d'`--on-dark`) ; `--danger-ink-2` au survol, comme les
+   quatre autres retraits du dépôt. La forme dit la même chose que la couleur : une couleur seule ne
+   doit pas porter une information. */
+.destructif {
+  color: var(--danger-ink);
+}
+
+.destructif:hover {
+  color: var(--danger-ink-2);
+}
+
 .actions:focus-within {
   visibility: visible;
 }
 
-.gouttiereWrap:hover .gouttiere {
-  visibility: hidden;
-}
-
 /* Une ligne déjà marquée garde ses actions visibles en permanence : la marque ne doit pas dépendre
-   du survol pour se voir. */
+   du survol pour se voir — et son numéro reste caché, l'`x` qui annule occupant sa place. */
 .gouttiereSupprimee .actions {
   visibility: visible;
 }

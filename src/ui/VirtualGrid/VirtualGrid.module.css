@@ -315,6 +315,26 @@
   background: var(--hover-row);
 }
 
+/* **Le survol d'une ligne descend à ses cellules, par deux propriétés personnalisées.** Une action
+   de ligne — la poubelle de `A5` — se découvre au survol de la **ligne** et non de la cellule qui
+   la porte : la gouttière fait 30 px, et devoir viser cette bande pour savoir qu'un geste existe
+   est ce qu'`API-45` a signalé. Les classes d'un module CSS étant hachées, l'écran ne peut pas
+   écrire `.tr:hover .actions` chez lui — c'est donc la ligne qui **annonce** son survol, et la
+   cellule qui en dérive ce qu'elle montre. Les propriétés personnalisées héritent, ce qui est
+   exactement le canal qu'il faut : la ligne n'a rien à savoir de ce que ses cellules contiennent.
+
+   Les deux valeurs sont posées **à l'arrêt aussi** : sans elles, `var(--row-actions)` tomberait sur
+   son repli chez l'appelant, donc la valeur d'arrêt vivrait à deux endroits (règle n° 17). */
+.tr {
+  --row-actions: hidden;
+  --row-number: visible;
+}
+
+.tr:hover {
+  --row-actions: visible;
+  --row-number: hidden;
+}
+
 .selected {
   background: var(--info-bg);
   /* Liseré intérieur, et non une bordure : une bordure ajouterait 2px à la boîte et décalerait
