@@ -23,17 +23,33 @@ test.beforeEach(async ({ page }) => {
  * région live, ce qui est le pire choix ici — la sélection changeant à chaque flèche dans l'arbre, un
  * lecteur d'écran couvrirait l'annonce de la ligne parcourue. `role="group"` a été essayé puis
  * écarté, ARIA le destinant à un ensemble de contrôles ; cette zone n'est que du texte. Il ne reste
- * donc rien à viser qu'une position, et `.center` de `TitleBar` n'a qu'un enfant.
+ * donc rien à viser qu'une position — et depuis `API-47` le centre porte **deux** enfants, le logo
+ * puis l'indicateur, d'où le `:not(svg)` : sans lui, tout ce fichier mesurerait le logo.
  */
 const CENTRE = '[data-tauri-drag-region] [class*="center"]'
 
 /** L'indicateur de la barre du décor principal — projet, environnement « coulisses », fil d'Ariane. */
 const indicateur = (page: import('@playwright/test').Page) =>
-  page.locator('[data-testid=titlebar-a4] [class*="center"] > *')
+  page.locator('[data-testid=titlebar-a4] [class*="center"] > :not(svg)')
 
 /** L'indicateur d'un décor désigné par le libellé de son environnement. */
 const indicateurDe = (page: import('@playwright/test').Page, environnement: string) =>
-  page.locator(`${CENTRE} > *`).filter({ hasText: environnement })
+  page.locator(`${CENTRE} > :not(svg)`).filter({ hasText: environnement })
+
+/**
+ * **Le logo est au centre, et le nom n'est plus écrit** (`API-47`, à la demande).
+ *
+ * Il vivait à gauche avec le mot « DoraBase », dans une zone que le dégagement des feux poussait
+ * déjà de 78 px. Le contrôle négatif porte la moitié du sens : sans l'absence du texte, une barre
+ * qui garderait le wordmark *et* poserait un logo au centre passerait la première assertion.
+ */
+test('le logo vit dans le centre, et la barre n’écrit plus « DoraBase »', async ({ page }) => {
+  const barre = page.locator('[data-testid=titlebar-a4] [data-tauri-drag-region]')
+  await expect(barre.locator('[class*="center"] > svg use')).toHaveAttribute('href', '#logo')
+  await expect(barre).not.toContainText('DoraBase')
+  // Et la barre n'a que deux zones : le centre et les actions.
+  await expect(barre.locator('> *')).toHaveCount(2)
+})
 
 test('l’indicateur tient dans la rangée de 24 px du mockup', async ({ page }) => {
   // **Les deux boîtes de 24 px du mockup n'en font plus qu'une**, et elle n'est plus une boîte : la
@@ -45,7 +61,7 @@ test('l’indicateur tient dans la rangée de 24 px du mockup', async ({ page })
 test('le centre ne porte ni cadre, ni fond, ni contrôle', async ({ page }) => {
   const mesures = await page.evaluate(() => {
     const barre = document.querySelector('[data-testid=titlebar-a4]')
-    const zone = barre?.querySelector('[class*="center"]')?.firstElementChild
+    const zone = barre?.querySelector('[class*="center"] > :not(svg)')
     if (!barre || !zone) return null
     const s = getComputedStyle(zone)
     return {
@@ -91,16 +107,22 @@ test('aucun élément focalisable au centre, donc toute la zone est glissable', 
 // fait le mockup. Une première version du test comparait le centre du contenu à la demi-largeur de
 // la barre : elle mesurait une chose que ni le mockup ni notre barre ne font, la barre réservant en
 // plus 78 px à gauche pour les feux de macOS.
-test('le contenu est centré dans sa zone, pas collé au logo', async ({ page }) => {
+//
+// **Ce qui est centré est le groupe, logo compris** (`API-47`) : mesurer le seul indicateur le
+// dirait décentré de la demi-largeur du logo, et c'est voulu — le logo est son voisin de gauche.
+test('le groupe logo + indicateur est centré dans sa zone', async ({ page }) => {
   const ecart = await page.evaluate(() => {
     const centre = document
       .querySelector('[data-testid=titlebar-a4]')
       ?.querySelector('[class*="center"]')
-    const zone = centre?.firstElementChild
-    if (!zone || !centre) return null
-    const a = zone.getBoundingClientRect()
+    const enfants = [...(centre?.children ?? [])]
+    const debut = enfants.at(0)
+    const fin = enfants.at(-1)
+    if (!centre || !debut || !fin || enfants.length < 2) return null
+    const premier = debut.getBoundingClientRect()
+    const dernier = fin.getBoundingClientRect()
     const b = centre.getBoundingClientRect()
-    return Math.round(Math.abs(a.left + a.width / 2 - (b.left + b.width / 2)))
+    return Math.round(Math.abs((premier.left + dernier.right) / 2 - (b.left + b.width / 2)))
   })
   expect(ecart).toBeLessThanOrEqual(2)
 })
@@ -195,26 +217,29 @@ test('le parcours clavier de la barre compte un arrêt', async ({ page }) => {
 /**
  * Rien de sélectionné : aucune empreinte réservée.
  *
- * `.center` vide a une hauteur de zéro sans rien déplacer. Ce n'est pas un état à inventer — c'est
- * celui que `A1` montre déjà dans le handoff. Une boîte fantôme n'achèterait aucune stabilité, et une
- * boîte vide bordée au centre d'une barre se lirait comme un champ à remplir.
+ * `.center` sans indicateur n'a que son logo, et rien ne bouge autour. Ce n'est pas un état à
+ * inventer — c'est celui que `A1` montre déjà dans le handoff. Une boîte fantôme n'achèterait aucune
+ * stabilité, et une boîte vide bordée au centre d'une barre se lirait comme un champ à remplir.
+ *
+ * **Ce que ce test ne prétend plus** (`API-47`) : que le logo ne bouge pas. Il est désormais dans le
+ * groupe centré, donc il se déplace avec la longueur du fil d'Ariane — conséquence voulue de
+ * « centrer un groupe de largeur variable », et la seule alternative aurait décentré l'indicateur.
+ * Ce qui doit rester immobile est la **hauteur** de la barre et la place de ses actions, qui sont ce
+ * qu'un centre variable pourrait pousser.
  */
-test('un centre vide ne déplace ni le wordmark ni les actions', async ({ page }) => {
+test('un centre sans indicateur ne déplace pas les actions', async ({ page }) => {
   const mesures = await page.evaluate(() => {
     const releve = (testid: string) => {
       const barre = document.querySelector(`[data-testid=${testid}]`)?.firstElementChild
       if (!barre) return null
       const b = barre.getBoundingClientRect()
-      const wordmark = barre.firstElementChild?.getBoundingClientRect()
       const actions = barre.lastElementChild?.getBoundingClientRect()
-      if (!wordmark || !actions) return null
+      if (!actions) return null
       // Des écarts aux bords, et non des abscisses : les deux décors sont dans deux `Sub` distincts,
       // donc à deux ordonnées et potentiellement à deux largeurs. Ce qui doit être identique est la
-      // place que le wordmark et les actions prennent **dans** la barre.
+      // place que les actions prennent **dans** la barre.
       return {
         hauteur: Math.round(b.height),
-        wordmark: Math.round(wordmark.left - b.left),
-        largeurWordmark: Math.round(wordmark.width),
         actions: Math.round(b.right - actions.right),
         largeurActions: Math.round(actions.width),
       }
@@ -224,6 +249,27 @@ test('un centre vide ne déplace ni le wordmark ni les actions', async ({ page }
 
   expect(mesures.vide).not.toBeNull()
   expect(mesures.vide).toEqual(mesures.plein)
+})
+
+/**
+ * Et seul, le logo est au milieu de la zone — c'est ce que `A1` montre.
+ *
+ * Le test précédent ne le dit pas : il compare deux décors entre eux, donc il resterait vert sur un
+ * logo collé à un bord dans les deux. C'est la leçon de la règle n° 18 — une comparaison ne garde
+ * pas une position.
+ */
+test('sans indicateur, le logo seul est centré', async ({ page }) => {
+  const ecart = await page.evaluate(() => {
+    const centre = document
+      .querySelector('[data-testid=titlebar-vide]')
+      ?.querySelector('[class*="center"]')
+    const logo = centre?.firstElementChild
+    if (!centre || !logo || logo.tagName !== 'svg') return null
+    const a = logo.getBoundingClientRect()
+    const b = centre.getBoundingClientRect()
+    return Math.round(Math.abs(a.left + a.width / 2 - (b.left + b.width / 2)))
+  })
+  expect(ecart).toBeLessThanOrEqual(2)
 })
 
 test('le fil d’Ariane est en mono, le nom du projet en Nunito', async ({ page }) => {

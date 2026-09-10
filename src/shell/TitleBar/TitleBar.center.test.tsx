@@ -23,35 +23,43 @@ const barre = (container: HTMLElement) =>
 /*
  * **Rien de sélectionné : aucune empreinte réservée** (`25b`).
  *
- * `.center` vide a une hauteur de zéro sans rien déplacer — la barre garde ses 40 px, le wordmark et
- * les actions ne bougent pas. jsdom ne mesure rien, donc ce qui est testable ici est la **structure**
- * : le centre existe, il est vide, et les actions sont là. Une boîte fantôme n'achèterait aucune
+ * `.center` sans indicateur ne réserve aucune empreinte — la barre garde ses 40 px et les actions ne
+ * bougent pas. jsdom ne mesure rien, donc ce qui est testable ici est la **structure** : le centre
+ * existe, il ne porte que le logo, et les actions sont là. Une boîte fantôme n'achèterait aucune
  * stabilité, et une boîte vide bordée au centre d'une barre se lirait comme un champ à remplir.
+ *
+ * **Depuis `API-47`, « vide » veut dire « le logo seul »** : il vit dans cette zone, et c'est lui
+ * que `A1` montre seul au milieu de sa barre.
  */
-test('sans centre, la barre garde son wordmark et ses actions, et rien au centre', () => {
+test('sans indicateur, le centre ne porte que le logo, et les actions restent', () => {
   const { container } = render(
     <LanguageProvider preferences={{ language: 'fr' }}>
       <Sprite />
       <TitleBar onOpenPreferences={() => {}} />
     </LanguageProvider>,
   )
-  expect(screen.getByText('DoraBase')).toBeInTheDocument()
+  expect(screen.queryByText('DoraBase')).not.toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Préférences' })).toBeInTheDocument()
 
-  // Le centre est la deuxième zone de la barre — wordmark, centre, actions — et il est vide.
-  const centre = barre(container).children[1] as HTMLElement
+  // Le centre est la première zone de la barre — centre, actions — et il n'a que son logo.
+  const centre = barre(container).children[0] as HTMLElement
   expect(centre.textContent).toBe('')
-  expect(centre.children).toHaveLength(0)
+  expect(centre.children).toHaveLength(1)
+  expect(centre.firstElementChild?.tagName).toBe('svg')
 })
 
-test('avec un centre, l’indicateur de sélection y est rendu', () => {
-  render(
+test('avec un centre, l’indicateur de sélection y est rendu à côté du logo', () => {
+  const { container } = render(
     <LanguageProvider preferences={{ language: 'fr' }}>
       <Sprite />
       <TitleBar center={<SelectionIndicator projectName="Atelier Nord" />} />
     </LanguageProvider>,
   )
   expect(screen.getByText('Atelier Nord')).toBeInTheDocument()
+  // **L'ordre compte** : le logo précède l'indicateur, comme il précédait le mot qu'il nommait.
+  const centre = barre(container).children[0] as HTMLElement
+  expect(centre.children).toHaveLength(2)
+  expect(centre.firstElementChild?.tagName).toBe('svg')
 })
 
 /*
@@ -88,15 +96,18 @@ test('le parcours clavier de la barre compte un arrêt, et le centre n’en est 
 
 // La barre n'a plus de prop `right` : le sélecteur d'environnement en était l'unique appelant, et
 // une prop sans appelant n'est qu'un emplacement que le prochain écran remplira sans savoir pourquoi.
-test('la barre n’expose que le centre, sans emplacement à droite', () => {
+//
+// Elle n'a plus de zone à **gauche** non plus depuis `API-47` : le wordmark en occupait une, et le
+// logo qui en reste vit au centre.
+test('la barre n’a que deux zones, le centre et les actions', () => {
   const { container } = render(
     <LanguageProvider preferences={{ language: 'fr' }}>
       <Sprite />
       <TitleBar center={<SelectionIndicator projectName="Atelier Nord" />} />
     </LanguageProvider>,
   )
-  // Trois zones exactement : wordmark, centre, actions.
-  expect(barre(container).children).toHaveLength(3)
+  // Deux zones exactement : centre, actions.
+  expect(barre(container).children).toHaveLength(2)
 })
 
 test('sans gestionnaire, l’engrenage est désactivé et dit pourquoi', () => {

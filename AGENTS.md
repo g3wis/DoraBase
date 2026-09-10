@@ -233,6 +233,33 @@ qu'il portait et que le rendu ne dit pas.
   est le palier qui connaît son contexte, là où un bouton de barre aurait dû deviner pour laquelle.
   C'est la même raison qui a fait partir le pied de la sidebar. La prop `showConsole` est partie
   avec.
+- **Et son logo est passé au centre, sans le mot « DoraBase »** (10 septembre 2026, `API-47`, à la
+  demande). Le wordmark occupait la zone de gauche, celle que le dégagement des feux de macOS pousse
+  déjà de 78 px, et il y disait le nom une seconde fois — la barre d'état le porte avec la version,
+  et la fenêtre le porte aussi. Le logo entre donc dans le centre, **avant** l'indicateur de
+  sélection, et la barre n'a plus que deux zones : centre et actions. Quatre points :
+  - **le groupe est centré, pas le seul indicateur.** Conséquence voulue, et c'est ce que « centrer
+    un groupe de largeur variable » veut dire : le logo se déplace avec la longueur du fil d'Ariane.
+    L'autre issue — figer le logo au milieu de la barre et laisser l'indicateur couler à sa droite —
+    **décentrerait l'indicateur**, que le mockup centre ; c'est le contraire de ce qui a fait
+    envelopper le centre dans un `flex:1; justify-content:center`. Le test de géométrie a donc
+    changé de sujet : ce qui doit rester immobile quand le centre varie est la hauteur de la barre et
+    la place de ses actions, non le logo ;
+  - **le centre est toujours celui de l'espace restant**, pas de la fenêtre. Les 78 px des feux
+    restent, donc le logo est à treize pixels à droite du milieu de la fenêtre. La question s'est
+    posée en le regardant : la déplacer serait re-trancher l'axe de centrage, ce qu'un test de `09c`
+    garde depuis le handoff avec sa raison — et ce n'est pas ce qui était demandé ;
+  - **`.wordmark`, `.name` et `.wordmarkDimmed` sont parties**, pas laissées mortes : une règle sans
+    appelant est un `var()` mort de plus, et c'est le motif du `grid-column` inerte du 31 août. La
+    cote `--text-wordmark` reste, l'en-tête des modales l'employant ;
+  - **le logo garde `aria-hidden`**, comme quand le mot le nommait : c'est une décoration, et le nom
+    de l'application n'a pas quitté l'arbre d'accessibilité — la barre d'état l'annonce. Trois tests
+    unitaires visaient ce mot comme témoin d'un écran monté (`App`, `A1`, la barre elle-même) ; ils
+    visent désormais la zone de glissement, qui est ce qu'ils voulaient dire.
+
+  **Les cinq captures de fidélité d'`a1.spec.ts` sont périmées par ce changement et régénérées avec
+  lui** — la règle n° 6, et la barre de titre est le décor le plus partagé du produit.
+
 - **L'engrenage était un soleil.** `i-gear` était un cercle et six rayons — le tracé d'un soleil, pas
   d'un rouage —, et il annonçait les préférences dans la barre de titre comme dans l'en-tête de leur
   modale. Redessiné en rouage à huit dents le 26 août 2026. Quatre captures de fidélité en

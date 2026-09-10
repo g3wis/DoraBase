@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, waitFor } from '@testing-library/react'
 import { App } from './App'
 
 // **L'app ne rend plus rien synchronement.** Depuis `09b`, elle lit d'abord la configuration :
@@ -7,9 +7,15 @@ import { App } from './App'
 //
 // Sous Vitest, le pont IPC n'existe pas : `load_config` rejette, et l'app tombe dans l'état
 // « injoignable » — qui affiche `A1` faute de mieux, la configuration restant inconnue.
-test('rend le nom de l’application une fois la configuration lue', async () => {
-  render(<App />)
-  await waitFor(() => expect(screen.getByText('DoraBase')).toBeInTheDocument())
+//
+// **Ce qu'on regarde n'est plus le nom écrit** (`API-47`) : la barre de titre ne porte plus le mot
+// « DoraBase », son logo étant passé au centre. Le témoin de l'écran monté est donc la zone de
+// glissement de la fenêtre, que le test suivant emploie déjà en négatif.
+test('rend l’écran une fois la configuration lue', async () => {
+  const { container } = render(<App />)
+  await waitFor(() =>
+    expect(container.querySelector('[data-tauri-drag-region]')).toBeInTheDocument(),
+  )
 })
 
 test('rien n’est rendu avant que la configuration ait répondu', () => {
