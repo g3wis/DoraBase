@@ -1253,6 +1253,14 @@ function TitleBarGallery() {
         désormais dans l’arbre, où il est un palier (`25a`).
       </Note>
       <Note>
+        **Le logo est au centre, et le mot « DoraBase » n’y est plus** (`API-47`). Il vivait à
+        gauche, apparié au wordmark, dans une zone que le dégagement des feux de macOS poussait déjà
+        de 78 px — et le nom y était dit une seconde fois, la barre d’état le portant avec la
+        version. Le logo entre donc dans le centre, avant l’indicateur, et les deux forment le
+        groupe que la barre centre : le logo se déplace avec la longueur du fil d’Ariane, ce qui est
+        ce que « centrer un groupe de largeur variable » veut dire.
+      </Note>
+      <Note>
         Le point d’état est celui de la connexion **ouverte** : un projet n’a pas d’état de
         connexion, ses connexions en ont. Sans connexion ouverte, **aucun point** plutôt qu’un point
         gris inventé.
@@ -1295,7 +1303,7 @@ function TitleBarGallery() {
       <Sub title="Un projet seul — la sélection ne désigne pas d’environnement">
         <TitleBar center={<SelectionIndicator projectName="Atelier Nord" />} />
       </Sub>
-      <Sub title="Rien de sélectionné — le centre est vide, et la barre ne bouge pas">
+      <Sub title="Rien de sélectionné — le centre n’a que son logo, et les actions ne bougent pas">
         <div data-testid="titlebar-vide">
           <TitleBar />
         </div>

@@ -21,11 +21,12 @@ type TitleBarProps = {
    * `titleBarStyle: "Overlay"` les fait dessiner par macOS, hors d'atteinte du CSS, et le
    * système ne les ternit que sur perte de focus — qu'une modale interne ne provoque pas.
    * Les deux autres effets du mockup sont appliqués : `saturate(.6)` sur la barre et
-   * `opacity .55` sur le wordmark. Écart consigné dans `AGENTS.md`.
+   * `opacity .55` sur le logo. Écart consigné dans `AGENTS.md`.
    */
   dimmed?: boolean
   /**
-   * Le centre de la barre : l'indicateur de sélection (`A4` → `A9`).
+   * Le centre de la barre : l'indicateur de sélection (`A4` → `A9`), posé **à droite du logo**
+   * depuis `API-47` — les deux forment le groupe que la barre centre.
    *
    * Passé en contenu plutôt qu'en propriétés : `A1` n'en a aucun, les écrans de travail en ont un, et
    * son contenu a déjà changé deux fois. Une liste de propriétés grandirait à chaque écran là où un
@@ -149,7 +150,7 @@ function BoutonsDeFenetre({ passerelle }: { passerelle: PasserelleFenetre }) {
 // **La valeur `deep` est nécessaire, et l'attribut nu ne suffisait pas.** Le script de Tauri
 // (`window/scripts/drag.js`) traite l'attribut nu comme « seuls les clics **directs** sur cet
 // élément » : `el === composedPath[0]`. Or la barre est presque entièrement couverte par ses
-// enfants — wordmark, centre, actions — donc seule la bande de fond autour des feux répondait.
+// enfants — centre, actions — donc seule la bande de fond autour des feux répondait.
 // Constaté à l'usage le 10 août 2026, après avoir cru le problème réglé par la seule permission.
 //
 // `deep` étend le glissement au sous-arbre, et les éléments **cliquables** le bloquent
@@ -171,16 +172,30 @@ export function TitleBar({
       className={cx(styles.root, windows && styles.rootWindows, dimmed && styles.dimmed)}
       data-tauri-drag-region="deep"
     >
-      <div className={cx(styles.wordmark, dimmed && styles.wordmarkDimmed)}>
-        <svg className={styles.logo} viewBox="0 0 512 512" aria-hidden="true">
+      {/* **Le logo est au centre, et le mot « DoraBase » n'y est plus** (`API-47`, à la demande).
+          Il vivait à gauche, apparié au wordmark, dans une zone que le dégagement des feux de macOS
+          poussait déjà de 78 px : le nom y était dit une seconde fois, la barre d'état le portant
+          déjà avec la version — et une barre de titre n'a pas à répéter le nom de la fenêtre.
+
+          Il entre donc dans le centre, **avant** l'indicateur, et les deux ne font qu'un groupe que
+          `.center` centre. Conséquence voulue, et c'est ce que « centrer un groupe de largeur
+          variable » veut dire : le logo se déplace avec la longueur du fil d'Ariane. L'autre issue
+          — le figer au milieu et laisser l'indicateur couler à sa droite — décentrerait l'indicateur,
+          que le mockup centre.
+
+          Il reste `aria-hidden` : c'est une décoration, et il l'était déjà quand le nom le
+          nommait. Ce nom n'a pas disparu de l'arbre d'accessibilité pour autant — la barre d'état
+          l'annonce, et la fenêtre le porte. */}
+      <div className={styles.center}>
+        <svg
+          className={cx(styles.logo, dimmed && styles.logoDimmed)}
+          viewBox="0 0 512 512"
+          aria-hidden="true"
+        >
           <use href="#logo" />
         </svg>
-        <span className={styles.name}>DoraBase</span>
+        {center}
       </div>
-      {/* Le centre est **centré dans la barre**, pas simplement placé après le wordmark : le
-          mockup l'enveloppe dans un `flex:1; justify-content:center`. Sans cela, la pastille
-          collerait au logo et se déplacerait avec la longueur du fil d'Ariane. */}
-      <div className={styles.center}>{center}</div>
       <div className={styles.actions}>
         <button
           type="button"

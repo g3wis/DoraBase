@@ -6,8 +6,10 @@
  * `padding-left: 78px` dégage les feux tricolores du système, la barre de titre native
  * n'existant plus sous `titleBarStyle: Overlay` — voir spec 01.
  *
- * Wordmark en `--text-wordmark` (14px, corrigé à la valeur du mockup — la table du
- * handoff annonçait 13px, écart assumé).
+ * **Le wordmark est parti** (`API-47`) : le logo est passé au centre, avec l'indicateur, et le
+ * mot « DoraBase » a été retiré. `.wordmark`, `.name` et `.wordmarkDimmed` sont donc partis avec
+ * lui plutôt que d'être laissés morts — une règle sans appelant est un `var()` mort de plus. La
+ * cote de police qu'il portait, `--text-wordmark`, sert toujours à l'en-tête des modales.
  *
  * L'icône de préférences est seule à droite : pas d'icône console sur cet écran.
  */
@@ -36,25 +38,15 @@
   padding-left: var(--space-6);
 }
 
-.wordmark {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  margin-left: var(--space-3);
-}
-
+/* `flex: none` : le logo est une image de 24 px, pas un contenu qui rétrécit. Sans lui, un fil
+ * d'Ariane profond le comprimerait avant de rétrécir le texte — or c'est le texte qui doit
+ * céder, et `SelectionIndicator` porte déjà ce rétrécissement. */
 .logo {
   display: block;
+  flex: none;
   width: 24px;
   height: 24px;
   border-radius: var(--radius-control);
-}
-
-.name {
-  font-family: var(--font-title);
-  font-size: var(--text-wordmark);
-  font-weight: var(--weight-bold);
-  letter-spacing: 0.1px; /* hors échelle --tracking-*, mesuré ligne 121 */
 }
 
 /* Le centre occupe tout l'espace disponible et centre son contenu. C'est ce qui tient la
@@ -66,6 +58,9 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  /* L'écart entre le logo et l'indicateur. C'est celui que `.wordmark` mettait entre le logo et le
+   * mot « DoraBase » : le logo a changé de voisin, pas de rythme. */
+  gap: var(--space-4);
   /* Le contenu ne doit pas pousser les actions hors de la barre : un nom de projet long ou un
    * fil d'Ariane profond rétrécissent plutôt que de déborder.
    *
@@ -131,7 +126,7 @@
 
 /* --- Fenêtre bloquée par une modale (A2, A3) ---
  *
- * `filter: saturate(.6)` sur la barre et `opacity .55` sur le wordmark : les deux effets du
+ * `filter: saturate(.6)` sur la barre et `opacity .55` sur le logo : les deux effets du
  * mockup qui sont à notre portée. Le troisième — les feux en `#DCD6CB` — ne l'est pas, macOS
  * les dessinant lui-même sous `titleBarStyle: "Overlay"`. Voir la note du composant.
  */
@@ -139,6 +134,6 @@
   filter: saturate(0.6);
 }
 
-.wordmarkDimmed {
+.logoDimmed {
   opacity: 0.55;
 }

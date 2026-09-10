@@ -1488,9 +1488,9 @@ export function Workbench({
       )}
       <TitleBar
         onOpenPreferences={onOpenPreferences}
-        // **Rien du tout quand rien n'est sélectionné** (`25b`), et aucune empreinte réservée : un
-        // `.center` vide a une hauteur de zéro sans rien déplacer — la barre garde ses 40 px, le
-        // wordmark et les actions ne bougent pas. C'est déjà ce que `A1` montre dans le handoff.
+        // **Rien du tout quand rien n'est sélectionné** (`25b`), et aucune empreinte réservée : le
+        // centre n'a alors que son logo (`API-47`) — la barre garde ses 40 px et les actions ne
+        // bougent pas. C'est déjà ce que `A1` montre dans le handoff.
         center={
           indication === null ? undefined : (
             <SelectionIndicator

@@ -39,8 +39,10 @@ test('cet écran n’écoute plus le clavier', async () => {
 })
 
 test('assemble la barre de titre, la barre d’état et le compteur de projets', () => {
-  monter({ projectCount: 2 })
-  expect(screen.getByText('DoraBase')).toBeInTheDocument()
+  const { container } = monter({ projectCount: 2 })
+  // La barre de titre, désignée par sa zone de glissement : elle ne porte plus le mot « DoraBase »
+  // depuis `API-47`, son logo étant passé au centre.
+  expect(container.querySelector('[data-tauri-drag-region]')).toBeInTheDocument()
   expect(screen.getByText('2 projets')).toBeInTheDocument()
 })
 
