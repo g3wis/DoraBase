@@ -29,7 +29,6 @@ export const shellFr: Dictionnaire = {
   },
   titleBar: {
     preferences: 'Préférences',
-    preferencesDisabledTitle: 'Les préférences ne sont pas montées sur cet exemplaire de la barre.',
     // Les trois boutons de fenêtre, Windows seulement (31 août 2026). `decorations: false` retire
     // ceux du système : ceux-ci les remplacent, donc ils ont besoin d'un nom accessible — l'icône
     // seule ne dit rien à la voix.
@@ -67,7 +66,6 @@ export const shellEn: Dictionnaire = {
   },
   titleBar: {
     preferences: 'Preferences',
-    preferencesDisabledTitle: 'Preferences are not mounted on this instance of the bar.',
     reduire: 'Minimise',
     agrandir: 'Maximise',
     restaurer: 'Restore',

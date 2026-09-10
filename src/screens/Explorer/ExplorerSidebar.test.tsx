@@ -93,6 +93,7 @@ function Piloté({
   consoles,
   onAddDatabase,
   onNewProject,
+  onOpenPreferences,
   onOpenDiagram,
   onManageSchemas,
   projets = PROJETS,
@@ -110,6 +111,7 @@ function Piloté({
   consoles?: ExplorerSidebarProps['consoles']
   onAddDatabase?: ExplorerSidebarProps['onAddDatabase']
   onNewProject?: () => void
+  onOpenPreferences?: () => void
   onOpenDiagram?: ExplorerSidebarProps['onOpenDiagram']
   onManageSchemas?: ExplorerSidebarProps['onManageSchemas']
   projets?: Project[]
@@ -135,6 +137,7 @@ function Piloté({
           consoles={consoles}
           onAddDatabase={onAddDatabase}
           onNewProject={onNewProject}
+          onOpenPreferences={onOpenPreferences}
           onOpenDiagram={onOpenDiagram}
           onManageSchemas={onManageSchemas}
           onSelect={(n) => setChoisi(n.id)}
@@ -470,12 +473,51 @@ test('la colonne n’a plus de pied du tout', () => {
 
 test('la bande d’actions est en tête, avant le filtre', () => {
   render(<Piloté onNewProject={() => {}} />)
-  const bande = screen.getByRole('toolbar', { name: /Actions de l’arborescence/ })
+  const bande = screen.getByRole('toolbar', { name: /Actions du panneau/ })
   const bouton = screen.getByRole('button', { name: 'Nouveau projet' })
   expect(bande).toContainElement(bouton)
   // L'ordre du DOM est celui du parcours clavier : on agit sur le panneau avant de filtrer sa liste.
   const champ = screen.getByRole('textbox')
   expect(bande.compareDocumentPosition(champ)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+})
+
+/**
+ * **Le bouton des préférences est dans la bande, à côté du « + »** (`API-46`, à la demande).
+ *
+ * Il a quitté la barre de titre, qui n'a plus aucune action dans l'écran de travail. Ce qui est
+ * mesurable ici est l'appartenance et l'ordre du DOM — le rythme des deux carrés est une mise en
+ * page, donc hors de portée de jsdom (règle n° 9) —, et le reste est un test d'assemblage : la
+ * vitrine ne peut pas prouver que le bouton est branché à l'écran qui monte la modale (règle n° 8).
+ */
+test('le bouton des préférences suit « Nouveau projet » dans la bande, et ouvre les préférences', async () => {
+  const ouvrir = vi.fn()
+  render(<Piloté onNewProject={() => {}} onOpenPreferences={ouvrir} />)
+  const bande = screen.getByRole('toolbar', { name: /Actions du panneau/ })
+  const reglages = screen.getByRole('button', { name: 'Préférences' })
+  // Enfant **direct** de la bande : c'est ce qui interdit une enveloppe de rangement autour de lui,
+  // dont un `margin-left: auto` le renverrait à l'autre bout sans que le DOM en dise rien.
+  expect(reglages.parentElement).toBe(bande)
+  expect(
+    screen.getByRole('button', { name: 'Nouveau projet' }).compareDocumentPosition(reglages),
+  ).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+
+  await userEvent.click(reglages)
+  expect(ouvrir).toHaveBeenCalledOnce()
+})
+
+test('sans gestionnaire, le bouton n’est pas rendu — et la bande subsiste', () => {
+  // C'est la règle de « Nouveau projet » juste au-dessus : un contrôle qui ne fait rien est pire
+  // qu'un contrôle absent (défaut n° 36). Et le cas de la galerie, où aucune modale ne répond.
+  render(<Piloté onNewProject={() => {}} />)
+  expect(screen.queryByRole('button', { name: 'Préférences' })).toBeNull()
+  expect(screen.getByRole('toolbar', { name: /Actions du panneau/ })).toBeInTheDocument()
+})
+
+test('sans aucun des deux gestes, la bande n’est pas montée du tout', () => {
+  // Une bande vide coûterait ses 28 px sur la hauteur de l'arbre pour ne rien porter — c'est
+  // exactement ce que le retrait du pied avait gagné.
+  render(<Piloté />)
+  expect(screen.queryByRole('toolbar', { name: /Actions du panneau/ })).toBeNull()
 })
 
 // **Le geste n'est pas supprimé, il est déplacé** — et ce test est ce qui l'atteste. `rafraichir`

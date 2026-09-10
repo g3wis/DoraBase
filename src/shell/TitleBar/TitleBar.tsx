@@ -39,13 +39,16 @@ type TitleBarProps = {
    */
   center?: ReactNode
   /**
-   * Ouvre les préférences (`15a`). Absent, l'engrenage reste **désactivé avec sa raison** — la règle
-   * de `09f` : un bouton cliquable et inerte se lit comme une panne (défaut n° 36).
+   * Ouvre les préférences (`15a`). **Absent, l'engrenage n'est pas rendu** — et non rendu inerte.
    *
-   * **Depuis le 26 août 2026, aucun écran du produit ne le laisse absent** : `A1` le passait pas, et
-   * son engrenage ne faisait rien. La galerie est le dernier appelant à monter la barre sans, d'où
-   * une infobulle qui ne nomme plus d'écran — celui qu'elle nommait n'existe pas quand `A1` est à
-   * l'écran. Un tel bouton désactivé dans le produit serait désormais un défaut.
+   * Il était *désactivé avec sa raison* jusqu'à `API-46`, ce qui était la bonne réponse tant que tous
+   * les écrans du produit le passaient et que la galerie était le seul appelant à ne pas le faire.
+   * Depuis que l'écran de travail porte l'engrenage dans la bande en tête de sa sidebar, la barre est
+   * montée **sans** dans le produit : un carré grisé y annoncerait un réglage inatteignable alors
+   * qu'il est à trente pixels de là. Un contrôle qui ne fait rien est pire qu'un contrôle absent
+   * (défaut n° 36), et c'est déjà l'arbitrage de `SidebarToolbar` pour « Nouveau projet ».
+   *
+   * L'accueil, lui, le passe toujours : il n'a pas d'arborescence, donc pas de bande où le mettre.
    */
   onOpenPreferences?: () => void
   /**
@@ -197,20 +200,22 @@ export function TitleBar({
         {center}
       </div>
       <div className={styles.actions}>
-        <button
-          type="button"
-          className={styles.action}
-          aria-label={t('shell.titleBar.preferences')}
-          onClick={onOpenPreferences}
-          disabled={onOpenPreferences === undefined}
-          title={
-            onOpenPreferences === undefined
-              ? t('shell.titleBar.preferencesDisabledTitle')
-              : undefined
-          }
-        >
-          <Icon name="gear" size={15} strokeWidth={1.8} />
-        </button>
+        {/* **Non rendu quand personne n'écoute** (`API-46`) : voir la note de la prop. Dans l'écran
+            de travail, les préférences vivent désormais dans la bande en tête de la sidebar, et la
+            barre n'a plus d'action du tout — c'est l'accueil, sans arborescence, qui la garde ici. */}
+        {onOpenPreferences && (
+          <button
+            type="button"
+            className={styles.action}
+            aria-label={t('shell.titleBar.preferences')}
+            onClick={onOpenPreferences}
+          >
+            {/* `slid` et non l'engrenage depuis `API-46` : c'est le même bouton que celui de la
+                bande de la sidebar, donc le même dessin — un contrôle qui change de glyphe selon
+                l'écran se lit comme un autre contrôle. Voir la note d'`i-slid` dans le sprite. */}
+            <Icon name="slid" size={15} strokeWidth={1.8} />
+          </button>
+        )}
         {/* Après l'engrenage : les boutons de fenêtre sont **au bord**, comme partout sous
             Windows, et une action du produit ne doit pas se glisser entre eux. */}
         {windows && <BoutonsDeFenetre passerelle={fenetre} />}

@@ -763,6 +763,9 @@ function SidebarGallery() {
             toolbar={
               <SidebarToolbar>
                 <SidebarToolbarButton icon="plus" label="Nouveau projet" onClick={() => {}} />
+                {/* Les deux actions du produit (`API-46`) : une bande à un seul bouton ne dirait rien
+                    du rythme de deux carrés côte à côte. */}
+                <SidebarToolbarButton icon="slid" label="Préférences" onClick={() => {}} />
               </SidebarToolbar>
             }
           >
