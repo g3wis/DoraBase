@@ -36,7 +36,7 @@ import { WelcomeScreen } from '../screens/Welcome/WelcomeScreen'
 import { Workbench } from '../screens/Workbench/Workbench'
 import { AnnonceMiseAJour } from '../shell/AnnonceMiseAJour/AnnonceMiseAJour'
 import { useClicDroitDesactive } from '../shell/useClicDroit'
-import { useZoom } from '../shell/useZoom'
+import { useRefusDuZoom } from '../shell/useRefusDuZoom'
 import { BarresDeDefilement } from '../ui/BarresDeDefilement/BarresDeDefilement'
 import { brancherEvenementsDeMenu } from './menuEvents'
 import { useRaccourcisDeCreation } from './useRaccourcisDeCreation'
@@ -67,8 +67,8 @@ const WorkbenchDemo = showDemo
   : null
 
 export function App() {
-  // Le zoom au geste, à pas fin — sous Tauri seulement, la webview étant ce qui zoome.
-  useZoom()
+  // Aucun zoom global : le pincement du trackpad et `⌘`/`Ctrl` + molette sont refusés (`API-57`).
+  useRefusDuZoom()
   // Le menu contextuel du moteur de rendu, remplacé par le silence : nos menus s'ouvrent eux-mêmes.
   useClicDroitDesactive()
 

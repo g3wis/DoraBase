@@ -212,9 +212,9 @@ type ToolbarProps = {
  * l'ancêtre de défiler à notre place.
  *
  * **Seul l'axe vertical est traduit.** Un glissement horizontal du trackpad est déjà appliqué par la
- * webview ; l'ajouter au nôtre doublerait le pas. Et `ctrlKey`/`metaKey` sont laissés à `useZoom`,
- * qui refuse le pincement et applique le zoom fin — les intercepter ici ferait défiler la bande sur
- * un geste de zoom.
+ * webview ; l'ajouter au nôtre doublerait le pas. Et `ctrlKey`/`metaKey` sont laissés à
+ * `useRefusDuZoom`, qui refuse ces gestes-là — les intercepter ici ferait défiler la bande sur un
+ * geste de zoom, c'est-à-dire remplacerait un zoom non voulu par un défilement non voulu.
  *
  * `preventDefault` **seulement si la position a bougé** : arrivé au bout, le geste doit redevenir
  * celui de la page plutôt que d'être avalé par une bande qui ne défile plus.

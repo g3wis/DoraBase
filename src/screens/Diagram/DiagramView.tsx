@@ -81,10 +81,12 @@ export type DiagramViewProps = {
  *
  * # Le zoom est à boutons, et c'est délibéré
  *
- * La molette **défile**, elle ne zoome pas. `⌘` + molette appartient au zoom de l'application
- * (`useZoom`), et le pincement du trackpad y est refusé activement depuis le 26 août 2026 : un
- * second zoom sur les mêmes gestes ferait dépendre l'échelle de qui écoute l'événement le premier.
- * Les paliers sont donc explicites, et le glissement du fond déplace la vue.
+ * La molette **défile**, elle ne zoome pas, et il n'y a plus de geste qui zoome : `⌘` / `Ctrl` +
+ * molette comme le pincement du trackpad sont refusés par `useRefusDuZoom` (`API-57`), l'application
+ * n'ayant plus aucun zoom global. Les paliers d'ici sont donc les seuls du produit — et c'est ce que
+ * le zoom d'une **vue** a de différent : il grossit un dessin, non l'écran qui l'entoure. Les rendre
+ * explicites reste juste pour la raison d'origine : un second zoom sur les mêmes gestes ferait
+ * dépendre l'échelle de qui écoute l'événement le premier.
  */
 export function DiagramView({
   schema,
