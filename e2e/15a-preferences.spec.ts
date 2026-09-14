@@ -143,17 +143,17 @@ test('la modale des préférences tient dans la fenêtre minimale', async ({ pag
   expect(tient?.dansLaHauteur).toBe(true)
 })
 
-test('les six sections sont atteignables au clavier', async ({ page }) => {
+test('les cinq sections sont atteignables au clavier', async ({ page }) => {
   await ouvrirLesPreferences(page)
   // **Porté sur la modale** : la bande d'onglets de l'écran de travail en a aussi, et une
   // assertion à l'échelle de la page les compterait ensemble.
   const modale = page.getByRole('dialog', { name: 'Préférences' })
   const onglets = modale.getByRole('tab')
-  await expect(onglets).toHaveCount(6)
+  await expect(onglets).toHaveCount(5)
 
   // `role="tablist"` **promet** la navigation aux flèches, il ne la fournit pas : un rôle ARIA
   // annonce une convention, et c'est au code de la tenir. Sans elle, un lecteur d'écran annonce
-  // « onglet 1 sur 6 » et les flèches ne font rien.
+  // « onglet 1 sur 5 » et les flèches ne font rien.
   await modale.getByRole('tab', { name: 'Général' }).focus()
   await page.keyboard.press('ArrowDown')
   await expect(modale.getByRole('tab', { name: 'Apparence' })).toBeFocused()

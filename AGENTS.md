@@ -1068,6 +1068,38 @@ qu'il portait et que le rendu ne dit pas.
   trouvait zéro poubelle et concluait que le mode édition ne s'était pas ouvert. Les locators de ce
   test passent donc par le nom accessible **en attribut**.
 
+- **Une section de préférences qui n'a rien à régler s'en va** (14 septembre 2026, `API-59`, à la
+  demande : « supprimer le menu connexions du panneau de réglages »). C'est le troisième retrait de
+  la même famille — « Éditeur SQL » et « Raccourcis » étaient parties le 28 août 2026 —, et la règle
+  d'origine se renverse par son propre bout. Elle disait : « cacher ferait croire à une interface
+  plus pauvre qu'elle ne sera, laisser vide ferait croire à un défaut », donc on annonce. Ce
+  raisonnement tient **tant qu'il y a une date** ; sans elle, l'onglet occupe une place dans la
+  colonne, un arrêt dans le parcours clavier et une ligne dans le nom du groupe, pour rendre une
+  phrase qui ne change jamais — c'est-à-dire le défaut n° 36 déplacé du bouton à la section, un
+  contrôle qui répond en n'offrant rien. Quatre points :
+  - **le paragraphe de « Général » part avec, et c'est ce qui rend le retrait entier.** Il portait la
+    même promesse sous la langue — « le comportement au démarrage, et l'ouverture automatique des
+    connexions » — et un commentaire qui l'assumait : « livrer un réglage ne doit pas faire
+    disparaître ce qui reste annoncé ». Le laisser aurait gardé la moitié du défaut à l'endroit où on
+    le voit le moins ;
+  - **`AVenir` perd alors ses deux appelants, donc s'en va**, avec sa règle CSS et les quatre clefs
+    i18n des deux langues. C'est le motif du `var()` mort et du `grid-column` inerte : une fonction
+    sans appelant est un emplacement que le prochain écran remplira sans savoir pourquoi ;
+  - **ce que la section annonçait est reporté, pas abandonné** — délai d'attente, reconnexion
+    automatique, chemin de clé SSH par défaut vivent dans `API-60`. Une promesse qui disparaît de
+    l'écran doit se retrouver quelque part, sinon le retrait est une perte ;
+  - **et la raison de la section par défaut ne lui a pas survécu** (règle n° 20). La modale ouvrait
+    sur « Apparence » parce qu'« ouvrir sur Général montrerait d'abord une section qui annonce ce
+    qu'elle portera » — faux dès que « Général » ne porte plus que la langue. Le défaut ne bouge pas,
+    ce n'était pas demandé et changer la première vue de tout le monde n'est pas un effet de bord ;
+    c'est sa raison qui est réécrite, on ouvre sur ce qu'on vient changer.
+
+  **Et le test qui garde ce retrait est une négative, portée aux deux endroits** : aucun onglet
+  « Connexions », et aucune section ne rend « Cette section portera ». Une assertion positive sur les
+  cinq onglets restants laisserait revenir une sixième section sans rien dire, et une négative posée
+  sur le seul onglet laisserait revenir la phrase sous « Général ». Vérifié par deux sabotages, un
+  par moitié : chacun ne fait tomber que son assertion.
+
 ### La sidebar ne redit pas la table qu'on a ouverte (10 septembre 2026, `API-44`)
 
 La section « Colonnes de *table* » du bas de la sidebar paraissait aussi **sous un onglet de table**,

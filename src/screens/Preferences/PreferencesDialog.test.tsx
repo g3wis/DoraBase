@@ -45,26 +45,32 @@ function allerA(nom: string) {
 }
 
 describe('la coquille (`15a`)', () => {
-  it('liste les cinq sections du mockup, plus les mises à jour, et affiche la version', () => {
+  it('liste les quatre sections du mockup, plus les mises à jour, et affiche la version', () => {
     monter()
-    expect(screen.getAllByRole('tab')).toHaveLength(6)
+    // Quatre, et non les cinq du mockup : « Connexions » est partie le 14 septembre 2026
+    // (`API-59`), n'ayant jamais rien porté qu'une phrase « à venir ».
+    expect(screen.getAllByRole('tab')).toHaveLength(5)
     expect(screen.getByText('DoraBase 0.4.2 (arm64)')).toBeInTheDocument()
   })
 
-  it('ouvre sur Apparence, la seule section qui a du contenu', () => {
+  it('ouvre sur Apparence', () => {
     monter()
-    // Ouvrir sur « Général » montrerait d'abord une section qui annonce ce qu'elle portera.
+    // On ouvre sur la section qu'on vient changer — le thème et l'accent —, là où la langue de
+    // « Général » se choisit une fois. La raison d'origine (« Général annonce ce qu'il portera »)
+    // est morte avec `API-59`.
     expect(screen.getByRole('tab', { name: 'Apparence' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByRole('heading', { name: 'Thème' })).toBeInTheDocument()
   })
 
-  it('les sections sans contenu disent ce qu’elles porteront', async () => {
+  it('aucune section ne se contente d’annoncer ce qu’elle portera (`API-59`)', async () => {
     monter()
-    for (const nom of ['Général', 'Connexions']) {
+    // La dernière est partie le 14 septembre 2026. L'assertion est **négative** et porte sur la
+    // liste d'onglets autant que sur les panneaux : sans elle, remettre une section « à venir »
+    // ne ferait échouer aucun test.
+    expect(screen.queryByRole('tab', { name: 'Connexions' })).not.toBeInTheDocument()
+    for (const nom of ['Général', 'Apparence', 'Grille de données', 'Sécurité & écriture']) {
       await allerA(nom)
-      // **Ni cachées ni vides** : cacher ferait croire à une interface plus pauvre qu'elle ne sera,
-      // laisser vide ferait croire à un défaut. La règle de `09f`, appliquée à une section.
-      expect(screen.getByText(/Cette section portera/)).toBeInTheDocument()
+      expect(screen.queryByText(/Cette section portera/)).not.toBeInTheDocument()
     }
   })
 
@@ -102,12 +108,6 @@ describe('la langue (26 août 2026)', () => {
 
     await userEvent.click(screen.getByRole('radio', { name: 'English' }))
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ language: 'en' }))
-  })
-
-  it('« Général » dit encore ce qui n’est pas livré, sous la langue', async () => {
-    monter()
-    await allerA('Général')
-    expect(screen.getByText(/Cette section portera/)).toBeInTheDocument()
   })
 })
 
