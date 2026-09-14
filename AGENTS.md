@@ -210,11 +210,55 @@ qu'il portait et que le rendu ne dit pas.
 - **Le port prérempli appartient au moteur, pas au formulaire** — voir le tableau des quatre
   moteurs. Un port **saisi à la main** survit au changement de moteur, le défaut de l'autre
   moteur non : le champ est saisissable parce qu'un serveur peut n'être pas sur le port usuel.
-- **Le pincement du trackpad ne zoome pas** (26 août 2026). Il se déclenche tout seul en
-  glissant deux doigts pour défiler une grille, et l'interface changeait d'échelle sans que
-  personne l'ait demandé. Le refus est **actif** (`preventDefault` sur `wheel` + `ctrlKey`) :
-  s'abstenir laisserait la webview appliquer son propre pas, de dix à vingt-cinq pour cent.
-  `⌘` + molette reste, à pas fin, et `⌘0` revient à l'origine.
+- **L'application n'a aucun zoom global** (26 août 2026, puis `API-57` le 14 septembre 2026). Le
+  pincement du trackpad se déclenche tout seul en glissant deux doigts pour défiler une grille, et
+  l'interface changeait d'échelle sans que personne l'ait demandé : il est refusé depuis le 26 août,
+  **activement** (`preventDefault` sur `wheel` + `ctrlKey`), s'abstenir laissant la webview
+  appliquer son propre pas, de dix à vingt-cinq pour cent. Ce qui restait à côté — `⌘` / `Ctrl` +
+  molette appliquant notre propre facteur à pas fin, `⌘0` le rendant à l'origine — est parti avec
+  `API-57`, rapporté à l'usage (« le zoom trackpad ne doit pas avoir d'impact sur l'application :
+  pas de zoom global autorisé »). Six points :
+  - **le partage ne tenait pas.** Sur un trackpad, le geste refusé et le geste offert **sont le même
+    à un doigt près** : il suffit de garder `⌘` enfoncé en défilant pour retomber exactement dans le
+    défaut que le refus du pincement existait pour corriger. Un zoom qu'on ne peut offrir sans le
+    déclencher par accident n'est pas offert, il est subi ;
+  - **le zoom qui reste est celui d'une *vue*, et c'est une autre chose.** Les paliers du diagramme
+    de schéma grossissent un **dessin**, à boutons, sans toucher l'écran qui l'entoure. Le zoom
+    global, lui, changeait la densité que ce fichier décide par ailleurs au pixel — 11 px de grille,
+    une échelle d'espacement sans 8 px ;
+  - **le refus n'a plus d'exception de plateforme.** Il en avait une : sous Windows, `Ctrl` + molette
+    **est** le geste de zoom volontaire de tous les logiciels, et le refuser aurait retiré le zoom au
+    lieu de l'adoucir. L'argument tombe avec le pas fin qu'il servait — il n'y a plus rien à offrir en
+    échange —, et WebView2 refuse déjà le sien. Deux comportements pour une seule règle auraient
+    survécu à leur raison ;
+  - **et il vaut dans le navigateur aussi**, comme avant : `pnpm dev` doit se comporter comme
+    l'application livrée — c'est ce que la fenêtre native, invisible à Playwright, ne permet pas de
+    vérifier autrement —, et un refus qui ne vivrait que sous Tauri ne serait couvert par aucun test ;
+  - **le clavier n'est pas repris, parce qu'il n'y a rien à reprendre.** `zoomHotkeysEnabled` vaut
+    `false` — désormais **écrit** dans les deux configurations plutôt que laissé au défaut de Tauri,
+    la garantie reposant dessus : sous Windows cette seule clef pose `IsZoomControlEnabled` **et**
+    `IsPinchZoomEnabled`, donc c'est elle qui refuse le pincement là-bas, et sur macOS elle empêche
+    Tauri d'injecter son polyfill `⌘ -` / `⌘ =`. Refuser `⌘ +` / `⌘ -` en JavaScript ne retirerait
+    donc rien à l'application et ne coûterait qu'au développement, où le zoom du navigateur reste
+    le seul moyen de regarder un écran de près ;
+  - **et la permission est partie avec le code.** `core:webview:allow-set-webview-zoom` ne figure
+    plus dans les capacités : la webview n'est plus zoomable **depuis la webview**, quoi qu'un
+    appelant futur tente. C'est la moitié structurelle du refus, celle qui ne dépend pas d'un
+    écouteur ; le plafond de `tests/permissions.rs` est descendu de 15 à 14 pour que son retour se
+    justifie en revue. Le zoom du plan `10g` a donc vécu du 19 août au 14 septembre 2026.
+
+  **Ce qui reste à voir à l'œil, et c'est tout le sujet du ticket** : le pincement a été rapporté
+  comme zoomant **encore** sous WKWebView, malgré le refus en place depuis le 26 août. Rien de cet
+  outillage ne va y voir. Ce qui a changé de ce côté est que l'écoute est passée de `window` en
+  bulle à `document` en **capture** — le plus tôt qu'un écouteur puisse arriver, et la forme que
+  WebKit documente pour ce refus —, et que les trois `GestureEvent` sont refusés de la même façon.
+  Si le pincement zoome toujours dans la fenêtre native, ce qu'il restera à regarder est du côté de
+  la vue et non du DOM : `allowsMagnification` de `WKWebView` vaut `NO` par défaut et **ni `tauri`
+  ni `wry` ne le posent** (relevé le 14 septembre 2026 contre `wry` 0.55.1, qui en déclare la
+  liaison sans jamais l'appeler), donc le forcer serait poser une valeur qu'elle a déjà — la piste
+  serait alors d'intercepter `magnifyWithEvent:` sur la vue native, ce qui demande `objc2` et du
+  code qu'aucun test de ce dépôt ne peut exercer. À ne pas écrire avant d'avoir constaté que le
+  reste ne suffit pas.
 - **Et cet engrenage n'ouvrait rien sur `A1`** (26 août 2026). `WelcomeScreen` montait la barre sans
   `onOpenPreferences`, donc le bouton retombait sur le `disabled` de `TitleBar` — dont l'infobulle
   renvoyait vers *l'écran de travail*, qui n'existe précisément pas tant qu'aucun projet n'est
@@ -595,10 +639,13 @@ qu'il portait et que le rendu ne dit pas.
     seraient le plus rapide au chronomètre : le verrou serait tenu le temps du schéma entier — donc
     la table qu'on clique pendant le dessin attendrait derrière lui — et le dessin arriverait d'un
     bloc après une attente muette, là où les lots le remplissent par paliers visibles.
-  - **la molette défile, elle ne zoome pas.** `⌘` + molette appartient à `useZoom`, et le pincement
-    du trackpad y est refusé activement depuis le 26 août 2026 : un second zoom sur les mêmes gestes
-    ferait dépendre l'échelle de qui écoute l'événement le premier. Les paliers sont donc des boutons,
-    et le glissement du fond déplace la vue.
+  - **la molette défile, elle ne zoome pas** — et depuis `API-57`, aucun geste ne zoome :
+    `⌘` / `Ctrl` + molette comme le pincement du trackpad sont refusés par `useRefusDuZoom`,
+    l'application n'ayant plus de zoom global. Les paliers d'ici sont donc les seuls du produit, et
+    c'est ce qu'un zoom de **vue** a de différent — il grossit un dessin, non l'écran qui l'entoure.
+    Qu'ils soient des boutons reste juste pour la raison d'origine : un second zoom sur les mêmes
+    gestes ferait dépendre l'échelle de qui écoute l'événement le premier. Le glissement du fond
+    déplace la vue.
   - **et deux tables choisies disent ce qui les relie** (3 septembre 2026, à la demande).
     Sélectionner **une** table éclaire ses voisines immédiates : « qu'est-ce qui touche `orders` ? ».
     L'autre question restait sans réponse nulle part — « qu'est-ce qui relie `orders` à
@@ -3446,7 +3493,8 @@ le cadre, et `TitleBar` monte trois boutons à droite. Quatre points à ne pas d
   littérale ajoutée, et « Nuit » suit tout seul sans entrée à tenir en phase. `--hover-close-ink`
   est l'encre : deux jetons plutôt qu'un, parce qu'un jeton nommé pour une surface ne doit jamais
   servir d'encre (la leçon d'`--on-dark`) ;
-- **la passerelle `PasserelleFenetre` est injectée**, comme `PASSERELLE_ZOOM`, et ses quatre
+- **la passerelle `PasserelleFenetre` est injectée**, comme l'était `PASSERELLE_ZOOM` avant que
+  le zoom global ne parte (`API-57`), et ses quatre
   fonctions sont `async`. Ce n'est pas décoratif : **`getCurrentWindow()` lève *synchronément***
   hors de la webview (il lit `__TAURI_INTERNALS__.metadata`), donc un `() => getCurrentWindow()
   .minimize()` ne construit jamais le `.catch()` de l'appelant. Mesuré : **81 tests** sont tombés

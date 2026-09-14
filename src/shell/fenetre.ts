@@ -5,7 +5,8 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
  *
  * # Pourquoi une passerelle et non des appels directs
  *
- * La même raison que `PASSERELLE_ZOOM` : `getCurrentWindow()` n'existe pas hors de la webview,
+ * La raison qu'avait `PASSERELLE_ZOOM`, partie avec le zoom global (`API-57`) :
+ * `getCurrentWindow()` n'existe pas hors de la webview,
  * donc un appel direct ferait planter la galerie, `?demo` et toute la suite Playwright — qui
  * tournent dans un Chromium ordinaire. Injectée, la passerelle se remplace par un double dans
  * les tests, et c'est le seul moyen de vérifier que les boutons appellent bien quelque chose

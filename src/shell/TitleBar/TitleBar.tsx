@@ -52,8 +52,8 @@ type TitleBarProps = {
    */
   onOpenPreferences?: () => void
   /**
-   * Les gestes de fenêtre des trois boutons Windows. Injectée pour la raison de
-   * `PASSERELLE_ZOOM` : hors de la webview, `getCurrentWindow()` n'existe pas.
+   * Les gestes de fenêtre des trois boutons Windows. Injectée pour la raison qu'a `fenetre.ts` :
+   * hors de la webview, `getCurrentWindow()` n'existe pas.
    */
   fenetre?: PasserelleFenetre
   /**

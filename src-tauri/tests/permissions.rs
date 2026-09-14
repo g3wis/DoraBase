@@ -30,12 +30,6 @@ const ATTENDUES: &[(&str, &str)] = &[
          n'accorde aucune permission d'écriture, et l'attribut seul ne suffisait donc pas",
     ),
     (
-        "core:webview:allow-set-webview-zoom",
-        "le zoom au geste à pas fin (`useZoom`) — le pas natif de WKWebView va de 10 à 25 % par cran, \
-         et aucun réglage ne l'expose ; `core:webview:default` n'accorde que la lecture de position \
-         et de taille",
-    ),
-    (
         "dialog:allow-open",
         "le bouton « Parcourir… » de la clé privée (08c) — ouverture seule",
     ),
@@ -50,7 +44,7 @@ const ATTENDUES: &[(&str, &str)] = &[
     // --- Windows seulement, depuis le 31 août 2026 (`capabilities/windows.json`) ---
     //
     // **Ces quatre-là n'existent pas sur macOS**, et c'est la raison du second fichier. La
-    // capacité porte `"platforms": ["windows"]`, donc la surface macOS reste à onze — celle que
+    // capacité porte `"platforms": ["windows"]`, donc la surface macOS reste à dix — celle que
     // `01` a réduite de 92 à six, et que ce test garde. Une capacité sans ce champ aurait
     // accordé quatre droits d'écriture sur la fenêtre à une plateforme qui n'en a pas l'usage.
     //
@@ -152,8 +146,8 @@ fn aucune_permission_par_defaut_de_plugin_n_est_prise() {
 
 /// **Les capacités Windows ne doivent rien accorder à macOS.**
 ///
-/// C'est ce qui fait que la surface macOS reste à onze permissions alors que le projet en
-/// déclare quinze. La garantie tient à un seul champ, `"platforms"`, et rien ne la gardait :
+/// C'est ce qui fait que la surface macOS reste à dix permissions alors que le projet en
+/// déclare quatorze. La garantie tient à un seul champ, `"platforms"`, et rien ne la gardait :
 /// l'oublier n'aurait produit aucune erreur — Tauri accorde alors la capacité **partout** —, et
 /// un bundle macOS aurait embarqué quatre droits d'écriture sur la fenêtre que rien n'appelle.
 ///
@@ -187,15 +181,16 @@ fn la_surface_reste_tres_inferieure_au_jeu_par_defaut_de_tauri() {
     // moins que l'ordre de grandeur : ce test attrape une dérive lente.
     //
     // **Le plafond est passé de 12 à 15 le 31 août 2026**, pour les quatre boutons de fenêtre de
-    // Windows. C'est le geste que ce test veut rendre délibéré, et il l'a été : lever un plafond
-    // se voit en revue, contrairement à un ajout dans un fichier de capacités. À noter que
-    // **onze de ces quinze seulement s'appliquent à macOS** — les quatre autres portent
-    // `"platforms": ["windows"]`, donc la surface réellement accordée sur un bundle macOS n'a
-    // pas bougé.
+    // Windows, puis **redescendu à 14 le 14 septembre 2026** : `API-57` retire tout zoom global,
+    // donc `core:webview:allow-set-webview-zoom` avec lui. C'est le geste que ce test veut rendre
+    // délibéré, et il l'a été dans les deux sens : lever un plafond se voit en revue, et le
+    // **baisser** est ce qui fait qu'un retour du zoom devra se justifier ici. À noter que **dix
+    // de ces quatorze seulement s'appliquent à macOS** — les quatre autres portent
+    // `"platforms": ["windows"]`.
     let compte = permissions_declarees().len();
     assert!(
-        compte <= 15,
+        compte <= 14,
         "{compte} permissions : la surface dérive (six au plan 01, sept depuis 08c, huit depuis \
-         10g, quinze depuis les boutons de fenêtre de Windows)"
+         10g, quinze depuis les boutons de fenêtre de Windows, quatorze depuis `API-57`)"
     );
 }
