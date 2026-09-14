@@ -1,6 +1,6 @@
 ---
 name: ticket-linear
-description: Traiter un ticket Linear de bout en bout sur DoraBase — lire le ticket par MCP, passer son statut à In Progress, écrire le code sur une branche dédiée, ouvrir la PR et la rattacher au ticket, puis passer en In Review. À invoquer dès qu'une demande nomme un ticket ("API-57", une URL linear.app, "traite le ticket 44") ou qu'un chantier va commencer et doit être rattaché à un ticket.
+description: Traiter un ticket Linear de bout en bout sur DoraBase — lire le ticket par MCP ou le créer quand le besoin n'en a pas, passer son statut à In Progress, écrire le code sur une branche dédiée, ouvrir la PR et la rattacher au ticket, puis passer en In Review. À invoquer dès qu'une demande nomme un ticket ("API-57", une URL linear.app, "traite le ticket 44"), demande d'en ouvrir un, ou qu'un chantier va commencer et doit être rattaché à un ticket.
 ---
 
 # Traiter un ticket Linear
@@ -9,8 +9,9 @@ Ce dépôt tient trois traces qui ne disent pas la même chose : le code dit *ce
 `CLAUDE.md` dit *pourquoi c'est ainsi*, le ticket dit **ce que quelqu'un a demandé et où en est la
 réponse**. Ce skill tient la troisième à jour pendant qu'on écrit les deux autres.
 
-**L'argument est le numéro du ticket** — `API-57`, `57`, ou l'URL Linear. Sans argument, demander
-lequel plutôt que deviner.
+**L'argument est le numéro du ticket** — `API-57`, `57`, ou l'URL Linear — **ou le besoin lui-même**,
+quand personne n'a encore écrit le ticket : le skill le cherche, et le crée s'il n'existe pas.
+Sans argument du tout, demander lequel plutôt que deviner.
 
 Les outils sont ceux du serveur MCP Linear : `get_issue`, `save_issue`, `list_comments`,
 `list_issues`. Les noms ci-dessous sont les leurs, sans le préfixe d'installation.
@@ -24,13 +25,69 @@ Les outils sont ceux du serveur MCP Linear : `get_issue`, `save_issue`, `list_co
 | Les sept états | `Backlog`, `Todo`, `In Progress`, `In Review`, `Done`, `Canceled`, `Duplicate` |
 | Base des PR | `main` |
 
-## 1. Identifier le ticket, et vérifier que c'est le bon
+## 1. Trouver le ticket — ou le créer
+
+**Rien ne s'écrit sans un ticket**, et l'ordre ne se saute pas.
+
+### a. L'identifiant donné fait foi
 
 Un numéro nu est ambigu : **les numéros sont partagés entre les équipes du workspace**, donc `57`
 seul peut désigner autre chose. Toujours qualifier en `API-<n>` avant d'appeler `get_issue`.
 
 Puis **dire son titre à l'utilisateur avant de commencer**. C'est le seul contrôle contre un chiffre
 mal recopié, et il coûte une ligne.
+
+### b. Sinon, chercher dans le projet
+
+Un besoin formulé aujourd'hui a souvent déjà son ticket au backlog, écrit par quelqu'un d'autre,
+dans l'autre langue, et sous un titre qu'on n'aurait pas choisi.
+
+```
+list_issues(team: "API", project: "DoraBase — explorateur de bases de données",
+            query: "<mots-clés du besoin>", includeArchived: true)
+```
+
+Chercher par mots-clés **et** parcourir le projet, **fermés compris** : un besoin qui revient est
+soit un défaut rouvert, soit un doublon qu'il vaut mieux lier que réécrire. Les candidats
+plausibles se **montrent** à l'utilisateur ; c'est lui qui dit si c'est le même besoin. Dans le
+doute, demander plutôt que deviner — la question coûte moins cher que le doublon.
+
+### c. Et seulement si rien ne couvre le besoin, en créer un
+
+**La recherche de l'étape b n'est pas facultative, même quand la demande est « ouvre un ticket
+pour X ».** Demander la création dit qu'on n'en connaît pas d'existant, pas qu'il n'y en a pas :
+c'est précisément le cas où le doublon se fabrique. Donc chercher d'abord, **puis** dire ce qu'on a
+trouvé — « rien de similaire dans le projet, fermés compris », ou les candidats — et créer ensuite.
+Un ticket qui ressemble sans être le même se **lie** (`relatedTo`) plutôt que de s'ignorer ; le
+même besoin déjà écrit se reprend, et s'il a été fermé, c'est un défaut rouvert et non un ticket
+neuf.
+
+```
+save_issue(team: "API", project: "DoraBase — explorateur de bases de données",
+           title: "…", description: "…", state: "Todo")
+```
+
+Cinq choses à ne pas défaire :
+
+- **le titre porte le besoin dans les mots de qui l'a demandé, pas la solution qu'on a déjà en
+  tête.** C'est la raison qui fait qu'aucune modale du produit ne nomme un objet à sa création : la
+  solution changera en écrivant, la demande non ;
+- **la description cite la demande** telle qu'elle a été formulée, puis dit ce qui est attendu. Ce
+  qu'on ne sait pas encore s'y écrit comme **point ouvert nommé**, jamais comme une décision prise à
+  la place de l'utilisateur — ces points-là seront tranchés à l'étape 2, et la réponse retenue
+  reviendra dans la description à l'étape 10 ;
+- **le brouillon — titre et description — se montre avant d'appeler `save_issue`.** Créer est une
+  écriture dans l'outil que d'autres lisent, et un ticket mal cadré se corrige plus mal qu'il ne
+  s'écrit ;
+- **l'état de départ est `Todo`** quand on enchaîne tout de suite, `Backlog` quand on écrit le
+  ticket pour plus tard — un morceau détaché du périmètre, par exemple, qu'on relie alors à celui
+  d'où il vient (`relatedTo`) ;
+- **l'`API-NN` ne s'écrit nulle part avant que le ticket existe** : ni dans un commentaire de code,
+  ni dans `CLAUDE.md`, ni dans le corps d'une PR. Le numéro est rendu par la création, il ne se
+  devine pas — et un numéro écrit d'avance désigne le ticket de quelqu'un d'autre.
+
+Un ticket créé se poursuit à l'étape 2 comme n'importe quel autre : il a une description, et c'est
+elle qui fait foi.
 
 ## 2. Le lire en entier, avant toute décision
 
@@ -167,8 +224,8 @@ qu'on garde. Dans les deux cas, on ferme : on ne laisse pas traîner.
 
 ## Ce que ce skill ne fait pas
 
-- **il ne crée pas de ticket** : il en traite un qu'on lui nomme. Créer relève de la section « Le
-  lien avec Linear » de `CLAUDE.md`, et demande d'avoir cherché avant — dans le projet, fermés
-  compris ;
+- **il ne crée pas de ticket sans avoir cherché**, ni sans montrer le brouillon : un second ticket
+  sur un besoin déjà décrit coupe l'historique en deux, et c'est la moitié la moins fournie qu'on
+  retrouve six mois plus tard ;
 - **il ne fusionne pas la PR** sans qu'on le lui demande ;
 - **il ne referme pas un ticket sur une PR non fusionnée**.
