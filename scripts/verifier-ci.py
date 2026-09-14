@@ -321,7 +321,7 @@ def verifier_publication() -> None:
     # Il s'attache à une release que le job `release` a déjà créée, en parallèle du job
     # `macos` (voir plus haut, 2 septembre 2026). Deux faits le tiennent, et aucun ne se
     # remarquerait autrement qu'en regardant une release publiée :
-    windows = etapes_de(jobs, "windows", 14, "publication.yml")
+    windows = etapes_de(jobs, "windows", 16, "publication.yml")
     commandes_windows = commandes_de(windows)
 
     # 1. Ce qu'il fait, et ce qu'il vérifie avant de publier.
@@ -337,35 +337,135 @@ def verifier_publication() -> None:
         ("cloud-sql-proxy.exe --version",
          "le sidecar embarqué pourrait manquer, ou porter une autre version que le verrou"),
         ("gh release upload", "l'installateur ne serait attaché à aucune release"),
+        ('cp "$zip.sig"',
+         "la signature ne serait pas copiée, donc l'artefact partirait vide vers le "
+         "manifeste"),
     ):
         if fragment not in commandes_windows:
             print(f"publication.yml : le job « windows » a perdu « {fragment} » — {raison}",
                   file=sys.stderr)
             raise SystemExit(1)
 
-    # 2. **Et surtout : il ne publie pas de mise à jour.** Faute de certificat Authenticode,
-    #    rien n'atteste qu'un exécutable téléchargé vient de nous — c'est « rien n'est proposé
-    #    qui n'ait été notarié », transposé. Téléverser l'archive `.nsis.zip` ou ajouter
-    #    `windows-x86_64` au manifeste ouvrirait cette voie **en silence**, chez des gens qui
-    #    n'ont rien demandé. Le jour où c'est décidé, c'est ce garde qu'il faut retirer, et le
-    #    retirer est alors un geste visible en revue.
-    if "nsis.zip" in commandes_windows:
-        print("publication.yml : le job « windows » téléverse une archive de mise à jour.\n"
-              "  Sans certificat Authenticode, rien n'atteste son origine — et le chemin de mise\n"
-              "  à jour n'a jamais été exercé, même sur macOS. Si c'est voulu, retirez ce garde\n"
-              "  avec sa raison.", file=sys.stderr)
+    # 2. **Et il publie de quoi se mettre à jour — depuis le 14 septembre 2026 (`API-58`).**
+    #
+    #    Jusque-là, deux gardes refusaient exactement l'inverse : ni archive `.nsis.zip`
+    #    téléversée, ni clef `windows-x86_64` au manifeste. La raison écrite était « sans
+    #    certificat Authenticode, rien n'atteste qu'un exécutable téléchargé vient de nous » —
+    #    et elle valait pour ce que **SmartScreen** montre à qui télécharge l'installateur, non
+    #    pour la mise à jour en place, qu'une signature minisign atteste déjà. Ces deux gardes
+    #    ont donc été retirés, et ceux-ci prennent leur place : ce qui se remarquerait le moins
+    #    n'est plus qu'on ouvre cette voie, c'est qu'on la referme.
+    #
+    #    Le motif porte ses **guillemets fermants** : sans eux, la ligne voisine du `.sig` le
+    #    satisfait — `DoraBase-$VERSION-x64.nsis.zip` est un préfixe de
+    #    `DoraBase-$VERSION-x64.nsis.zip.sig`. C'est le piège du motif non ancré des
+    #    assertions de nom accessible, ici sur un nom de fichier (vérifié par sabotage).
+    #    Et le garde porte sur l'étape **qui téléverse**, non sur le job entier : l'étape
+    #    voisine *nomme* l'archive en la copiant, et un fragment cherché dans tout le job s'en
+    #    contenterait — c'est-à-dire resterait vert sur un job qui construit l'archive et ne la
+    #    publie pas (vérifié par sabotage, comme les guillemets ci-dessus).
+    televersement = commandes_de(
+        [etape for etape in windows if "gh release upload" in str(etape.get("run", ""))]
+    )
+    if '"publication/DoraBase-$VERSION-x64.nsis.zip"' not in televersement:
+        print("publication.yml : le job « windows » ne téléverse plus l'archive de mise à "
+              "jour.\n"
+              "  Le manifeste porterait une clef `windows-x86_64` dont l'URL est en 404, donc\n"
+              "  une mise à jour annoncée que rien ne peut installer.", file=sys.stderr)
         raise SystemExit(1)
 
-    manifeste = commandes_de(etapes)
-    if "windows-x86_64" in manifeste:
-        print("publication.yml : le manifeste de mise à jour porte `windows-x86_64`.\n"
-              "  Les installations Windows se mettraient à jour avec un exécutable que rien\n"
-              "  n'authentifie. Si c'est voulu, retirez ce garde avec sa raison.",
+    #    Et les deux artefacts de signature refusent de partir **vides** : le défaut
+    #    d'`upload-artifact` est `warn`, donc une signature non copiée ne ferait rien échouer
+    #    là où elle manque — c'est le job `manifeste` qui tomberait, vingt minutes plus tard,
+    #    sur un téléchargement introuvable.
+    for nom_job, etapes_job in (("macos", etapes), ("windows", windows)):
+        artefacts = [
+            etape for etape in etapes_job
+            if str((etape.get("with") or {}).get("name", "")).startswith("maj-")
+        ]
+        if not artefacts:
+            print(f"publication.yml : le job « {nom_job} » ne téléverse plus d'artefact "
+                  "`maj-*` — le job « manifeste » n'aurait aucune signature à lire",
+                  file=sys.stderr)
+            raise SystemExit(1)
+        for artefact in artefacts:
+            if (artefact.get("with") or {}).get("if-no-files-found") != "error":
+                print(f"publication.yml : l'artefact `maj-*` du job « {nom_job} » n'a pas "
+                      "`if-no-files-found: error`.\n"
+                      "  Le défaut est `warn` : une signature non copiée partirait en artefact"
+                      "\n  vide, et l'échec se déclarerait dans un autre job.",
+                      file=sys.stderr)
+                raise SystemExit(1)
+
+    # ── Le manifeste de mise à jour ───────────────────────────────────────────────────────
+    #
+    # Il vit dans son **propre** job depuis `API-58` : il porte une clef par plateforme, et la
+    # signature Windows n'existe que dans le job Windows. Trois faits le tiennent, et aucun ne
+    # se remarquerait autrement qu'en regardant une release publiée — ou, pire, qu'en essayant
+    # de se mettre à jour depuis une installation existante.
+    etapes_manifeste = etapes_de(jobs, "manifeste", 5, "publication.yml")
+    commandes_manifeste = commandes_de(etapes_manifeste)
+
+    # a. **Un seul producteur.** Le manifeste écrit par `macos` ne pourrait pas porter la clef
+    #    Windows, et un manifeste complété *après coup* par le job Windows serait un fichier
+    #    engendré à deux mains — ce que ce dépôt refuse partout ailleurs.
+    if "latest.json" in commandes:
+        print("publication.yml : le job « macos » touche encore à `latest.json` — c'est le "
+              "job « manifeste » qui l'écrit, seul, une fois les deux constructions faites",
+              file=sys.stderr)
+        raise SystemExit(1)
+    if "latest.json" in commandes_windows:
+        print("publication.yml : le job « windows » touche à `latest.json` — un manifeste "
+              "complété par deux jobs est un fichier engendré à deux producteurs",
               file=sys.stderr)
         raise SystemExit(1)
 
+    # b. **Il attend les deux constructions, et il téléverse.** Sans `needs`, il courrait
+    #    contre elles et n'aurait aucune signature à lire ; sans téléversement, il écrirait un
+    #    fichier que personne ne va chercher.
+    if sorted(jobs["manifeste"].get("needs") or []) != ["macos", "windows"]:
+        print("publication.yml : le job « manifeste » doit déclarer `needs: [macos, "
+              "windows]` — il lit les signatures que les deux constructions produisent",
+              file=sys.stderr)
+        raise SystemExit(1)
+    if "gh release upload" not in commandes_manifeste:
+        print("publication.yml : le job « manifeste » ne téléverse rien — les installations "
+              "existantes liraient le manifeste de la release précédente, ou un 404",
+              file=sys.stderr)
+        raise SystemExit(1)
+
+    # c. **Les trois clefs y sont.** C'est le défaut d'`API-58` lui-même : une clef absente ne
+    #    fait échouer ni la construction ni la publication, elle ne se voit qu'en cherchant une
+    #    mise à jour depuis la plateforme qu'elle nomme. Les deux clefs `darwin-*` sont là pour
+    #    la même raison, et parce qu'il en faut deux pour **une** archive universelle.
+    for clef in ("darwin-aarch64", "darwin-x86_64", "windows-x86_64"):
+        if clef not in commandes_manifeste:
+            print(f"publication.yml : le manifeste ne porte plus `{clef}` — cette "
+                  "plateforme-là\n"
+                  "  recevrait « the platform was not found in the response `platforms` "
+                  "object »,\n"
+                  "  et rien avant la publication ne le dirait.", file=sys.stderr)
+            raise SystemExit(1)
+
+    # d. **Chaque plateforme entre au manifeste par sa propre sortie de job**, et non par son
+    #    `result` : un job `macos` réussi mais non notarié n'a pas d'archive à proposer, et
+    #    `download-artifact` échouerait sur un artefact absent. C'est aussi ce qui garde la
+    #    propriété du 1er septembre — un échec d'un côté ne coûte pas la publication de
+    #    l'autre — en la rendant symétrique.
+    for nom in ("macos", "windows"):
+        if not (jobs[nom].get("outputs") or {}).get("maj"):
+            print(f"publication.yml : le job « {nom} » ne déclare plus la sortie `maj` — le "
+                  "job « manifeste » ne saurait plus si cette plateforme a produit une "
+                  "archive signée", file=sys.stderr)
+            raise SystemExit(1)
+        if f"needs.{nom}.outputs.maj" not in str(etapes_manifeste):
+            print(f"publication.yml : le job « manifeste » ne consulte plus `needs.{nom}."
+                  "outputs.maj` — il téléchargerait un artefact qui peut ne pas exister",
+                  file=sys.stderr)
+            raise SystemExit(1)
+
     print(f"publication.yml cohérent — {len(jobs)} jobs, tag ancré, release publiée, "
-          "installateur Windows attaché sans voie de mise à jour")
+          "manifeste à trois clefs écrit par un seul job")
 
 
 def verifier_playwright() -> None:

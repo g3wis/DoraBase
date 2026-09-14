@@ -8,10 +8,10 @@ structure.
 Tauri 2 + React / TypeScript / Vite.
 
 **Windows est distribué, mais non signé.** Chaque version publiée porte un installateur
-`.exe` à côté du `.dmg` : le produit y fait tout ce qu'il fait sur macOS, et la CI le vérifie à
-chaque commit. Ce qui manque est un certificat Authenticode, donc **Windows avertira au
-téléchargement** et **les installations Windows ne se mettent pas à jour seules** — il faut
-retélécharger l'installateur à chaque version.
+`.exe` à côté du `.dmg` : le produit y fait tout ce qu'il fait sur macOS, mise à jour en place
+comprise, et la CI le vérifie à chaque commit. Ce qui manque est un certificat Authenticode,
+donc **Windows avertira au téléchargement** — une fois installée, l'application se met à jour
+seule, ce qu'elle accepte d'installer étant signé par la clé du projet.
 
 ---
 
@@ -26,10 +26,11 @@ empreinte SHA-256 :
 | --- | --- |
 | `DoraBase-X.Y.Z-universal.dmg` | l'application, à glisser dans *Applications* |
 | `DoraBase-X.Y.Z-universal.dmg.sha256` | l'empreinte, à comparer avant d'ouvrir |
-| `DoraBase-X.Y.Z-universal.app.tar.gz` | la mise à jour, que l'application va chercher elle-même |
-| `latest.json` | ce que l'application lit pour savoir qu'une version existe (macOS seulement) |
+| `DoraBase-X.Y.Z-universal.app.tar.gz` | la mise à jour macOS, que l'application va chercher elle-même |
+| `latest.json` | ce que l'application lit pour savoir qu'une version existe |
 | `DoraBase-X.Y.Z-x64-setup.exe` | l'installateur Windows, **non signé** — voir plus bas |
 | `DoraBase-X.Y.Z-x64-setup.exe.sha256` | son empreinte |
+| `DoraBase-X.Y.Z-x64.nsis.zip` | la mise à jour Windows, que l'application va chercher elle-même |
 
 **macOS 13 Ventura** au minimum. Toutes les versions sont sur la
 [page des releases](https://github.com/g3wis/DoraBase/releases).
@@ -68,9 +69,10 @@ vérification qui reste :
 Get-FileHash DoraBase-X.Y.Z-x64-setup.exe -Algorithm SHA256
 ```
 
-**Il n'y a pas de mise à jour automatique sous Windows** : l'application ne propose rien, et il
-faut retélécharger l'installateur à chaque version. C'est délibéré — proposer un remplacement que
-personne ne peut authentifier serait pire que de ne rien proposer.
+**La mise à jour, elle, se fait toute seule** — comme sur macOS, et par le même geste : voir
+*Mettre à jour* ci-dessous. L'avertissement de SmartScreen ne vaut que pour l'installateur qu'on
+**télécharge** ; le remplacement en place, lui, est signé par la clé du projet, que l'application
+vérifie avant de l'appliquer. Ce sont deux questions distinctes, et une seule reste ouverte.
 
 ### Mettre à jour
 
@@ -82,14 +84,21 @@ Il n'y a **ni recherche périodique ni installation automatique** : la recherche
 au démarrage, et l'installation attend un clic. Hors ligne, ou derrière un pare-feu qui ferme
 `github.com`, rien ne s'affiche et rien ne se plaint.
 
-Ce que l'application accepte d'installer est **signé deux fois** : par Apple, qui décide si
-macOS l'ouvre, et par une clé propre au projet, qui décide si l'application accepte de se
-remplacer par ce qu'on lui envoie. Une archive dont la seconde signature ne correspond pas est
-refusée avant d'être ouverte.
+Ce que l'application accepte d'installer est **signé par une clé propre au projet**, qui décide
+si l'application accepte de se remplacer par ce qu'on lui envoie : une archive dont la signature
+ne correspond pas est refusée avant d'être ouverte. Sur macOS s'y ajoute la signature d'Apple,
+qui répond à une autre question — si le système *ouvre* l'application —, et c'est pourquoi une
+version macOS n'est proposée que si elle a été notariée.
 
-Le remplacement demande de pouvoir écrire dans le bundle. Installée d'un glisser-déposer dans
-*Applications*, elle en a le droit ; posée là par un administrateur pour un autre compte, elle
-ne l'a pas, et le dit plutôt que d'échouer en silence — dans ce cas, retéléchargez le `.dmg`.
+Le remplacement demande de pouvoir écrire là où l'application est installée. Sous macOS,
+installée d'un glisser-déposer dans *Applications*, elle en a le droit ; posée là par un
+administrateur pour un autre compte, elle ne l'a pas, et le dit plutôt que d'échouer en
+silence — dans ce cas, retéléchargez le `.dmg`. Sous Windows, l'installateur pose l'application
+dans le compte de l'utilisateur, qui y a toujours le droit.
+
+Et si une version n'a été publiée que pour **un** des deux systèmes — chaque plateforme est
+construite de son côté, et un échec de l'une ne retient pas l'autre —, l'autre le dit en toutes
+lettres plutôt que de rester muet.
 
 ### Essayer un commit, sans attendre une version
 
@@ -127,12 +136,13 @@ branche de travail  ──PR──▶  main (CI verte)  ──version.sh──�
    git push origin main --follow-tags   # c'est le tag qui déclenche la publication
    ```
 
-3. **Le tag `vX.Y.Z` déclenche `publication.yml`** : construction du bundle universel,
-   signature et notarisation Apple, vérifications, puis release GitHub avec le `.dmg`,
-   l'archive de mise à jour, le manifeste `latest.json` et les notes de version — celles-ci
-   listent les commits depuis le tag précédent. Un second job construit ensuite
-   l'installateur Windows et l'attache à la même release : **après** elle, pour qu'un échec
-   de ce côté ne coûte pas la publication macOS.
+3. **Le tag `vX.Y.Z` déclenche `publication.yml`**, en quatre jobs. Le premier crée la release
+   et ses notes — celles-ci listent les commits depuis le tag précédent. Deux jobs de
+   construction y ajoutent ensuite leurs artefacts **en parallèle**, sans dépendre l'un de
+   l'autre, pour qu'un échec d'un côté ne coûte pas la publication de l'autre : le bundle
+   universel macOS, signé et notarié par Apple, et l'installateur Windows. Le dernier écrit le
+   manifeste `latest.json` une fois les deux passés — il porte une clef par plateforme, et
+   **chaque plateforme n'y entre que si sa propre construction a abouti**.
 
 Ce que le script refuse, et pourquoi : une branche autre que `main` (le tag désignerait un
 état que la CI n'a pas validé), un arbre sale (le commit de relèvement emporterait du
