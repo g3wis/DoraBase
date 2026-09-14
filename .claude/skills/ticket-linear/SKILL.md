@@ -62,6 +62,56 @@ Un ticket qui ressemble sans être le même se **lie** (`relatedTo`) plutôt que
 même besoin déjà écrit se reprend, et s'il a été fermé, c'est un défaut rouvert et non un ticket
 neuf.
 
+#### D'abord l'entretien, ensuite l'écriture
+
+**Un ticket ne s'écrit pas sur une phrase.** Ce qui manque à la demande initiale manquera au ticket,
+puis à l'implémentation — et c'est six mois plus tard qu'on lira le ticket sans avoir le dépôt sous
+la main. Donc **demander à l'utilisateur ce qui manque à la compréhension du besoin, avant
+d'écrire**, et mettre ses réponses dans la description.
+
+Ce qu'il faut avoir, et qui décide de ce qu'on demande :
+
+| | |
+| --- | --- |
+| **Le déclencheur** | ce qui se passe aujourd'hui, et en quoi c'est un problème. Un signalement d'usage se cite tel quel : c'est ce que les entrées de `CLAUDE.md` appellent « rapporté à l'usage », et c'est ce qui survit le mieux |
+| **Où** | l'écran (`A1`…`A10`), le panneau, et **quels moteurs** sont concernés — les cinq ne répondent pas la même chose à la même question |
+| **Ce qui est attendu** | le comportement voulu, dans les mots du demandeur |
+| **Le périmètre** | ce qui est explicitement **dehors**, et qui deviendra son propre ticket |
+| **Les arbitrages** | ceux que l'utilisateur veut trancher lui-même, et ceux qu'il nous laisse |
+| **Le design** | existe-t-il une maquette ? Sinon, le dépôt **n'invente pas de pixels** : c'est un point ouvert, pas une liberté |
+| **Comment on saura que c'est fait** | et ce qui restera à voir à l'œil — l'outillage ne pilote ni WKWebView ni WebView2 |
+| **La suite** | enchaîner sur l'implémentation, ou s'arrêter au ticket |
+
+Cinq règles pour cet entretien :
+
+- **ne demander que ce dont la réponse change le ticket.** Ce que le code, `CLAUDE.md` ou un ticket
+  voisin répondent déjà se **cherche**, il ne se demande pas : une question dont la réponse est déjà
+  écrite fait payer à l'utilisateur ce qu'on n'a pas lu ;
+- **peu de questions à la fois, groupées** — quatre au plus, avec les réponses plausibles proposées.
+  Un interrogatoire fait abandonner, et un ticket abandonné est un ticket écrit de mémoire ;
+- **les réponses entrent dans la description dans les mots du demandeur**, pas reformulées en
+  solution. Le titre et le besoin lui appartiennent ; la solution changera en écrivant ;
+- **ce qui reste sans réponse s'écrit comme point ouvert nommé**, et une hypothèse s'écrit comme
+  hypothèse. Combler un trou en silence, c'est prendre une décision à la place de quelqu'un et la
+  faire passer pour une donnée ;
+- **le brouillon complet se relit avant `save_issue`** — c'est le dernier moment où corriger coûte
+  une phrase.
+
+Le gabarit de description qui en sort :
+
+```markdown
+## La demande
+> la formulation d'origine, citée
+
+## Ce qui se passe aujourd'hui
+## Ce qui est attendu
+## Hors périmètre
+## Points ouverts
+## Comment on saura que c'est fait
+```
+
+Une section sans matière se retire : une rubrique vide occupe la place de ce qu'elle promet.
+
 ```
 save_issue(team: "API", project: "DoraBase — explorateur de bases de données",
            title: "…", description: "…", state: "Todo")
@@ -72,10 +122,10 @@ Cinq choses à ne pas défaire :
 - **le titre porte le besoin dans les mots de qui l'a demandé, pas la solution qu'on a déjà en
   tête.** C'est la raison qui fait qu'aucune modale du produit ne nomme un objet à sa création : la
   solution changera en écrivant, la demande non ;
-- **la description cite la demande** telle qu'elle a été formulée, puis dit ce qui est attendu. Ce
-  qu'on ne sait pas encore s'y écrit comme **point ouvert nommé**, jamais comme une décision prise à
-  la place de l'utilisateur — ces points-là seront tranchés à l'étape 2, et la réponse retenue
-  reviendra dans la description à l'étape 10 ;
+- **la description porte ce que l'entretien a rendu**, la demande citée en tête. Ce qu'on ne sait
+  toujours pas s'y écrit comme **point ouvert nommé**, jamais comme une décision prise à la place de
+  l'utilisateur — ces points-là seront tranchés à l'étape 2, et la réponse retenue reviendra dans la
+  description à l'étape 10 ;
 - **le brouillon — titre et description — se montre avant d'appeler `save_issue`.** Créer est une
   écriture dans l'outil que d'autres lisent, et un ticket mal cadré se corrige plus mal qu'il ne
   s'écrit ;
