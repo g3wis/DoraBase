@@ -23,7 +23,7 @@
 
 use serde::Serialize;
 use tauri::AppHandle;
-use tauri_plugin_updater::{Update, UpdaterExt};
+use tauri_plugin_updater::{Error, Update, UpdaterExt};
 use ts_rs::TS;
 
 /// Ce que la barre d'état affiche quand une version plus récente existe.
@@ -47,12 +47,72 @@ pub struct AvailableUpdate {
 /// actionnable côté écran. Hors ligne, manifeste absent, signature invalide — dans les trois
 /// cas la seule réponse possible est « plus tard », et un type à trois variantes ferait croire
 /// à trois traitements.
+///
+/// **Une seule fait exception, et elle a coûté un ticket** (`API-58`). Quand le manifeste ne
+/// porte pas de clef pour la plateforme courante, le plugin rend « the platform `windows-x86_64`
+/// was not found in the response `platforms` object » : le nom d'une clef d'un objet JSON que
+/// l'utilisateur ne verra jamais, en anglais, dans une interface qui n'en parle pas. Elle ne dit
+/// ni la cause — cette version n'a rien publié pour ce système —, ni la manœuvre.
+///
+/// Le cas reste atteignable après `API-58`, et c'est pourquoi la phrase existe plutôt qu'un
+/// commentaire : **chaque plateforme entre au manifeste par sa propre construction** (voir le
+/// job `manifeste` de `publication.yml`), donc une construction qui échoue d'un côté laisse
+/// l'autre publier seul. C'est voulu — un échec Windows ne doit pas coûter la release macOS —
+/// et cela veut dire qu'une version peut réellement n'exister que pour un des deux systèmes.
 async fn interroger(app: &AppHandle) -> Result<Option<Update>, String> {
     app.updater()
         .map_err(|erreur| format!("le mécanisme de mise à jour n'est pas configuré : {erreur}"))?
         .check()
         .await
-        .map_err(|erreur| format!("la recherche de mise à jour a échoué : {erreur}"))
+        .map_err(traduire)
+}
+
+/// Le message rendu à l'écran pour un refus de recherche.
+///
+/// Le bras attrape-tout n'est pas celui de la règle n° 16 : `tauri_plugin_updater::Error` est
+/// `#[non_exhaustive]`, donc il est **obligatoire** — et les vingt variantes qu'il couvre disent
+/// toutes la même chose à qui regarde, « plus tard ».
+fn traduire(erreur: Error) -> String {
+    match erreur {
+        Error::TargetNotFound(_) | Error::TargetsNotFound(_) => "cette version n'a pas été \
+             publiée pour votre système. Téléchargez-la depuis la page des releases de DoraBase."
+            .to_string(),
+        autre => format!("la recherche de mise à jour a échoué : {autre}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Ce que l'utilisateur lisait avant `API-58`, et qu'il ne doit plus lire : la clef d'un
+    /// objet JSON. L'assertion porte sur les deux bouts — la phrase qui remplace, et le jargon
+    /// qui doit avoir disparu —, sans quoi ajouter la phrase **à côté** du message du plugin
+    /// laisserait le test vert.
+    #[test]
+    fn une_plateforme_absente_du_manifeste_se_dit_en_francais() {
+        let message = traduire(Error::TargetNotFound("windows-x86_64".into()));
+        assert!(
+            message.contains("n'a pas été publiée pour votre système"),
+            "{message}"
+        );
+        assert!(message.contains("page des releases"), "{message}");
+        assert!(!message.contains("platforms"), "{message}");
+        assert!(!message.contains("windows-x86_64"), "{message}");
+    }
+
+    /// Et le reste garde le message du plugin : c'est le seul qui dise quelque chose d'un
+    /// réseau coupé ou d'une signature refusée, et le remplacer par une phrase à nous
+    /// reviendrait à réécrire un message dont on ne connaît pas la cause.
+    #[test]
+    fn les_autres_refus_gardent_le_mot_du_plugin() {
+        let message = traduire(Error::ReleaseNotFound);
+        assert!(
+            message.starts_with("la recherche de mise à jour a échoué : "),
+            "{message}"
+        );
+        assert!(message.contains("valid release JSON"), "{message}");
+    }
 }
 
 /// Cherche une version plus récente. `None` quand il n'y en a pas.

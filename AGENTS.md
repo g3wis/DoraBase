@@ -3017,12 +3017,73 @@ par ce qu'on lui envoie. La seconde est **irremplaçable** : sa moitié publique
 `tauri.conf.json`, donc dans le bundle que les utilisateurs ont déjà. La perdre coupe la voie
 de mise à jour de toutes les installations existantes, sans rattrapage possible.
 
-**Rien n'est proposé qui n'ait été notarié.** Le manifeste et l'archive ne sont attachés à la
-release que si les secrets Apple étaient là. Une archive ad hoc — un fork, une bifurcation —
-s'installerait proprement puis serait refusée par macOS au redémarrage, chez des gens qui
-n'avaient rien demandé et qui n'ont plus de voie de retour. C'est le même arbitrage que
-`signingIdentity: "-"`, poussé un cran plus loin : sans certificat, la construction reste
-possible, la **distribution** de mises à jour non.
+**Rien n'est proposé, sur macOS, qui n'ait été notarié.** L'archive n'est attachée à la release
+— et sa clef n'entre au manifeste — que si les secrets Apple étaient là. Une archive ad hoc — un
+fork, une bifurcation — s'installerait proprement puis serait refusée par macOS au redémarrage,
+chez des gens qui n'avaient rien demandé et qui n'ont plus de voie de retour. C'est le même
+arbitrage que `signingIdentity: "-"`, poussé un cran plus loin : sans certificat, la
+construction reste possible, la **distribution** de mises à jour non.
+
+**Cette phrase a porté « et rien du tout sous Windows » pendant deux semaines, et c'était une
+transposition trop forte** (14 septembre 2026, `API-58`, rapporté à l'usage : « auto update does
+not work on windows, something about unsupported platform »). Le message était celui du plugin —
+« the platform `windows-x86_64` was not found in the response `platforms` object » —, et la cause
+était que le manifeste ne portait que les deux clefs `darwin-*`, délibérément, faute de certificat
+Authenticode. Ce que la relecture a montré est que **les deux moitiés ne répondent pas à la même
+question**, et c'est la distinction que ce fichier écrit depuis le début, deux paragraphes plus
+haut :
+
+- **sur macOS, la notarisation décide si le système *ouvre* l'application.** Une archive qu'Apple
+  n'a pas acceptée donne une panne franche au redémarrage, et il n'y a pas de retour ;
+- **sous Windows, ce qui atteste l'origine d'une mise à jour est la clé minisign**, celle qui
+  décide « si une application déjà installée accepte de se remplacer par ce qu'on lui envoie ».
+  Elle était là, et elle signait déjà l'archive `.nsis.zip` à chaque construction — on ne la
+  publiait simplement pas. **Authenticode répond à une troisième question** : ce que SmartScreen
+  montre à qui **télécharge** l'installateur dans un navigateur. Celle-là reste entière, et le
+  `.exe` de la release est toujours non signé — mais elle ne gouverne pas le remplacement en
+  place, que la webview ne fait pas passer par un navigateur.
+
+Le refus protégeait donc d'un risque que la clé de mise à jour couvre déjà, au prix de la voie de
+mise à jour entière. Ce qui reste vrai de l'objection, et qu'il ne faut pas taire : le
+remplacement d'un bundle par lui-même **n'a toujours été exercé sur aucune des deux
+plateformes** — voir « Ce que l'outillage ne peut pas voir ».
+
+**Le manifeste a son propre job, et c'est ce que la clef Windows a coûté.** Il était écrit par le
+job `macos`, ce qui allait tant qu'il ne portait que des clefs `darwin-*` ; il porte maintenant
+une signature que ce job **ne peut pas produire**, et les deux constructions tournent en
+parallèle depuis le 2 septembre. Les deux autres issues ont été écartées : faire attendre l'un
+des deux reperd ce parallélisme et rebranche un échec Windows sur la publication macOS ; laisser
+Windows *compléter* le manifeste que macOS a téléversé donne deux producteurs pour un fichier
+engendré, ce que ce dépôt refuse partout ailleurs. Le job `manifeste` n'écrit donc rien d'autre,
+et attend les deux.
+
+**Et il publie ce qui existe, plutôt que d'exiger les deux.** C'est ce qui garde la propriété du
+1er septembre — « un échec de la construction Windows ne coûte pas la release macOS » — en la
+rendant symétrique : **chaque plateforme entre au manifeste si, et seulement si, sa propre
+construction a produit une archive signée**. Trois conséquences à ne pas défaire :
+
+- **la condition est une *sortie* de job, non son `result`.** Un job `macos` réussi peut n'avoir
+  rien à proposer — c'est le cas d'un fork sans les secrets Apple, où la construction va au bout
+  sans notariser. `needs.macos.outputs.maj` est posée par l'étape qui nomme l'archive, celle-là
+  même que `NOTARISE` gouverne ; s'en remettre au `result` ferait échouer le téléchargement d'un
+  artefact qui n'existe pas, et un `continue-on-error` masquerait au passage une vraie panne ;
+- **une version peut donc réellement n'exister que pour un système**, et l'application doit le
+  dire : c'est pourquoi `maj::traduire` rend une phrase française pour `TargetNotFound` plutôt
+  que le nom d'une clef d'objet JSON en anglais. Le cas n'est pas théorique — c'est exactement ce
+  que produit une construction qui échoue d'un côté ;
+- **les deux artefacts de signature refusent de partir vides** (`if-no-files-found: error`). Le
+  défaut d'`upload-artifact` est `warn` : une signature non copiée donnerait un artefact vide
+  sans rien faire échouer là où elle manque, et c'est le job `manifeste`, vingt minutes plus
+  tard, qui tomberait sur un téléchargement introuvable.
+
+**Les deux gardes négatifs de `verifier-ci.py` ont été remplacés, pas seulement retirés.** Ils
+refusaient le téléversement de l'archive et la clef `windows-x86_64` ; ce qui se remarquerait le
+moins n'est plus qu'on ouvre cette voie, c'est qu'on la **referme**. Onze sabotages ont été joués
+contre les nouveaux, et **trois ont d'abord été verts** — les trois pour la même raison, un motif
+non ancré : `DoraBase-$VERSION-x64.nsis.zip` est un préfixe de `…nsis.zip.sig`, donc le garde du
+téléversement se satisfaisait de la ligne de la signature ; et cherché dans le job entier, il se
+satisfaisait de l'étape voisine qui **copie** l'archive sans la publier. C'est le piège du motif
+non ancré des assertions de nom accessible, sur des noms de fichiers.
 
 **`--latest` cesse d'être cosmétique.** Les applications installées lisent
 `…/releases/latest/download/latest.json`, une URL qui ne nomme aucune version : c'est GitHub
@@ -3380,23 +3441,26 @@ Gestionnaire d'identifiants, SSH, dump, proxy Cloud SQL —, `ci.yml` porte un j
 `windows-latest` qui le tient, et `publication.yml` attache un installateur NSIS à chaque
 release.
 
-**Ce qui n'existe toujours pas : la signature, et donc la mise à jour en place.** Il n'y a pas
-de certificat Authenticode, donc SmartScreen avertit à chaque téléchargement — c'est le même
-arbitrage que `signingIdentity: "-"` avant l'achat du Developer ID, un cran plus rude, et les
-notes de release le disent plutôt que de le laisser découvrir. Corollaire à ne pas défaire :
-`latest.json` ne porte que les deux clefs `darwin-*`, et l'archive `.nsis.zip` que
-`createUpdaterArtifacts` produit **n'est pas publiée**. C'est « rien n'est proposé qui n'ait été
-notarié » transposé : proposer un remplacement qu'on ne peut pas authentifier, chez des gens qui
-n'ont rien demandé, est pire que ne rien proposer. Deux gardes de `verifier-ci.py` le tiennent,
-et les retirer est le geste visible en revue qui ouvrirait cette voie.
+**Ce qui n'existe toujours pas : la signature Authenticode.** SmartScreen avertit donc à chaque
+**téléchargement** de l'installateur — c'est le même arbitrage que `signingIdentity: "-"` avant
+l'achat du Developer ID, un cran plus rude, et les notes de release le disent plutôt que de le
+laisser découvrir.
 
-**L'installateur s'attache après coup, et c'est un ordre, pas une négligence.** Le job `windows`
-de `publication.yml` déclare `needs: macos` et emploie `gh release upload` — pas un second
-`gh release create`, dont l'unicité décide du `--latest`. La conséquence voulue : **un échec de
-la construction Windows ne coûte pas la release macOS**, qui reste l'artefact soutenu. Faire
-l'inverse rendrait la publication macOS tributaire d'une plateforme qui n'est même pas signée.
-Ce qui se paie en échange est quelques minutes entre la parution de la release et celle du
-`.exe`.
+**La mise à jour en place, elle, existe depuis le 14 septembre 2026** (`API-58`) : `latest.json`
+porte une clef `windows-x86_64`, et l'archive `.nsis.zip` que `createUpdaterArtifacts` produisait
+déjà est publiée avec sa signature minisign. Ce n'est pas un renversement de l'arbitrage
+ci-dessus, c'est la séparation de deux questions qu'il confondait — la raison entière est dans
+« La mise à jour en place », et elle tient en une phrase : *ce qui atteste un remplacement est la
+clé du projet, non le certificat qui rassure un navigateur*. Les deux gardes de `verifier-ci.py`
+qui refusaient cette voie ont été remplacés par ceux qui la tiennent ouverte.
+
+**L'installateur s'attache à une release qui existe déjà, et Windows ne dépend pas de macOS.** Le
+job `windows` de `publication.yml` déclare `needs: release` — comme `macos`, et non `needs: macos`
+depuis le 2 septembre 2026 — et emploie `gh release upload`, jamais un second `gh release create`,
+dont l'unicité décide du titre, des notes et du `--latest`. La conséquence voulue : **un échec de
+la construction Windows ne coûte pas la release macOS**, et l'inverse est vrai depuis qu'ils
+tournent en parallèle. C'est cette propriété que le job `manifeste` a dû apprendre à respecter en
+publiant les plateformes qui ont abouti plutôt qu'en exigeant les deux.
 
 **La plateforme est une constante de construction, `__APP_PLATFORM__`** — posée par
 `vite.config.ts` depuis `process.platform`, comme `__APP_ARCH__` et pour la raison qui y est
@@ -3970,6 +4034,16 @@ présenter comme vérifiées tant qu'un humain ne les a pas faites :
   l'application sait écrire dans `/Applications`, que macOS accepte le bundle remplacé, et que
   le redémarrage rend une application qui s'ouvre. Aucun test ne peut le faire : Playwright ne
   pilote pas WKWebView, et le chemin passe par un vrai téléchargement depuis GitHub.
+
+  **Et depuis `API-58`, la même dette existe sous Windows, où elle est plus fournie.** Ce qui a
+  été vérifié là-bas est du papier : que le manifeste porte la clef, que l'archive et sa
+  signature soient publiées, et — lu dans la source du plugin — que l'installation passe par un
+  `ShellExecuteW` de l'installateur NSIS en mode passif, lequel s'installe dans
+  `%LOCALAPPDATA%` (`installMode` vaut `currentUser` par défaut) et n'a donc pas d'élévation à
+  demander. **Rien de tout cela n'a été exécuté sur une machine Windows.** Les trois choses à
+  regarder, dans cet ordre : que l'annonce paraisse, que l'installateur ne fasse surgir ni
+  invite UAC ni fenêtre SmartScreen — un téléchargement fait par nous ne porte pas la marque du
+  Web, ce qui est le raisonnement et non une mesure —, et que l'application se relance seule.
 - **Ouvrir une connexion Kubernetes contre un vrai cluster.** Tout le pilotage de `kubectl` est
   couvert par un faux binaire en shell — port annoncé, mort avant l'ouverture, délai, transfert perdu
   alors que le processus vit, arguments, `PATH` de l'enfant, en-tête du contexte — mais **aucun test
@@ -4074,6 +4148,8 @@ que Windows n'a rien changé à macOS.
   du Finder.
 - **L'installateur NSIS** : qu'il s'ouvre, installe, et que l'application se lance. SmartScreen
   avertira — c'est attendu, faute de certificat Authenticode.
+- **Et la mise à jour en place** (`API-58`), qui est la dette la plus fournie de cette liste :
+  voir l'entrée jumelle de la liste macOS ci-dessus.
 - **Qu'aucune fenêtre de terminal ne paraisse**, sur un build **release** : une lecture de version
   au moment d'ouvrir la modale d'export, puis un export, puis une connexion Kubernetes ou Cloud SQL
   — c'est celle-là qui compte, sa fenêtre restant ouverte tout le temps de la connexion là où les

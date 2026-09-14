@@ -103,17 +103,19 @@ jobs:
             echo
             # **Windows, et ce qu'il n'a pas.** Dit dans les notes plutôt que découvert au
             # téléchargement : l'avertissement de SmartScreen ressemble à une application
-            # cassée, et l'absence de mise à jour automatique se remarquerait des semaines
-            # plus tard. Les deux sont des conséquences du même manque — pas de certificat
-            # Authenticode — et il vaut mieux les lire ici qu'ailleurs.
+            # cassée. Ce qui suivait — « et les installations ne se mettent pas à jour
+            # seules » — a cessé d'être vrai le 14 septembre 2026 (`API-58`), et la phrase est
+            # partie avec l'état qu'elle décrivait : une note de release fausse est lue par
+            # tous ceux qui téléchargent, et par eux seuls.
             echo "### Windows"
             echo
             echo "\`DoraBase-$VERSION-x64-setup.exe\` ci-dessous. L'installateur **n'est pas"
             echo "signé** : Windows affichera un avertissement SmartScreen, à passer par"
             echo "*Informations complémentaires → Exécuter quand même*."
             echo
-            echo "Et **les installations Windows ne se mettent pas à jour seules** : il faut"
-            echo "retélécharger l'installateur à chaque version."
+            echo "Une fois installée, l'application **se met à jour toute seule** : ce qu'elle"
+            echo "accepte d'installer est signé par la clé du projet, qu'elle vérifie avant de"
+            echo "se remplacer."
             echo
             echo "## Changements"
             echo
@@ -162,6 +164,13 @@ jobs:
   macos:
     needs: release
     runs-on: macos-latest
+    # Ce que le job `manifeste` a besoin de savoir de celui-ci, et qu'aucun `result` ne dirait :
+    # un job **réussi** peut n'avoir rien à faire figurer au manifeste — c'est le cas d'un fork
+    # sans les secrets Apple, où la construction va au bout sans notariser et où l'archive n'est
+    # donc pas publiée. La sortie est posée par l'étape qui nomme l'archive, qui est précisément
+    # celle que `NOTARISE` gouverne.
+    outputs:
+      maj: ${{ steps.archive-maj.outputs.publiee }}
     # Une stalle ne doit pas se déguiser en travail — même raison que le job `engine` de
     # `ci.yml`. Une construction universelle compile la crate deux fois : quarante minutes
     # laissent de la marge, une heure trente n'en serait plus.
@@ -592,6 +601,7 @@ jobs:
       # deux releases voisines exposeraient deux fichiers homonymes, et un `latest.json` mal
       # daté enverrait la mauvaise archive sans que personne ne le voie.
       - name: nommer l'archive de mise à jour
+        id: archive-maj
         if: env.NOTARISE == 'oui'
         run: |
           set -euo pipefail
@@ -599,77 +609,30 @@ jobs:
           cp "$source" "publication/DoraBase-$VERSION-universal.app.tar.gz"
           cp "$source.sig" "publication/DoraBase-$VERSION-universal.app.tar.gz.sig"
           ls -lh publication/
+          echo "publiee=oui" >> "$GITHUB_OUTPUT"
+
+      # La **signature** voyage jusqu'au job `manifeste`, pas l'archive : le manifeste porte le
+      # contenu du `.sig` et une URL épinglée au tag, donc trente mégaoctets n'auraient rien à y
+      # faire. L'archive, elle, part directement dans la release à l'étape suivante.
+      - uses: actions/upload-artifact@v4
+        if: env.NOTARISE == 'oui'
+        with:
+          name: maj-macos
+          path: publication/DoraBase-*-universal.app.tar.gz.sig
+          # Le défaut est `warn` : une signature non copiée donnerait un artefact vide, et
+          # c'est le job `manifeste` qui échouerait, bien plus tard et loin de la cause.
+          if-no-files-found: error
+          retention-days: 1
 
       # ── La release ─────────────────────────────────────────────────────────────────────
       #
       # **La release existe déjà** : le job `release` l'a créée, avec son titre, ses notes et
       # `--latest`, avant qu'aucun bundle n'ait été construit — c'est ce qui laisse ce job
-      # tourner en parallèle du job `windows` plutôt qu'attendre l'un après l'autre. Ce qui
-      # reste ici est un fichier que ce job-ci, et lui seul, sait produire :
-      # `changements.md` sert le champ « notes » du manifeste de mise à jour, et c'est le
-      # même texte que celui déjà publié dans la release — récupéré plutôt que régénéré, pour
-      # qu'il n'y ait toujours qu'un seul producteur.
-      - uses: actions/download-artifact@v4
-        with:
-          name: changements
-          path: publication
-
-      # ── Le manifeste de mise à jour ────────────────────────────────────────────────────
+      # tourner en parallèle du job `windows` plutôt qu'attendre l'un après l'autre. Il n'y a
+      # donc plus rien à y préparer : ce job téléverse ce qu'il a construit, et **le manifeste
+      # de mise à jour ne lui appartient plus** — il porte désormais une clef par plateforme,
+      # dont une que ce job ne peut pas signer. Voir le job `manifeste`.
       #
-      # C'est le seul fichier que les applications déjà installées vont chercher, à une URL qui
-      # ne nomme aucune version : `…/releases/latest/download/latest.json`. GitHub la redirige
-      # vers l'asset de la release marquée « latest » — d'où le `--latest` de l'étape suivante,
-      # qui cesse d'être cosmétique : sans lui, plus personne ne trouve de mise à jour.
-      #
-      # **Les deux architectures pointent sur la même archive**, qui est universelle. C'est la
-      # conséquence directe du choix d'un bundle unique : le manifeste doit quand même porter
-      # les deux clés, Tauri cherchant la sienne par `{plateforme}-{architecture}` et ne
-      # connaissant pas la notion d'universel.
-      #
-      # **Et rien n'est publié sans notarisation.** Une archive signée ad hoc — un fork, une
-      # bifurcation — s'installerait proprement puis serait refusée par macOS au redémarrage,
-      # chez des gens qui n'avaient rien demandé et qui n'ont plus de voie de retour. Sans
-      # certificat, il n'y a pas de manifeste, donc pas de mise à jour proposée.
-      - name: le manifeste de mise à jour
-        if: env.NOTARISE == 'oui'
-        run: |
-          set -euo pipefail
-          python3 - <<'FIN'
-          import json, os, pathlib
-
-          version = os.environ["VERSION"]
-          tag = os.environ["GITHUB_REF_NAME"]
-          depot = os.environ["GITHUB_REPOSITORY"]
-          archive = f"DoraBase-{version}-universal.app.tar.gz"
-          dossier = pathlib.Path("publication")
-
-          # La signature est le **contenu** du `.sig`, pas son chemin : le manifeste est ce que
-          # l'application lit, et elle ne va pas chercher un second fichier.
-          signature = (dossier / f"{archive}.sig").read_text().strip()
-          notes = dossier / "changements.md"
-
-          # **Pas de `pub_date`.** Le champ est optionnel, il n'est affiché nulle part, et il est
-          # typé côté Tauri : une date mal formée ne rend pas le manifeste incomplet, elle le
-          # rend *illisible* — donc coupe la mise à jour pour tout le monde. Un champ décoratif
-          # ne mérite pas ce mode de défaillance.
-          manifeste = {
-              "version": version,
-              "notes": notes.read_text().strip() if notes.exists() else "",
-              "platforms": {
-                  arch: {
-                      "signature": signature,
-                      "url": f"https://github.com/{depot}/releases/download/{tag}/{archive}",
-                  }
-                  # L'URL est **épinglée au tag** et non à « latest » : le manifeste dit une
-                  # version, il doit désigner l'archive de cette version. Une URL en « latest »
-                  # ferait installer autre chose que ce qui vient d'être annoncé et vérifié.
-                  for arch in ("darwin-aarch64", "darwin-x86_64")
-              },
-          }
-          (dossier / "latest.json").write_text(json.dumps(manifeste, indent=2) + "\n")
-          print(json.dumps(manifeste, indent=2)[:600])
-          FIN
-
       # **Téléversé dans la release existante, jamais créé une seconde fois.** Le job
       # `release` a déjà appelé `gh release create` avec le titre, les notes et `--latest` :
       # un second `create` échouerait (le tag existe déjà), et de toute façon diviserait la
@@ -681,8 +644,10 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Le disque et son empreinte sont toujours là ; les trois fichiers de mise à jour
-          # n'existent que si la construction était notariée — voir l'étape du manifeste.
+          # Le disque et son empreinte sont toujours là ; les deux fichiers de mise à jour
+          # n'existent que si la construction était notariée. Le manifeste, lui, n'est plus
+          # dans cette liste : c'est le job `manifeste` qui le téléverse, une fois les deux
+          # plateformes construites.
           assets=(
             "publication/DoraBase-$VERSION-universal.dmg"
             "publication/DoraBase-$VERSION-universal.dmg.sha256"
@@ -691,11 +656,11 @@ jobs:
             assets+=(
               "publication/DoraBase-$VERSION-universal.app.tar.gz"
               "publication/DoraBase-$VERSION-universal.app.tar.gz.sig"
-              "publication/latest.json"
             )
           else
-            echo "::notice::sans notarisation, ni archive ni manifeste — les installations"
-            echo "  existantes ne verront pas cette version."
+            echo "::notice::sans notarisation, pas d'archive — et le manifeste ne portera pas"
+            echo "  de clef darwin : les installations macOS existantes ne verront pas cette"
+            echo "  version."
           fi
 
           gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
@@ -720,6 +685,12 @@ jobs:
   windows:
     needs: release
     runs-on: windows-latest
+    # Le pendant exact de la sortie du job `macos` : ce que `manifeste` doit savoir de
+    # celui-ci, et qu'aucun `result` ne dirait. Ici la sortie est posée sans condition — il
+    # n'y a pas d'équivalent de `NOTARISE` sous Windows —, mais un job qui échoue avant cette
+    # étape ne la pose pas, et c'est cela qu'elle sert à dire.
+    outputs:
+      maj: ${{ steps.archive-maj.outputs.publiee }}
     # Pas de construction universelle ici, donc pas de double compilation : vingt-cinq minutes
     # laissent la même marge que les quarante du job macOS.
     timeout-minutes: 25
@@ -813,23 +784,65 @@ jobs:
             | sed "s|publication/||" > "publication/DoraBase-$VERSION-x64-setup.exe.sha256"
           ls -lh publication/
 
-      # **L'installateur seul, et pas les artefacts de mise à jour.**
+      # ── L'archive de mise à jour, depuis le 14 septembre 2026 (`API-58`) ──────────────
       #
-      # `tauri build` vient de produire un `.nsis.zip` et sa signature minisign, qui suffiraient
-      # techniquement à faire se mettre à jour une installation Windows. Ils ne sont pas publiés,
-      # et `latest.json` — écrit par le job macOS — ne porte toujours que les deux clefs
-      # `darwin-*`. Trois raisons, chacune suffisante :
+      # **Ce qui a changé, et pourquoi.** Ces deux fichiers existaient depuis le premier jour —
+      # `createUpdaterArtifacts` les produit à chaque `tauri build` — et ils n'étaient pas
+      # publiés : sans certificat Authenticode, « rien n'atteste que l'exécutable téléchargé
+      # vient de nous », l'arbitrage de « rien n'est proposé qui n'ait été notarié » transposé à
+      # Windows. **La transposition était trop forte**, et les deux moitiés ne disent pas la
+      # même chose :
       #
-      #   - **il n'y a pas de certificat Authenticode**, donc rien n'atteste que l'exécutable
-      #     téléchargé vient de nous. C'est l'exact arbitrage de « rien n'est proposé qui n'ait
-      #     été notarié », transposé : proposer un remplacement qu'on ne peut pas authentifier
-      #     chez des gens qui n'ont rien demandé est pire que ne rien proposer ;
-      #   - **le chemin de mise à jour n'a jamais été exercé**, même sur macOS — c'est écrit dans
-      #     AGENTS.md. L'ouvrir sur une seconde plateforme doublerait une dette non payée ;
-      #   - **ce qui a été demandé est l'installateur.** La mise à jour Windows est une décision
-      #     séparée, et elle tiendrait en peu de lignes le jour où on la prend : ajouter
-      #     `windows-x86_64` au manifeste et téléverser les deux fichiers ci-dessous.
-      - name: attacher l'installateur à la release
+      #   - sur macOS, la notarisation décide si le système **ouvre** l'application. Une archive
+      #     signée ad hoc s'installe proprement puis est refusée au redémarrage, chez quelqu'un
+      #     qui n'a plus de voie de retour : c'est une panne franche, et c'est ce que le refus
+      #     de publier évite ;
+      #   - sous Windows, ce qui atteste l'origine d'une mise à jour est la **clé minisign** du
+      #     projet, dont la moitié publique est dans `tauri.conf.json` — donc dans le bundle que
+      #     les utilisateurs ont déjà. C'est la distinction qu'AGENTS.md écrit depuis le début :
+      #     Apple décide si macOS ouvre l'application, la clé minisign décide si une
+      #     installation accepte de se **remplacer** par ce qu'on lui envoie. Authenticode
+      #     répond à une troisième question — ce que SmartScreen affiche à qui **télécharge**
+      #     l'installateur dans un navigateur —, et celle-là reste entière : le `.exe` de la
+      #     release est toujours non signé, et le README le dit toujours.
+      #
+      # Autrement dit le refus protégeait d'un risque que la clé de mise à jour couvre déjà, au
+      # prix de la voie de mise à jour entière. Ce qu'il en reste est **à voir à l'œil** : le
+      # remplacement d'un bundle par lui-même n'a jamais été exercé, sur aucune des deux
+      # plateformes — AGENTS.md le porte, et ce chantier ne l'a pas payé.
+      #
+      # Tauri nomme l'archive `DoraBase_<version>_x64-setup.nsis.zip`. Renommée sur la
+      # convention du dépôt, et pour la même raison que l'archive macOS : un nom qui ne porte
+      # pas la version expose deux fichiers homonymes sur deux releases voisines.
+      - name: nommer l'archive de mise à jour
+        id: archive-maj
+        shell: bash
+        run: |
+          set -euo pipefail
+          zip=$(ls src-tauri/target/release/bundle/nsis/*.nsis.zip)
+          # Même garde que pour l'installateur : deux archives voudraient dire qu'une ancienne
+          # traîne dans le cache, et `ls` en choisirait une au hasard.
+          test "$(wc -l <<<"$zip")" -eq 1
+          cp "$zip" "publication/DoraBase-$VERSION-x64.nsis.zip"
+          # La signature minisign, sans laquelle l'archive ne serait qu'un zip : c'est elle que
+          # l'application vérifie avant de se remplacer, et le manifeste en porte le contenu.
+          test -f "$zip.sig"
+          cp "$zip.sig" "publication/DoraBase-$VERSION-x64.nsis.zip.sig"
+          ls -lh publication/
+          echo "publiee=oui" >> "$GITHUB_OUTPUT"
+
+      # Comme côté macOS, c'est la **signature** qui voyage jusqu'au job `manifeste`, pas
+      # l'archive : celui-ci n'écrit qu'un JSON, et il n'a besoin que du contenu du `.sig`.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: maj-windows
+          path: publication/DoraBase-*-x64.nsis.zip.sig
+          # Le défaut est `warn` : une signature non copiée donnerait un artefact vide, et
+          # c'est le job `manifeste` qui échouerait, bien plus tard et loin de la cause.
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: attacher l'installateur et l'archive à la release
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -838,6 +851,143 @@ jobs:
           gh release upload "$GITHUB_REF_NAME" \
             "publication/DoraBase-$VERSION-x64-setup.exe" \
             "publication/DoraBase-$VERSION-x64-setup.exe.sha256" \
+            "publication/DoraBase-$VERSION-x64.nsis.zip" \
+            "publication/DoraBase-$VERSION-x64.nsis.zip.sig" \
             --clobber
           echo "::notice::installateur Windows attaché — non signé, SmartScreen avertira au"
-          echo "  téléchargement, et les installations Windows ne se mettent pas à jour seules."
+          echo "  téléchargement. La mise à jour en place, elle, est signée par la clé du projet."
+
+  # ── Le manifeste de mise à jour ────────────────────────────────────────────────────────
+  #
+  # C'est le seul fichier que les applications déjà installées vont chercher, à une URL qui ne
+  # nomme aucune version : `…/releases/latest/download/latest.json`. GitHub la redirige vers
+  # l'asset de la release marquée « latest » — d'où le `--latest` du job `release`, qui cesse
+  # d'être cosmétique : sans lui, plus personne ne trouve de mise à jour.
+  #
+  # **Pourquoi un job à part, depuis le 14 septembre 2026 (`API-58`).** Le manifeste était écrit
+  # par le job `macos`, ce qui allait tant qu'il ne portait que des clefs `darwin-*`. Il porte
+  # maintenant une clef que ce job **ne peut pas signer** : la signature Windows n'existe que
+  # dans le job Windows, et les deux tournent en parallèle. Trois issues possibles, une seule
+  # tenable :
+  #
+  #   - faire attendre l'un des deux — c'est reperdre le parallélisme du 2 septembre, et
+  #     rebrancher un échec Windows sur la publication macOS ;
+  #   - laisser Windows **compléter** le manifeste que macOS a téléversé — deux producteurs pour
+  #     un fichier engendré, ce que ce dépôt refuse partout ailleurs, et une lecture-modification
+  #     -écriture entre deux jobs par-dessus le marché ;
+  #   - un troisième job qui **n'écrit rien d'autre** et qui attend les deux. C'est celui-ci.
+  #
+  # **Et il publie ce qui existe, plutôt que d'exiger les deux.** C'est ce qui garde la propriété
+  # du 1er septembre — « un échec de la construction Windows ne coûte pas la release macOS » — en
+  # la rendant symétrique : chaque plateforme entre au manifeste si, et seulement si, sa propre
+  # construction a produit une archive signée. Une plateforme absente n'est pas un silence pour
+  # autant : l'application le dit, et nomme la manœuvre (voir `src-tauri/src/maj/mod.rs`).
+  manifeste:
+    needs: [macos, windows]
+    # `!cancelled()` et non `always()` : une annulation demandée à la main ne doit pas publier
+    # un manifeste à moitié. La seconde moitié est la condition qui décide qu'il y a quelque
+    # chose à écrire — sans elle, un tag dont les deux constructions échouent téléverserait un
+    # `platforms` vide, c'est-à-dire un manifeste que l'application lit sans y trouver personne.
+    # Sur une seule ligne, et c'est délibéré : en scalaire replié (`>-`), une continuation
+    # **plus indentée** que la première ligne garde son saut de ligne — donc `${{ … }}`
+    # arriverait à GitHub coupé en deux. Mesuré en relisant le YAML analysé, pas supposé.
+    if: ${{ !cancelled() && (needs.macos.outputs.maj == 'oui' || needs.windows.outputs.maj == 'oui') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Le nom dit ce que l'étape fait, et rien de plus : ce job ne vérifie **pas** que le tag
+      # s'accorde aux fichiers du dépôt — les deux constructions l'ont déjà fait par
+      # `verifier-version.py`, et il n'a même pas le dépôt sous la main, n'ayant rien à y lire.
+      - name: la version, tirée du tag
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      # `changements.md` sert le champ « notes » du manifeste — le même texte que celui déjà
+      # publié dans la release, récupéré plutôt que régénéré : un fichier engendré n'a qu'un
+      # seul producteur.
+      - uses: actions/download-artifact@v4
+        with:
+          name: changements
+          path: manifeste
+
+      # **Une condition par plateforme, et c'est la sortie du job qui décide** — non son
+      # `result`. Un job `macos` réussi mais non notarié (un fork sans les secrets Apple) n'a
+      # pas d'archive à proposer : `download-artifact` échouerait sur un artefact absent, et
+      # `continue-on-error` masquerait au passage une vraie panne de téléchargement.
+      - uses: actions/download-artifact@v4
+        if: needs.macos.outputs.maj == 'oui'
+        with:
+          name: maj-macos
+          path: manifeste
+      - uses: actions/download-artifact@v4
+        if: needs.windows.outputs.maj == 'oui'
+        with:
+          name: maj-windows
+          path: manifeste
+
+      - name: écrire le manifeste
+        run: |
+          set -euo pipefail
+          python3 - <<'FIN'
+          import json, os, pathlib
+
+          version = os.environ["VERSION"]
+          tag = os.environ["GITHUB_REF_NAME"]
+          depot = os.environ["GITHUB_REPOSITORY"]
+          dossier = pathlib.Path("manifeste")
+
+          # Une entrée par clef que Tauri sait chercher : il compose la sienne en
+          # `{plateforme}-{architecture}` et ne connaît pas la notion d'universel — d'où deux
+          # clefs darwin pour **une** archive, qui l'est.
+          #
+          # L'URL est **épinglée au tag** et non à « latest » : le manifeste annonce une
+          # version, il doit désigner l'archive de cette version. Une URL en « latest » ferait
+          # installer autre chose que ce qui vient d'être annoncé et vérifié.
+          sources = {
+              f"DoraBase-{version}-universal.app.tar.gz": ("darwin-aarch64", "darwin-x86_64"),
+              f"DoraBase-{version}-x64.nsis.zip": ("windows-x86_64",),
+          }
+
+          plateformes = {}
+          for archive, clefs in sources.items():
+              signature = dossier / f"{archive}.sig"
+              # Absente = cette construction-là n'a rien produit. On n'annonce pas ce qu'on
+              # n'a pas : mieux vaut un manifeste d'une seule plateforme qu'une clef qui
+              # pointe sur une URL en 404.
+              if not signature.exists():
+                  print(f"pas de signature pour {archive} — {'/'.join(clefs)} hors manifeste")
+                  continue
+              url = f"https://github.com/{depot}/releases/download/{tag}/{archive}"
+              for clef in clefs:
+                  plateformes[clef] = {
+                      "signature": signature.read_text().strip(),
+                      "url": url,
+                  }
+
+          # La condition du job l'a déjà dit, mais elle le dit en YAML : ceci le redit là où
+          # une erreur d'écriture de cette condition se verrait.
+          if not plateformes:
+              raise SystemExit("aucune signature — il n'y a pas de manifeste à écrire")
+
+          notes = dossier / "changements.md"
+
+          # **Pas de `pub_date`.** Le champ est optionnel, il n'est affiché nulle part, et il est
+          # typé côté Tauri : une date mal formée ne rend pas le manifeste incomplet, elle le
+          # rend *illisible* — donc coupe la mise à jour pour tout le monde. Un champ décoratif
+          # ne mérite pas ce mode de défaillance.
+          manifeste = {
+              "version": version,
+              "notes": notes.read_text().strip() if notes.exists() else "",
+              "platforms": plateformes,
+          }
+          (dossier / "latest.json").write_text(json.dumps(manifeste, indent=2) + "\n")
+          print(json.dumps(manifeste, indent=2)[:600])
+          FIN
+
+      # Téléversé dans la release que le job `release` a créée, jamais par un second `create` —
+      # même raison que les deux jobs de construction.
+      - name: téléverser le manifeste
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload "$GITHUB_REF_NAME" manifeste/latest.json --clobber
