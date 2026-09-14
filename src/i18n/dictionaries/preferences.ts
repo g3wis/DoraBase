@@ -8,7 +8,6 @@ export const preferencesFr: Dictionnaire = {
     general: 'Général',
     apparence: 'Apparence',
     grille: 'Grille de données',
-    connexions: 'Connexions',
     securite: 'Sécurité & écriture',
     maj: 'Mises à jour',
   },
@@ -19,7 +18,6 @@ export const preferencesFr: Dictionnaire = {
   },
   general: {
     langueTitre: 'Langue',
-    aVenir: 'Le comportement au démarrage, et l’ouverture automatique des connexions.',
   },
   langues: {
     fr: 'Français',
@@ -58,10 +56,6 @@ export const preferencesFr: Dictionnaire = {
     policeAriaLabel: 'Corps de la police du code',
     policeNote:
       'La famille reste JetBrains Mono, embarquée avec l’application. Le corps s’applique à la grille, à l’éditeur et aux blocs SQL.',
-  },
-  connexions: {
-    aVenir:
-      'Le délai d’attente, la reconnexion automatique, et le chemin du fichier de clés SSH par défaut.',
   },
   securite: {
     titre: 'Garde-fous',
@@ -102,9 +96,6 @@ export const preferencesFr: Dictionnaire = {
     redemarrageNote:
       'DoraBase se relance seul. Les consoles non enregistrées ne sont pas conservées.',
   },
-  aVenir: {
-    corps: (p) => `Rien à régler ici pour l’instant. Cette section portera : ${p.porte}`,
-  },
   reinitialisation: {
     titre: 'Réinitialiser les préférences',
     annuler: 'Annuler',
@@ -123,7 +114,6 @@ export const preferencesEn: Dictionnaire = {
     general: 'General',
     apparence: 'Appearance',
     grille: 'Data grid',
-    connexions: 'Connections',
     securite: 'Security & writes',
     maj: 'Updates',
   },
@@ -134,7 +124,6 @@ export const preferencesEn: Dictionnaire = {
   },
   general: {
     langueTitre: 'Language',
-    aVenir: 'Startup behavior, and automatically opening connections.',
   },
   langues: {
     fr: 'Français',
@@ -174,9 +163,6 @@ export const preferencesEn: Dictionnaire = {
     policeNote:
       'The family stays JetBrains Mono, bundled with the application. The size applies to the grid, the editor, and SQL blocks.',
   },
-  connexions: {
-    aVenir: 'The timeout, automatic reconnection, and the default SSH key file path.',
-  },
   securite: {
     titre: 'Guardrails',
     pendingBeforeWrite: {
@@ -214,9 +200,6 @@ export const preferencesEn: Dictionnaire = {
     installer: 'Install and restart',
     installation: 'Downloading…',
     redemarrageNote: 'DoraBase restarts on its own. Unsaved consoles are not kept.',
-  },
-  aVenir: {
-    corps: (p) => `Nothing to set here yet. This section will cover: ${p.porte}`,
   },
   reinitialisation: {
     titre: 'Reset preferences',

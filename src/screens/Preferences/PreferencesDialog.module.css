@@ -106,15 +106,6 @@
   color: var(--warn-ink);
 }
 
-.aVenir {
-  margin: 0;
-  padding: var(--space-5) var(--space-6);
-  border: 1px dashed var(--border-dashed);
-  border-radius: var(--radius-field);
-  font: var(--weight-medium) var(--text-label) / var(--leading-ui) var(--font-ui);
-  color: var(--ink-8);
-}
-
 /* --- Apparence --------------------------------------------------------- */
 
 .themes {

@@ -60,11 +60,12 @@ type PreferencesDialogProps = {
 /**
  * Les sections du mockup, dans son ordre, plus « Mises à jour » (26 août 2026).
  *
- * **« Éditeur SQL » et « Raccourcis » ont été retirées le 28 août 2026** : deux sections qui ne
- * portaient qu'une phrase « à venir », et sans date à laquelle ce contenu arrive. Elles
- * reviendront quand il y aura quelque chose à y régler.
+ * **« Éditeur SQL » et « Raccourcis » ont été retirées le 28 août 2026, « Connexions » le
+ * 14 septembre (`API-59`)** : trois sections qui ne portaient qu'une phrase « à venir », et sans
+ * date à laquelle ce contenu arrive. Elles reviendront quand il y aura quelque chose à y régler ;
+ * ce que la dernière annonçait est porté par `API-60`.
  */
-export type Section = 'general' | 'apparence' | 'grille' | 'connexions' | 'securite' | 'maj'
+export type Section = 'general' | 'apparence' | 'grille' | 'securite' | 'maj'
 
 /**
  * L'écran de préférences de `A10` (`15a` → `15d`).
@@ -89,7 +90,6 @@ export function PreferencesDialog({
     { cle: 'general', nom: t('preferences.sections.general'), icone: 'gear' },
     { cle: 'apparence', nom: t('preferences.sections.apparence'), icone: 'paint' },
     { cle: 'grille', nom: t('preferences.sections.grille'), icone: 'cols' },
-    { cle: 'connexions', nom: t('preferences.sections.connexions'), icone: 'srv' },
     { cle: 'securite', nom: t('preferences.sections.securite'), icone: 'shield' },
     // **En dernier, et après les cinq du mockup.** Ce n'est pas un réglage : rien ne s'y règle, on y
     // demande et on y installe. La placer parmi les sections de préférences la ferait chercher parmi
@@ -98,9 +98,11 @@ export function PreferencesDialog({
     { cle: 'maj', nom: t('preferences.sections.maj'), icone: 'dl' },
   ]
 
-  // Le mockup ouvre sur « Apparence » : c'est la section qui a du contenu, et ouvrir sur « Général »
-  // montrerait d'abord une section qui annonce ce qu'elle portera. C'est le défaut de la prop, que
-  // seule la notification de mise à jour remplace aujourd'hui.
+  // Le mockup ouvre sur « Apparence », et c'est resté. **La raison d'origine est morte avec
+  // `API-59`** — « Général » n'annonce plus ce qu'il portera, il règle la langue —, donc elle est
+  // remplacée plutôt que laissée en place (règle n° 20) : on ouvre sur la section qu'on vient
+  // changer, le thème et l'accent, là où la langue se choisit une fois. C'est le défaut de la prop,
+  // que seule la notification de mise à jour remplace aujourd'hui.
   const [section, setSection] = useState<Section>(sectionInitiale)
   const [aReinitialiser, setAReinitialiser] = useState(false)
 
@@ -207,12 +209,6 @@ export function PreferencesDialog({
             />
           )}
           {section === 'general' && <General preferences={preferences} onRegler={regler} />}
-          {section === 'connexions' && (
-            <AVenir
-              titre={t('preferences.sections.connexions')}
-              porte={t('preferences.connexions.aVenir')}
-            />
-          )}
         </div>
       </div>
 
@@ -232,9 +228,9 @@ export function PreferencesDialog({
 /**
  * « Général » : la langue de l'interface (26 août 2026, `general` n'avait jusque-là rien à régler).
  *
- * **Le reste que la section promettait — comportement au démarrage, ouverture automatique des
- * connexions — n'est toujours pas livré**, et le dit encore, sous la langue : livrer un réglage ne
- * doit pas faire disparaître ce qui reste annoncé.
+ * **Ce que la section promettait encore sous la langue — comportement au démarrage, ouverture
+ * automatique des connexions — est parti le 14 septembre 2026 (`API-59`)**, comme la section
+ * « Connexions » elle-même et pour la même raison : une annonce sans date n'est pas un réglage.
  */
 function General({
   preferences,
@@ -269,7 +265,6 @@ function General({
           ))}
         </div>
       </section>
-      <AVenir titre={t('preferences.sections.general')} porte={t('preferences.general.aVenir')} />
     </>
   )
 }
@@ -603,22 +598,6 @@ function MisesAJour({
 /** Ce que `catch` reçoit n'est pas toujours une `Error` : Tauri rejette avec une chaîne. */
 function message(erreur: unknown): string {
   return erreur instanceof Error ? erreur.message : String(erreur)
-}
-
-/**
- * Une section qui n'a rien à régler, **et qui dit ce qu'elle portera**.
- *
- * La cacher ferait croire à une interface plus pauvre qu'elle ne sera ; la laisser vide ferait
- * croire à un défaut.
- */
-function AVenir({ titre, porte }: { titre: string; porte: string }) {
-  const t = useT()
-  return (
-    <section className={styles.bloc}>
-      <h3 className={styles.titre}>{titre}</h3>
-      <p className={styles.aVenir}>{t('preferences.aVenir.corps', { porte })}</p>
-    </section>
-  )
 }
 
 /**
