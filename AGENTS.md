@@ -1304,6 +1304,32 @@ transaction : là-bas il y a un geste qu'on n'offre pas, ici il n'y a pas de cl�
   l'assertion échouait de la largeur exacte de ce qu'elle voulait garder. Ce qui se compare est le
   bord du **contenu**, c'est-à-dire l'endroit le plus loin qu'un texte puisse atteindre.
 
+**Et un défaut livré, rapporté à l'usage le 16 septembre 2026** : « la police et la taille des liens
+du panneau droit ne correspondent pas au reste de l'interface ». `.lienSuivable` posait
+`font: inherit` pour neutraliser la police de formulaire d'un `<button>` ; déclarée **après**
+`.lien` dans le même fichier, cette **abréviation** reposait famille, taille, graisse, style et
+hauteur de ligne d'un coup, et écrasait donc les trois déclarations de `.lien`. Mesuré : Nunito
+16 px/400 là où le lien entrant voisin gardait JetBrains Mono 11 px/500. Trois choses à en retenir,
+et les deux dernières valent partout :
+
+- **il n'y avait rien à neutraliser.** Les styles d'auteur l'emportent sur ceux de l'agent
+  utilisateur quelle que soit leur spécificité : la police de formulaire d'un `<button>` ne
+  s'appliquait déjà pas contre les `font-family` / `font-size` / `font-weight` de `.lien`. La ligne
+  ne réparait rien et cassait trois choses ;
+- **une abréviation CSS repose ce qu'on ne nomme pas.** `font`, `background`, `border`, `grid` :
+  chacune remet à zéro des longhands qu'on n'avait pas l'intention de toucher. Sur un élément qui
+  porte **deux classes** — l'idiome `cx(styles.a, styles.b)` de tout ce dépôt —, c'est l'ordre du
+  fichier qui décide, pas l'intention. Sept autres `font: inherit` vivent dans `src/` et n'ont pas
+  été audités : le premier qui suit une règle posant une police sur le même élément portera le même
+  défaut ;
+- **une police n'est ni une position ni une présence, et rien ne la mesurait.** Les 1 935 tests
+  d'alors étaient verts : le DOM était juste, les rôles aussi, le nom accessible inchangé. Un test
+  de bout en bout compare désormais la police **calculée** d'un lien sortant à celle d'un entrant —
+  ce qui est gardé est qu'un lien se lise pareil qu'il soit cliquable ou non, et non qu'il vaille
+  telle valeur, qu'un passage de design périmerait. Les deux sortes vivant sur deux tables du décor
+  (`orders` la seule sortante, `shipment_batches` la seule entrante), la comparaison traverse deux
+  onglets.
+
 **Ce qui reste hors périmètre** : le sens entrant — depuis une colonne référencée, aller aux lignes
 qui la désignent —, qui essaime vers N tables et demande un menu plutôt qu'une cible. Et les filtres
 qu'un onglet oublie dès qu'on le quitte, que ce chantier rend seulement plus visibles : c'est

@@ -313,13 +313,20 @@
    l'un. D'où un curseur, un survol, et rien de plus — pas de soulignement, que rien du produit
    n'emploie.
    Les réglages de `<button>` sont remis à zéro parce que `.lien` décrit une ligne de texte : sans
-   eux l'agent utilisateur poserait sa bordure, son fond gris et sa police de formulaire. */
+   eux l'agent utilisateur poserait sa bordure, son fond gris et sa police de formulaire.
+
+   **Mais surtout pas par `font: inherit`**, qui était là et qui a coûté un signalement. C'est une
+   **abréviation** : elle repose famille, taille, graisse, style et hauteur de ligne d'un coup, et
+   comme cette règle suit `.lien` dans le fichier, elle écrasait ses trois déclarations par celles
+   de l'ancêtre — le lien sortant rendait en Nunito 16 px/400 quand son voisin entrant gardait
+   JetBrains Mono 11 px/500. Mesuré, pas supposé. Il n'y avait d'ailleurs rien à neutraliser : les
+   styles d'auteur l'emportent sur ceux de l'agent utilisateur quelle que soit leur spécificité,
+   donc la police de formulaire ne s'appliquait déjà pas. */
 .lienSuivable {
   width: 100%;
   padding: 0;
   border: none;
   background: none;
-  font: inherit;
   color: inherit;
   text-align: left;
   cursor: pointer;

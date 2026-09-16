@@ -144,3 +144,42 @@ test('le même saut se fait au clavier, depuis la section « Liens » du panneau
   await expect(page.getByRole('grid', { name: 'Lignes de public.users' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Retirer le filtre sur id' })).toBeVisible()
 })
+
+test('un lien sortant garde la police d’un lien, bien qu’il soit un bouton', async ({ page }) => {
+  /*
+   * **Rapporté à l'usage** : « la police et la taille des liens du panneau droit ne
+   * correspondent pas au reste de l'interface ». `.lienSuivable` posait `font: inherit` pour
+   * neutraliser la police de formulaire d'un `<button>` — une **abréviation**, qui repose famille,
+   * taille, graisse, style et hauteur de ligne d'un coup, et qui, déclarée après `.lien`, écrasait
+   * ses trois valeurs par celles de l'ancêtre. Mesuré : Nunito 16 px/400 au lieu de JetBrains Mono
+   * 11 px/500, donc un lien sortant qui ne ressemblait à rien de son voisinage.
+   *
+   * **Aucun des 1 935 tests d'alors ne l'a vu** : le DOM était juste, les rôles aussi, et le nom
+   * accessible inchangé. Une police n'est ni une position ni une présence — c'est un style
+   * *calculé*, et rien n'en mesurait aucun dans ce panneau.
+   *
+   * Les deux sortes de liens vivent sur deux tables du décor — `orders` porte la seule sortante,
+   * `shipment_batches` la seule entrante —, donc la comparaison traverse deux onglets. C'est ce
+   * qui la rend juste : ce qu'on garde est qu'un lien se lit **pareil** qu'il soit cliquable ou
+   * non, et non qu'il vaille telle valeur, qu'un changement de design périmerait.
+   */
+  const police = (cible: Locator) =>
+    cible.evaluate((element) => {
+      const style = getComputedStyle(element)
+      return `${style.fontFamily} / ${style.fontSize} / ${style.fontWeight}`
+    })
+
+  await ligneDeDonnees(page, 2).click()
+  const sortant = await police(page.getByRole('button', { name: /user_id.*users\.id/ }))
+
+  await page.getByRole('treeitem', { name: /^shipment_batches/ }).click()
+  await page.waitForSelector('[role=grid][aria-label*="shipment_batches"]')
+  await ligneDeDonnees(page, 2).click()
+  const entrant = await police(
+    page.locator('[class*="liens"]').getByText('inventory_movements.batch_id'),
+  )
+
+  expect(sortant).toBe(entrant)
+  // Et le contrôle positif : sans lui, deux polices fausses mais égales passeraient.
+  expect(sortant).toContain('JetBrains Mono')
+})
