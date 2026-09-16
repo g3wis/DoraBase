@@ -383,6 +383,38 @@ qu'il portait et que le rendu ne dit pas.
   chez `A10`, la seule modale à porter son propre plancher de hauteur : celui-ci l'emportait sur son
   propre maximum, donc le corps de la modale défilait et emportait la bande de sections avec lui — un
   `min()` le borne au même endroit que le maximum.
+- **Dans un partage vertical, c'est le panneau *souple* qui a besoin de `min-height: 0`** (16
+  septembre 2026, `API-62`, rapporté à l'usage : « i cannot scroll the left panel »). `SplitPane` ne
+  le posait que sur `.pane` — celui qui porte la taille réglée —, alors que `.pane` est en
+  `flex: none` et tient la hauteur qu'on lui écrit. C'est `.end`, souple, qui doit se **réduire** à
+  ce qui reste, et un élément souple à `min-height: auto` refuse de descendre sous la hauteur de son
+  contenu. Mesuré sur la sidebar de l'écran de travail — `sized="end"` depuis `API-32`, donc l'arbre
+  est le panneau souple : dans une fenêtre de 420 px, arbre déplié, il prenait **760 px dans un
+  conteneur de 379**. Trois choses à en retenir :
+  - **un `overflow` qui ne défile pas ne se dénonce pas.** `Sidebar.body` déclarait son
+    `overflow-y: auto` et sa déclaration était juste ; elle n'avait simplement **rien à faire
+    défiler**, sa hauteur valant celle de son contenu. La signature du défaut était
+    `clientHeight === scrollHeight` — et à l'écran, un arbre coupé dont la molette ne fait rien,
+    qui se lit comme une molette en panne plutôt que comme une mise en page fausse. C'est la
+    famille du `var()` mort et du `grid-column` inerte, sur une déclaration que rien n'atteint ;
+  - **la raison était déjà écrite dans le même fichier, à un sélecteur près.** `.root` porte le
+    commentaire exact — « imbriqué dans une colonne flex, un enfant flex refuse par défaut de
+    descendre sous la hauteur de son contenu » —, et c'est `.end` qui ne l'avait pas. Un remède
+    posé sur un seul des deux endroits qui en ont besoin est la même famille que le `HOME` lu à
+    quatre endroits : la question n'a qu'une réponse, elle doit n'avoir qu'un lieu ;
+  - **et la zone d'en dessous est celle qui paie.** Le débord poussait « Instances » 88 px sous le
+    bord de la fenêtre, où aucun geste ne va — avec le `+` qui fait exister une instance. Un
+    panneau qui déborde ne coupe pas ce qui dépasse, il **emporte ses voisins**.
+
+  **Le contrôle positif ne doit pas bouger avec le défaut**, et c'est la leçon de test (règle
+  n° 1). Le premier jet ouvrait par « l'arbre est plus haut que sa zone défilante », ce qui est
+  *la propriété même qu'on mesure* : sous sabotage, c'est le contrôle qui tombait, et les deux
+  assertions qui disent l'exigence n'étaient jamais évaluées. Il compare désormais des quantités
+  que le défaut ne déplace pas — la hauteur de l'arbre plus celle du panneau d'instances contre
+  celle de la colonne —, si bien que le sabotage laisse parler l'assertion qu'il doit faire
+  tomber. **Une fenêtre courte plutôt qu'un arbre long** : la propriété est vraie de toute
+  hauteur, et déplier vingt nœuds ferait dépendre le test des chargements du décor.
+
 - **`esc` dans un champ rend le focus, il ne ferme pas la modale.** Un second `esc` ferme ;
   depuis un bouton, la fermeture est immédiate — il n'y a pas de saisie à abandonner.
 - **Aucune correction automatique dans les champs.** macOS transformait `localhost` en
@@ -3925,7 +3957,9 @@ anecdotes.
 1. **Un test vert ne prouve rien tant qu'un sabotage ne l'a pas fait tomber.** Le contrôle
    négatif se fait par sabotage, pas par relecture : retirer la ligne soupçonnée du sujet
    et constater que la suite reste verte. Un test qui reste vert sous sabotage doit être
-   **réécrit** — c'est arrivé quatre fois.
+   **réécrit** — c'est arrivé quatre fois. Corollaire trouvé avec `API-62` : **un contrôle
+   positif qui bouge avec le défaut ne contrôle rien** — il tombe à la place de l'assertion
+   qu'il devait laisser parler, et le sabotage ne dit plus rien de celle-ci.
 
 2. **Vérifier le chemin, pas seulement le résultat visible.** Saboter la pagination
    laissait vert le test « la fenêtre rend 500 lignes » — ramener cent mille lignes puis
