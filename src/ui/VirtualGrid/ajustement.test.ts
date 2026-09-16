@@ -33,6 +33,29 @@ describe('largeurAjustee', () => {
     expect(avec - sans).toBe(15)
   })
 
+  it('réserve la place du bouton de saut dans chaque cellule', () => {
+    // `API-55` : une colonne de clé étrangère porte un bouton **dans** ses cellules. Sans cette
+    // réserve, l'ajustement rendrait juste la place du texte, et le bouton se peindrait dessus.
+    const sans = largeurAjustee('user_id', ['184220000000'])
+    const avec = largeurAjustee('user_id', ['184220000000'], { margeDeValeur: 17 })
+    expect(avec - sans).toBe(17)
+  })
+
+  it('les deux réserves s’ajoutent, chacune de son côté', () => {
+    // L'en-tête et les valeurs sont deux candidats à la largeur, et `largeurAjustee` prend le plus
+    // grand : une réserve posée du côté qui **ne gagne pas** ne changerait rien, et c'est
+    // exactement ce qu'un test à décor court ne verrait pas.
+    const valeursLongues = ['184220000000000000']
+    expect(
+      largeurAjustee('id', valeursLongues, { margeDeValeur: 17 }) -
+        largeurAjustee('id', valeursLongues),
+    ).toBe(17)
+    expect(
+      largeurAjustee('est_remboursable_par_le_marchand', [], { margeDEntete: 14 }) -
+        largeurAjustee('est_remboursable_par_le_marchand', []),
+    ).toBe(14)
+  })
+
   it('une valeur de 19 caractères tient dans sa colonne, marges comprises', () => {
     // `2026-07-31 09:41:02`, la valeur du décor : 19 × 6,9 + 16 = 147,1 → 148.
     const largeur = largeurAjustee('created_at', ['2026-07-31 09:41:02'])

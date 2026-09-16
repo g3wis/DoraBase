@@ -22,6 +22,7 @@ export type IconName =
   | 'fk'
   | 'flask'
   | 'gear'
+  | 'goto'
   | 'hist'
   | 'json'
   | 'kbd'

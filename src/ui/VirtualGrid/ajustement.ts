@@ -55,6 +55,15 @@ export type OptionsDAjustement = {
    * de tri ne tronque le nom de la colonne qu'on vient de trier.
    */
   margeDEntete?: number
+  /**
+   * Les pixels réservés dans **chaque cellule** au-delà de son texte : le bouton de saut d'une
+   * colonne de clé étrangère (`API-55`), qui vit à droite de la valeur.
+   *
+   * Réservés toujours, comme la flèche de tri l'est dans l'en-tête, et pour la même raison prise
+   * par l'autre bout : le bouton ne paraît qu'au survol, donc une place prise à ce moment-là
+   * déplacerait la valeur sous le pointeur qui vient de s'y poser.
+   */
+  margeDeValeur?: number
 }
 
 /**
@@ -75,7 +84,7 @@ export function largeurAjustee(
   for (const valeur of valeurs) {
     if (valeur.length > caracteres) caracteres = valeur.length
   }
-  const largeurDesValeurs = caracteres * AVANCE_MONO + MARGE_CELLULE
+  const largeurDesValeurs = caracteres * AVANCE_MONO + MARGE_CELLULE + (options.margeDeValeur ?? 0)
   const largeurDeLEntete =
     entete.length * AVANCE_ENTETE + MARGE_CELLULE + (options.margeDEntete ?? 0)
   return Math.min(max, Math.max(min, Math.ceil(Math.max(largeurDesValeurs, largeurDeLEntete))))

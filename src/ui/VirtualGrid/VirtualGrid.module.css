@@ -335,6 +335,23 @@
   --row-number: hidden;
 }
 
+/* **Et le survol d'une *cellule* a son propre canal** (`API-55`), par le même mécanisme et pour
+   une raison différente. La poubelle d'`API-45` agit sur la **ligne**, donc elle se découvre au
+   survol de la ligne ; le saut vers une ligne liée agit sur la **valeur d'une cellule** — deux
+   clés étrangères sur la même ligne mènent à deux tables. Le révéler au survol de la ligne
+   allumerait tous ses boutons à la fois, pour désigner chacun autre chose.
+
+   Ce n'est pas un état de survol inventé : la cellule ne change ni de fond ni de filet. Ce qui
+   annonce le geste est le glyphe de l'en-tête, qui dit que la colonne se suit ; le canal ne fait
+   que révéler le contrôle là où le regard est déjà. */
+.td {
+  --cell-actions: hidden;
+}
+
+.td:hover {
+  --cell-actions: visible;
+}
+
 .selected {
   background: var(--info-bg);
   /* Liseré intérieur, et non une bordure : une bordure ajouterait 2px à la boîte et décalerait

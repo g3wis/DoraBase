@@ -14,6 +14,7 @@ import { LanguageProvider } from '../../i18n/LanguageContext'
 import type { PasserelleDetail } from '../Workbench/useDetailTable'
 import type { Echelle } from './horodatage'
 import { RowPanel } from './RowPanel'
+import type { CibleDuSaut } from './saut'
 import type { PasserelleLignes } from './useLignes'
 
 const CLE: DatabaseKey = { project: 'Halle', database: 'analytics', environment: 'prod' }
@@ -108,6 +109,7 @@ type Options = {
   onCopyInsert?: () => void
   onNavigate?: (rang: number) => void
   lectures?: Readonly<Record<string, Echelle>>
+  onSuivreLaReference?: (cible: CibleDuSaut) => void
 }
 
 function monter({
@@ -118,6 +120,7 @@ function monter({
   rang = 1,
   onCopyInsert,
   lectures,
+  onSuivreLaReference,
 }: Options = {}) {
   const readRows = vi.fn(async (_cle: DatabaseKey, _requete: RowQuery) => ({
     offset: 0,
@@ -145,6 +148,7 @@ function monter({
           lectures={lectures}
           rang={rang}
           onCopyInsert={onCopyInsert}
+          onSuivreLaReference={onSuivreLaReference}
           passerelleDetail={{ describeTable } as unknown as PasserelleDetail}
           passerelleLignes={{ readRows } as unknown as PasserelleLignes}
         />
@@ -432,5 +436,54 @@ describe('copier en INSERT', () => {
   it('sans commande, le bouton n’est pas rendu', () => {
     monter()
     expect(screen.queryByRole('button', { name: /Copier la ligne/ })).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * Suivre un lien depuis le panneau (`API-55`).
+ *
+ * **C'est le chemin clavier du geste que la grille n'offre qu'à la souris** : son bouton de cellule
+ * ne paraît qu'au survol, donc il est hors du parcours de tabulation. Les deux appellent la même
+ * fonction (règle n° 17), et ce sont les mêmes `filters` qui en sortent.
+ */
+describe('un lien sortant se suit', () => {
+  it('est un bouton, et mène à la ligne que la clé désigne', async () => {
+    const utilisateur = userEvent.setup()
+    const suivre = vi.fn()
+    monter({ relations: [RELATION, RELATION_ENTRANTE], onSuivreLaReference: suivre })
+
+    const liens = sectionDesLiens()
+    await utilisateur.click(within(liens).getByRole('button', { name: /user_id/ }))
+    expect(suivre).toHaveBeenCalledWith({
+      schema: 'public',
+      table: 'users',
+      filters: [{ column: 'id', operator: 'eq', value: '90233' }],
+    })
+  })
+
+  it('un lien entrant reste du texte', () => {
+    monter({ relations: [RELATION, RELATION_ENTRANTE], onSuivreLaReference: vi.fn() })
+
+    // **Une entrante ne désigne aucune ligne** : elle dit qui référence cette table, ce qui est
+    // une question à N réponses et un autre écran (hors périmètre d'`API-55`). Un bouton y
+    // promettrait une destination qu'aucun clic ne peut tenir.
+    const boutons = within(sectionDesLiens()).getAllByRole('button')
+    expect(boutons).toHaveLength(1)
+    expect(boutons[0]).toHaveAccessibleName(expect.stringContaining('user_id'))
+  })
+
+  it('sans gestionnaire, les liens restent ce qu’ils étaient', () => {
+    monter({ relations: [RELATION, RELATION_ENTRANTE] })
+    expect(within(sectionDesLiens()).queryAllByRole('button')).toHaveLength(0)
+  })
+
+  it('une clé nulle ne se suit pas', () => {
+    // La ligne sans `user_id` : le lien est là — c'est une propriété de la table —, mais il ne
+    // mène nulle part pour *cette* ligne.
+    const ligne: Value[] = [{ kind: 'int', value: 184_220 }, { kind: 'null' }, ...LIGNE.slice(2)]
+    monter({ relations: [RELATION], ligne, onSuivreLaReference: vi.fn() })
+
+    expect(within(sectionDesLiens()).queryAllByRole('button')).toHaveLength(0)
+    expect(within(sectionDesLiens()).getByText('user_id')).toBeInTheDocument()
   })
 })

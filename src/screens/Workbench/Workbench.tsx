@@ -54,6 +54,7 @@ import type { Echelle } from '../TableView/horodatage'
 import { type EnAttente, retirer } from '../TableView/modifications'
 import { PendingPanel } from '../TableView/PendingPanel'
 import { RowPanel } from '../TableView/RowPanel'
+import type { CibleDuSaut } from '../TableView/saut'
 import { TableStatusBar } from '../TableView/TableStatusBar'
 import { TableView } from '../TableView/TableView'
 import { PASSERELLE_APPLY, type PasserelleApply, useApplication } from '../TableView/useApplication'
@@ -386,6 +387,14 @@ export function Workbench({
    * **cette** source. Un compteur tenu à part divergerait au premier `⌘Z`.
    */
   const [attentes, setAttentes] = useState<Readonly<Record<string, EnAttente>>>({})
+
+  /**
+   * Le saut en attente (`API-55`) : les filtres qu'une table doit poser en s'ouvrant.
+   *
+   * Il vit ici, et non dans la vue, parce qu'il naît dans **l'onglet qu'on quitte** et s'applique
+   * dans celui qu'on ouvre. Il est oublié dès que la vue l'a appliqué.
+   */
+  const [saut, setSaut] = useState<{ jeton: number; cible: CibleDuSaut } | null>(null)
 
   const actif = ongletActif(etatOnglets)
   // **Deux vues de l'onglet actif**, depuis que `12a` en fait une union. Tout ce qui parle de
@@ -1220,6 +1229,40 @@ export function Workbench({
     return () => window.removeEventListener('keydown', auClavier)
   }, [idActif, basculerLEdition])
 
+  /**
+   * Suivre une clé étrangère (`API-55`) : ouvrir la table visée, filtrée sur la ligne désignée.
+   *
+   * **Le geste vit ici parce que la bande d'onglets vit ici.** La grille et le panneau de ligne
+   * rendent tous deux une *cible* — un schéma, une table, des filtres — et appellent cette
+   * fonction : deux voies pour un même acte en laissent une en arrière (règle n° 17).
+   *
+   * Trois points portés par le jeton :
+   *
+   * - **la table visée peut être déjà ouverte.** `ouvrir` active alors son onglet au lieu d'en
+   *   empiler un second (`onglets.ts`), et le saut **remplace** ses filtres : c'est la seule
+   *   réponse qui tienne la promesse du geste, qui est de désigner une ligne ;
+   * - **elle peut même être celle qu'on quitte** — `parent_id` référence sa propre table. La vue
+   *   n'est alors pas remontée, donc un filtre posé « au montage » n'arriverait jamais ;
+   * - **et il ne doit servir qu'une fois.** La vue est remontée à chaque changement d'onglet (sa
+   *   `key`), donc un saut gardé ici se reposerait à chaque retour sur cette table. La vue dit
+   *   qu'elle l'a appliqué, et on l'oublie.
+   *
+   * `kind: 'table'` sans deviner : une clé étrangère vise une table, une vue n'en porte pas.
+   */
+  function suivreLaReference(cible: CibleDuSaut) {
+    if (!table) return
+    setSaut({ jeton: Date.now(), cible })
+    setEtatOnglets((etat) =>
+      ouvrir(etat, {
+        sorte: 'table',
+        key: table.key,
+        schema: cible.schema,
+        table: cible.table,
+        kind: 'table',
+      }),
+    )
+  }
+
   function ouvrirTable(objet: TableSummary) {
     if (!contexte) return
     setEtatOnglets((etat) =>
@@ -1444,6 +1487,22 @@ export function Workbench({
           table={table.table}
           moteur={moteurActuel}
           columns={detail?.columns ?? []}
+          relations={detail?.relations ?? []}
+          onSuivreLaReference={suivreLaReference}
+          // **Seulement quand le saut vise *cette* table** — une précondition écrite, non un
+          // correctif. React groupe `setSaut` et `setEtatOnglets` du même gestionnaire, donc il
+          // n'existe aucun rendu où le saut serait posé alors qu'un autre onglet est encore
+          // actif : la retirer laisse la suite verte, vérifié par sabotage. Elle reste parce que
+          // ce qu'elle dit — ces filtres appartiennent à cette table — cesserait d'être garanti
+          // par quoi que ce soit de visible le jour où l'ouverture d'un onglet passerait par un
+          // aller-retour, et le mode de défaillance est le pire possible : les filtres consommés
+          // par la mauvaise table, donc jamais posés sur la bonne.
+          arrivee={
+            saut && saut.cible.schema === table.schema && saut.cible.table === table.table
+              ? { jeton: saut.jeton, filters: saut.cible.filters }
+              : null
+          }
+          onArriveeAppliquee={() => setSaut(null)}
           passerelle={passerelleLignes}
           onLectureChange={setLecture}
           rang={rangChoisi}
@@ -2162,6 +2221,9 @@ export function Workbench({
                         cle={cle}
                         columns={detail?.columns ?? []}
                         relations={detail?.relations ?? []}
+                        // Le chemin **clavier** du saut d'`API-55` : le bouton de la grille ne
+                        // paraît qu'au survol, donc il n'est atteignable qu'à la souris.
+                        onSuivreLaReference={suivreLaReference}
                         ligne={lecture.ligne}
                         lectures={lecture.lectures}
                         rang={lecture.rang}

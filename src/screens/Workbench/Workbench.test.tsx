@@ -9,6 +9,7 @@ import type {
   ConnectionStateEntry,
   DatabaseKey,
   QueryResult,
+  RowQuery,
   SchemaInfo,
   TableDetail,
   TableSummary,
@@ -3113,5 +3114,131 @@ describe('la transaction manuelle de la console', () => {
     expect(bascule).toHaveAttribute('title', expect.stringContaining('ne fait que lire'))
     await utilisateur.click(bascule)
     expect(screen.queryByRole('complementary', { name: 'Transaction en cours' })).toBeNull()
+  })
+})
+
+/**
+ * Suivre une clé étrangère, **depuis l'écran** (`API-55`).
+ *
+ * `references.test.tsx` prouve que la grille rend la bonne cible ; il ne peut pas prouver qu'elle
+ * est branchée à la bande d'onglets, qui vit ici (règle n° 8). C'est le seul niveau où le geste
+ * entier se voit : un clic dans une cellule, et une autre table à l'écran.
+ */
+describe('suivre une clé étrangère', () => {
+  /** `orders` porte une clé vers `order_items`, et une valeur non nulle pour la suivre. */
+  const DETAIL_LIE: TableDetail = {
+    ...DETAIL,
+    columns: [
+      ...DETAIL.columns,
+      {
+        position: 4,
+        name: 'main_item_id',
+        typeName: 'int8',
+        category: 'number',
+        nullable: true,
+        default: null,
+        identity: null,
+        key: 'foreign',
+        comment: null,
+        frequency: null,
+      },
+    ],
+    relations: [
+      {
+        constraintName: 'orders_main_item_id_fkey',
+        direction: 'outgoing',
+        cardinality: 'many',
+        columns: ['main_item_id'],
+        targetSchema: 'public',
+        targetTable: 'order_items',
+        targetColumns: ['id'],
+      },
+    ],
+  }
+
+  function monterAvecUneCle() {
+    const lignes: PasserelleLignes = {
+      readRows: vi.fn(async (_cle: DatabaseKey, requete: RowQuery) => ({
+        offset: 0,
+        rows: [
+          [
+            { kind: 'int' as const, value: 184_220 },
+            { kind: 'null' as const },
+            { kind: 'text' as const, value: 'pending' },
+            { kind: 'int' as const, value: 901 },
+          ],
+        ],
+        total: null,
+        sql: `select * from ${requete.schema}.${requete.table} limit 500 offset 0`,
+        durationMs: 41,
+      })),
+    }
+    const detail: PasserelleDetail = { describeTable: vi.fn(async () => DETAIL_LIE) }
+    monter({ passerelleLignes: lignes, passerelleDetail: detail })
+    return lignes
+  }
+
+  it('ouvre la table visée, filtrée sur la ligne désignée', async () => {
+    const utilisateur = userEvent.setup()
+    const lignes = monterAvecUneCle()
+    await ouvrirLArbreJusquAuSchema(utilisateur)
+    await utilisateur.dblClick(within(await screen.findByRole('table')).getByText('orders'))
+
+    const grille = await screen.findByRole('grid', { name: 'Lignes de public.orders' })
+    await utilisateur.click(
+      within(grille).getByRole('button', {
+        name: 'Suivre main_item_id de la ligne 1 vers order_items.id',
+      }),
+    )
+
+    // L'onglet de la table visée est ouvert **et** au premier plan : ouvrir sans activer laisserait
+    // le geste sans effet visible, ce qui est le défaut n° 36.
+    expect(screen.getByRole('tab', { name: /order_items/ })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    expect(
+      await screen.findByRole('grid', { name: 'Lignes de public.order_items' }),
+    ).toBeInTheDocument()
+
+    // Le filtre est **posé**, pas seulement envoyé : le chip de la barre d'outils est ce que
+    // l'utilisateur voit, et c'est par lui qu'il le retire.
+    expect(await screen.findByRole('button', { name: 'Retirer le filtre sur id' })).toBeVisible()
+    // **Une seule lecture, et elle porte déjà le filtre.** Un saut qui laisserait d'abord partir
+    // une lecture nue ramènerait cinq cents lignes pour rien, et les remplacerait sous les yeux de
+    // qui vient de cliquer. C'est ce que l'état initial de la vue garantit, et l'effet seul ne
+    // garantissait pas : mesuré à deux lectures avant correction.
+    const surCible = () =>
+      vi.mocked(lignes.readRows).mock.calls.filter(([, requete]) => requete.table === 'order_items')
+    await waitFor(() => expect(surCible().length).toBeGreaterThan(0))
+    expect(surCible()).toHaveLength(1)
+    expect(surCible()[0]?.[1].filters).toEqual([{ column: 'id', operator: 'eq', value: '901' }])
+  })
+
+  it('ne pose pas les filtres de la cible sur l’onglet qu’on quitte', async () => {
+    const utilisateur = userEvent.setup()
+    const lignes = monterAvecUneCle()
+    await ouvrirLArbreJusquAuSchema(utilisateur)
+    await utilisateur.dblClick(within(await screen.findByRole('table')).getByText('orders'))
+
+    const grille = await screen.findByRole('grid', { name: 'Lignes de public.orders' })
+    await utilisateur.click(
+      within(grille).getByRole('button', {
+        name: 'Suivre main_item_id de la ligne 1 vers order_items.id',
+      }),
+    )
+    await screen.findByRole('grid', { name: 'Lignes de public.order_items' })
+
+    // **`orders` n'a rien demandé.** C'est une **propriété** qu'on mesure, pas une garde : deux
+    // choses la tiennent — le groupement des deux `setState` du même gestionnaire, qui fait qu'il
+    // n'existe aucun rendu où l'ancien onglet serait actif avec un saut posé, et la condition de
+    // `arrivee` qui la redit. Retirer l'une laisse ce test vert (vérifié par sabotage) ; ce qu'il
+    // garde est le résultat, qui vaut quel que soit le mécanisme — des filtres d'une autre table
+    // rendraient « aucune ligne » sous les yeux de qui vient de cliquer.
+    const surOrders = vi
+      .mocked(lignes.readRows)
+      .mock.calls.filter(([, requete]) => requete.table === 'orders')
+    expect(surOrders.length).toBeGreaterThan(0)
+    for (const [, requete] of surOrders) expect(requete.filters).toEqual([])
   })
 })

@@ -10,6 +10,7 @@
   <symbol id="i-table" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M3 14.5h18M9.5 9v11"/></symbol>
   <symbol id="i-view" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" stroke-dasharray="3 2.5"/><path d="M3 9h18M9.5 9v11"/></symbol>
   <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="12" r="3.5"/><path d="M11.5 12H21M18 12v3.5M15 12v2.5"/></symbol>
+  <symbol id="i-goto" viewBox="0 0 24 24"><path d="M4 12h14m0 0-5.5-5.5M18 12l-5.5 5.5"/></symbol>
   <symbol id="i-fk" viewBox="0 0 24 24"><path d="M9.5 14.5 5.8 18.2a3.5 3.5 0 0 1-5-5L4.6 9.6"/><path d="m14.5 9.5 3.7-3.7a3.5 3.5 0 0 1 5 5l-3.8 3.7"/><path d="m9.5 14.5 5-5"/></symbol>
   <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5 19.5 12 7 19.5V4.5Z"/></symbol>
   <symbol id="i-filter" viewBox="0 0 24 24"><path d="M3.5 5h17l-6.6 7.8V20L10 17.5v-4.7L3.5 5Z"/></symbol>

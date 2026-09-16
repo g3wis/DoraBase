@@ -14,6 +14,7 @@ import type {
   DatabaseKey,
   Filter,
   FilterOperator,
+  Relation,
   RowLimit,
   RowQuery,
   RowWindow,
@@ -47,6 +48,7 @@ import {
   echelleDeduite,
   valeurRelue,
 } from './horodatage'
+import { relationDe } from './ligneLiee'
 import {
   ajouterUneLigne,
   annulerLaDerniere,
@@ -65,6 +67,7 @@ import {
   texteBrutDe,
   valeurDeLaLigne,
 } from './modifications'
+import { type CibleDuSaut, cibleDuSaut } from './saut'
 import styles from './TableView.module.css'
 import { Toolbar } from './Toolbar'
 import {
@@ -94,6 +97,35 @@ type TableViewProps = {
   moteur?: Engine
   /** Les colonnes du catalogue — elles nomment les en-têtes et donnent l'ordre. */
   columns: readonly ColumnInfo[]
+  /**
+   * Les relations de la table (`API-55`) : elles marquent les colonnes de clé étrangère, et
+   * disent où mène chaque valeur.
+   *
+   * Vide, la grille est celle d'avant — aucun glyphe, aucun bouton. C'est ce que rendent MongoDB
+   * et BigQuery, qui n'ont pas de clés étrangères à déclarer : il n'y a donc rien à désactiver
+   * avec sa raison, puisqu'il n'y a rien à offrir.
+   */
+  relations?: readonly Relation[]
+  /**
+   * Suivre une clé étrangère. La vue rend **où aller** ; ouvrir un onglet appartient à l'écran,
+   * seul à tenir la bande d'onglets.
+   */
+  onSuivreLaReference?: (cible: CibleDuSaut) => void
+  /**
+   * Le saut qui **arrive ici** : les filtres que l'écran pose en ouvrant cette table.
+   *
+   * **Un jeton plutôt qu'un simple tableau**, pour deux raisons qu'un filtre posé « au montage »
+   * ne couvre pas :
+   *
+   * - **la table visée peut être celle qu'on quitte** — une clé qui référence sa propre table,
+   *   `parent_id`. La vue n'est alors pas remontée, et rien n'arriverait jamais ;
+   * - **et il ne doit s'appliquer qu'une fois.** Changer d'onglet remonte cette vue (voir la
+   *   `key` que l'écran lui donne) : un saut encore présent chez l'écran se reposerait à chaque
+   *   retour sur cette table, longtemps après le geste qui l'avait demandé.
+   */
+  arrivee?: { jeton: number; filters: readonly Filter[] } | null
+  /** Le saut a été appliqué : l'écran peut l'oublier. */
+  onArriveeAppliquee?: () => void
   passerelle?: PasserelleLignes
   /**
    * Remonte la fenêtre lue et la ligne choisie.
@@ -203,6 +235,17 @@ const LIGNES_AJUSTEES = 200
  * par caractère contre 6,3 mesurés au plus large — accumulant assez de mou pour absorber la flèche.
  */
 const MARGE_DE_TRI = 15
+/**
+ * Ce qu'une colonne de clé étrangère réserve dans **chaque cellule** : le bouton de saut et son
+ * écart (`API-55`).
+ *
+ * Réservé toujours, y compris sur une cellule nulle qui n'en porte pas : le bouton ne paraît qu'au
+ * survol, et prendre cette place à ce moment-là déplacerait la valeur sous le pointeur qui vient de
+ * s'y poser. C'est la raison de `MARGE_DE_TRI`, prise par l'autre bout.
+ */
+const MARGE_DU_SAUT = 17
+/** Ce que le glyphe de clé étrangère prend dans l'en-tête, glyphe et écart. */
+const MARGE_DU_GLYPHE_FK = 14
 /** La gouttière `#`, à 30 px dans le mockup. */
 const LARGEUR_GOUTTIERE = 30
 /**
@@ -229,6 +272,10 @@ export function TableView({
   table,
   moteur,
   columns,
+  relations = [],
+  onSuivreLaReference,
+  arrivee = null,
+  onArriveeAppliquee,
   passerelle,
   onLectureChange,
   rang = null,
@@ -242,11 +289,24 @@ export function TableView({
   onAttenteChange,
 }: TableViewProps) {
   const t = useT()
-  const [filters, setFilters] = useState<readonly Filter[]>([])
+  /**
+   * **Les filtres d'un saut sont posés dès le premier rendu** (`API-55`), pas par l'effet.
+   *
+   * Le cas courant d'un saut est que la table visée n'était pas montée : la vue naît donc avec son
+   * `arrivee`, et l'initialiser ici est ce qui évite une **première lecture non filtrée** — cinq
+   * cents lignes demandées pour rien, puis remplacées sous les yeux de qui vient de cliquer.
+   * Mesuré : deux lectures au lieu d'une, dont la première ramenait toute la table.
+   *
+   * L'effet plus bas reste indispensable : il porte le cas où la vue est **déjà montée** — une clé
+   * qui référence sa propre table.
+   */
+  const [filters, setFilters] = useState<readonly Filter[]>(() => [...(arrivee?.filters ?? [])])
   const [sort, setSort] = useState<readonly SortKey[]>([])
   // L'opérateur choisi par colonne, y compris pour un filtre pas encore appliqué. Séparé des
   // filtres : `= ` sur une colonne vide n'est pas un filtre, c'est un champ prêt à recevoir.
-  const [operateurs, setOperateurs] = useState<Record<string, FilterOperator>>({})
+  const [operateurs, setOperateurs] = useState<Record<string, FilterOperator>>(() =>
+    Object.fromEntries((arrivee?.filters ?? []).map((filtre) => [filtre.column, filtre.operator])),
+  )
   const [limite, setLimite] = useState<RowLimit>(LIMITE_PAR_DEFAUT)
   // Les colonnes **masquées**, et non les visibles : une table dont on n'a rien masqué a un
   // ensemble vide, quel que soit le nombre de colonnes qu'elle finira par avoir.
@@ -275,7 +335,19 @@ export function TableView({
   // ils ne peuvent pas être ouverts ensemble, et le second clic droit remplace le premier.
   const [menu, setMenu] = useState<
     | ({ sorte: 'entete'; colonne: string } & PositionDuMenu)
-    | ({ sorte: 'cellule'; colonne: string; texte: string | null } & PositionDuMenu)
+    | ({
+        sorte: 'cellule'
+        colonne: string
+        texte: string | null
+        /**
+         * Où mène cette cellule (`API-55`), ou `null` — colonne sans clé étrangère, ou valeur
+         * nulle, qui ne désigne aucune ligne.
+         *
+         * **Calculée à l'ouverture du menu**, parce que c'est le seul moment où la ligne est
+         * connue : `onCellContextMenu` la donne, l'état du menu ne la garde pas.
+         */
+        cible: CibleDuSaut | null
+      } & PositionDuMenu)
     | null
   >(null)
   const [enEdition, setEnEdition] = useState<EnEdition | null>(null)
@@ -284,6 +356,38 @@ export function TableView({
   const [documentJsonOuvert, setDocumentJsonOuvert] = useState<
     { sorte: 'editer'; cle: string; rang: number } | { sorte: 'creer' } | null
   >(null)
+  /**
+   * Le jeton du dernier saut appliqué (`API-55`).
+   *
+   * **Il garde contre une seconde application dans la même vie du composant** : l'objet `arrivee`
+   * peut changer d'identité à chaque rendu de l'appelant, et sans lui les filtres de l'utilisateur
+   * seraient écrasés par un saut déjà consommé. C'est le piège de `10d`, désarmé à la source
+   * plutôt que confié à la discipline des appelants. L'écran, de son côté, oublie le saut — ce qui
+   * garde le **remontage**, où ce témoin repart à zéro.
+   */
+  const jetonApplique = useRef<number | null>(arrivee?.jeton ?? null)
+  useEffect(() => {
+    if (arrivee === null) return
+    if (jetonApplique.current !== arrivee.jeton) {
+      jetonApplique.current = arrivee.jeton
+      // **Les filtres sont remplacés, pas ajoutés.** Deux tables n'ont pas les mêmes colonnes, et
+      // sur la même table un filtre resté en place ferait rendre « aucune ligne » là où le saut
+      // promet d'en désigner une.
+      setFilters([...arrivee.filters])
+      // L'opérateur suit : la cellule de filtre affiche celui qu'on lui donne, et sans lui la
+      // colonne annoncerait le défaut de sa catégorie au-dessus d'une grille filtrée autrement.
+      setOperateurs((precedent) => {
+        const suite = { ...precedent }
+        for (const filtre of arrivee.filters) suite[filtre.column] = filtre.operator
+        return suite
+      })
+    }
+    // **Dit dans les deux cas**, y compris quand l'état initial portait déjà ce saut : c'est ce
+    // qui fait oublier le saut à l'écran, et un saut gardé se reposerait au prochain retour sur
+    // cette table — longtemps après le geste qui l'avait demandé.
+    onArriveeAppliquee?.()
+  }, [arrivee, onArriveeAppliquee])
+
   const hauteur = useHauteurDisponible()
   // La sélection est **pilotée par l'écran** : le panneau de ligne et ses flèches vivent au-dessus
   // de cette vue, et deux copies du même rang divergeraient.
@@ -597,6 +701,7 @@ export function TableView({
     const echantillon = lignes.slice(0, LIGNES_AJUSTEES)
     const parNom: Record<string, number> = {}
     for (const [rang, colonne] of colonnesEffectives.entries()) {
+      const suivie = relationDe(relations, colonne.name) !== undefined
       parNom[colonne.name] = largeurAjustee(
         colonne.name,
         // **La valeur relue, pas la brute** : une colonne lue en horodatage affiche 19 caractères
@@ -606,11 +711,14 @@ export function TableView({
             valeurRelue(ligne.valeurs[rang] ?? { kind: 'null' }, lectures[colonne.name]),
           ),
         ),
-        { margeDEntete: MARGE_DE_TRI },
+        {
+          margeDEntete: MARGE_DE_TRI + (suivie ? MARGE_DU_GLYPHE_FK : 0),
+          margeDeValeur: suivie ? MARGE_DU_SAUT : 0,
+        },
       )
     }
     return parNom
-  }, [colonnesEffectives, lignes, lectures])
+  }, [colonnesEffectives, lignes, lectures, relations])
 
   /**
    * Le texte d'une cellule, pour « Copier la valeur » du menu contextuel — `null` quand il n'y a
@@ -760,6 +868,13 @@ export function TableView({
           const filtre = filters.find((f) => f.column === colonne.name)
           const critere = sort.find((c) => c.column === colonne.name)
           const rangDuTri = rangDeTri(sort, colonne.name)
+          // La relation **sortante** que porte cette colonne (`API-55`), s'il y en a une : elle
+          // décide du glyphe de l'en-tête et du bouton de chaque cellule. Une entrante dit qui
+          // référence cette table — une question à N réponses, et un autre écran.
+          const suivie = relationDe(relations, colonne.name)
+          const cibleNommee = suivie
+            ? `${suivie.targetTable}.${suivie.targetColumns.join(', ')}`
+            : ''
           return {
             key: colonne.name,
             // **Le nom seul** : ce n'est plus un bouton de tri (`23h`). Le glissement de
@@ -767,6 +882,20 @@ export function TableView({
             // ne doit plus rien déclencher d'autre que ce glissement.
             header: (
               <>
+                {/* **Le glyphe de clé étrangère** (`API-55`) : la convention que la vue Structure,
+                  la sidebar et le diagramme tiennent déjà, apportée au seul endroit du produit qui
+                  ne marquait pas ses clés. Une marque par **colonne**, pas par cellule : ce qui est
+                  une clé étrangère est la colonne, et le répéter cinq cents fois dirait la même
+                  chose en compétition avec les valeurs. Le `title` nomme la cible, que le nom
+                  accessible laisse de côté pour rester court. */}
+                {suivie && (
+                  <span
+                    className={styles.enteteFk}
+                    title={t('tableView.grid.foreignKeyTarget', { target: cibleNommee })}
+                  >
+                    <Icon name="fk" size={11} strokeWidth={2} />
+                  </span>
+                )}
                 {colonne.name}
                 {/* La pastille de rang n'apparaît qu'à partir de **deux** critères : un « 1 »
                   solitaire sur la seule colonne triée serait du bruit. */}
@@ -780,7 +909,13 @@ export function TableView({
             reorderLabel: t('tableView.grid.reorderColumn', { column: colonne.name }),
             // La cellule d'en-tête s'annonce par le nom de la colonne, pas par la somme des
             // contrôles qu'elle contient — « Trier par id Redimensionner id ».
-            headerLabel: colonne.name,
+            // **Le glyphe, lui, n'est rien pour une voix** (`Icon` pose `aria-hidden`, à raison) :
+            // le fait entre donc dans le nom, par un mot et non par la cible — celle-ci est dite
+            // par le `title`, par le bouton de chaque cellule et par la section « Liens » du
+            // panneau. Répétée ici, elle allongerait un nom que la voix redit à chaque cellule.
+            headerLabel: suivie
+              ? t('tableView.grid.foreignKeyColumn', { column: colonne.name })
+              : colonne.name,
             // **Le tri, sur une flèche à part** — jamais sur le nom (`23h`). Le `⌘`-clic empile un
             // second critère : la convention de tous les tableurs et de tous les clients SQL, que
             // le handoff ne dit pas et qu'inventer autrement serait gratuit.
@@ -874,9 +1009,46 @@ export function TableView({
               // qu'une date sera écrite.
               const relue = valeurRelue(valeur, lectures[colonne.name])
               const affichee = modifiee ? apercuDeLaSaisie(modifiee.apres) : rendreValeur(relue)
-              const classe = estNumerique(relue) ? styles.nombre : undefined
+              // **La classe de réserve est portée par toute cellule d'une colonne suivie**, même
+              // celle qui n'aura pas de bouton : une colonne dont l'indentation varierait d'une
+              // ligne à l'autre se lirait comme un défaut d'alignement.
+              const classe = cx(estNumerique(relue) && styles.nombre, suivie && styles.valeurSuivie)
+              // **Le bouton suit la valeur de la base, jamais la saisie retenue.** Une saisie en
+              // attente n'a pas encore de ligne au bout — elle n'est pas écrite —, et y mener
+              // rendrait « aucune ligne » sur une valeur parfaitement valide.
+              const cible =
+                suivie === undefined || modifiee !== undefined
+                  ? null
+                  : cibleDuSaut(suivie, columns, ligne.valeurs)
+              const bouton =
+                cible === null || onSuivreLaReference === undefined ? null : (
+                  <button
+                    type="button"
+                    className={styles.saut}
+                    aria-label={t('tableView.grid.followReference', {
+                      column: colonne.name,
+                      rang: ligne.rang,
+                      target: cibleNommee,
+                    })}
+                    // **Le clic ne remonte pas à la ligne** : sans cela, suivre une référence
+                    // choisirait au passage la ligne qu'on quitte — un effet de bord sur un geste
+                    // qui emmène ailleurs.
+                    onClick={(evenement) => {
+                      evenement.stopPropagation()
+                      onSuivreLaReference(cible)
+                    }}
+                  >
+                    <Icon name="goto" size={11} strokeWidth={2.2} />
+                  </button>
+                )
 
-              if (!edition) return <span className={classe}>{affichee}</span>
+              if (!edition)
+                return (
+                  <>
+                    <span className={classe}>{affichee}</span>
+                    {bouton}
+                  </>
+                )
 
               // **Un `<button>` qui remplit la cellule**, et non un `div` à double-clic : le
               // clavier vient gratuitement — `Tab` pour parcourir, `↩` ou espace pour ouvrir — là
@@ -891,20 +1063,30 @@ export function TableView({
                       ? t('tableView.grid.deletedRowReason')
                       : refusDeLaColonne
                 return (
-                  <span className={cx(classe, styles.nonEditable)} title={raison ?? undefined}>
-                    {affichee}
-                  </span>
+                  <>
+                    <span className={cx(classe, styles.nonEditable)} title={raison ?? undefined}>
+                      {affichee}
+                    </span>
+                    {bouton}
+                  </>
                 )
               }
               return (
-                <button
-                  type="button"
-                  className={cx(classe, styles.editable)}
-                  aria-label={t('tableView.grid.modifyColumn', { column: colonne.name })}
-                  onClick={() => setEnEdition({ cle, rang: ligne.rang, column: colonne.name })}
-                >
-                  {affichee}
-                </button>
+                <>
+                  {/* **Le bouton de saut est un frère, jamais un enfant** : en mode édition la
+                    cellule *est* un bouton, et un bouton dans un bouton n'est pas du HTML valide —
+                    ni cliquable de façon prévisible. Posé en absolu par-dessus, il reçoit le clic
+                    qui tombe sur lui et laisse le reste ouvrir l'éditeur. */}
+                  <button
+                    type="button"
+                    className={cx(classe, styles.editable)}
+                    aria-label={t('tableView.grid.modifyColumn', { column: colonne.name })}
+                    onClick={() => setEnEdition({ cle, rang: ligne.rang, column: colonne.name })}
+                  >
+                    {affichee}
+                  </button>
+                  {bouton}
+                </>
               )
             },
           }
@@ -927,6 +1109,9 @@ export function TableView({
       edition,
       cleDe,
       onAttenteChange,
+      columns,
+      relations,
+      onSuivreLaReference,
       t,
       moteur,
     ],
@@ -1008,10 +1193,17 @@ export function TableView({
             }}
             onCellContextMenu={(ligne, cle, _rang, position) => {
               if (cle === '#') return
+              const suivie = relationDe(relations, cle)
               setMenu({
                 sorte: 'cellule',
                 colonne: cle,
                 texte: texteDeLaCellule(ligne, cle),
+                // La ligne n'est connue qu'ici : la cible se calcule maintenant, pas au rendu du
+                // menu.
+                cible:
+                  suivie === undefined || ligne.sorte !== 'lue'
+                    ? null
+                    : cibleDuSaut(suivie, columns, ligne.valeurs),
                 ...position,
               })
             }}
@@ -1153,6 +1345,24 @@ export function TableView({
                     : () => void navigator.clipboard?.writeText(menu.texte ?? ''),
                 raison: menu.texte === null ? t('tableView.grid.nothingToCopy') : undefined,
               },
+              // **L'entrée n'existe que sur une colonne de clé étrangère** (`API-55`) — la
+              // proposer partout ferait chercher à quoi elle sert, comme un `is null` sur une
+              // colonne `NOT NULL`. Sur une colonne suivie dont la valeur est nulle, elle reste et
+              // se **désactive avec sa raison** : c'est la cellule qui ne désigne personne, pas le
+              // geste qui n'existe pas.
+              ...(relationDe(relations, menu.colonne) === undefined ||
+              onSuivreLaReference === undefined
+                ? []
+                : [
+                    {
+                      libelle: t('tableView.grid.followLinkedRow'),
+                      onClick:
+                        menu.cible === null
+                          ? undefined
+                          : () => onSuivreLaReference(menu.cible as CibleDuSaut),
+                      raison: menu.cible === null ? t('tableView.grid.noLinkedRow') : undefined,
+                    },
+                  ]),
             ]}
             onFermer={() => setMenu(null)}
           />

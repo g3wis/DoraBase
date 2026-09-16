@@ -219,3 +219,75 @@
 .nonEditable {
   cursor: help;
 }
+
+/* ------------------------------------------------------------------------------------------------
+   Suivre une clé étrangère (`API-55`).
+   ---------------------------------------------------------------------------------------------- */
+
+/* Le glyphe de l'en-tête. `flex: none` comme la pastille de rang : sans lui, un nom de colonne long
+   le comprimerait au lieu de se couper lui-même. */
+.enteteFk {
+  display: flex;
+  flex: none;
+  align-items: center;
+  color: var(--ink-3);
+}
+
+/* **La place du bouton, réservée dans la valeur.** Le bouton est posé en absolu, donc il ne pousse
+   rien : sans cette réserve il se peindrait *sur* la fin d'une valeur longue, là où l'œil va lire.
+   `box-sizing: border-box` est explicite parce que le dépôt n'en pose aucun globalement (voir
+   `reset.css`) et que `.editable` fixe `width: 100%` — sans lui, la cellule éditable déborderait de
+   la réserve exacte qu'on vient d'ajouter.
+   L'ellipse est refaite ici : celle de la cellule s'applique à sa propre boîte, qui ignore cette
+   réserve. */
+.valeurSuivie {
+  display: block;
+  box-sizing: border-box;
+  padding-right: 17px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Le bouton, aligné sur le bord droit du **texte** — d'où les 8 px, qui sont le rembourrage d'une
+   cellule de `VirtualGrid`. Le mesurer autrement ferait flotter le bouton dans la marge, décollé de
+   la valeur qu'il suit.
+   `visibility` et non `display` : la boîte reste, donc rien ne bouge quand elle paraît. Le canal est
+   celui de la cellule (`--cell-actions`), et non celui de la ligne — deux clés étrangères sur la
+   même ligne mènent à deux tables, et les allumer ensemble ferait désigner deux endroits à la fois. */
+.saut {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* La cote est portée par `width`/`height` : le rembourrage par défaut d'un `<button>` ferait une
+     cible de 15 + 2 × padding, plus large que la réserve. */
+  padding: 0;
+  width: 15px;
+  height: 15px;
+  border: none;
+  border-radius: var(--radius-badge);
+  background: none;
+  color: var(--ink-2);
+  cursor: pointer;
+  visibility: var(--cell-actions, hidden);
+}
+
+/* `--ink-2` au repos, `--ink` au survol du bouton lui-même : le motif des actions de ligne, et de
+   `SidebarToolbar` avant elles. Pas de fond — celui d'`API-45` se composait avec celui de la ligne
+   survolée et faisait une case plus sombre à l'endroit précis où l'on regarde. */
+.saut:hover {
+  color: var(--ink);
+}
+
+/* Un bouton qu'on a atteint au clavier reste visible : sans cela, le focus tomberait sur un
+   contrôle invisible. Il n'y arrive qu'après un survol — le chemin clavier de ce geste est la
+   section « Liens » du panneau de ligne, qui, elle, ne se cache pas. */
+.saut:focus-visible {
+  visibility: visible;
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
