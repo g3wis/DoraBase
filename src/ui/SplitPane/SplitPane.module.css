@@ -146,8 +146,27 @@
   width: 100%;
 }
 
-.vertical .pane {
-  /* `flex: none` est déjà posé ; c'est la hauteur qui devient la dimension pilotée. */
+/*
+ * **Les deux panneaux, et non le seul qui porte la taille** (16 septembre 2026, `API-62`).
+ *
+ * `min-height: 0` ne vivait que sur `.pane`. Or c'est l'**autre** qui en a le plus besoin : `.pane`
+ * est en `flex: none` et porte une hauteur écrite, quand `.end` est souple et doit se **réduire** à
+ * la place qui reste. Dans une colonne flex, un élément souple à `min-height: auto` refuse de
+ * descendre sous la hauteur de son contenu — c'est la raison que `.root` écrit déjà en tête de ce
+ * fichier, et elle vaut ici à l'identique.
+ *
+ * Ce que son absence coûtait, mesuré sur la sidebar de l'écran de travail — `sized="end"`, donc
+ * c'est **l'arbre** qui est le panneau souple : dans une fenêtre de 420 px, arbre déplié, il prenait
+ * **760 px dans un conteneur de 379**. La zone de défilement de `Sidebar` avait alors
+ * `clientHeight === scrollHeight`, donc son `overflow-y: auto` n'avait **rien à faire défiler** :
+ * l'arbre était coupé et la molette ne faisait rien. Un `overflow` qui ne défile pas ne se dénonce
+ * pas — c'est le motif du `var()` mort, appliqué à une déclaration juste que rien n'atteint. Et la
+ * zone « Instances » finissait 88 px sous le bord de la fenêtre, où aucun geste ne va.
+ *
+ * `flex: none` est déjà posé sur `.pane` ; c'est la hauteur qui devient la dimension pilotée.
+ */
+.vertical .pane,
+.vertical .end {
   min-height: 0;
 }
 
