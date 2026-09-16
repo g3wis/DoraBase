@@ -241,31 +241,29 @@ function General({
 }) {
   const t = useT()
   return (
-    <>
-      <section className={styles.bloc}>
-        <h3 className={styles.titre}>{t('preferences.general.langueTitre')}</h3>
-        {/* **Des radios natives**, comme le thème juste en dessous : l'exclusivité, la navigation
+    <section className={styles.bloc}>
+      <h3 className={styles.titre}>{t('preferences.general.langueTitre')}</h3>
+      {/* **Des radios natives**, comme le thème juste en dessous : l'exclusivité, la navigation
             aux flèches et l'annonce à la voix viennent du navigateur. */}
-        <div className={styles.themes}>
-          {LANGUES.map((langue) => (
-            <label
-              key={langue.valeur}
-              className={preferences.language === langue.valeur ? styles.themeActif : styles.theme}
-              title={t(`preferences.langues.detail${majuscule(langue.valeur)}`)}
-            >
-              <input
-                type="radio"
-                name="language"
-                className={styles.radio}
-                checked={preferences.language === langue.valeur}
-                onChange={() => onRegler({ language: langue.valeur })}
-              />
-              {t(`preferences.langues.${langue.valeur}`)}
-            </label>
-          ))}
-        </div>
-      </section>
-    </>
+      <div className={styles.themes}>
+        {LANGUES.map((langue) => (
+          <label
+            key={langue.valeur}
+            className={preferences.language === langue.valeur ? styles.themeActif : styles.theme}
+            title={t(`preferences.langues.detail${majuscule(langue.valeur)}`)}
+          >
+            <input
+              type="radio"
+              name="language"
+              className={styles.radio}
+              checked={preferences.language === langue.valeur}
+              onChange={() => onRegler({ language: langue.valeur })}
+            />
+            {t(`preferences.langues.${langue.valeur}`)}
+          </label>
+        ))}
+      </div>
+    </section>
   )
 }
 
