@@ -12,6 +12,7 @@ import { type Echelle, valeurRelue } from './horodatage'
 import { JsonColore } from './JsonColore'
 import { relationDe, valeurDeCle } from './ligneLiee'
 import styles from './RowPanel.module.css'
+import { type CibleDuSaut, cibleDuSaut } from './saut'
 import { useLigneLiee } from './useLigneLiee'
 import type { PasserelleLignes } from './useLignes'
 
@@ -52,6 +53,20 @@ type RowPanelProps = {
   rang: number | null
   /** Le SQL d'insertion, demandé au moteur. `null` quand la commande n'est pas disponible. */
   onCopyInsert?: () => void
+  /**
+   * Suivre une clé étrangère sortante (`API-55`) — **le même acte que le bouton de la grille**, et
+   * la même fonction derrière : deux voies pour un même acte en laissent une en arrière
+   * (règle n° 17).
+   *
+   * C'est aussi **le chemin clavier** de ce geste. Celui de la grille ne peut pas l'être : son
+   * bouton ne paraît qu'au survol de la cellule, donc il est en `visibility: hidden` — hors de
+   * l'arbre d'accessibilité et hors du parcours de tabulation — et l'y mettre coûterait un arrêt
+   * par cellule de clé étrangère, cinq cents lignes durant. Ici les liens sont une poignée, dans
+   * un panneau qu'on atteint au `Tab`.
+   *
+   * Absent, les liens restent du texte, comme avant.
+   */
+  onSuivreLaReference?: (cible: CibleDuSaut) => void
   passerelleDetail: PasserelleDetail
   passerelleLignes: PasserelleLignes
 }
@@ -83,6 +98,7 @@ export function RowPanel({
   lectures = {},
   rang,
   onCopyInsert,
+  onSuivreLaReference,
   passerelleDetail,
   passerelleLignes,
 }: RowPanelProps) {
@@ -278,32 +294,54 @@ export function RowPanel({
         {onglet === 'champs' && liens.length > 0 && (
           <section className={styles.liens}>
             <h3 className={styles.liensTitre}>{t('tableView.rowPanel.linksTitle')}</h3>
-            {liens.map((lien) => (
-              <div
-                key={lien.constraintName}
-                className={cx(styles.lien, lien.direction === 'incoming' && styles.lienEntrant)}
-                /* Le `title` porte le lien en entier : l'ellipse coupe, et rien d'autre ici ne
-                   rendrait ce qu'elle a coupé — l'aperçu du survol prolongé appartient à la donnée
-                   de la ligne, pas au schéma. */
-                title={libelleDuLien(lien)}
-              >
-                <Icon name="fk" size={11} strokeWidth={2} className={styles.lienIcone} />
-                <span className={styles.lienDepart}>{lien.columns.join(', ')}</span>
-                {/* La flèche est **retirée de l'arbre d'accessibilité**, un verbe masqué la
-                    remplaçant avec ses espaces : une voix qui rendrait « user_id → users.id » ne
-                    dirait plus laquelle référence l'autre (pièges n° 1 et n° 2, la leçon du
-                    diagramme). */}
-                <span aria-hidden="true">{lien.direction === 'outgoing' ? '→' : '←'}</span>
-                <span className={styles.pourLaVoix}>
-                  {t(
-                    lien.direction === 'outgoing'
-                      ? 'tableView.rowPanel.references'
-                      : 'tableView.rowPanel.referencedBy',
-                  )}
-                </span>
-                <span className={styles.lienCible}>{cibleDuLien(lien)}</span>
-              </div>
-            ))}
+            {liens.map((lien) => {
+              // **Où mène ce lien, pour *cette* ligne** (`API-55`). `null` pour une relation
+              // entrante — elle dit qui référence cette table, ce qui est une question à N
+              // réponses — et pour une clé nulle, qui ne désigne personne. Dans les deux cas le
+              // lien reste ce qu'il était : du texte.
+              const cible = onSuivreLaReference ? cibleDuSaut(lien, columns, ligne) : null
+              const contenu = (
+                <>
+                  <Icon name="fk" size={11} strokeWidth={2} className={styles.lienIcone} />
+                  <span className={styles.lienDepart}>{lien.columns.join(', ')}</span>
+                  {/* La flèche est **retirée de l'arbre d'accessibilité**, un verbe masqué la
+                      remplaçant avec ses espaces : une voix qui rendrait « user_id → users.id » ne
+                      dirait plus laquelle référence l'autre (pièges n° 1 et n° 2, la leçon du
+                      diagramme). */}
+                  <span aria-hidden="true">{lien.direction === 'outgoing' ? '→' : '←'}</span>
+                  <span className={styles.pourLaVoix}>
+                    {t(
+                      lien.direction === 'outgoing'
+                        ? 'tableView.rowPanel.references'
+                        : 'tableView.rowPanel.referencedBy',
+                    )}
+                  </span>
+                  <span className={styles.lienCible}>{cibleDuLien(lien)}</span>
+                </>
+              )
+              /* Le `title` porte le lien en entier : l'ellipse coupe, et rien d'autre ici ne
+                 rendrait ce qu'elle a coupé — l'aperçu du survol prolongé appartient à la donnée
+                 de la ligne, pas au schéma. */
+              return cible === null ? (
+                <div
+                  key={lien.constraintName}
+                  className={cx(styles.lien, lien.direction === 'incoming' && styles.lienEntrant)}
+                  title={libelleDuLien(lien)}
+                >
+                  {contenu}
+                </div>
+              ) : (
+                <button
+                  key={lien.constraintName}
+                  type="button"
+                  className={cx(styles.lien, styles.lienSuivable)}
+                  title={libelleDuLien(lien)}
+                  onClick={() => onSuivreLaReference?.(cible)}
+                >
+                  {contenu}
+                </button>
+              )
+            })}
           </section>
         )}
 

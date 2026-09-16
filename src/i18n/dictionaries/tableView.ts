@@ -145,6 +145,17 @@ export const tableViewFr: Dictionnaire = {
     // gestes différents.
     columnMenuLabel: (p) => `Actions sur la colonne ${p.column}`,
     hideColumn: 'Masquer la colonne',
+    // Suivre une clé étrangère (`API-55`). Le nom accessible de l'en-tête dit **le fait** et non la
+    // cible : une voix redit le nom de colonne à chaque cellule, et « vers public.users.id » y
+    // serait répété cinq cents fois. La cible est dans le `title` du glyphe, dans le nom du bouton
+    // de chaque cellule, et dans la section « Liens » du panneau de ligne.
+    foreignKeyColumn: (p) => `${p.column} — clé étrangère`,
+    foreignKeyTarget: (p) => `Clé étrangère vers ${p.target}`,
+    // Le rang entre dans le nom pour la raison de « Supprimer la ligne N » : cinq cents boutons de
+    // la même colonne porteraient sinon le même nom accessible.
+    followReference: (p) => `Suivre ${p.column} de la ligne ${p.rang} vers ${p.target}`,
+    followLinkedRow: 'Aller à la ligne liée',
+    noLinkedRow: 'Cette cellule est vide : elle ne désigne aucune ligne.',
     // La lecture d'une colonne d'entiers. Aucun moteur ne peut dire si un `bigint` porte une époque
     // ou un compte (voir `horodatage.ts`) : c'est donc une entrée de menu, pas une détection.
     readAsNumber: 'Lire comme un nombre',
@@ -311,6 +322,11 @@ export const tableViewEn: Dictionnaire = {
     reorderColumn: (p) => `Move ${p.column} (left and right arrows)`,
     columnMenuLabel: (p) => `Actions on column ${p.column}`,
     hideColumn: 'Hide column',
+    foreignKeyColumn: (p) => `${p.column} — foreign key`,
+    foreignKeyTarget: (p) => `Foreign key to ${p.target}`,
+    followReference: (p) => `Follow ${p.column} of row ${p.rang} to ${p.target}`,
+    followLinkedRow: 'Go to the linked row',
+    noLinkedRow: 'This cell is empty: it designates no row.',
     readAsNumber: 'Read as a number',
     readAs: {
       secondes: (p) => `Timestamp · seconds${p.suffixe}`,

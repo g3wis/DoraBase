@@ -141,7 +141,12 @@ qu'il portait et que le rendu ne dit pas.
   et de l'entrée de menu, parce qu'une icône nue sans retour au survol se lit comme une
   décoration alors qu'elle ouvre une modale. Un survol **ailleurs**, ou avec une valeur qui
   n'est pas déjà un jeton, serait une invention. La galerie l'affiche franchement ; ce n'est
-  pas un oubli.
+  pas un oubli. **Un lien sortant de la section « Liens » du panneau de ligne en a un depuis
+  `API-55`**, et c'est le même argument à la lettre : il reprend `--hover-row`, et une ligne qui
+  ressemble à la ligne de texte du dessus n'a rien d'autre pour dire qu'elle se clique. Ce qui
+  n'en est **pas** un : le bouton de saut d'une cellule de clé étrangère, qui relève son encre
+  d'`--ink-2` à `--ink` comme les actions de ligne et la bande de sidebar le font déjà, et le
+  canal `--cell-actions` qui le révèle — la cellule, elle, ne change ni de fond ni de filet.
 - **Aucune couleur littérale hors `src/design/tokens.json`.** Garde-fou : `pnpm tokens:check`.
 - **L'échelle d'espacement n'a pas de 8 px** : 3, 5, 6, 7, 9, 11, 14, 16. Un littéral
   commenté vaut mieux qu'un jeton approximatif choisi « parce que ça se ressemble ».
@@ -1191,6 +1196,123 @@ deux places, là où les trois assertions positives restaient vertes.
 qu'un dans le décor de `?demo`, donc une section de liens longue — et son écart avec l'aperçu de
 ligne liée, qui reste collé en bas du panneau — n'a pour juge que le test unitaire, qui ne mesure
 aucun pixel.
+
+### Suivre une clé étrangère depuis la grille (16 septembre 2026, `API-55`)
+
+La grille d'`A5` était **le seul endroit du produit qui ne marquait pas ses clés étrangères** — le
+glyphe `fk` les nomme depuis longtemps dans « Colonnes de », la vue Structure, le diagramme et le
+panneau de ligne. Et suivre une référence n'existait nulle part : la section « Liens » d'`API-49`
+les écrit en texte, l'aperçu de « ligne liée » montre quelques champs de la ligne cible sans jamais
+y mener. Aller de `orders.user_id = 42` à `users` demandait d'ouvrir la table à la main dans l'arbre
+puis d'y poser un filtre.
+
+**La marque est dans l'en-tête, pas dans les cellules.** Ce qui *est* une clé étrangère est la
+colonne ; le répéter sur cinq cents lignes dirait la même chose cinq cents fois, en concurrence avec
+les valeurs, dans 130 px. Le nom accessible porte le **fait** — « user_id — clé étrangère » — et non
+la cible : une voix redit le nom de colonne à chaque cellule, et « vers public.users.id » y serait
+répété autant de fois. La cible est dans le `title` du glyphe, dans le nom du bouton de chaque
+cellule, et dans la section « Liens » du panneau.
+
+Onze décisions à ne pas défaire :
+
+- **le geste est un bouton révélé au survol de la cellule, doublé d'une entrée de menu contextuel.**
+  Le clic simple n'était pas disponible : il choisit la ligne, et ouvre l'éditeur en mode édition.
+  Et le clic droit seul aurait été un chemin que personne ne trouve — le défaut qu'`API-28` (le
+  `⌘E` sans bouton), le `⇧`-clic du diagramme et le renommage des consoles ont déjà corrigé ;
+- **le survol est celui de la *cellule*, par un canal à elle** (`--cell-actions` de `VirtualGrid`),
+  et non celui de la ligne qu'`API-45` emploie pour la poubelle. L'écart est dans ce que le bouton
+  vise : la poubelle agit sur la **ligne**, celui-ci sur la **valeur d'une cellule** — deux clés
+  étrangères sur la même ligne mènent à deux tables, et les allumer ensemble ferait désigner deux
+  endroits à la fois. **Ce n'est pas un état de survol inventé** : la cellule ne change ni de fond
+  ni de filet, et ce qui annonce le geste est le glyphe de l'en-tête ;
+- **la place du bouton est réservée dans chaque cellule de la colonne**, y compris celles qui n'en
+  portent pas. C'est la raison de `MARGE_DE_TRI` prise par l'autre bout : le bouton ne paraît qu'au
+  survol, donc une place prise à ce moment-là déplacerait la valeur sous le pointeur qui vient de
+  s'y poser. `largeurAjustee` gagne pour cela un `margeDeValeur`, le pendant exact de son
+  `margeDEntete` ;
+- **le bouton est un frère de la valeur, jamais un enfant.** En mode édition la cellule *est* un
+  `<button>` : un bouton dans un bouton n'est pas du HTML valide, ni cliquable de façon prévisible.
+  Posé en absolu par-dessus, il reçoit le clic qui tombe sur lui et laisse le reste ouvrir
+  l'éditeur. Et son `onClick` arrête la propagation — sans quoi suivre une référence choisirait au
+  passage la ligne qu'on quitte, un effet de bord sur un geste qui emmène ailleurs ;
+- **une valeur nulle ne se suit pas, et une saisie en attente non plus.** La première ne désigne
+  aucune ligne : pas de bouton, et l'entrée du menu **désactivée avec sa raison** — c'est la cellule
+  qui ne désigne personne, pas le geste qui n'existe pas sur cette colonne. La seconde n'est pas
+  encore écrite, et la cellule affiche déjà la valeur saisie : y mener par l'ancienne ferait un
+  bouton qui contredit ce qu'on lit à deux millimètres de lui ;
+- **une clé composite porte toutes ses paires.** Filtrer sur une moitié rendrait les lignes qui la
+  partagent, c'est-à-dire davantage que la ligne qu'on désignait ;
+- **l'arrivée remplace les filtres de la table visée, elle ne s'y ajoute pas.** Deux tables n'ont
+  pas les mêmes colonnes, et sur la même table un filtre resté en place ferait rendre « aucune
+  ligne » là où le saut promet d'en désigner une. Conséquence assumée : un onglet déjà ouvert perd
+  ce qu'on y avait filtré — `ouvrir` active l'existant plutôt que d'en empiler un second ;
+- **le saut voyage avec un jeton, et il est oublié dès qu'il est appliqué.** Trois cas qu'un simple
+  tableau de filtres ne couvre pas : la table visée peut être **celle qu'on quitte** (`parent_id`
+  référence sa propre table), auquel cas la vue n'est pas remontée et un filtre posé « au montage »
+  n'arriverait jamais ; la vue est remontée à **chaque changement d'onglet** (sa `key`), donc un
+  saut gardé se reposerait à chaque retour sur cette table, longtemps après le geste ; et l'objet
+  peut changer d'identité à chaque rendu de l'appelant, ce qui écraserait les filtres que
+  l'utilisateur a posés depuis. Le témoin de jeton désarme le dernier **à la source**, plutôt que de
+  le confier à la discipline des appelants (la leçon de `10d`) ;
+- **les filtres sont posés dès le premier rendu, et non par le seul effet.** Le cas courant d'un
+  saut est que la table visée n'était pas montée : l'initialiser dans l'état évite une **première
+  lecture non filtrée** — cinq cents lignes demandées pour rien, puis remplacées sous les yeux de
+  qui vient de cliquer. Mesuré à deux lectures avant correction, une après. L'effet reste, et porte
+  le cas de la table qui se référence elle-même ;
+- **le chemin clavier est la section « Liens » du panneau de ligne**, dont les liens **sortants**
+  deviennent de vrais boutons. Celui de la grille ne peut pas l'être : il est en
+  `visibility: hidden` hors survol, donc hors de l'arbre d'accessibilité et du parcours de
+  tabulation, et l'y mettre coûterait un arrêt par cellule de clé étrangère, cinq cents lignes
+  durant. Les deux voies appellent **la même fonction** — deux voies pour un même acte en laissent
+  une en arrière (règle n° 17), et le dépôt l'a déjà payé une fois ;
+- **un lien entrant reste du texte.** Il dit qui référence cette table, ce qui est une question à N
+  réponses et un autre écran : un bouton y promettrait une destination qu'aucun clic ne peut tenir.
+  C'est ce qui reste hors du périmètre d'`API-55`.
+
+**Trois moteurs, et les deux autres n'ont rien à refuser.** PostgreSQL, MySQL et SQLite rendent des
+relations ; MongoDB et BigQuery rendent une liste vide. Il n'y a donc **rien à désactiver avec sa
+raison** — contrairement à « Gérer les schémas… » hors PostgreSQL ou à l'interrupteur de
+transaction : là-bas il y a un geste qu'on n'offre pas, ici il n'y a pas de clé étrangère.
+
+**Quatre choses apprises en le vérifiant, et les quatre par sabotage** (règle n° 1) :
+
+- **une garde peut être redondante dans un sens et nécessaire dans l'autre.** `cibleDuSaut` refuse
+  une contrainte dont les deux bouts ne comptent pas le même nombre de colonnes ; retirer cette
+  garde laissait la suite **verte**, parce que le décor n'opposait que le cas inoffensif — plus de
+  colonnes de départ que de cibles, que les gardes intérieures attrapent déjà. Le cas dangereux est
+  l'inverse : moins de départs que de cibles, où la boucle ignore les cibles en trop et rend un
+  filtre sur **une partie** de la clé, donc plus de lignes que celle qu'on désignait, en silence ;
+- **et une garde peut n'être qu'une précondition écrite.** L'`arrivee` n'est passée à la vue que si
+  le saut vise *sa* table ; la retirer laisse la suite verte, React groupant `setSaut` et
+  `setEtatOnglets` du même gestionnaire — il n'existe aucun rendu où le saut serait posé alors qu'un
+  autre onglet est encore actif. Elle reste, et le commentaire le **dit** plutôt que de prétendre
+  corriger un défaut observé (règle n° 20) : ce qu'elle exprime cesserait d'être garanti par quoi
+  que ce soit de visible le jour où ouvrir un onglet passerait par un aller-retour, et le mode de
+  défaillance est le pire possible — les filtres consommés par la mauvaise table, donc jamais posés
+  sur la bonne ;
+- **un test de fidélité de largeur ne peut pas mordre sur un décor court.** « Rien n'est tronqué
+  dans la colonne suivie » est resté vert sous le sabotage des **deux** réserves : `user_id` porte
+  cinq chiffres dans `?demo` et son nom en fait sept, donc la colonne bute sur son plancher de 60 px
+  et rien n'approche jamais son bord. Il mesurait la brièveté du décor. L'allonger pour le faire
+  mordre serait écrire un décor pour un test — et un identifiant à douze chiffres vers une table de
+  92 800 lignes serait *moins* vrai que celui d'aujourd'hui. L'arithmétique est donc gardée où elle
+  se mesure, dans `ajustement.test.ts`, en boîtes posées plutôt que rendues (règle n° 9), et le test
+  de bout en bout a été **retiré** plutôt que laissé vert ;
+- **et une réserve de `padding` ne se mesure pas sur une boîte englobante.** Le premier test de
+  recouvrement comparait le bord droit de la valeur à celui du bouton : la réserve étant un
+  `padding-right`, la boîte de la valeur va jusqu'au bord de la cellule, bouton compris, et
+  l'assertion échouait de la largeur exacte de ce qu'elle voulait garder. Ce qui se compare est le
+  bord du **contenu**, c'est-à-dire l'endroit le plus loin qu'un texte puisse atteindre.
+
+**Ce qui reste hors périmètre** : le sens entrant — depuis une colonne référencée, aller aux lignes
+qui la désignent —, qui essaime vers N tables et demande un menu plutôt qu'une cible. Et les filtres
+qu'un onglet oublie dès qu'on le quitte, que ce chantier rend seulement plus visibles : c'est
+`API-61`.
+
+**Ce qui reste à voir à l'œil** : le bouton sous WKWebView, et en « Nuit » — même réserve que les
+dix écrans, pour la même raison. Et le saut sur une base réelle à clé composite, que `?demo` n'a
+pas : `cibleDuSaut` le compose et un test pur le garde, mais aucun moteur n'a jamais rendu ce filtre
+à deux membres.
 
 ### Le gestionnaire de schémas (8 septembre 2026, `API-33`)
 
