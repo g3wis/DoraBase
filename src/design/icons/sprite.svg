@@ -38,6 +38,7 @@
   <symbol id="i-cols" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9.5 4v16M15 4v16"/></symbol>
   <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.8-6.5 10-6.5S22 12 22 12s-3.8 6.5-10 6.5S2 12 2 12Z"/><circle cx="12" cy="12" r="2.8"/></symbol>
   <symbol id="i-dl" viewBox="0 0 24 24"><path d="M12 3.5v11m0 0 4.5-4.5M12 14.5 7.5 10M4 19.5h16"/></symbol>
+  <symbol id="i-ul" viewBox="0 0 24 24"><path d="M12 16.5v-11m0 0 4.5 4.5M12 5.5 7.5 10M4 19.5h16"/></symbol>
   <!-- Redessinée le 10 septembre 2026 (`API-46`) : deux rails au lieu de trois, et la ligne est
        **coupée** de part et d'autre du curseur. Elle n'avait jamais servi ; le premier appelant est un
        carré de 14 px, où trois rails à 5 unités d'écart se touchaient et où un rail traversant le

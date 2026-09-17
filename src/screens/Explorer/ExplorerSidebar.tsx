@@ -411,13 +411,20 @@ export function ExplorerSidebar({
                   moyens : l'un le déclare, l'autre le reçoit d'un fichier. Les voisiner est ce qui
                   fait trouver le second quand on cherchait le premier.
 
-                  **Le glyphe est celui de la modale d'import**, `save`, et non `dl` : dans ce
-                  produit `dl` dit « export » depuis les modales de dump, et le même geste ne doit
-                  pas se dessiner de deux façons — pas plus qu'il ne doit se dire de deux façons. */}
+                  **Le glyphe est `ul`, le miroir de `dl`** : même sol, une flèche qui descend vers
+                  le disque pour l'export, une qui en remonte pour l'import. La disquette de `save`
+                  a tenu une semaine et disait « enregistrer » — ce qu'un bouton d'icône nue ne peut
+                  pas se permettre. Le même geste ne se dessine pas de deux façons, et celui-ci ne
+                  s'en dessine plus d'une fausse.
+
+                  **Et il porte un `title`** : les deux autres actions de cette bande sont des
+                  gestes qu'on devine, celui-ci nomme un format de fichier. Le nom accessible seul
+                  ne se lit pas au survol. */}
               {onImportProjects && (
                 <SidebarToolbarButton
-                  icon="save"
+                  icon="ul"
                   label={t('transfer.import.menu')}
+                  title={t('transfer.import.menu')}
                   onClick={onImportProjects}
                 />
               )}

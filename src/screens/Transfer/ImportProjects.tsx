@@ -84,7 +84,13 @@ export function ImportProjects({
   return (
     <Modal
       title={t('transfer.import.title')}
-      icon="save"
+      /* **`ul`, pas `save`** (17 septembre 2026, à la demande : « do not use a save icon for an
+         import feature »). Une disquette dit « enregistrer », pas « importer » — et elle le disait
+         déjà dans la modale d'import de dump, d'où celle-ci l'avait reprise. `ul` et `dl` sont un
+         **couple** : même sol, une flèche qui descend vers le disque pour l'export, une qui en
+         remonte pour l'import. C'est l'appariement qui les rend lisibles, et c'est pourquoi les
+         deux gestes ne peuvent pas partager un glyphe ni en emprunter un qui dit autre chose. */
+      icon="ul"
       onClose={onClose}
       footer={
         <div className={styles.footer}>

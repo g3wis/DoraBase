@@ -2614,6 +2614,34 @@ que les préférences énonçaient déjà : **une modale atteignable depuis deux
 des deux**. Le test qui le garde part de `/` (règle n° 8) ; il est rouge sous le sabotage qui la
 remet dans la branche.
 
+**Et le glyphe de l'import a dû changer, à la demande** (« do not use a save icon for an import
+feature »). Il portait `save`, la disquette — reprise telle quelle de la modale d'import de dump,
+qui l'avait déjà faux. Une disquette dit **enregistrer** : elle nomme l'écriture d'un fichier, ce
+qui est exactement le geste inverse, et un bouton d'icône nue ne survit pas à ce genre d'à-peu-près.
+
+`ul` a donc été **ajouté au sprite**, miroir exact de `dl` : même sol à `y=19.5`, une flèche qui y
+descend pour l'export, une qui en remonte pour l'import. C'est l'**appariement** qui les rend
+lisibles l'un par l'autre, et c'est pourquoi ni un glyphe partagé ni un glyphe emprunté ne pouvait
+convenir. Les deux modales de dump ont reçu la correction en même temps : un geste ne se dessine pas
+de deux façons dans un même produit, et c'est de là que le mauvais dessin venait. Regardé à
+`deviceScaleFactor: 6` avant d'être retenu, comme la marque du diagramme — à quatorze pixels, un
+glyphe se juge à la loupe, pas dans un fichier SVG.
+
+**Réserve, et elle est connue** : une flèche montante au-dessus d'un trait est aussi le glyphe
+universel de l'*upload*, donc de l'envoi. Ce qui tranche ici est interne : `dl` veut déjà dire
+« export » dans ce produit, et le miroir est alors le seul dessin qui puisse vouloir dire son
+contraire. Les trois surfaces le doublent d'un mot — deux boutons à libellé, et un `title` sur celui
+de la bande, qui n'en a pas.
+
+**Deux gardes en sont sortis, et la première dépasse ce chantier** : `names.ts` et `sprite.svg` sont
+deux sources éditées à la main, ce fichier dit depuis longtemps qu'« une icône ajoutée doit l'être
+dans les deux », et **rien ne le vérifiait**. L'oubli est muet des deux côtés — un nom sans symbole
+rend un `<use>` qui ne pointe sur rien, donc un bouton **vide**, sans que TypeScript, Biome ni
+Vitest s'en aperçoivent : la famille du `var()` vers un jeton inexistant, appliquée au sprite. Un
+test compare désormais les deux listes dans les deux sens, avec son contrôle positif. La seconde
+garde que la modale d'import ne porte pas la disquette, et vise le `<use>` du DOM plutôt que le nom
+de la prop — c'est ce qu'un œil voit.
+
 **Le paramètre de décor est parti avec.** `?demo&transfert=import` existait faute de chemin réel, et
 le test de bout en bout passe désormais par le bouton. C'est le bon sens de la correction, et elle
 vaut au-delà d'ici : **ce qu'un test ne peut atteindre que par une porte dérobée est souvent ce

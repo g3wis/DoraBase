@@ -254,3 +254,17 @@ test('après l’import, les cases disparaissent et le rapport reste', async () 
   expect(screen.queryByRole('checkbox')).toBeNull()
   expect(screen.queryByRole('button', { name: /^Importer/ })).toBeNull()
 })
+
+test('la modale d’import ne porte pas la disquette d’« enregistrer »', () => {
+  /* **Une disquette dit « enregistrer », pas « importer »** (17 septembre 2026, à la demande).
+     Le glyphe venait de la modale d'import de dump, qui l'avait déjà faux ; `ul` le remplace — le
+     miroir du `dl` de l'export, même sol, une flèche qui en remonte au lieu d'y descendre.
+
+     Le test vise le `<use>` plutôt que le nom de la prop : c'est ce que le DOM porte, donc ce qu'un
+     œil voit, et il resterait juste si `Modal` changeait la façon dont il rend son icône. */
+  render(<Piloté />)
+
+  const dialogue = screen.getByRole('dialog', { name: 'Importer des projets' })
+  expect(dialogue.querySelector('use[href="#i-ul"]')).not.toBeNull()
+  expect(dialogue.querySelector('use[href="#i-save"]')).toBeNull()
+})

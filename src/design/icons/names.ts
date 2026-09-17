@@ -52,6 +52,7 @@ export type IconName =
   | 'table'
   | 'term'
   | 'trash'
+  | 'ul'
   | 'unlock'
   | 'view'
   | 'warn'

@@ -44,8 +44,8 @@ export function WelcomeHero({ onNewProject, onImportProjects }: WelcomeHeroProps
           {onImportProjects && (
             <Button variant="secondary" size="xl" onClick={onImportProjects}>
               {/* Le glyphe de la modale d'import, comme dans la bande de l'arbre : un geste, un
-                  dessin. */}
-              <Icon name="save" size={15} strokeWidth={2.2} />
+                  dessin. `ul` remonte du disque, là où le `dl` de l'export y descend. */}
+              <Icon name="ul" size={15} strokeWidth={2.2} />
               {t('transfer.import.menu')}
             </Button>
           )}
