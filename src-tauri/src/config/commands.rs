@@ -1190,3 +1190,178 @@ pub async fn delete_environment(
         leftover_secrets: suppression.secrets_residuels,
     })
 }
+
+/// Ce que la modale d'export envoie (`API-30`).
+#[derive(Debug, Clone, serde::Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "config.ts")]
+pub struct ExportProjectsRequest {
+    /// La destination, choisie dans le sélecteur natif.
+    pub file: String,
+    /// Le projet à exporter seul, ou `None` pour tous — les deux portées de la demande.
+    ///
+    /// **Un nom et non un index** : la liste de l'écran peut avoir été réordonnée ou vidée depuis, et
+    /// les projets sont relus au disque comme partout ailleurs.
+    pub project: Option<String>,
+    /// Écrire les mots de passe **en clair** dans le fichier.
+    ///
+    /// **Reçu de l'écran, jamais déduit** : c'est une case à cocher, avec son avertissement à côté.
+    /// Un défaut qui les inclurait ferait d'un export ordinaire un fichier de secrets.
+    pub include_passwords: bool,
+}
+
+/// Ce que la modale d'import envoie pour écrire (`API-30`).
+#[derive(Debug, Clone, serde::Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "config.ts")]
+pub struct ImportProjectsRequest {
+    pub file: String,
+    /// Les projets retenus, par nom. `None` retient tout ce que le fichier porte.
+    pub projects: Option<Vec<String>>,
+}
+
+/// Ce qu'un import rend à l'écran.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "config.ts")]
+pub struct ImportProjectsResult {
+    /// La configuration d'après, que `App` repose — c'est ce changement qui fait relire l'arbre et
+    /// purger son cache, comme pour les six autres commandes de configuration.
+    pub projects: Vec<Project>,
+    pub report: super::transfert::ImportReport,
+}
+
+/// Écrit un fichier de transfert : tous les projets, ou un seul (`API-30`).
+///
+/// **Les projets viennent du disque, pas de l'écran** — comme partout ailleurs dans ce module : une
+/// liste envoyée par la webview pourrait être périmée, et on exporterait alors une configuration qui
+/// n'est plus celle de la machine.
+#[tauri::command]
+pub fn export_projects(
+    request: ExportProjectsRequest,
+    state: State<'_, ConfigState>,
+) -> Result<super::transfert::ExportReport, String> {
+    let garde = state
+        .0
+        .lock()
+        .map_err(|_| "état de configuration corrompu".to_owned())?;
+    let store = garde
+        .as_ref()
+        .ok_or_else(|| "la configuration doit être lue avant d'être exportée".to_owned())?;
+
+    let projects = store.load_projects()?;
+    let retenus = super::transfert::composer(&projects, request.project.as_deref())
+        .map_err(|erreur| erreur.to_string())?;
+
+    let repertoire = store
+        .path()
+        .parent()
+        .ok_or_else(|| "le fichier de configuration n'a pas de répertoire parent".to_owned())?
+        .to_path_buf();
+    let magasin = crate::secrets::selectionner(&repertoire).map_err(|e| e.to_string())?;
+
+    let (fichier, report) =
+        super::transfert::preparer(retenus, request.include_passwords, magasin.store.as_ref())
+            .map_err(|erreur| erreur.to_string())?;
+
+    super::transfert::ecrire(std::path::Path::new(&request.file), &fichier)
+        .map_err(|erreur| erreur.to_string())?;
+
+    // Le **chemin n'est pas journalisé**, contrairement aux autres commandes : il vient d'un
+    // sélecteur natif, donc il nomme un répertoire de l'utilisateur, et le journal du plugin est
+    // écrit sur disque en développement. Le compte suffit à savoir que le geste a abouti.
+    log::info!(
+        "export_projects → {} projet(s), {} connexion(s), {} console(s), {} mot(s) de passe",
+        report.projects,
+        report.connections,
+        report.consoles,
+        report.passwords_carried
+    );
+
+    Ok(report)
+}
+
+/// Lit un fichier de transfert et dit **ce qu'un import ferait**, sans rien écrire (`API-30`).
+///
+/// Le rapport vient de la même fonction que l'import lui-même, avec tous les projets retenus : c'est
+/// ce qui garantit que l'aperçu et l'écriture ne peuvent pas se contredire. Voir
+/// `transfert::fusionner`.
+#[tauri::command]
+pub fn inspect_projects_file(
+    file: String,
+    state: State<'_, ConfigState>,
+) -> Result<super::transfert::ImportReport, String> {
+    let garde = state
+        .0
+        .lock()
+        .map_err(|_| "état de configuration corrompu".to_owned())?;
+    let store = garde
+        .as_ref()
+        .ok_or_else(|| "la configuration doit être lue avant d'être comparée".to_owned())?;
+
+    let projects = store.load_projects()?;
+    let fichier =
+        super::transfert::lire(std::path::Path::new(&file)).map_err(|erreur| erreur.to_string())?;
+
+    Ok(super::transfert::fusionner(&projects, &fichier, None).report)
+}
+
+/// Verse les projets d'un fichier de transfert dans la configuration (`API-30`).
+///
+/// **Le versement est recalculé ici**, sur la configuration telle qu'elle est *maintenant* : rejouer
+/// l'aperçu écraserait une connexion créée entre-temps dans un autre écran. C'est `tourDesEtats` par
+/// un autre bout — une lecture dépassée ne doit pas décider d'une écriture.
+///
+/// **Aucune connexion n'est fermée, et aucune n'a à l'être.** Les six commandes qui ferment le font
+/// parce qu'elles *périment* la recette d'une connexion ouverte — un hôte qui change, un secret qui
+/// se déplace. Celle-ci n'en modifie aucune : elle ajoute ce qui manquait et garde le reste tel quel,
+/// donc toute connexion ouverte reste décrite par ce qui l'a ouverte.
+#[tauri::command]
+pub fn import_projects(
+    request: ImportProjectsRequest,
+    state: State<'_, ConfigState>,
+) -> Result<ImportProjectsResult, String> {
+    let garde = state
+        .0
+        .lock()
+        .map_err(|_| "état de configuration corrompu".to_owned())?;
+    let store = garde
+        .as_ref()
+        .ok_or_else(|| "la configuration doit être lue avant d'être écrite".to_owned())?;
+
+    let locaux = store.load_projects()?;
+    let fichier = super::transfert::lire(std::path::Path::new(&request.file))
+        .map_err(|erreur| erreur.to_string())?;
+
+    let repertoire = store
+        .path()
+        .parent()
+        .ok_or_else(|| "le fichier de configuration n'a pas de répertoire parent".to_owned())?
+        .to_path_buf();
+    let magasin = crate::secrets::selectionner(&repertoire).map_err(|e| e.to_string())?;
+
+    let fusion = super::transfert::fusionner(&locaux, &fichier, request.projects.as_deref());
+    let (projects, report) =
+        super::transfert::appliquer(fusion, magasin.store.as_ref(), &mut |projets| {
+            // **Par `ecrire_le_reste_intact`, et surtout pas par trois lignes à soi** : un import de
+            // projets n'a rien à dire d'un thème ni d'une instance managée, et c'est exactement le
+            // motif qui a fait extraire cette fonction — huit appelants avaient chacun pensé aux
+            // préférences, aucun n'aurait pensé aux instances. En passant par elle, cette commande
+            // n'est pas le neuvième oubli.
+            ecrire_le_reste_intact(store, projets)
+        })
+        .map_err(|erreur| erreur.to_string())?;
+
+    for sort in &report.projects {
+        log::info!(
+            "import_projects → {} : {:?}, +{} env, +{} connexion(s), +{} console(s)",
+            sort.name,
+            sort.verdict,
+            sort.environments_added.len(),
+            sort.connections_added.len(),
+            sort.consoles_added.len()
+        );
+    }
+
+    Ok(ImportProjectsResult { projects, report })
+}

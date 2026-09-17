@@ -138,7 +138,11 @@ export function ImportDump({
   return (
     <Modal
       title={titre}
-      icon="save"
+      /* **`ul`, pas `save`** (17 septembre 2026) : une disquette dit « enregistrer ». C'est d'ici
+         que l'import de projets avait repris le glyphe, donc c'est ici aussi qu'il fallait le
+         corriger — un geste ne se dessine pas de deux façons dans un même produit, et « importer »
+         ne s'en dessine plus d'une fausse. Il fait couple avec le `dl` d'`ExportDump`. */
+      icon="ul"
       onClose={onClose}
       footer={
         <div className={styles.footer}>

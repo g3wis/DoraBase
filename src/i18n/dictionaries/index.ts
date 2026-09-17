@@ -10,6 +10,7 @@ import { schemasEn, schemasFr } from './schemas'
 import { shellEn, shellFr } from './shell'
 import { structureEn, structureFr } from './structure'
 import { tableViewEn, tableViewFr } from './tableView'
+import { transferEn, transferFr } from './transfer'
 import { uiEn, uiFr } from './ui'
 import { welcomeEn, welcomeFr } from './welcome'
 
@@ -33,6 +34,7 @@ export const DICTIONNAIRES = {
     dump: dumpFr,
     schemas: schemasFr,
     instances: instancesFr,
+    transfer: transferFr,
     ui: uiFr,
   },
   en: {
@@ -49,6 +51,7 @@ export const DICTIONNAIRES = {
     dump: dumpEn,
     schemas: schemasEn,
     instances: instancesEn,
+    transfer: transferEn,
     ui: uiEn,
   },
 } as const

@@ -14,6 +14,9 @@ export const EVENEMENT_DE_MENU = 'menu://declenche'
 export type ActionsDeMenu = {
   exporter: () => void
   importer: () => void
+  /** L'export de **tous** les projets (`API-30`) — la portée d'un seul part du menu de sa ligne. */
+  exporterLesProjets: () => void
+  importerDesProjets: () => void
 }
 
 /**
@@ -38,6 +41,14 @@ export function brancherEvenementsDeMenu(actions: ActionsDeMenu): (identifiant: 
       case 'fichier.importer-dump':
         console.info(`menu → ${identifiant}`)
         actions.importer()
+        return
+      case 'fichier.exporter-projets':
+        console.info(`menu → ${identifiant}`)
+        actions.exporterLesProjets()
+        return
+      case 'fichier.importer-projets':
+        console.info(`menu → ${identifiant}`)
+        actions.importerDesProjets()
         return
       default:
         console.info(`menu → ${identifiant} (aucune action câblée)`)

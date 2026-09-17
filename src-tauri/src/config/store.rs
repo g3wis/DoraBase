@@ -282,7 +282,7 @@ pub fn load(cible: &Path) -> LoadOutcome {
 /// `valeur` est **déjà** le JSON de `brut` analysé par `load` : reparser ici testerait un
 /// JSON qu'on sait déjà valide, et ne pourrait produire qu'une branche d'erreur inatteignable.
 /// `brut` reste nécessaire à part — c'est ce qui part, octet pour octet, dans la sauvegarde.
-fn migrer(cible: &Path, brut: &str, mut valeur: serde_json::Value, depuis: u32) -> LoadOutcome {
+fn migrer(cible: &Path, brut: &str, valeur: serde_json::Value, depuis: u32) -> LoadOutcome {
     let sauvegarde = sauvegarde_de_migration(cible, depuis);
     if let Err(erreur) = fs::write(&sauvegarde, brut) {
         return LoadOutcome::Unreadable {
@@ -291,6 +291,40 @@ fn migrer(cible: &Path, brut: &str, mut valeur: serde_json::Value, depuis: u32) 
         };
     }
 
+    match migrer_le_document(valeur, depuis) {
+        Ok((projects, preferences, instances)) => LoadOutcome::Loaded {
+            projects,
+            preferences: preferences.borner(),
+            instances,
+        },
+        Err(raison) => LoadOutcome::Unreadable {
+            reason: raison,
+            quarantined_to: sauvegarde,
+        },
+    }
+}
+
+/// La chaîne de migrations elle-même, appliquée à un document **déjà analysé**.
+///
+/// **Ni chemin, ni écriture, ni sauvegarde** — et c'est ce qui la rend réemployable. Le transfert
+/// de projets (`API-30`) migre un fichier qui n'est *pas* la configuration : il n'y a rien à
+/// sauvegarder avant, puisque rien n'est réécrit, et rien à mettre en quarantaine, puisque le
+/// fichier appartient à l'utilisateur et qu'on ne fait que le lire. Ce qui doit être commun, en
+/// revanche, c'est la chaîne : deux échelles de migration pour la même forme de données
+/// divergeraient à la première montée de version (règle n° 17), et c'est le fichier de transfert —
+/// celui qui traîne dans un dossier partagé pendant des mois — qui en paierait le prix.
+///
+/// L'erreur est une **chaîne déjà formulée** : les deux causes — aucune migration connue, migration
+/// impossible — se disent différemment, et `migrer` les rendait déjà telles quelles.
+///
+/// Elle rend **tout ce que le document porte** — projets, préférences, instances managées
+/// (`API-32`) —, et non les seuls projets : c'est `migrer` qui en a besoin. Le transfert, lui, n'en
+/// garde qu'un tiers, et c'est `projets_du_document` qui le dit plutôt que cette fonction, qui n'a
+/// pas à connaître ses appelants.
+pub(crate) fn migrer_le_document(
+    mut valeur: serde_json::Value,
+    depuis: u32,
+) -> Result<(Vec<Project>, Preferences, Vec<ManagedInstance>), String> {
     // **Le cran du proxy passe en premier, et il est le seul à travailler sur le JSON.** `05d`
     // remplace un tunnel plat par `{ localPort, proxy }` partout où un tunnel apparaît ; il ne
     // connaît ni les projets, ni les bases, ni les environnements. L'appliquer d'abord, sur la
@@ -320,24 +354,52 @@ fn migrer(cible: &Path, brut: &str, mut valeur: serde_json::Value, depuis: u32) 
         2..=4 => serde_json::from_str::<ConfigFile>(&brut_migre)
             .map(|fichier| (fichier.projects, fichier.preferences, fichier.instances)),
         _ => {
-            return LoadOutcome::Unreadable {
-                reason: format!("aucune migration connue depuis la version {depuis}"),
-                quarantined_to: sauvegarde,
-            };
+            return Err(format!(
+                "aucune migration connue depuis la version {depuis}"
+            ));
         }
     };
 
-    match migre {
-        Ok((projects, preferences, instances)) => LoadOutcome::Loaded {
-            projects,
-            preferences: preferences.borner(),
-            instances,
-        },
-        Err(erreur) => LoadOutcome::Unreadable {
-            reason: format!("migration depuis la version {depuis} impossible : {erreur}"),
-            quarantined_to: sauvegarde,
-        },
-    }
+    migre.map_err(|erreur| format!("migration depuis la version {depuis} impossible : {erreur}"))
+}
+
+/// Les projets d'un document `{ version, projects, … }` déjà analysé, migrés si sa version est
+/// antérieure à la courante.
+///
+/// **Écrite pour le transfert de projets (`API-30`)**, qui lit un fichier portant les mêmes projets
+/// que la configuration sans être la configuration : ni préférences à en tirer, ni quarantaine à
+/// prononcer sur un fichier qui n'est pas le nôtre.
+///
+/// **Le bras « rien à migrer » est ici et non dans la chaîne**, et c'est délibéré : élargir le
+/// `2..=4` de `migrer_le_document` jusqu'à `VERSION_COURANTE` en aurait fait un bras attrape-tout
+/// (règle n° 16) — le jour où la v5 → v6 demande une transformation, la plage l'avalerait en silence
+/// et lirait un fichier v5 comme s'il portait la forme v6. Séparés, l'oubli se dit : une version
+/// sans cran tombe sur « aucune migration connue ».
+///
+/// Une version **postérieure** n'est pas traitée ici : l'appelant la refuse d'abord, avec son propre
+/// message — un fichier de transfert et une configuration ne se répondent pas de la même façon.
+pub(crate) fn projets_du_document(
+    valeur: serde_json::Value,
+    version: u32,
+) -> Result<Vec<Project>, String> {
+    let mut projects = if version == VERSION_COURANTE {
+        serde_json::from_value::<Vec<Project>>(
+            valeur
+                .get("projects")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null),
+        )
+        .map_err(|erreur| format!("forme inattendue : {erreur}"))?
+    } else {
+        migrer_le_document(valeur, version)?.0
+    };
+
+    // **La même reprise qu'à la lecture de la configuration**, et pour la même raison : un fichier
+    // écrit avant le 20 août 2026 porte des requêtes enregistrées, que rien d'autre ne convertit en
+    // consoles. Les laisser dans `queries` les rendrait invisibles jusqu'à la relecture suivante du
+    // fichier de configuration — ou les perdrait, si le projet d'accueil a déjà une connexion.
+    super::enregistrer::migrer_requetes_en_consoles(&mut projects);
+    Ok(projects)
 }
 
 /// v2 → v3 (`05d`) : le tunnel plat devient `{ localPort, proxy: { kind: "ssh", … } }`.

@@ -148,6 +148,21 @@ type WorkbenchProps = {
     nom: string,
   ) => Promise<{ missingSecrets: string[]; leftoverSecrets: string[] }>
   /**
+   * Ouvre l'export de **ce projet** (`API-30`), depuis le menu de sa ligne d'arbre.
+   *
+   * **Relayé, pas traité ici** : la modale vit au niveau de l'application, avec celle du menu natif
+   * qui exporte tous les projets — les deux portées sont un seul écran, et le monter en deux
+   * endroits aurait fait deux états à tenir en phase. Absent, l'entrée est désactivée avec sa raison.
+   */
+  onExportProject?: (project: string) => void
+  /**
+   * Ouvre l'import de projets (`API-30`), depuis la bande en tête de l'arbre.
+   *
+   * **Relayé, pas traité ici**, comme l'export : la modale vit au niveau de l'application, où vivent
+   * aussi les deux entrées du menu natif. Absent, le bouton n'est pas rendu.
+   */
+  onImportProjects?: () => void
+  /**
    * Renomme une connexion (`26`). Absent, l'entrée « Renommer… » de l'arbre est désactivée.
    *
    * **Rejette avec le refus du cœur** — un nom déjà pris dans cet environnement — et la sidebar
@@ -264,6 +279,8 @@ export function Workbench({
   onNewProject,
   onEditDatabase,
   onRenameProject,
+  onExportProject,
+  onImportProjects,
   onRenameDatabase,
   onProjets,
   gestesEnvironnement,
@@ -1825,6 +1842,12 @@ export function Workbench({
                     onRenameDatabase === undefined ? undefined : renommerUneConnexion
                   }
                   onEditProject={onRenameProject === undefined ? undefined : ouvrirLEditionDe}
+                  /* **L'export d'un projet part du menu de sa ligne** (`API-30`) : c'est le
+                     palier qui connaît la portée. L'écran de travail ne fait que le relayer — la
+                     modale vit au niveau de l'application, avec celle qui exporte *tous* les
+                     projets, parce que les deux portées sont un seul écran. */
+                  onExportProject={onExportProject}
+                  onImportProjects={onImportProjects}
                   consoles={
                     onCreateConsole === undefined
                       ? undefined

@@ -128,6 +128,31 @@ export type ExplorerSidebarProps = {
    */
   onEditProject?: (project: string) => void
   /**
+   * Exporte **ce projet** dans un fichier de transfert (`API-30`).
+   *
+   * **Depuis le menu de sa ligne**, comme la création d'une console part du menu de sa connexion et
+   * pour la même raison : le geste part du palier qui connaît son contexte. L'export de *tous* les
+   * projets vit dans le menu natif, où il n'a rien à deviner.
+   *
+   * Absent, l'entrée est désactivée avec sa raison — c'est le cas de la galerie.
+   */
+  onExportProject?: (project: string) => void
+  /**
+   * Ouvre l'import de projets (`API-30`), depuis la bande en tête de l'arbre.
+   *
+   * **Il a fallu ce second chemin, et c'est un signalement qui l'a dit** (17 septembre 2026, « je
+   * n'ai pas trouvé comment importer »). L'import n'existait que dans le menu natif : il marchait,
+   * un test le prouvait jusqu'au menu construit, et **personne ne pouvait le trouver**. C'est la
+   * règle que ce dépôt a déjà payée trois fois — le `⌘E` du mode édition, le `⇧`-clic du diagramme,
+   * le renommage d'une console : *un chemin unique qu'on ne voit pas est un chemin qui n'existe pas*.
+   *
+   * **Dans cette bande et non ailleurs** : elle porte déjà « Nouveau projet », et un import **crée
+   * des projets** — les deux gestes produisent la même chose, par deux moyens. L'export, lui, n'y
+   * est pas : il ne crée rien, et sa portée la plus utile est un projet, donc elle vit sur la ligne
+   * qui le nomme.
+   */
+  onImportProjects?: () => void
+  /**
    * Retirer la déclaration d'une base, ou un projet entier (`08j`).
    *
    * Une seule prop pour les deux : la cible dit lequel, et deux props jumelles se seraient
@@ -198,6 +223,8 @@ export function ExplorerSidebar({
   onManageSchemas,
   onRenameDatabase,
   onEditProject,
+  onExportProject,
+  onImportProjects,
   onDelete,
   modificationsEnAttenteDe,
   columns,
@@ -261,6 +288,7 @@ export function ExplorerSidebar({
       onManageSchemas,
       onRenameDatabase !== undefined,
       onEditProject,
+      onExportProject,
       demanderLeRetrait,
       onRefresh,
       consoles,
@@ -368,7 +396,7 @@ export function ExplorerSidebar({
              icône nue sans « + » se lisait comme un raccourci vers un projet déjà là, pas comme un
              geste d'ajout — la même confusion que le `+` de la grille (`AGENTS.md`) écarte pour une
              ligne. */
-          (onNewProject || onOpenPreferences) && (
+          (onNewProject || onImportProjects || onOpenPreferences) && (
             <SidebarToolbar>
               {onNewProject && (
                 <SidebarToolbarButton
@@ -376,6 +404,28 @@ export function ExplorerSidebar({
                   label={t('explorer.sidebar.newProject')}
                   title={t('explorer.sidebar.newProjectTitle', { raccourci: raccourci('N') })}
                   onClick={onNewProject}
+                />
+              )}
+              {/* **L'import, juste après la création** (`API-30`, 17 septembre 2026, à la demande).
+                  Les deux gestes de cette bande produisent la même chose — un projet —, par deux
+                  moyens : l'un le déclare, l'autre le reçoit d'un fichier. Les voisiner est ce qui
+                  fait trouver le second quand on cherchait le premier.
+
+                  **Le glyphe est `ul`, le miroir de `dl`** : même sol, une flèche qui descend vers
+                  le disque pour l'export, une qui en remonte pour l'import. La disquette de `save`
+                  a tenu une semaine et disait « enregistrer » — ce qu'un bouton d'icône nue ne peut
+                  pas se permettre. Le même geste ne se dessine pas de deux façons, et celui-ci ne
+                  s'en dessine plus d'une fausse.
+
+                  **Et il porte un `title`** : les deux autres actions de cette bande sont des
+                  gestes qu'on devine, celui-ci nomme un format de fichier. Le nom accessible seul
+                  ne se lit pas au survol. */}
+              {onImportProjects && (
+                <SidebarToolbarButton
+                  icon="ul"
+                  label={t('transfer.import.menu')}
+                  title={t('transfer.import.menu')}
+                  onClick={onImportProjects}
                 />
               )}
               {/* **Les préférences, à gauche avec le reste** (`API-46`, à la demande, second tour).
@@ -654,6 +704,7 @@ function entreesDe(
    */
   renommageDisponible: boolean,
   onEditProject: ExplorerSidebarProps['onEditProject'],
+  onExportProject: ExplorerSidebarProps['onExportProject'],
   demanderLeRetrait: ((cible: CibleDeSuppression) => void) | undefined,
   onRefresh: ExplorerSidebarProps['onRefresh'],
   consoles: ExplorerSidebarProps['consoles'],
@@ -689,6 +740,20 @@ function entreesDe(
         icone: 'pencil',
         onClick: onEditProject ? () => onEditProject(noeud.label) : undefined,
         raison: onEditProject ? undefined : RAISONS.editionIndisponible,
+      },
+      {
+        /* **« Exporter le projet… », après « Modifier » et avant « Retirer »** (`API-30`). Il ne
+           configure rien et n'ouvre rien : il produit un fichier. Sa place est donc après les deux
+           entrées qui touchent à la déclaration, et avant celle qui la retire — le geste destructeur
+           reste le dernier de la liste, partout dans le produit.
+
+           **Le libellé vient du dictionnaire du transfert**, non de celui de l'explorateur : c'est le
+           même geste que la modale nomme, et deux chaînes pour une action auraient divergé à la
+           première reformulation. */
+        libelle: t('transfer.export.menu'),
+        icone: 'dl',
+        onClick: onExportProject ? () => onExportProject(noeud.label) : undefined,
+        raison: onExportProject ? undefined : RAISONS.exportIndisponible,
       },
       {
         // **« Retirer… » et non « Supprimer… »** : le mot compte, et c'est toute la décision de
@@ -915,6 +980,7 @@ function raisons(t: ReturnType<typeof useT>) {
     diagrammeIndisponible: t('explorer.sidebar.raisons.diagramUnavailable'),
     schemasIndisponible: t('explorer.sidebar.raisons.schemasUnavailable'),
     schemasHorsPostgres: t('explorer.sidebar.raisons.schemasPostgresOnly'),
+    exportIndisponible: t('explorer.sidebar.raisons.exportUnavailable'),
   }
 }
 

@@ -103,6 +103,8 @@ mod macos {
         // pas la construction, la tâche 3 écoutera un événement qui n'arrive jamais.
         assert!(identifiants.contains(&"fichier.exporter-dump".to_string()));
         assert!(identifiants.contains(&"fichier.importer-dump".to_string()));
+        assert!(identifiants.contains(&"fichier.exporter-projets".to_string()));
+        assert!(identifiants.contains(&"fichier.importer-projets".to_string()));
     }
 
     fn aucun_libelle_anglais_de_muda_ne_subsiste() {

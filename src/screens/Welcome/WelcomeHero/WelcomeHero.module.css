@@ -63,5 +63,14 @@
 .actions {
   display: flex;
   gap: var(--space-5);
+  /*
+   * **`center`, et ce n'est pas cosmétique** (`API-30`). `Button` impose `content-box` pour suivre
+   * le mockup, donc un bouton **bordé** rend deux pixels de plus qu'un bouton plein à la même
+   * taille déclarée : mesuré, 36 px contre 34 pour un `xl`. Sans cette ligne, les deux boutons de
+   * cet écran sont calés en haut et le secondaire dépasse par le bas — sur le premier écran du
+   * produit. C'est la déclaration que le pied de `Modal` porte déjà, pour la même paire et la même
+   * raison.
+   */
+  align-items: center;
   margin-top: var(--space-3);
 }

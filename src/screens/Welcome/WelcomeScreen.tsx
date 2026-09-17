@@ -17,6 +17,8 @@ type WelcomeScreenProps = {
    * n'engendrait aucune action.
    */
   onOpenPreferences: () => void
+  /** Ouvre l'import de projets (`API-30`) — voir `WelcomeHero`, qui porte la raison. */
+  onImportProjects?: () => void
   projectCount: number
   /** Vrai quand une modale bloque la fenêtre : la barre de titre se ternit (`08b`). */
   dimmed?: boolean
@@ -32,6 +34,7 @@ type WelcomeScreenProps = {
 export function WelcomeScreen({
   onNewProject,
   onOpenPreferences,
+  onImportProjects,
   projectCount,
   dimmed = false,
 }: WelcomeScreenProps) {
@@ -40,7 +43,7 @@ export function WelcomeScreen({
       <TitleBar dimmed={dimmed} onOpenPreferences={onOpenPreferences} />
       <div className={styles.body}>
         <ProjectSidebar onNewProject={onNewProject} />
-        <WelcomeHero onNewProject={onNewProject} />
+        <WelcomeHero onNewProject={onNewProject} onImportProjects={onImportProjects} />
       </div>
       <StatusBar projectCount={projectCount} />
     </div>

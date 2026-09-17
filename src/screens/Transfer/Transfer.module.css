@@ -1,0 +1,157 @@
+/*
+ * Les deux modales de transfert de projets (`API-30`).
+ *
+ * **Le handoff ne maquette pas ces écrans**, comme pour le dump : aucune métrique n'est relevée,
+ * les blocs reprennent celles des modales de dump — qui reprenaient elles-mêmes `A2` —, et rien
+ * d'autre n'est inventé. Les valeurs viennent de l'échelle d'espacement, jamais d'un littéral.
+ */
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-7) var(--space-8);
+}
+
+.portee {
+  font-family: var(--font-ui);
+  font-size: var(--text-body);
+  font-weight: var(--weight-bold);
+  color: var(--ink);
+}
+
+.explication {
+  font-family: var(--font-ui);
+  font-size: var(--text-dense);
+  color: var(--ink-2);
+}
+
+.chemin {
+  font-family: var(--font-mono);
+  font-size: var(--text-dense);
+  color: var(--ink-6);
+  /* Un chemin est long, et le couper vaut mieux que d'élargir la modale. */
+  overflow-wrap: anywhere;
+}
+
+.echec {
+  font-family: var(--font-ui);
+  font-size: var(--text-dense);
+  color: var(--danger-ink);
+}
+
+/* La ligne de l'interrupteur « inclure les mots de passe », et son avertissement dessous. */
+.reglage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--field);
+}
+
+.reglageLigne {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+}
+
+.reglageLibelle {
+  font-family: var(--font-ui);
+  font-size: var(--text-dense);
+  font-weight: var(--weight-bold);
+  color: var(--ink);
+}
+
+/*
+ * L'avertissement des mots de passe en clair. En `--danger-ink` et non en `--warn-ink` : ce qui
+ * est en jeu n'est pas une gêne mais un fichier qu'on ne peut pas « dé-partager ».
+ */
+.avertissement {
+  font-family: var(--font-ui);
+  font-size: var(--text-dense);
+  color: var(--danger-ink);
+}
+
+/* La liste des projets du fichier, une ligne par projet. */
+.projets {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  /*
+   * Le corps de la modale défile déjà (`Modal`), mais un fichier de trente projets ferait un corps
+   * de plusieurs milliers de pixels dont le pied resterait loin. Un plafond ici garde les deux
+   * boutons à portée.
+   */
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.projet {
+  display: flex;
+  gap: var(--space-5);
+  align-items: flex-start;
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+}
+
+/*
+ * La case à cocher d'une ligne de projet — **native**, voir la note d'`ImportProjects`.
+ *
+ * `accent-color` est la seule déclaration qui compte : c'est ce qui fait dessiner la coche dans
+ * l'accent du produit, réglable, plutôt que dans le bleu du système. La géométrie reste celle de la
+ * plateforme, et `color-scheme` (dans `reset.css`) lui donne le thème.
+ */
+.case {
+  flex: none;
+  /* 1 px : le carré s'aligne sur la ligne de base du nom, non sur son cadratin. */
+  margin-top: var(--space-1);
+  accent-color: var(--accent);
+}
+
+.projetTexte {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  /* Sans quoi un nom de projet long pousse la case à cocher hors de la carte. */
+  min-width: 0;
+}
+
+.projetNom {
+  font-family: var(--font-ui);
+  font-size: var(--text-dense);
+  font-weight: var(--weight-bold);
+  color: var(--ink);
+}
+
+.detail {
+  font-family: var(--font-ui);
+  font-size: var(--text-label);
+  color: var(--ink-2);
+}
+
+/* Ce qui n'arrivera pas : gardé, refusé, à ressaisir, à vérifier. */
+.reserve {
+  font-family: var(--font-ui);
+  font-size: var(--text-label);
+  color: var(--warn-ink);
+}
+
+.refus {
+  font-family: var(--font-ui);
+  font-size: var(--text-label);
+  color: var(--danger-ink);
+}
+
+.footer {
+  display: flex;
+  gap: var(--space-3);
+  /* La même raison que `.actions` d'`A1` : un bouton bordé rend deux pixels de plus qu'un bouton
+     plein, `Button` étant en `content-box`. Sans `center`, « Fermer » et « Importer » ne sont pas
+     alignés. */
+  align-items: center;
+  justify-content: flex-end;
+  width: 100%;
+}

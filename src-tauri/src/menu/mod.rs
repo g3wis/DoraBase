@@ -151,6 +151,33 @@ impl MenuSpec {
                             accelerateur: Some("CmdOrCtrl+Shift+I"),
                         },
                         Item::Separateur,
+                        /* **Les projets, et non « les collections »** (`API-30`). La demande
+                        compare le fichier à une collection Postman, et c'est la bonne analogie
+                        — mais « collection » est déjà le mot de MongoDB pour une table, que
+                        l'arbre affiche sous une connexion mongo. « Exporter les collections… »
+                        dans ce menu se lirait comme un export de données. Ce qui voyage est un
+                        projet, et la demande le dit elle-même : « everything or only a specific
+                        project ».
+
+                        **Aucun accélérateur.** `⇧⌘E` et `⇧⌘I` appartiennent au dump, et les
+                        chords libres qui resteraient — `⌥⌘E`, `⌃⌘E` — ne sont le geste de
+                        personne. Un raccourci inventé qui recouvrirait celui d'un autre écran
+                        coûterait plus que l'absence d'un raccourci sur une action qu'on fait
+                        deux fois par an.
+
+                        **Après le dump, non avant** : les deux entrées de dump gardent leur
+                        place et leurs raccourcis, où la mémoire des doigts les cherche. */
+                        Item::Commande {
+                            id: "fichier.exporter-projets",
+                            libelle: "Exporter les projets…",
+                            accelerateur: None,
+                        },
+                        Item::Commande {
+                            id: "fichier.importer-projets",
+                            libelle: "Importer des projets…",
+                            accelerateur: None,
+                        },
+                        Item::Separateur,
                         Item::Predefini(Predefini::FermerFenetre),
                     ],
                 },

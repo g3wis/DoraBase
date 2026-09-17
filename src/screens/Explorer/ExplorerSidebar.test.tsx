@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { Sprite } from '../../design/icons/Sprite'
@@ -87,6 +87,8 @@ function Piloté({
   onEditDatabase,
   onRenameDatabase,
   onEditProject,
+  onExportProject,
+  onImportProjects,
   onDelete,
   modificationsEnAttenteDe,
   onRefresh,
@@ -105,6 +107,8 @@ function Piloté({
   onEditDatabase?: (project: string, database: string, environment: EnvironmentId) => void
   onRenameDatabase?: ExplorerSidebarProps['onRenameDatabase']
   onEditProject?: (project: string) => void
+  onExportProject?: (project: string) => void
+  onImportProjects?: () => void
   onDelete?: (cible: CibleDeSuppression) => Promise<{ leftoverSecrets: string[] }>
   modificationsEnAttenteDe?: (cible: CibleDeSuppression) => number
   onRefresh?: () => void
@@ -131,6 +135,8 @@ function Piloté({
           onEditDatabase={onEditDatabase}
           onRenameDatabase={onRenameDatabase}
           onEditProject={onEditProject}
+          onExportProject={onExportProject}
+          onImportProjects={onImportProjects}
           onDelete={onDelete}
           modificationsEnAttenteDe={modificationsEnAttenteDe}
           onRefresh={onRefresh}
@@ -788,6 +794,51 @@ test('« Modifier le projet… » appelle le geste d’édition, sur ce projet',
   expect(screen.queryByRole('dialog')).toBeNull()
 })
 
+test('« Exporter le projet… » nomme le projet de la ligne', async () => {
+  const vus: string[] = []
+  render(<Piloté initial={TOUT_DEPLIE} onExportProject={(projet) => vus.push(projet)} />)
+  await userEvent.click(screen.getByRole('button', { name: 'Actions de Atelier Nord' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Exporter le projet…' }))
+
+  // **La portée vient du nœud** (`API-30`) : c'est le palier qui la connaît, et une bande en tête de
+  // colonne aurait dû la deviner.
+  expect(vus).toEqual(['Atelier Nord'])
+  // La sidebar ne monte pas la modale : elle vit au niveau de l'application, avec celle du menu
+  // natif qui exporte tous les projets.
+  expect(screen.queryByRole('dialog')).toBeNull()
+})
+
+test('« Exporter le projet… » se place après « Modifier », avant « Retirer »', async () => {
+  render(<Piloté initial={TOUT_DEPLIE} onExportProject={vi.fn()} onRefresh={vi.fn()} />)
+  await userEvent.click(screen.getByRole('button', { name: 'Actions de Atelier Nord' }))
+
+  // **L'ordre est la décision**, pas un effet de bord : l'export ne configure rien et n'ouvre rien,
+  // il produit un fichier — donc après les entrées qui touchent la déclaration, et avant celle qui
+  // la retire. Le geste destructeur reste le dernier de la liste, partout dans le produit.
+  //
+  // Le « … » rend un `Popover` de boutons et non un `role="menu"` — celui-là est la forme du clic
+  // droit —, donc l'ordre se lit dans le panneau lui-même.
+  const attendues = [
+    'Rafraîchir l’arborescence',
+    'Modifier le projet…',
+    'Exporter le projet…',
+    'Retirer de DoraBase…',
+  ]
+  const panneau = screen.getByRole('button', { name: attendues[0] }).parentElement
+  expect([...(panneau?.children ?? [])].map((entree) => entree.textContent)).toEqual(attendues)
+})
+
+test('« Exporter le projet… » se désactive quand l’écran ne la relie à rien', async () => {
+  render(<Piloté initial={TOUT_DEPLIE} />)
+  await userEvent.click(screen.getByRole('button', { name: 'Actions de Atelier Nord' }))
+  const entree = screen.getByRole('button', { name: 'Exporter le projet…' })
+  expect(entree).toBeDisabled()
+  expect(entree).toHaveAttribute(
+    'title',
+    'L’export de projet n’est pas disponible depuis cet écran.',
+  )
+})
+
 test('« Modifier le projet… » se désactive quand l’écran ne la relie à rien', async () => {
   render(<Piloté initial={TOUT_DEPLIE} />)
   await userEvent.click(screen.getByRole('button', { name: 'Actions de Atelier Nord' }))
@@ -1182,4 +1233,27 @@ describe('le clic droit ouvre le même menu, au pointeur (`26`)', () => {
     clicDroit(ligne('public', '4'))
     expect(screen.getByRole('menuitem', { name: 'Diagramme du schéma' })).toBeEnabled()
   })
+})
+
+test('« Importer des projets… » vit dans la bande, à côté de « Nouveau projet »', async () => {
+  // **Le second chemin de l'import** (`API-30`, 17 septembre 2026, à la demande) : il n'existait
+  // que dans le menu natif, donc personne ne l'a trouvé. Les deux gestes de cette bande produisent
+  // un projet — l'un le déclare, l'autre le reçoit —, et les voisiner est ce qui fait trouver le
+  // second quand on cherchait le premier.
+  const onImportProjects = vi.fn()
+  render(<Piloté onNewProject={vi.fn()} onImportProjects={onImportProjects} />)
+
+  const bande = screen.getByRole('toolbar', { name: 'Actions du panneau' })
+  await userEvent.click(within(bande).getByRole('button', { name: 'Importer des projets…' }))
+
+  expect(onImportProjects).toHaveBeenCalledOnce()
+})
+
+test('la bande ne rend pas l’import quand l’écran ne le relie à rien', () => {
+  // **Le contrôle négatif** : un bouton d'icône nue qui ne mènerait nulle part se lirait comme une
+  // panne (défaut n° 36), et il n'y a rien à expliquer dans 22 px — donc on ne le rend pas, plutôt
+  // que de le désactiver avec sa raison comme le fait une entrée de menu, qui a la place de la dire.
+  render(<Piloté onNewProject={vi.fn()} />)
+
+  expect(screen.queryByRole('button', { name: 'Importer des projets…' })).toBeNull()
 })

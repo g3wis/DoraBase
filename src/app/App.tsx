@@ -32,6 +32,7 @@ import { NewConnection } from '../screens/NewConnection/NewConnection'
 import { ParcoursDeCreation } from '../screens/NewProject/ParcoursDeCreation'
 import { PreferencesDialog } from '../screens/Preferences/PreferencesDialog'
 import { jetonsDe, PREFERENCES_PAR_DEFAUT, themeApplique } from '../screens/Preferences/preferences'
+import { type DemandeDeTransfert, TransferDialogs } from '../screens/Transfer/TransferDialogs'
 import { WelcomeScreen } from '../screens/Welcome/WelcomeScreen'
 import { Workbench } from '../screens/Workbench/Workbench'
 import { AnnonceMiseAJour } from '../shell/AnnonceMiseAJour/AnnonceMiseAJour'
@@ -155,10 +156,22 @@ export function App() {
    */
   const [dump, setDump] = useState<SensDuDump | null>(null)
 
+  /**
+   * Ce que le transfert de projets ouvre (`API-30`).
+   *
+   * **Trois points d'entrée, un seul état** : les deux entrées du menu natif, et « Exporter le
+   * projet… » dans le menu d'une ligne de projet — le seul des trois qui nomme une portée, parce que
+   * c'est le seul palier qui la connaisse. Une bande en tête de colonne aurait dû la deviner, comme
+   * le pied de la sidebar devait deviner un environnement.
+   */
+  const [transfert, setTransfert] = useState<DemandeDeTransfert | null>(null)
+
   useEffect(() => {
     brancherEvenementsDeMenu({
       exporter: () => setDump('export'),
       importer: () => setDump('import'),
+      exporterLesProjets: () => setTransfert({ sens: 'export', projet: null }),
+      importerDesProjets: () => setTransfert({ sens: 'import' }),
     })
   }, [])
 
@@ -332,6 +345,14 @@ export function App() {
             onDeclareInstance={() => setInstanceOuverte({})}
             onEditInstance={(instance) => setInstanceOuverte({ instance })}
             onRemoveInstance={setInstanceARetirer}
+            /* **L'export d'un projet ouvre la même modale que celui de tous** (`API-30`), avec sa
+               portée en paramètre : c'est un seul écran, et deux modales jumelles auraient divergé
+               au premier réglage ajouté — la case des mots de passe, par exemple. */
+            onExportProject={(project) => setTransfert({ sens: 'export', projet: project })}
+            /* **Le troisième chemin vers l'import**, après le menu natif et l'écran d'accueil — et
+               le seul que voit quelqu'un qui a déjà des projets. Voir `ExplorerSidebar`, qui porte
+               la raison : un chemin unique dans un menu natif n'a été trouvé par personne. */
+            onImportProjects={() => setTransfert({ sens: 'import' })}
             onRenameProject={async (project, nom) => {
               const issue = await renommerLeProjet({ project, name: nom })
               setProjects(issue.projects)
@@ -443,6 +464,10 @@ export function App() {
             // **`A1` a un engrenage, donc il doit ouvrir quelque chose.** La modale est montée
             // au-dessus du choix de l'écran pour cette raison exactement.
             onOpenPreferences={() => setPreferencesOuvertes(true)}
+            /* **L'import depuis l'écran des débuts** (`API-30`) : c'est là qu'on en a le plus besoin
+               — un second poste, aucun projet, et rien à l'écran qui dise qu'un fichier peut en
+               apporter. La modale est la même que celle des deux autres chemins. */
+            onImportProjects={() => setTransfert({ sens: 'import' })}
             projectCount={projects.length}
             dimmed={connexionOuverte !== null || projetOuvert !== null}
           />
@@ -462,6 +487,25 @@ export function App() {
           projets={projetsPourLesEcrans}
           onClose={() => setProjetOuvert(null)}
           onProjets={setProjects}
+        />
+      )}
+      {/* **Au niveau de l'application, et c'est un défaut corrigé** (`API-30`, 17 septembre 2026).
+          Elle était montée dans la branche de l'écran de travail, donc `transfert` se posait sans
+          que rien ne paraisse dès que la configuration était vide : « Importer des projets… » du
+          menu natif **ne faisait rien** sur `A1`, c'est-à-dire exactement là où l'on importe — un
+          second poste, aucun projet. C'est le défaut de l'engrenage d'`A1` du 26 août 2026, à la
+          lettre, et l'écran d'accueil en porte désormais le bouton, ce qui l'aurait rendu visible
+          de toute façon. La règle qui en sort est celle que les préférences énoncent juste en
+          dessous : **une modale atteignable depuis deux écrans se monte au-dessus des deux**. */}
+      {transfert && (
+        <TransferDialogs
+          demande={transfert}
+          total={projects.length}
+          onClose={() => setTransfert(null)}
+          /* Les projets rendus sont **reposés**, comme après chaque écriture de configuration :
+             c'est ce changement qui fait relire les états du registre et purger le cache de
+             l'arbre. La modale reste ouverte pour montrer son rapport. */
+          onImported={setProjects}
         />
       )}
       {/* **Au niveau de l'application, pas de l'écran de travail.** Les préférences règlent des

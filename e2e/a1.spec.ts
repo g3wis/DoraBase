@@ -63,6 +63,44 @@ test('A1 est conforme à la référence', async ({ page }) => {
   await expect(page).toHaveScreenshot('a1-accueil.png', { fullPage: true })
 })
 
+/**
+ * Les deux boutons de l'accueil sont alignés (`API-30`, 17 septembre 2026).
+ *
+ * **Une capture ne garde pas cela**, et c'est pourquoi ce test existe à côté d'elle : un écart de
+ * deux pixels sur un bouton passe sous le seuil de comparaison autant qu'il échappe à l'œil qui
+ * relit un diff, et il faudrait de toute façon avoir déjà régénéré la référence pour le voir.
+ *
+ * **Deux pixels, et ils sont structurels** : `Button` impose `content-box` pour suivre le mockup,
+ * donc un bouton **bordé** — le secondaire — rend 36 px là où le plein en rend 34 à la même taille
+ * déclarée. Sans `align-items: center` sur la bande, le second dépasse par le bas, sur le premier
+ * écran du produit. C'est mesuré, pas supposé : le centre de chacun, pas leur hauteur, parce que
+ * c'est l'alignement qui se voit — deux hauteurs différentes centrées l'une sur l'autre sont
+ * justes, deux hauteurs égales décalées ne le seraient pas.
+ */
+test('les deux boutons de l’accueil sont centrés l’un sur l’autre', async ({ page }) => {
+  await page.goto('/')
+  await page.evaluate(() => document.fonts.ready)
+
+  const centres = await page.evaluate(() => {
+    const actions = [...document.querySelectorAll('button')].filter((bouton) =>
+      /Nouveau projet|Importer des projets/.test(bouton.textContent ?? ''),
+    )
+    // Le bouton du pied de la sidebar porte le même libellé : seuls ceux du héros nous occupent,
+    // et ce sont les deux derniers dans l'ordre du document.
+    return actions.slice(-2).map((bouton) => {
+      const boite = bouton.getBoundingClientRect()
+      return boite.top + boite.height / 2
+    })
+  })
+
+  const [premier, second] = centres
+  // Le décor doit porter les deux boutons avant qu'on mesure quoi que ce soit : une assertion sur
+  // le décor, non sur le sujet — sans elle, un héros qui n'en rendrait qu'un passerait par vacuité.
+  expect(premier).toBeDefined()
+  expect(second).toBeDefined()
+  expect(premier as number).toBeCloseTo(second as number, 1)
+})
+
 // La modale de `A2` par-dessus `A1`, capturée comme référence de la même façon. Elle inclut
 // la barre de titre ternie derrière, qui fait partie de l'écran.
 //

@@ -4,6 +4,9 @@ import type {
   ConnectionSettings,
   ConsoleRequest,
   Engine,
+  ExportProjectsRequest,
+  ImportProjectsRequest,
+  ImportProjectsResult,
   InstanceId,
   ManagedInstance,
   Preferences,
@@ -43,6 +46,7 @@ import type {
   SaveInstanceRequest,
 } from '../domain/instances'
 import type { AvailableUpdate } from '../domain/maj'
+import type { ExportReport, ImportReport } from '../domain/transfert'
 import { PREFERENCES_PAR_DEFAUT } from '../screens/Preferences/preferences'
 
 /**
@@ -292,6 +296,39 @@ export async function createSchema(key: DatabaseKey, name: string): Promise<void
  */
 export async function saveVisibleSchemas(request: VisibleSchemasRequest): Promise<Project[]> {
   return appeler<Project[]>('save_visible_schemas', { request })
+}
+
+/**
+ * Écrit un fichier de transfert : tous les projets, ou un seul (`API-30`).
+ *
+ * **Le fichier ne traverse pas l'IPC** : la webview envoie un chemin et une case cochée, et
+ * reçoit un compte. C'est la contrainte transverse du projet, et elle a ici une seconde raison —
+ * le fichier peut porter des mots de passe en clair.
+ */
+export async function exportProjects(request: ExportProjectsRequest): Promise<ExportReport> {
+  return appeler<ExportReport>('export_projects', { request })
+}
+
+/**
+ * Dit ce qu'un import ferait, sans rien écrire (`API-30`).
+ *
+ * Le rapport vient de la même fonction que l'import lui-même : l'aperçu et l'écriture ne peuvent
+ * donc pas se contredire.
+ */
+export async function inspectProjectsFile(file: string): Promise<ImportReport> {
+  return appeler<ImportReport>('inspect_projects_file', { file })
+}
+
+/**
+ * Verse les projets d'un fichier dans la configuration (`API-30`).
+ *
+ * Rend les projets à jour, comme les autres écritures : c'est ce changement que `App` repose et
+ * que l'arbre suit.
+ */
+export async function importProjects(
+  request: ImportProjectsRequest,
+): Promise<ImportProjectsResult> {
+  return appeler<ImportProjectsResult>('import_projects', { request })
 }
 
 /**
