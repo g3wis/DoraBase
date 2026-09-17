@@ -3296,7 +3296,7 @@ haut :
   n'a pas acceptée donne une panne franche au redémarrage, et il n'y a pas de retour ;
 - **sous Windows, ce qui atteste l'origine d'une mise à jour est la clé minisign**, celle qui
   décide « si une application déjà installée accepte de se remplacer par ce qu'on lui envoie ».
-  Elle était là, et elle signait déjà l'archive `.nsis.zip` à chaque construction — on ne la
+  Elle était là, et elle signait déjà l'installateur à chaque construction — on ne la
   publiait simplement pas. **Authenticode répond à une troisième question** : ce que SmartScreen
   montre à qui **télécharge** l'installateur dans un navigateur. Celle-là reste entière, et le
   `.exe` de la release est toujours non signé — mais elle ne gouverne pas le remplacement en
@@ -3339,10 +3339,46 @@ construction a produit une archive signée**. Trois conséquences à ne pas déf
 refusaient le téléversement de l'archive et la clef `windows-x86_64` ; ce qui se remarquerait le
 moins n'est plus qu'on ouvre cette voie, c'est qu'on la **referme**. Onze sabotages ont été joués
 contre les nouveaux, et **trois ont d'abord été verts** — les trois pour la même raison, un motif
-non ancré : `DoraBase-$VERSION-x64.nsis.zip` est un préfixe de `…nsis.zip.sig`, donc le garde du
-téléversement se satisfaisait de la ligne de la signature ; et cherché dans le job entier, il se
-satisfaisait de l'étape voisine qui **copie** l'archive sans la publier. C'est le piège du motif
-non ancré des assertions de nom accessible, sur des noms de fichiers.
+non ancré : un nom de fichier est le préfixe de sa propre signature, donc le garde du
+téléversement se satisfaisait de la ligne du `.sig` ; et cherché dans le job entier, il se
+satisfaisait de l'étape voisine qui **copie** le fichier sans le publier. C'est le piège du motif
+non ancré des assertions de nom accessible, sur des noms de fichiers. Les motifs portent donc
+leurs **guillemets fermants**, et le garde vise l'étape qui téléverse.
+
+**Et la première publication à l'emprunter a échoué en deux endroits** (17 septembre 2026,
+`API-58`, sur la v0.11.0 publiée la veille). La description du ticket finissait sur « la première release publiée depuis
+cette branche est ce qui le dira » : elle l'a dit, et les deux défauts sont de la même famille —
+**rien avant une publication ne pouvait les voir**, chaque garde de `verifier-ci.py` étant vert
+sur un workflow qui ne peut pas aboutir. Les deux valent d'être connus :
+
+- **`createUpdaterArtifacts: true` ne produit aucune archive.** Le job cherchait un
+  `bundle/nsis/*.nsis.zip` que Tauri n'écrit jamais : le `.zip` est la forme de **compatibilité
+  v1**, sous `createUpdaterArtifacts: "v1Compatible"`. Avec `true`, qui est ce que
+  `tauri.conf.json` déclare, le bundler signe **l'installateur NSIS lui-même** et pose un
+  `…-setup.exe.sig` à côté — le journal de construction le dit en toutes lettres, « Finished 1
+  updater signature at: …-setup.exe.sig », et personne n'était allé le lire. Le plugin le sait
+  faire : `extract` renifle les octets reçus, et un `.exe` nu est accepté tel quel. **Le `.exe`
+  de la release porte donc deux rôles** — l'installateur qu'on télécharge à la main et la mise
+  à jour que l'application va chercher —, et c'est l'URL du manifeste qui le désigne. Le
+  dupliquer sous un second nom donnerait deux fois le même binaire et deux noms à tenir en
+  phase ; macOS en garde deux parce que là-bas ce sont deux choses, un `.dmg` à ouvrir et une
+  archive de l'application ;
+- **`gh` déduit le dépôt du remote git, et le job `manifeste` n'en a pas.** Il ne se fait pas
+  `checkout` — délibérément, n'ayant rien à lire dans le dépôt —, donc `gh release upload` a
+  répondu `fatal: not a git repository` **après** avoir composé un manifeste juste. Ce qui s'est
+  perdu n'est pas la clef Windows : c'est `latest.json` **en entier**, donc
+  `…/releases/latest/download/latest.json` en 404 et plus personne qui se met à jour, **sur
+  aucune des deux plateformes**. Un `--repo "$GITHUB_REPOSITORY"` le règle, et le garde qui le
+  tient porte sur le **mécanisme** plutôt que sur ce job-ci : *tout job sans `checkout` qui
+  appelle `gh` doit nommer son dépôt*. C'est la famille du `var()` mort — une commande qui ne
+  peut pas aboutir ne se dénonce pas, il faut aller lui demander.
+
+**La leçon de test est la règle n° 13 par un autre bout** : la question n'était pas « le garde
+est-il vert ? » mais « que voit la seule machine qui exécute ceci ? ». Ce qui manquait aux deux
+est un **couplage** qu'aucun des deux bouts ne portait — le nom d'un fichier que Tauri écrit
+d'un côté et que le workflow lit de l'autre, le dépôt que `gh` cherche là où personne ne l'a
+mis. D'où, désormais, l'installateur qui **exporte son chemin** pour que la signature s'en
+dérive, plutôt que deux `ls` indépendants qui peuvent désigner deux fichiers.
 
 **`--latest` cesse d'être cosmétique.** Les applications installées lisent
 `…/releases/latest/download/latest.json`, une URL qui ne nomme aucune version : c'est GitHub
@@ -3706,8 +3742,8 @@ l'achat du Developer ID, un cran plus rude, et les notes de release le disent pl
 laisser découvrir.
 
 **La mise à jour en place, elle, existe depuis le 14 septembre 2026** (`API-58`) : `latest.json`
-porte une clef `windows-x86_64`, et l'archive `.nsis.zip` que `createUpdaterArtifacts` produisait
-déjà est publiée avec sa signature minisign. Ce n'est pas un renversement de l'arbitrage
+porte une clef `windows-x86_64`, et l'installateur que `createUpdaterArtifacts` signait déjà est
+publié avec sa signature minisign. Ce n'est pas un renversement de l'arbitrage
 ci-dessus, c'est la séparation de deux questions qu'il confondait — la raison entière est dans
 « La mise à jour en place », et elle tient en une phrase : *ce qui atteste un remplacement est la
 clé du projet, non le certificat qui rassure un navigateur*. Les deux gardes de `verifier-ci.py`
