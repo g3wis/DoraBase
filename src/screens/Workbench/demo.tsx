@@ -1307,21 +1307,14 @@ export function WorkbenchDemo() {
   /**
    * La modale de transfert ouverte (`API-30`).
    *
-   * **L'import s'ouvre par un paramètre du décor**, et c'est délibéré : son seul point d'entrée dans
-   * le produit est le menu natif, que Playwright ne touche pas — et les modales de dump, qui n'en
-   * ont pas d'autre non plus, n'ont **aucun** test de bout en bout pour cette raison. Un bouton
-   * inventé dans la démo aurait été un pixel inventé ; un paramètre de décor ne ment sur rien et
-   * rend la géométrie mesurable, ce que jsdom ne peut pas faire (règle n° 9). C'est le même
-   * arbitrage que `DORABASE_PLATEFORME_DECOR` et `DORABASE_VERSION_DECOR`.
-   *
-   * L'export, lui, a un vrai chemin — le menu d'une ligne de projet —, et c'est celui que le test
-   * emprunte.
+   * **Les deux sens ont désormais un vrai chemin, et le décor n'en invente plus aucun.** Un
+   * paramètre d'URL (`?demo&transfert=import`) a existé une semaine, faute de mieux : l'import ne
+   * vivait que dans le menu natif, que Playwright ne touche pas. Il est parti le jour où l'import
+   * a gagné son bouton — dans la bande de l'arbre et sur l'écran d'accueil —, et c'est le bon
+   * sens de la correction : ce qu'un test ne peut atteindre que par une porte dérobée est souvent
+   * ce qu'un utilisateur ne peut pas atteindre du tout.
    */
-  const [transfert, setTransfert] = useState<DemandeDeTransfert | null>(
-    new URLSearchParams(window.location.search).get('transfert') === 'import'
-      ? { sens: 'import' }
-      : null,
-  )
+  const [transfert, setTransfert] = useState<DemandeDeTransfert | null>(null)
   /**
    * Le journal de la transaction manuelle, **par console** (`API-38`).
    *
@@ -1831,6 +1824,9 @@ export function WorkbenchDemo() {
            voir `TRANSFERT_SIMULE`. C'est le seul moyen de la rendre mesurable sous Playwright, la
            géométrie étant hors de portée de jsdom (règle n° 9). */
         onExportProject={(projet) => setTransfert({ sens: 'export', projet })}
+        /* L'import, depuis la bande en tête de l'arbre : c'est le chemin que le test de bout en
+           bout emprunte, et il n'y en a plus d'autre dans le décor. */
+        onImportProjects={() => setTransfert({ sens: 'import' })}
         gestesEnvironnement={gestesEnvironnement}
       />
       {instanceOuverte !== null && (

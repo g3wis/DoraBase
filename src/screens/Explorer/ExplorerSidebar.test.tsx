@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { Sprite } from '../../design/icons/Sprite'
@@ -88,6 +88,7 @@ function Piloté({
   onRenameDatabase,
   onEditProject,
   onExportProject,
+  onImportProjects,
   onDelete,
   modificationsEnAttenteDe,
   onRefresh,
@@ -107,6 +108,7 @@ function Piloté({
   onRenameDatabase?: ExplorerSidebarProps['onRenameDatabase']
   onEditProject?: (project: string) => void
   onExportProject?: (project: string) => void
+  onImportProjects?: () => void
   onDelete?: (cible: CibleDeSuppression) => Promise<{ leftoverSecrets: string[] }>
   modificationsEnAttenteDe?: (cible: CibleDeSuppression) => number
   onRefresh?: () => void
@@ -134,6 +136,7 @@ function Piloté({
           onRenameDatabase={onRenameDatabase}
           onEditProject={onEditProject}
           onExportProject={onExportProject}
+          onImportProjects={onImportProjects}
           onDelete={onDelete}
           modificationsEnAttenteDe={modificationsEnAttenteDe}
           onRefresh={onRefresh}
@@ -1230,4 +1233,27 @@ describe('le clic droit ouvre le même menu, au pointeur (`26`)', () => {
     clicDroit(ligne('public', '4'))
     expect(screen.getByRole('menuitem', { name: 'Diagramme du schéma' })).toBeEnabled()
   })
+})
+
+test('« Importer des projets… » vit dans la bande, à côté de « Nouveau projet »', async () => {
+  // **Le second chemin de l'import** (`API-30`, 17 septembre 2026, à la demande) : il n'existait
+  // que dans le menu natif, donc personne ne l'a trouvé. Les deux gestes de cette bande produisent
+  // un projet — l'un le déclare, l'autre le reçoit —, et les voisiner est ce qui fait trouver le
+  // second quand on cherchait le premier.
+  const onImportProjects = vi.fn()
+  render(<Piloté onNewProject={vi.fn()} onImportProjects={onImportProjects} />)
+
+  const bande = screen.getByRole('toolbar', { name: 'Actions du panneau' })
+  await userEvent.click(within(bande).getByRole('button', { name: 'Importer des projets…' }))
+
+  expect(onImportProjects).toHaveBeenCalledOnce()
+})
+
+test('la bande ne rend pas l’import quand l’écran ne le relie à rien', () => {
+  // **Le contrôle négatif** : un bouton d'icône nue qui ne mènerait nulle part se lirait comme une
+  // panne (défaut n° 36), et il n'y a rien à expliquer dans 22 px — donc on ne le rend pas, plutôt
+  // que de le désactiver avec sa raison comme le fait une entrée de menu, qui a la place de la dire.
+  render(<Piloté onNewProject={vi.fn()} />)
+
+  expect(screen.queryByRole('button', { name: 'Importer des projets…' })).toBeNull()
 })

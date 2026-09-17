@@ -138,6 +138,21 @@ export type ExplorerSidebarProps = {
    */
   onExportProject?: (project: string) => void
   /**
+   * Ouvre l'import de projets (`API-30`), depuis la bande en tête de l'arbre.
+   *
+   * **Il a fallu ce second chemin, et c'est un signalement qui l'a dit** (17 septembre 2026, « je
+   * n'ai pas trouvé comment importer »). L'import n'existait que dans le menu natif : il marchait,
+   * un test le prouvait jusqu'au menu construit, et **personne ne pouvait le trouver**. C'est la
+   * règle que ce dépôt a déjà payée trois fois — le `⌘E` du mode édition, le `⇧`-clic du diagramme,
+   * le renommage d'une console : *un chemin unique qu'on ne voit pas est un chemin qui n'existe pas*.
+   *
+   * **Dans cette bande et non ailleurs** : elle porte déjà « Nouveau projet », et un import **crée
+   * des projets** — les deux gestes produisent la même chose, par deux moyens. L'export, lui, n'y
+   * est pas : il ne crée rien, et sa portée la plus utile est un projet, donc elle vit sur la ligne
+   * qui le nomme.
+   */
+  onImportProjects?: () => void
+  /**
    * Retirer la déclaration d'une base, ou un projet entier (`08j`).
    *
    * Une seule prop pour les deux : la cible dit lequel, et deux props jumelles se seraient
@@ -209,6 +224,7 @@ export function ExplorerSidebar({
   onRenameDatabase,
   onEditProject,
   onExportProject,
+  onImportProjects,
   onDelete,
   modificationsEnAttenteDe,
   columns,
@@ -380,7 +396,7 @@ export function ExplorerSidebar({
              icône nue sans « + » se lisait comme un raccourci vers un projet déjà là, pas comme un
              geste d'ajout — la même confusion que le `+` de la grille (`AGENTS.md`) écarte pour une
              ligne. */
-          (onNewProject || onOpenPreferences) && (
+          (onNewProject || onImportProjects || onOpenPreferences) && (
             <SidebarToolbar>
               {onNewProject && (
                 <SidebarToolbarButton
@@ -388,6 +404,21 @@ export function ExplorerSidebar({
                   label={t('explorer.sidebar.newProject')}
                   title={t('explorer.sidebar.newProjectTitle', { raccourci: raccourci('N') })}
                   onClick={onNewProject}
+                />
+              )}
+              {/* **L'import, juste après la création** (`API-30`, 17 septembre 2026, à la demande).
+                  Les deux gestes de cette bande produisent la même chose — un projet —, par deux
+                  moyens : l'un le déclare, l'autre le reçoit d'un fichier. Les voisiner est ce qui
+                  fait trouver le second quand on cherchait le premier.
+
+                  **Le glyphe est celui de la modale d'import**, `save`, et non `dl` : dans ce
+                  produit `dl` dit « export » depuis les modales de dump, et le même geste ne doit
+                  pas se dessiner de deux façons — pas plus qu'il ne doit se dire de deux façons. */}
+              {onImportProjects && (
+                <SidebarToolbarButton
+                  icon="save"
+                  label={t('transfer.import.menu')}
+                  onClick={onImportProjects}
                 />
               )}
               {/* **Les préférences, à gauche avec le reste** (`API-46`, à la demande, second tour).

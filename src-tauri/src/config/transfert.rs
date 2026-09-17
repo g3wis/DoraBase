@@ -544,22 +544,69 @@ pub fn preparer(
 pub fn ecrire(chemin: &Path, fichier: &FichierDeProjets) -> Result<(), TransfertError> {
     // `to_string_pretty` : ce fichier est fait pour être lu, envoyé par message, versionné. Le coût
     // en octets d'une configuration est sans commune mesure avec celui d'un dump.
-    let octets = serde_json::to_vec_pretty(fichier)?;
-
-    use std::io::Write;
-    let mut sortie = std::fs::File::create(chemin)?;
+    //
+    // **Sérialisé en entier avant qu'on touche au fichier** : l'échec le plus probable — une forme
+    // inattendue — se produit alors sans qu'aucun octet soit parti.
+    let mut contenu = serde_json::to_string_pretty(fichier)?;
+    contenu.push('\n');
 
     if fichier.secrets == CarriedSecrets::Embedded {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(chemin, std::fs::Permissions::from_mode(0o600))?;
-        }
+        restreindre_au_proprietaire(chemin)?;
     }
 
-    sortie.write_all(&octets)?;
-    sortie.write_all(b"\n")?;
-    sortie.sync_all()?;
+    // **L'écriture appartient à `engine::export`**, et non à une seconde copie ici (`API-29`).
+    // Celle-là porte une garantie que la version d'origine de cette fonction n'avait pas : à
+    // l'échec **d'écriture**, le fichier partiel est supprimé — un export tronqué qui ressemble à
+    // un export complet est l'artefact dangereux de ce geste, comme un dump tronqué l'est du sien.
+    // Et seulement à l'échec d'écriture : supprimer sur un échec **d'ouverture** effacerait un
+    // fichier auquel on n'a jamais touché. Deux écritures de fichier d'export dans le dépôt
+    // auraient divergé sur ce détail-là précisément (règle n° 17), et c'est celle qui a raison qui
+    // a été gardée.
+    crate::engine::export::ecrire(chemin, &contenu)
+        .map(|_| ())
+        .map_err(|raison| TransfertError::Illisible { raison })
+}
+
+/// Restreint le fichier à son propriétaire **avant** qu'un octet sensible y entre.
+///
+/// # Pourquoi avant, et pourquoi sans troncature
+///
+/// `set_permissions` après l'écriture laisserait les mots de passe lisibles par tout compte de la
+/// machine le temps d'un appel. Il faut donc que le fichier existe et soit restreint d'abord — mais
+/// **sans le tronquer** : `File::create` viderait un fichier que l'écriture pourrait ensuite refuser
+/// d'ouvrir, et détruire l'export précédent pour un export qui n'a pas eu lieu serait pire que le
+/// défaut qu'on évite. D'où `create(true).truncate(false)`, et un `set_permissions` explicite qui
+/// rattrape le cas d'un fichier **déjà là** avec des droits plus larges — `mode()` ne s'applique
+/// qu'à la création.
+///
+/// **Et `truncate(false)` est une précaution qu'aucun test d'ici n'exerce**, ce qui se dit plutôt
+/// que de se supposer gardé (règle n° 1) : pour l'atteindre il faudrait que cette ouverture
+/// réussisse et que celle de l'écriture échoue juste après, sur le même chemin — un fichier
+/// inscriptible l'est pour les deux. Ce que les tests gardent est ce qui est observable : les droits
+/// obtenus, sur un fichier neuf comme sur un fichier déjà là. L'ordre, lui, ne coûte qu'un mot, et
+/// c'est la différence entre « on pourrait détruire l'export précédent » et « on ne le fait pas ».
+///
+/// Un fichier **sans** mot de passe n'appelle pas cette fonction : il est fait pour être partagé, et
+/// le restreindre serait une gêne que personne n'a demandée.
+///
+/// Windows n'a pas d'équivalent bon marché — ses ACL s'héritent du répertoire —, et le dire vaut
+/// mieux que de laisser croire à une protection.
+#[cfg(unix)]
+fn restreindre_au_proprietaire(chemin: &Path) -> Result<(), TransfertError> {
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(chemin)?;
+    std::fs::set_permissions(chemin, std::fs::Permissions::from_mode(0o600))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn restreindre_au_proprietaire(_chemin: &Path) -> Result<(), TransfertError> {
     Ok(())
 }
 
@@ -1318,6 +1365,37 @@ mod tests {
             0o600,
             "un fichier sans mot de passe garde les droits ordinaires"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn un_fichier_deja_la_est_restreint_avant_de_recevoir_les_mots_de_passe() {
+        use std::os::unix::fs::PermissionsExt;
+
+        // **Le cas que `mode()` seul ne couvre pas** : les droits posés à l'ouverture ne
+        // s'appliquent qu'à la *création*, donc un export qui écrase un fichier déjà lisible par
+        // tout le monde y aurait versé des mots de passe sans le restreindre. Et le contenu doit
+        // bien être remplacé — restreindre sans écrire laisserait l'export précédent en place.
+        let chemin = temporaire("droits-deja-la");
+        std::fs::write(&chemin, "un export précédent").expect("écriture");
+        std::fs::set_permissions(&chemin, std::fs::Permissions::from_mode(0o644)).expect("droits");
+
+        let porteur = FichierDeProjets {
+            secrets: CarriedSecrets::Embedded,
+            passwords: BTreeMap::from([("Halle/catalogue/prod".to_owned(), "s3cr3t".to_owned())]),
+            ..fichier_de(vec![projet("Halle", &["prod"], Vec::new())])
+        };
+        ecrire(&chemin, &porteur).expect("écriture");
+
+        let mode = std::fs::metadata(&chemin)
+            .expect("métadonnées")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600);
+        let relu = std::fs::read_to_string(&chemin).expect("relecture");
+        assert!(!relu.contains("un export précédent"), "relu = {relu}");
+        assert!(relu.contains("Halle"));
     }
 
     #[test]

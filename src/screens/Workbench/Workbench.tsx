@@ -156,6 +156,13 @@ type WorkbenchProps = {
    */
   onExportProject?: (project: string) => void
   /**
+   * Ouvre l'import de projets (`API-30`), depuis la bande en tête de l'arbre.
+   *
+   * **Relayé, pas traité ici**, comme l'export : la modale vit au niveau de l'application, où vivent
+   * aussi les deux entrées du menu natif. Absent, le bouton n'est pas rendu.
+   */
+  onImportProjects?: () => void
+  /**
    * Renomme une connexion (`26`). Absent, l'entrée « Renommer… » de l'arbre est désactivée.
    *
    * **Rejette avec le refus du cœur** — un nom déjà pris dans cet environnement — et la sidebar
@@ -273,6 +280,7 @@ export function Workbench({
   onEditDatabase,
   onRenameProject,
   onExportProject,
+  onImportProjects,
   onRenameDatabase,
   onProjets,
   gestesEnvironnement,
@@ -1839,6 +1847,7 @@ export function Workbench({
                      modale vit au niveau de l'application, avec celle qui exporte *tous* les
                      projets, parce que les deux portées sont un seul écran. */
                   onExportProject={onExportProject}
+                  onImportProjects={onImportProjects}
                   consoles={
                     onCreateConsole === undefined
                       ? undefined

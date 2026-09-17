@@ -26,6 +26,8 @@ export const transferFr: Dictionnaire = {
   },
   import: {
     title: 'Importer des projets',
+    /** Le bouton de la bande de l'arbre, et celui de l'écran d'accueil. */
+    menu: 'Importer des projets…',
     what: "Choisissez un fichier de projets exporté par DoraBase. Rien ne sera écrit avant que vous ayez vu ce qu'il apporte.",
     choose: 'Choisir un fichier…',
     apply: (p) => (p.count === 1 ? 'Importer 1 projet' : `Importer ${p.count} projets`),
@@ -75,6 +77,7 @@ export const transferEn: Dictionnaire = {
   },
   import: {
     title: 'Import projects',
+    menu: 'Import projects…',
     what: 'Choose a projects file exported by DoraBase. Nothing is written until you have seen what it brings.',
     choose: 'Choose a file…',
     apply: (p) => (p.count === 1 ? 'Import 1 project' : `Import ${p.count} projects`),

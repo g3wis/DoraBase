@@ -2572,6 +2572,16 @@ portant des mots de passe. Même motif que le marqueur `kind`, qui existe pour *
 un `config.json` tombé sous le sélecteur se lirait comme un fichier de transfert vide, donc un import
 qui ne fait rien sans rien à dire.
 
+**L'écriture appartient à `engine::export::ecrire`** (`API-29`), et non à une seconde copie. Celle-ci
+porte une garantie que la version d'origine de ce chantier n'avait pas : **à l'échec d'écriture, le
+fichier partiel est supprimé** — et seulement d'écriture, un échec d'*ouverture* laissant intact un
+fichier auquel on n'a jamais touché. Deux écritures de fichier d'export auraient divergé sur ce
+détail précis (règle n° 17), et c'est celle qui a raison qui a été gardée. Ce qui reste propre au
+transfert est la **restriction** : `0600` posé sur le fichier avant qu'un octet sensible y entre, et
+**sans troncature** — vider un fichier que l'écriture pourrait ensuite refuser d'ouvrir détruirait
+l'export précédent pour un export qui n'a pas eu lieu. Cette dernière précaution, elle, n'est
+exercée par aucun test, et le commentaire le dit plutôt que de la laisser croire gardée.
+
 **Le fichier est déterministe** : ni horodatage, ni version d'application, et les mots de passe dans
 un `BTreeMap`. Deux exports de la même configuration donnent le même fichier octet pour octet, ce qui
 rend deux exports comparables par un `diff` — et un champ décoratif ne mérite pas le mode de
@@ -2580,9 +2590,38 @@ seul élément, l'ordre d'une table de hachage ne se distingue de rien.
 
 #### Les points d'entrée, et la case à cocher
 
-**Trois points d'entrée, un seul écran.** Les deux entrées du menu natif — « Exporter les projets… »
-et « Importer des projets… », **sans accélérateur** : `⇧⌘E` et `⇧⌘I` appartiennent au dump, et les
-chords qui resteraient ne sont le geste de personne. Et « Exporter le projet… » dans le menu d'une
+**L'import a dû gagner deux boutons, et c'est un signalement qui l'a dit** (17 septembre 2026, « je
+n'ai pas trouvé comment importer »). Il n'existait que dans le menu natif. Il **marchait** — un test
+le suivait jusqu'au menu construit —, et personne ne pouvait le trouver : c'est la règle que ce
+dépôt a déjà payée trois fois, au `⌘E` du mode édition, au `⇧`-clic du diagramme, au renommage d'une
+console. *Un chemin unique qu'on ne voit pas est un chemin qui n'existe pas*, et un menu natif est
+aussi invisible qu'un raccourci. Deux endroits le portent désormais :
+
+- **la bande en tête de l'arbre**, à côté de « Nouveau projet ». Les deux gestes y produisent la
+  même chose — un projet —, l'un en le déclarant, l'autre en le recevant d'un fichier : les
+  voisiner est ce qui fait trouver le second quand on cherchait le premier. L'export n'y est pas,
+  et ce n'est pas un oubli : il ne crée rien, et sa portée la plus utile est *un* projet, donc elle
+  vit sur la ligne qui le nomme ;
+- **l'écran d'accueil**, en bouton secondaire à côté de « Nouveau projet ». C'est là qu'il manquait
+  le plus : sur un second poste il n'y a ni arbre ni bande, donc rien ne disait qu'un fichier
+  pouvait rendre ses projets. Recevoir est une façon de commencer, au même titre que déclarer.
+
+**Et ce bouton a découvert un défaut que le menu natif cachait** : `TransferDialogs` était montée
+**dans la branche de l'écran de travail**. Sur `A1` — aucun projet — « Importer des projets… » du
+menu posait donc son état et **rien ne paraissait**, c'est-à-dire précisément là où l'on importe.
+C'est le défaut de l'engrenage d'`A1` du 26 août 2026 à la lettre, et la règle qui en sort est celle
+que les préférences énonçaient déjà : **une modale atteignable depuis deux écrans se monte au-dessus
+des deux**. Le test qui le garde part de `/` (règle n° 8) ; il est rouge sous le sabotage qui la
+remet dans la branche.
+
+**Le paramètre de décor est parti avec.** `?demo&transfert=import` existait faute de chemin réel, et
+le test de bout en bout passe désormais par le bouton. C'est le bon sens de la correction, et elle
+vaut au-delà d'ici : **ce qu'un test ne peut atteindre que par une porte dérobée est souvent ce
+qu'un utilisateur ne peut pas atteindre du tout.** Les deux modales de dump, toujours sans test de
+bout en bout parce que le menu natif est leur seule porte, sont le même cas resté ouvert.
+
+**Les deux entrées du menu natif restent**, et **sans accélérateur** : `⇧⌘E` et `⇧⌘I` appartiennent
+au dump, et les chords qui resteraient ne sont le geste de personne. Et « Exporter le projet… » dans le menu d'une
 ligne de projet, seul des trois à nommer une portée parce que **c'est le seul palier qui la
 connaisse** — une bande en tête de colonne aurait dû la deviner, comme le pied de la sidebar devait
 deviner un environnement. Son rang dans le menu est une décision : après « Modifier le projet… »,
@@ -2625,6 +2664,15 @@ bout en bout**. Un bouton inventé dans la démo aurait été un pixel inventé 
 ment sur rien et rend la géométrie mesurable, que jsdom ne calcule pas (règle n° 9). C'est le même
 arbitrage que `DORABASE_PLATEFORME_DECOR`. L'export, lui, a un vrai chemin — le menu d'une ligne de
 projet —, et c'est celui que le test emprunte.
+
+**Les instances managées ne voyagent pas non plus** (`API-32`, constaté au rebasage du 17 septembre
+2026). Une instance vit **à côté** des projets, n'appartient à aucun d'eux, et la portée de cet
+export est le projet — « tous » ou « un seul » : il n'y a pas de place où une instance entrerait.
+Conséquence à connaître avant de s'y fier : **un export « tous les projets » ne suffit pas à
+déménager une installation.** C'est la seule chose que ce geste tait, et le dire ici ne suffira pas
+longtemps — voir « Ce qui attend une décision humaine ». L'écriture, elle, passe par
+`ecrire_le_reste_intact`, donc un import **ne les efface pas** : c'est la fonction qui existe pour
+que la neuvième commande n'oublie pas ce qu'elle n'écrit pas.
 
 **Les préférences ne voyagent pas** : un thème n'appartient pas à un projet, et `save_preferences`
 les relit déjà plutôt que de les recevoir, pour la même raison. **`Project::queries` non plus** :
@@ -4922,6 +4970,15 @@ Aucun de ces points ne bloque le code en place.
   remplacer, ou verser sous un nom libre — ce dernier ayant un précédent, le « console N » de la
   création. Ce qui manque pour décider est l'usage : si le fichier sert surtout à *donner* ses
   requêtes à quelqu'un, le refus suffit ; s'il sert à se synchroniser entre deux postes, il gêne.
+- **Un export ne porte pas les instances managées** (`API-30` × `API-32`). Une instance vit à côté
+  des projets, donc la portée « un projet » n'a pas de place pour elle — mais la portée « tous les
+  projets » en aurait une, et quelqu'un qui exporte tout pour changer de poste laissera ses
+  instances derrière lui. Trois formes possibles : les porter quand la portée est « tout » (le
+  fichier gagne une clé `instances`, l'import la fusionne par identifiant comme il fusionne un
+  projet) ; les porter toujours, ce qui ferait d'un export « un projet » un fichier qui parle
+  d'autre chose que de lui ; ou les laisser dehors et **le dire dans la modale**, ce qui est le
+  minimum honnête et coûte une phrase. La première est la bonne si le fichier sert à déménager, la
+  troisième si elle sert à donner un projet à quelqu'un — et c'est l'usage qui tranche.
 - **Importer un projet sous un autre nom** n'existe pas. La fusion couvre le cas courant — deux
   machines, un même projet — mais pas « je veux les deux côte à côte pour comparer ». Le renommage
   demanderait de recalculer les références de secret du projet importé, donc de décider ce qu'il

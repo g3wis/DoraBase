@@ -704,11 +704,13 @@ test('la bande d’actions tient dans la colonne, à hauteur fixe', async ({ pag
   // 22 px, la hauteur d'une ligne d'arbre : la bande n'introduit pas une troisième unité verticale
   // dans une colonne qui en a déjà deux.
   //
-  // **Deux carrés depuis `API-46`**, et non un : l'engrenage a rejoint la bande, en fin de bande. Les
-  // deux cotes sont écrites l'une après l'autre plutôt que comparées entre elles — c'est une égalité,
-  // pas un ordre de grandeur (règle n° 18) —, et `dansLaBande` couvre au passage ce que la fin de
-  // bande peut casser : une action poussée hors du bord droit par le `margin-left: auto`.
+  // **Trois carrés depuis `API-30`** : « Nouveau projet », l'import de projets, les préférences —
+  // les deux gestes qui produisent un projet, puis celui qui configure, l'ordre des menus de ce
+  // produit. Les cotes sont écrites l'une après l'autre plutôt que comparées entre elles — c'est une
+  // égalité, pas un ordre de grandeur (règle n° 18) —, et `dansLaBande` couvre au passage ce qu'un
+  // troisième carré peut casser : une action poussée hors du bord droit d'une colonne étroite.
   expect(m.carres).toEqual([
+    [22, 22],
     [22, 22],
     [22, 22],
   ])

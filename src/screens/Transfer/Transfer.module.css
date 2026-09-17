@@ -148,6 +148,10 @@
 .footer {
   display: flex;
   gap: var(--space-3);
+  /* La même raison que `.actions` d'`A1` : un bouton bordé rend deux pixels de plus qu'un bouton
+     plein, `Button` étant en `content-box`. Sans `center`, « Fermer » et « Importer » ne sont pas
+     alignés. */
+  align-items: center;
   justify-content: flex-end;
   width: 100%;
 }

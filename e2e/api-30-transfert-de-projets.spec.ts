@@ -18,12 +18,15 @@ import { deplierUnEnvironnement } from './pourLesTests'
  * 3. **que la liste des projets défile dans son propre conteneur** plutôt que de pousser les deux
  *    boutons hors de vue.
  *
- * # L'import s'ouvre par un paramètre du décor
+ * # Les deux sens passent par un vrai chemin
  *
- * Son seul point d'entrée dans le produit est le menu natif, que Playwright ne touche pas — c'est
- * la raison pour laquelle les modales de dump n'ont **aucun** test de bout en bout. Un bouton
- * inventé dans la démo aurait été un pixel inventé ; `?demo&transfert=import` ne ment sur rien.
- * L'export, lui, a un vrai chemin, et c'est celui que ce fichier emprunte.
+ * L'import n'en avait qu'un — le menu natif, que Playwright ne touche pas —, et ce fichier l'ouvrait
+ * par un paramètre de décor. Le paramètre est parti avec le signalement qui l'a rendu inutile
+ * (17 septembre 2026, « je n'ai pas trouvé comment importer ») : l'import a gagné son bouton dans la
+ * bande de l'arbre, donc le test emprunte ce que l'utilisateur emprunte. **C'est le bon sens de la
+ * correction** — ce qu'un test ne peut atteindre que par une porte dérobée est souvent ce qu'un
+ * utilisateur ne peut pas atteindre du tout, et les modales de dump, qui n'ont toujours aucun test
+ * de bout en bout, sont le même cas resté ouvert.
  */
 
 test.describe("l'export d'un projet", () => {
@@ -69,7 +72,12 @@ test.describe("l'export d'un projet", () => {
 
 test.describe("l'import de projets", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/?demo&transfert=import')
+    await page.goto('/?demo')
+    // **Par le bouton de la bande**, comme un utilisateur : c'est ce chemin-là qui manquait.
+    await page
+      .getByRole('toolbar', { name: 'Actions du panneau' })
+      .getByRole('button', { name: 'Importer des projets…' })
+      .click()
     await page.getByRole('dialog', { name: 'Importer des projets' }).waitFor()
     await page.getByRole('button', { name: 'Choisir un fichier…' }).click()
     // La mesure **après** l'attente qui prouve l'effet (règle n° 15) : l'aperçu arrive d'une
@@ -129,7 +137,16 @@ test.describe("l'import de projets", () => {
     const boite = await pied.boundingBox()
     if (!boite) throw new Error('le pied doit être mesurable')
     expect(boite.y + boite.height).toBeLessThanOrEqual(fenetre.height)
-    await expect(page.getByRole('button', { name: /^Importer/ })).toBeVisible()
+    /* **Cherché dans la modale, non dans la page** : depuis que la bande de l'arbre porte
+       « Importer des projets… », un `/^Importer/` non ancré désigne deux boutons — celui qui ouvre
+       et celui qui applique — et Playwright refuse alors de conclure. C'est la règle du nom
+       accessible ancré (`/orders/` compte aussi `orders_by_day`), par le bout où c'est le *décor*
+       qui a changé sous un motif resté juste. */
+    await expect(
+      page.getByRole('dialog', { name: 'Importer des projets' }).getByRole('button', {
+        name: /^Importer \d/,
+      }),
+    ).toBeVisible()
 
     /* **La liste a son propre conteneur de défilement**, et c'est la garde qui compte : un fichier
        de trente projets ferait sinon un corps de plusieurs milliers de pixels. La mesure porte sur

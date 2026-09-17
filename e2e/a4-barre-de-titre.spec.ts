@@ -242,21 +242,32 @@ test('les préférences suivent le « + », au-dessus de l’arborescence', asyn
 
   const cotes = await page.evaluate(() => {
     const bande = document.querySelector('[role=toolbar]') as HTMLElement
-    const plus = bande.querySelector('button[aria-label="Nouveau projet"]') as HTMLElement
+    const actions = [...bande.querySelectorAll('button')] as HTMLElement[]
     const reglages = bande.querySelector('button[aria-label="Préférences"]') as HTMLElement
     const arbre = document.querySelector('[role=tree]') as HTMLElement
     return {
-      ecart: reglages.getBoundingClientRect().left - plus.getBoundingClientRect().right,
+      // Chaque écart entre deux carrés consécutifs, dans l'ordre du document.
+      ecarts: actions.slice(1).map((action, index) => {
+        const precedent = actions[index] as HTMLElement
+        return action.getBoundingClientRect().left - precedent.getBoundingClientRect().right
+      }),
       gap: Number.parseFloat(getComputedStyle(bande).gap),
       bas: reglages.getBoundingClientRect().bottom,
       hautDeLArbre: arbre.getBoundingClientRect().top,
     }
   })
 
-  // **Une égalité, pas un ordre de grandeur** (règle n° 18) : l'écart entre les deux carrés est celui
-  // de la bande, donc ils sont voisins. Un « le second est à droite du premier » resterait vrai avec
-  // un `margin-left: auto` qui l'enverrait au bord opposé — l'état écrit puis retiré le jour même.
-  expect(cotes.ecart).toBeCloseTo(cotes.gap, 1)
+  /* **Tous les écarts valent celui de la bande**, donc la bande est **un seul groupe** — c'est la
+     propriété que ce test garde, et elle ne dépend pas du nombre de boutons. Elle en comptait deux
+     quand il a été écrit, et il mesurait alors l'écart `+` → engrenage ; l'import de projets s'est
+     glissé entre les deux le 17 septembre 2026 (`API-30`), et cette forme-là l'aurait laissé passer
+     ou l'aurait fait rougir pour rien. Ce qui compte n'a jamais été l'adjacence de ces deux-là :
+     c'est qu'aucune action ne soit **poussée au bord opposé** par un `margin-left: auto`, l'état
+     écrit puis retiré le jour d'`API-46`.
+
+     Une égalité, pas un ordre de grandeur (règle n° 18). */
+  expect(cotes.ecarts.length).toBeGreaterThan(0)
+  for (const ecart of cotes.ecarts) expect(ecart).toBeCloseTo(cotes.gap, 1)
   expect(cotes.bas).toBeLessThanOrEqual(cotes.hautDeLArbre)
 })
 
