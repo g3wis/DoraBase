@@ -108,6 +108,53 @@ def commandes_de(etapes: list) -> str:
     return " ".join(lignes)
 
 
+def verifier_gh_nomme_son_depot(workflow: dict, fichier: str) -> None:
+    """Qu'un `gh` lancé sans le dépôt sous la main nomme le dépôt qu'il vise.
+
+    **Le défaut que ce garde attrape** (16 septembre 2026, publication 0.11.0). `gh` déduit le
+    dépôt du **remote git du répertoire courant** : dans un job qui ne s'est pas fait
+    `checkout`, il n'y en a pas, et il répond `failed to run git: fatal: not a git repository`.
+    C'est ce qui est arrivé au job `manifeste`, qui n'a rien à lire dans le dépôt et ne le
+    clone donc pas, délibérément — il a composé un manifeste juste, puis n'a pas su où le
+    poser. Ce qui s'est perdu n'est pas une clef du manifeste mais `latest.json` **en entier** :
+    plus personne ne se met à jour, sur aucune plateforme, jusqu'à la version suivante.
+
+    **Et rien avant la publication ne le disait.** Le workflow est syntaxiquement juste, tous
+    les autres gardes de ce fichier étaient verts, et les trois autres jobs se font `checkout`
+    — donc le défaut n'existe que dans celui qui ne le fait pas. C'est la même famille que le
+    `var()` mort : une commande qui ne peut pas aboutir ne se dénonce pas, il faut aller lui
+    demander.
+
+    Le garde porte sur le **mécanisme** et non sur ce job-ci : tout job sans `checkout` qui
+    appelle `gh` doit nommer son dépôt, par `--repo` ou par `GH_REPO` dans son environnement.
+    """
+    for nom, job in (workflow.get("jobs") or {}).items():
+        etapes = job.get("steps") or []
+        if any("actions/checkout" in str(etape.get("uses", "")) for etape in etapes):
+            continue
+        for etape in etapes:
+            commande = commandes_de([etape])
+            # `\bgh\s` plutôt que `"gh "` : le second se satisfait d'un mot qui finit par
+            # « gh », et les commentaires sont déjà retirés par `commandes_de`.
+            if not re.search(r"\bgh\s", commande):
+                continue
+            environnement = {
+                **(workflow.get("env") or {}),
+                **(job.get("env") or {}),
+                **(etape.get("env") or {}),
+            }
+            if "--repo" in commande or "GH_REPO" in environnement:
+                continue
+            print(f"{fichier} : le job « {nom} » appelle `gh` sans s'être fait `checkout`, et "
+                  "sans nommer\n"
+                  "  son dépôt. `gh` le déduit du remote git du répertoire courant : il "
+                  "répondra\n"
+                  "  `fatal: not a git repository`, après avoir fait tout le travail.\n"
+                  "  Ajouter `--repo \"$GITHUB_REPOSITORY\"`, ou `GH_REPO` à son "
+                  "environnement.", file=sys.stderr)
+            raise SystemExit(1)
+
+
 def verifier_ci() -> None:
     workflow = charger(CI)
     jobs = workflow.get("jobs", {})
@@ -215,6 +262,8 @@ def verifier_ci() -> None:
               "son fond, sa taille de fenêtre et ses positions d'icônes, en silence",
               file=sys.stderr)
         raise SystemExit(1)
+
+    verifier_gh_nomme_son_depot(workflow, "ci.yml")
 
     print(f"ci.yml cohérent — {len(jobs)} jobs, aucun doublon")
 
@@ -337,7 +386,14 @@ def verifier_publication() -> None:
         ("cloud-sql-proxy.exe --version",
          "le sidecar embarqué pourrait manquer, ou porter une autre version que le verrou"),
         ("gh release upload", "l'installateur ne serait attaché à aucune release"),
-        ('cp "$zip.sig"',
+        # Les deux moitiés d'un même couple : l'étape qui nomme l'installateur **exporte** son
+        # chemin, celle qui publie la signature le relit. Sans l'export, `set -u` fait échouer
+        # la seconde — bruyamment, mais seulement une fois la publication lancée, et vingt
+        # minutes de construction plus tard.
+        ('INSTALLATEUR=$exe',
+         "l'étape suivante n'aurait plus de quoi dériver la signature, et tomberait sur une "
+         "variable non définie"),
+        ('cp "$INSTALLATEUR.sig"',
          "la signature ne serait pas copiée, donc l'artefact partirait vide vers le "
          "manifeste"),
     ):
@@ -356,23 +412,36 @@ def verifier_publication() -> None:
     #    ont donc été retirés, et ceux-ci prennent leur place : ce qui se remarquerait le moins
     #    n'est plus qu'on ouvre cette voie, c'est qu'on la referme.
     #
-    #    Le motif porte ses **guillemets fermants** : sans eux, la ligne voisine du `.sig` le
-    #    satisfait — `DoraBase-$VERSION-x64.nsis.zip` est un préfixe de
-    #    `DoraBase-$VERSION-x64.nsis.zip.sig`. C'est le piège du motif non ancré des
-    #    assertions de nom accessible, ici sur un nom de fichier (vérifié par sabotage).
-    #    Et le garde porte sur l'étape **qui téléverse**, non sur le job entier : l'étape
-    #    voisine *nomme* l'archive en la copiant, et un fragment cherché dans tout le job s'en
-    #    contenterait — c'est-à-dire resterait vert sur un job qui construit l'archive et ne la
-    #    publie pas (vérifié par sabotage, comme les guillemets ci-dessus).
+    #    **Deux fichiers, et l'un d'eux porte deux rôles.** Il n'y a pas d'archive séparée :
+    #    avec `createUpdaterArtifacts: true`, le bundler signe l'installateur NSIS lui-même, et
+    #    le plugin accepte un `.exe` nu. Donc le `.exe` de la release **est** la mise à jour —
+    #    c'est lui que l'URL du manifeste désigne — et le `.sig` est ce qui l'atteste. Chacun
+    #    est gardé pour sa propre raison : sans le premier l'URL est en 404, sans le second le
+    #    job `manifeste` n'a aucune signature à mettre en face.
+    #
+    #    Les motifs portent leurs **guillemets fermants** : sans eux,
+    #    `"publication/DoraBase-$VERSION-x64-setup.exe"` est satisfait par les lignes voisines
+    #    du `.sha256` et du `.sig`, dont il est le préfixe. C'est le piège du motif non ancré
+    #    des assertions de nom accessible, ici sur un nom de fichier (vérifié par sabotage).
+    #    Et le garde porte sur l'étape **qui téléverse**, non sur le job entier : les étapes
+    #    voisines *nomment* ces fichiers en les copiant, et un fragment cherché dans tout le
+    #    job s'en contenterait — c'est-à-dire resterait vert sur un job qui les construit et ne
+    #    les publie pas (vérifié par sabotage, comme les guillemets ci-dessus).
     televersement = commandes_de(
         [etape for etape in windows if "gh release upload" in str(etape.get("run", ""))]
     )
-    if '"publication/DoraBase-$VERSION-x64.nsis.zip"' not in televersement:
-        print("publication.yml : le job « windows » ne téléverse plus l'archive de mise à "
-              "jour.\n"
-              "  Le manifeste porterait une clef `windows-x86_64` dont l'URL est en 404, donc\n"
-              "  une mise à jour annoncée que rien ne peut installer.", file=sys.stderr)
-        raise SystemExit(1)
+    for fichier_publie, raison in (
+        ('"publication/DoraBase-$VERSION-x64-setup.exe"',
+         "le manifeste porterait une clef `windows-x86_64` dont l'URL est en 404, donc une\n"
+         "  mise à jour annoncée que rien ne peut installer"),
+        ('"publication/DoraBase-$VERSION-x64-setup.exe.sig"',
+         "l'application refuserait la mise à jour qu'elle vient de télécharger : c'est cette\n"
+         "  signature qu'elle vérifie avant de se remplacer"),
+    ):
+        if fichier_publie not in televersement:
+            print(f"publication.yml : le job « windows » ne téléverse plus "
+                  f"{fichier_publie}.\n  {raison}.", file=sys.stderr)
+            raise SystemExit(1)
 
     #    Et les deux artefacts de signature refusent de partir **vides** : le défaut
     #    d'`upload-artifact` est `warn`, donc une signature non copiée ne ferait rien échouer
@@ -463,6 +532,8 @@ def verifier_publication() -> None:
                   "outputs.maj` — il téléchargerait un artefact qui peut ne pas exister",
                   file=sys.stderr)
             raise SystemExit(1)
+
+    verifier_gh_nomme_son_depot(workflow, "publication.yml")
 
     print(f"publication.yml cohérent — {len(jobs)} jobs, tag ancré, release publiée, "
           "manifeste à trois clefs écrit par un seul job")

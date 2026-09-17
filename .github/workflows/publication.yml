@@ -782,11 +782,16 @@ jobs:
           cp "$exe" "publication/DoraBase-$VERSION-x64-setup.exe"
           sha256sum "publication/DoraBase-$VERSION-x64-setup.exe" \
             | sed "s|publication/||" > "publication/DoraBase-$VERSION-x64-setup.exe.sha256"
+          # L'étape suivante dérive la signature de **ce** fichier plutôt que de refaire un `ls` :
+          # deux recherches indépendantes peuvent désigner deux installateurs, et le manifeste
+          # annoncerait alors la signature de l'un pour l'URL de l'autre — une mise à jour refusée
+          # chez l'utilisateur, sans rien qui échoue ici.
+          echo "INSTALLATEUR=$exe" >> "$GITHUB_ENV"
           ls -lh publication/
 
-      # ── L'archive de mise à jour, depuis le 14 septembre 2026 (`API-58`) ──────────────
+      # ── La signature de mise à jour, depuis le 14 septembre 2026 (`API-58`) ──────────────
       #
-      # **Ce qui a changé, et pourquoi.** Ces deux fichiers existaient depuis le premier jour —
+      # **Ce qui a changé, et pourquoi.** Ces fichiers existaient depuis le premier jour —
       # `createUpdaterArtifacts` les produit à chaque `tauri build` — et ils n'étaient pas
       # publiés : sans certificat Authenticode, « rien n'atteste que l'exécutable téléchargé
       # vient de nous », l'arbitrage de « rien n'est proposé qui n'ait été notarié » transposé à
@@ -807,42 +812,47 @@ jobs:
       #     release est toujours non signé, et le README le dit toujours.
       #
       # Autrement dit le refus protégeait d'un risque que la clé de mise à jour couvre déjà, au
-      # prix de la voie de mise à jour entière. Ce qu'il en reste est **à voir à l'œil** : le
-      # remplacement d'un bundle par lui-même n'a jamais été exercé, sur aucune des deux
-      # plateformes — AGENTS.md le porte, et ce chantier ne l'a pas payé.
+      # prix de la voie de mise à jour entière.
       #
-      # Tauri nomme l'archive `DoraBase_<version>_x64-setup.nsis.zip`. Renommée sur la
-      # convention du dépôt, et pour la même raison que l'archive macOS : un nom qui ne porte
-      # pas la version expose deux fichiers homonymes sur deux releases voisines.
-      - name: nommer l'archive de mise à jour
+      # **Et il n'y a pas d'archive : l'installateur *est* l'artefact de mise à jour** (corrigé
+      # le 17 septembre 2026, après l'échec de la publication 0.11.0). La première version
+      # cherchait un `.nsis.zip`, que ce dépôt ne produit pas — c'est la forme de compatibilité
+      # v1 de Tauri, sous `createUpdaterArtifacts: "v1Compatible"`. Avec `true`, qui est ce que
+      # `tauri.conf.json` déclare, le bundler signe l'installateur NSIS **lui-même** et écrit un
+      # `…-setup.exe.sig` à côté. Le plugin le sait faire : il renifle les octets qu'il
+      # télécharge (`extract` de `tauri-plugin-updater`), et un `.exe` nu est accepté tel quel.
+      #
+      # Conséquence voulue : le `.exe` de la release **porte les deux rôles**, l'installateur
+      # qu'on télécharge à la main et la mise à jour que l'application va chercher. Le
+      # dupliquer sous un second nom donnerait deux fois vingt mégaoctets d'un même binaire, et
+      # un second nom à tenir en phase avec le premier ; c'est l'URL du manifeste qui désigne
+      # celui-ci. macOS garde deux fichiers parce que là-bas ce sont deux choses — un `.dmg` à
+      # ouvrir et une archive de l'application.
+      - name: nommer la signature de mise à jour
         id: archive-maj
         shell: bash
         run: |
           set -euo pipefail
-          zip=$(ls src-tauri/target/release/bundle/nsis/*.nsis.zip)
-          # Même garde que pour l'installateur : deux archives voudraient dire qu'une ancienne
-          # traîne dans le cache, et `ls` en choisirait une au hasard.
-          test "$(wc -l <<<"$zip")" -eq 1
-          cp "$zip" "publication/DoraBase-$VERSION-x64.nsis.zip"
-          # La signature minisign, sans laquelle l'archive ne serait qu'un zip : c'est elle que
-          # l'application vérifie avant de se remplacer, et le manifeste en porte le contenu.
-          test -f "$zip.sig"
-          cp "$zip.sig" "publication/DoraBase-$VERSION-x64.nsis.zip.sig"
+          # La signature de **l'installateur qu'on vient de publier**, nommée par l'étape
+          # précédente : c'est elle que l'application vérifie avant de se remplacer, et le
+          # manifeste en porte le contenu en face de l'URL de ce `.exe`-là.
+          test -f "$INSTALLATEUR.sig"
+          cp "$INSTALLATEUR.sig" "publication/DoraBase-$VERSION-x64-setup.exe.sig"
           ls -lh publication/
           echo "publiee=oui" >> "$GITHUB_OUTPUT"
 
       # Comme côté macOS, c'est la **signature** qui voyage jusqu'au job `manifeste`, pas
-      # l'archive : celui-ci n'écrit qu'un JSON, et il n'a besoin que du contenu du `.sig`.
+      # l'installateur : celui-ci n'écrit qu'un JSON, et il n'a besoin que du contenu du `.sig`.
       - uses: actions/upload-artifact@v4
         with:
           name: maj-windows
-          path: publication/DoraBase-*-x64.nsis.zip.sig
+          path: publication/DoraBase-*-x64-setup.exe.sig
           # Le défaut est `warn` : une signature non copiée donnerait un artefact vide, et
           # c'est le job `manifeste` qui échouerait, bien plus tard et loin de la cause.
           if-no-files-found: error
           retention-days: 1
 
-      - name: attacher l'installateur et l'archive à la release
+      - name: attacher l'installateur et sa signature à la release
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -851,8 +861,7 @@ jobs:
           gh release upload "$GITHUB_REF_NAME" \
             "publication/DoraBase-$VERSION-x64-setup.exe" \
             "publication/DoraBase-$VERSION-x64-setup.exe.sha256" \
-            "publication/DoraBase-$VERSION-x64.nsis.zip" \
-            "publication/DoraBase-$VERSION-x64.nsis.zip.sig" \
+            "publication/DoraBase-$VERSION-x64-setup.exe.sig" \
             --clobber
           echo "::notice::installateur Windows attaché — non signé, SmartScreen avertira au"
           echo "  téléchargement. La mise à jour en place, elle, est signée par la clé du projet."
@@ -942,9 +951,13 @@ jobs:
           # L'URL est **épinglée au tag** et non à « latest » : le manifeste annonce une
           # version, il doit désigner l'archive de cette version. Une URL en « latest » ferait
           # installer autre chose que ce qui vient d'être annoncé et vérifié.
+          # Sous Windows, l'artefact de mise à jour **est** l'installateur : avec
+          # `createUpdaterArtifacts: true`, le bundler signe le `.exe` NSIS lui-même, et le
+          # plugin accepte un `.exe` nu (il renifle les octets reçus). D'où un fichier de la
+          # release qui porte les deux rôles, là où macOS en a deux.
           sources = {
               f"DoraBase-{version}-universal.app.tar.gz": ("darwin-aarch64", "darwin-x86_64"),
-              f"DoraBase-{version}-x64.nsis.zip": ("windows-x86_64",),
+              f"DoraBase-{version}-x64-setup.exe": ("windows-x86_64",),
           }
 
           plateformes = {}
@@ -985,9 +998,19 @@ jobs:
 
       # Téléversé dans la release que le job `release` a créée, jamais par un second `create` —
       # même raison que les deux jobs de construction.
+      #
+      # **`--repo` est indispensable ici, et il l'est pour ce job seul** (17 septembre 2026,
+      # après l'échec de la publication 0.11.0). `gh` déduit le dépôt du *remote git* du
+      # répertoire courant : les trois autres jobs se sont fait `checkout`, celui-ci non — il
+      # n'a rien à lire dans le dépôt, et c'est écrit plus haut. Il répondait donc
+      # `failed to run git: fatal: not a git repository`, **après** avoir composé un manifeste
+      # juste. Ce qui se perd alors n'est pas la clef Windows mais `latest.json` **en entier** :
+      # `…/releases/latest/download/latest.json` rend un 404, et plus personne ne se met à
+      # jour, sur aucune des deux plateformes.
       - name: téléverser le manifeste
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release upload "$GITHUB_REF_NAME" manifeste/latest.json --clobber
+          gh release upload "$GITHUB_REF_NAME" manifeste/latest.json \
+            --repo "$GITHUB_REPOSITORY" --clobber

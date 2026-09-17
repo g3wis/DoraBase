@@ -28,9 +28,9 @@ empreinte SHA-256 :
 | `DoraBase-X.Y.Z-universal.dmg.sha256` | l'empreinte, à comparer avant d'ouvrir |
 | `DoraBase-X.Y.Z-universal.app.tar.gz` | la mise à jour macOS, que l'application va chercher elle-même |
 | `latest.json` | ce que l'application lit pour savoir qu'une version existe |
-| `DoraBase-X.Y.Z-x64-setup.exe` | l'installateur Windows, **non signé** — voir plus bas |
-| `DoraBase-X.Y.Z-x64-setup.exe.sha256` | son empreinte |
-| `DoraBase-X.Y.Z-x64.nsis.zip` | la mise à jour Windows, que l'application va chercher elle-même |
+| `DoraBase-X.Y.Z-x64-setup.exe` | l'installateur Windows, **non signé** — voir plus bas. C'est aussi la mise à jour que l'application va chercher elle-même |
+| `DoraBase-X.Y.Z-x64-setup.exe.sha256` | son empreinte, à comparer avant de l'exécuter |
+| `DoraBase-X.Y.Z-x64-setup.exe.sig` | la signature que l'application vérifie avant de se remplacer |
 
 **macOS 13 Ventura** au minimum. Toutes les versions sont sur la
 [page des releases](https://github.com/g3wis/DoraBase/releases).
