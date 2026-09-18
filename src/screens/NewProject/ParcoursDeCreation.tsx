@@ -7,6 +7,7 @@ import type {
   Project,
 } from '../../domain/config'
 import { NewConnection } from '../NewConnection/NewConnection'
+import type { CatalogueKubernetes } from '../NewConnection/useCatalogueKubernetes'
 import { NewProject } from './NewProject'
 
 type ParcoursDeCreationProps = {
@@ -47,6 +48,11 @@ type ParcoursDeCreationProps = {
    */
   kubeconfigs?: Kubeconfigs
   onDeclareKubeconfig?: () => Promise<string | null>
+  /**
+   * Ce que l'hôte sait demander à `kubectl` pour remplir les listes du visage Kubernetes
+   * (`API-73`). Traversé tel quel, et absent hors de la webview.
+   */
+  catalogueKubernetes?: CatalogueKubernetes
 }
 
 /**
@@ -75,6 +81,7 @@ export function ParcoursDeCreation({
   onCreate,
   kubeconfigs = {},
   onDeclareKubeconfig = async () => null,
+  catalogueKubernetes,
 }: ParcoursDeCreationProps) {
   const [projetCree, setProjetCree] = useState<string | null>(
     depart.etape === 'connexion' ? depart.projet : null,
@@ -124,6 +131,7 @@ export function ParcoursDeCreation({
       venantDuParcours
       kubeconfigs={kubeconfigs}
       onDeclareKubeconfig={onDeclareKubeconfig}
+      {...(catalogueKubernetes === undefined ? {} : { catalogueKubernetes })}
       onClose={onClose}
       onSaved={onProjets}
     />

@@ -14,6 +14,7 @@ import { ENGINES, modesSslDisponibles } from '../NewConnection/engines'
 import { ouvrirSelecteurDeCle } from '../NewConnection/ouvrirSelecteurDeCle'
 import { TunnelPanel } from '../NewConnection/TunnelPanel'
 import { tunnelDraftToTunnel } from '../NewConnection/tunnelDraftToTunnel'
+import type { CatalogueKubernetes } from '../NewConnection/useCatalogueKubernetes'
 import { MOTEURS_MANAGES, MOTEURS_OFFERTS, raisonDuMoteur } from './moteurs'
 import styles from './NewInstance.module.css'
 
@@ -49,6 +50,11 @@ export type NewInstanceProps = {
   kubeconfigs?: Kubeconfigs
   /** Déclare un kubeconfig et rend sa référence. Injectée pour la raison d'`onBrowseKey`. */
   onDeclareKubeconfig?: () => Promise<string | null>
+  /**
+   * Ce que l'hôte sait demander à `kubectl` pour remplir les listes du visage Kubernetes
+   * (`API-73`). Traversé tel quel, et absent hors de la webview.
+   */
+  catalogueKubernetes?: CatalogueKubernetes
 }
 
 /**
@@ -82,6 +88,7 @@ export function NewInstance({
   onBrowseKey,
   kubeconfigs = {},
   onDeclareKubeconfig = async () => null,
+  catalogueKubernetes,
 }: NewInstanceProps) {
   const t = useT()
   const [engine, setEngine] = useState<Engine>(edition?.engine ?? 'postgresql')
@@ -283,6 +290,7 @@ export function NewInstance({
           onBrowseKey={onBrowseKey ?? ouvrirSelecteurDeCle}
           kubeconfigs={kubeconfigs}
           onDeclareKubeconfig={onDeclareKubeconfig}
+          {...(catalogueKubernetes === undefined ? {} : { catalogueKubernetes })}
         />
 
         <div className={styles.bascules}>

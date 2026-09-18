@@ -337,13 +337,20 @@ test('les champs du visage Cloud SQL font 28 px aussi (08k)', async ({ page }) =
 // Le visage Kubernetes n'est pas maquetté non plus. Sa cote est ici et non en Vitest parce que
 // jsdom ne calcule aucune mise en page — une exigence de largeur y serait structurellement
 // inobservable (règle n° 9).
-test('les champs du visage Kubernetes font 28 px, et la ressource prend la rangée', async ({
+//
+// **Trois de ses quatre contrôles sont des listes depuis `API-73`** — le kubeconfig, la sorte, et
+// l'espace de noms puis la ressource dès que la démo a « lu » son cluster. Les localisateurs passent
+// donc par l'**étiquette**, jamais par un `placeholder` ni par une classe hachée : ce qui est mesuré
+// est la boîte du contrôle, quelle que soit la forme qu'il a prise.
+test('les contrôles du visage Kubernetes font 28 px, et la ressource se partage la rangée', async ({
   page,
 }) => {
   await deplierTunnel(page)
   await page.getByRole('combobox', { name: 'Type' }).click()
   await page.getByRole('option', { name: 'Kubernetes' }).click()
-  await page.waitForSelector('input[placeholder^="svc/postgres"]')
+  // La démo « lit » son cluster d'un tour : attendre que l'espace de noms soit devenu une liste
+  // mesure l'état d'après, et non celui d'avant, où les deux champs sont encore des saisies.
+  await page.getByRole('combobox', { name: 'Espace de noms' }).waitFor()
 
   const mesures = await page.evaluate(() => {
     const panneau = [...document.querySelectorAll('section')].find((s) =>
@@ -351,34 +358,42 @@ test('les champs du visage Kubernetes font 28 px, et la ressource prend la rang�
     )
     if (!panneau) return null
     const grille = panneau.querySelector('[class*=tunnelGrid]') as HTMLElement
-    const boite = (selecteur: string) =>
-      Math.round(panneau.querySelector(selecteur)?.getBoundingClientRect().width ?? 0)
-    const hauteur = (el: Element | null) =>
-      el ? Math.round(el.getBoundingClientRect().height) : null
+    const rangee = panneau.querySelector('[class*=tunnelResourceRow]') as HTMLElement
+
+    /**
+     * La **racine** du contrôle nommé par cette étiquette, liste ou champ.
+     *
+     * C'est elle qui est l'enfant de la grille, donc elle dont on dit qu'elle « prend la rangée » —
+     * le contrôle vit à l'intérieur, sous l'étiquette, et mesure forcément moins.
+     */
+    const racine = (etiquette: string) => {
+      const libelle = [...panneau.querySelectorAll('label, span')].find(
+        (candidat) => candidat.textContent?.trim() === etiquette,
+      )
+      return libelle?.closest('[class*=root]') ?? null
+    }
+    const largeur = (etiquette: string) =>
+      Math.round(racine(etiquette)?.getBoundingClientRect().width ?? 0)
+
+    // La boîte **peinte** de chaque contrôle : l'enveloppe d'un champ à suffixe, l'`<input>` nu
+    // sinon, et le `wrap` d'une liste. Les trois portent la bordure, donc les trois doivent faire la
+    // même hauteur.
+    const boites = [...panneau.querySelectorAll('[class*=wrap], input')].filter(
+      (boite) => !(boite.tagName === 'INPUT' && boite.parentElement?.className.includes('wrap')),
+    )
+
     return {
-      champs: [...panneau.querySelectorAll('input')].map((i) =>
-        hauteur(i.parentElement?.className.includes('wrap') ? i.parentElement : i),
-      ),
-      espaceDeNoms: boite('input[placeholder*="default"]'),
-      // **Le kubeconfig est une liste depuis `API-70`**, donc un `combobox` et non un `input`. Il
-      // est nommé par `aria-labelledby`, comme tout `Select` du dépôt : on résout l'étiquette
-      // plutôt que de viser une classe hachée, qui ne survivrait pas au prochain module CSS.
-      kubeconfig: (() => {
-        const liste = [...panneau.querySelectorAll('[role=combobox]')].find((candidat) => {
-          const etiquette = candidat.getAttribute('aria-labelledby')
-          return etiquette
-            ? (document.getElementById(etiquette)?.textContent ?? '').includes('kubeconfig')
-            : false
-        })
-        // **La racine du `Select`, et non le `combobox` qu'elle contient** : c'est elle qui est
-        // l'enfant de la grille, donc elle dont on dit qu'elle « prend la rangée ». Le contrôle
-        // vit à l'intérieur, sous l'étiquette, et mesure forcément moins.
-        const champ = liste?.closest('[class*=root]')
-        return Math.round(champ?.getBoundingClientRect().width ?? 0)
-      })(),
-      ressource: boite('input[placeholder^="svc/postgres"]'),
+      hauteurs: [...new Set(boites.map((b) => Math.round(b.getBoundingClientRect().height)))],
+      kubeconfig: largeur('Fichier kubeconfig'),
+      espaceDeNoms: largeur('Espace de noms'),
+      sorte: largeur('Sorte'),
+      ressource: largeur('Ressource'),
       grilleLargeur: Math.round(grille.getBoundingClientRect().width),
+      rangeeLargeur: Math.round(rangee.getBoundingClientRect().width),
       pistes: getComputedStyle(grille)
+        .gridTemplateColumns.split(' ')
+        .map((v) => Number.parseFloat(v)),
+      pistesRangee: getComputedStyle(rangee)
         .gridTemplateColumns.split(' ')
         .map((v) => Number.parseFloat(v)),
     }
@@ -386,22 +401,58 @@ test('les champs du visage Kubernetes font 28 px, et la ressource prend la rang�
 
   // 28 px de contenu plus les 2 px de bordure, comme les deux autres visages. Le mockup ne montre
   // celui-ci pas plus que celui de Cloud SQL : l'aligner sur eux est la seule cohérence disponible.
-  expect(new Set(mesures?.champs)).toHaveProperty('size', 1)
-  expect(mesures?.champs[0]).toBe(30)
+  expect(mesures?.hauteurs).toEqual([30])
 
   // **Le kubeconfig tient dans une seule piste**, la deuxième — il a échangé sa place avec l'espace
-  // de noms le 18 septembre 2026 (`API-70`, à la demande), et il y tient parce qu'il a cessé d'être
-  // un chemin : la liste rend un libellé. Mesuré contre la piste **calculée** et non par un ordre de
-  // grandeur : une comparaison laisserait passer un champ tombé dans la piste voisine, qui est le
-  // défaut qu'on veut voir (règle n° 18).
+  // de noms le 18 septembre 2026 (`API-70`, à la demande). Mesuré contre la piste **calculée** et
+  // non par un ordre de grandeur : une comparaison laisserait passer un champ tombé dans la piste
+  // voisine, qui est le défaut qu'on veut voir (règle n° 18).
   const [, piste2 = 0] = mesures?.pistes ?? []
   expect(mesures?.kubeconfig ?? 0).toBeCloseTo(piste2, 0)
 
-  // L'espace de noms et la ressource prennent la rangée entière. Tolérance de 3 px pour les
-  // bordures, plutôt qu'une égalité que le sous-pixel ferait échouer.
-  for (const large of [mesures?.espaceDeNoms ?? 0, mesures?.ressource ?? 0]) {
+  // L'espace de noms prend la rangée entière, et la rangée de la ressource aussi. Tolérance de 3 px
+  // pour les bordures, plutôt qu'une égalité que le sous-pixel ferait échouer.
+  for (const large of [mesures?.espaceDeNoms ?? 0, mesures?.rangeeLargeur ?? 0]) {
     expect(large).toBeGreaterThan((mesures?.grilleLargeur ?? 0) - 3)
   }
+
+  // **La sorte et le nom se partagent leur rangée**, et chacun mesure sa piste — une **égalité**
+  // contre les pistes calculées, non un « le nom est plus large », qui resterait vrai si les deux
+  // tombaient dans la même piste (règle n° 18).
+  const [pisteSorte = 0, pisteNom = 0] = mesures?.pistesRangee ?? []
+  expect(mesures?.sorte ?? 0).toBeCloseTo(pisteSorte, 0)
+  expect(mesures?.ressource ?? 0).toBeCloseTo(pisteNom, 0)
+  // Et la sorte est la plus étroite des deux : `postgres-principal-0` est ce qu'on lit.
+  expect(pisteNom).toBeGreaterThan(pisteSorte)
+})
+
+// **Le câblage jusqu'au cluster** (`API-73`), et il ne se voit qu'ici : `TunnelPanel` est juste dans
+// ses tests unitaires avec le décor qu'ils lui donnent, mais aucun d'eux ne prouve que l'écran qui le
+// monte lui **passe** le catalogue (règle n° 8). Sans ce câblage, les deux champs resteraient des
+// saisies sur un poste qui a `kubectl`, et le chantier entier ne servirait à rien sans qu'un seul
+// test rougisse.
+test('les listes du visage Kubernetes portent ce que le cluster rend', async ({ page }) => {
+  await deplierTunnel(page)
+  await page.getByRole('combobox', { name: 'Type' }).click()
+  await page.getByRole('option', { name: 'Kubernetes' }).click()
+
+  await page.getByRole('combobox', { name: 'Espace de noms' }).click()
+  const espaces = page.getByRole('listbox')
+  await expect(espaces.getByRole('option', { name: 'comptoir' })).toBeVisible()
+  await expect(espaces.getByRole('option', { name: 'atelier-nord' })).toBeVisible()
+  // Les deux entrées qui **agissent** encadrent la liste par le bas, comme « Autre fichier… » chez
+  // le kubeconfig — là où l'on ne tombe pas par accident en la parcourant au clavier.
+  await expect(espaces.getByRole('option', { name: 'Saisir à la main…' })).toBeVisible()
+  // On en choisit un plutôt que de refermer la liste : `Échap` traverserait jusqu'à la modale, et
+  // choisir est de toute façon le geste qui suit — il relit les objets de cet espace de noms là.
+  await espaces.getByRole('option', { name: 'comptoir' }).click()
+
+  // **La sorte décide de ce que la liste des noms contient**, et c'est tout le point du ticket :
+  // « kind must become a dropdown as well, no writing pod/xxxx ».
+  await page.getByRole('combobox', { name: 'Sorte' }).click()
+  await page.getByRole('option', { name: 'Pod', exact: true }).click()
+  await page.getByRole('combobox', { name: 'Ressource' }).click()
+  await expect(page.getByRole('listbox').getByRole('option', { name: 'postgres-0' })).toBeVisible()
 })
 
 test('la liste des kubeconfigs porte les déclarations de la configuration', async ({ page }) => {

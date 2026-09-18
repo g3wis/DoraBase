@@ -487,6 +487,19 @@
   grid-column: 2 / -1;
 }
 
+/* La sorte et le nom d'une ressource Kubernetes, sur une rangée (`API-73`).
+ *
+ * `130px` est la première piste de `.tunnelGrid`, celle de « Type » : la reprendre aligne les deux
+ * listes du panneau sur la même colonne, là où une valeur choisie au jugé aurait fait deux bords
+ * gauches à deux pixels l'un de l'autre. Le nom prend le reste — `postgres-principal-0` tient mal
+ * dans une colonne, et c'est la moitié qu'on lit. */
+.tunnelResourceRow {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 10px;
+  align-items: end;
+}
+
 /* Le libellé qui dit que le vide est une valeur. Poids `normal` là où `.label` est
  * `semibold` : c'est une aide, pas l'étiquette d'un champ, et les confondre à l'œil ferait
  * lire deux étiquettes empilées. */

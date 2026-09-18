@@ -2877,6 +2877,136 @@ c'est là, et seulement là, que se voit ce que la référence a acheté. La mig
 tourné sur un vrai `config.json` d'utilisateur : celui de ce poste est le seul décor, et il n'a pas
 de connexion Kubernetes.
 
+### Le cluster remplit ses propres listes (18 septembre 2026, `API-73`)
+
+Le visage Kubernetes d'`A2` demandait trois chaînes à la main. Le fichier est une liste depuis
+`API-70` ; **l'espace de noms et la ressource restaient des champs de saisie**, et ce sont justement
+les deux qui nomment des choses qui existent déjà ailleurs — rapporté à l'usage : « using kubectl
+commands, prefetch the list of available objects. kind must become a dropdown as well, no writing
+pod/xxxx ». Un espace de noms mal orthographié fait échouer `kubectl` sur « not found », donc
+bruyamment, mais après un aller-retour et vingt secondes ; et un nom de pod porte le suffixe
+aléatoire que son `Deployment` lui a donné, qu'on relève forcément dans un terminal. Deux commandes
+vont les chercher là où ils sont, et le champ « Ressource » devient **deux** listes, une sorte et un
+nom.
+
+**Ce qui est stocké n'a pas changé, et c'est la décision qui tient tout le reste.**
+`ProxyKubernetes.resource` reste la chaîne que `kubectl port-forward` reçoit, composée `sorte/nom`
+par les deux listes : aucun cran de migration, aucune connexion existante à reprendre, et la règle
+de `config/model.rs` reste vraie au mot près — « transmise telle quelle, jamais réécrite ». Nous
+**composons** une valeur, nous n'en corrigeons aucune. Rouvrir une connexion sans toucher au panneau
+la laisse intacte au caractère près, les deux moitiés étant **dérivées** et jamais gardées à côté.
+
+Onze décisions à ne pas défaire :
+
+- **le champ reste saisissable quand rien ne peut être lu**, et c'est la moitié du ticket qui ne
+  s'écrit pas dans son titre. Un poste sans `kubectl`, un cluster injoignable, un rôle sans droit de
+  lister, un espace de noms sans le moindre pod, ou l'objet qui **n'existe pas encore** : les cinq
+  sont ordinaires pendant qu'on remplit un formulaire, et aucun ne doit empêcher de déclarer la
+  connexion. « no writing pod/xxxx » vaut pour le geste courant ; il ne peut pas valoir pour un
+  formulaire qu'on remplit hors ligne. Le contrôle est donc une **liste quand une lecture a rendu des
+  noms**, un champ sinon — avec la raison écrite dessous ;
+- **un sens, un geste, et un seul.** La liste porte « Saisir à la main… », le champ porte un bouton
+  « Choisir dans la liste ». Ce bouton est **aussi** ce qui réessaie après un échec : une seconde
+  commande « Réessayer » aurait dit deux fois la même chose, vouloir la liste et vouloir qu'on la
+  relise étant le même souhait. C'est l'idiome d'« Autre fichier… » d'`API-70`, une entrée qui *agit*
+  au lieu de désigner, et ces valeurs-là ne peuvent pas entrer en collision avec un nom Kubernetes,
+  qui ne commence jamais par un tiret ;
+- **rien n'est lu tout seul.** À l'arrivée sur le visage, au changement de kubeconfig, au changement
+  de sorte, et sur demande — jamais de minuteur, jamais de relecture périodique. C'est la règle des
+  sections du gestionnaire d'instances (`API-32`), et elle vaut davantage ici : chaque lecture est
+  une requête **authentifiée** au serveur d'API, que `kubectl` peut faire précéder d'un *exec
+  credential plugin* — donc de `gcloud` et d'un aller-retour réseau ;
+- **l'espace de noms n'est pas dans les dépendances de l'effet, et c'est délibéré.** Il change aussi
+  à la frappe quand le champ est en saisie à la main : taper `prod` enverrait **quatre** requêtes
+  authentifiées. Le seul changement d'espace de noms qui relit est celui qui vient de la **liste**, et
+  c'est le panneau qui l'appelle — un geste, jamais une dépendance ;
+- **et l'espace de noms lui est alors passé explicitement.** Le panneau relit dans le geste même où
+  il pose la nouvelle valeur, donc avant le rendu qui remettrait l'état ambiant à jour : sans ce
+  paramètre, choisir « prod » listerait les objets de l'espace de noms **précédent**. Une liste
+  plausible tirée du mauvais endroit est le mode de défaillance que ce visage traite comme le pire,
+  et c'est le seul du chantier qui ne se voit pas à l'œil ;
+- **quatre sortes proposées, pas soixante.** `service`, `pod`, `deployment`, `statefulset` — ce que
+  `port-forward` résout en un pod, et ce derrière quoi une base se trouve. Le dépôt écrit ailleurs
+  que « la liste des types est celle de `kubectl` et grandit sans nous » : c'est vrai de ce qu'on
+  **accepte**, et rien n'est refusé ici — une sorte absente des quatre reste lisible et modifiable,
+  comme une référence de kubeconfig retirée reçoit son entrée. Ce qui est décidé est ce qu'on
+  **propose**, et `kubectl api-resources` en proposerait une soixantaine dont la quasi-totalité n'a
+  pas de pod derrière elle ;
+- **une sorte qu'on ne propose pas reçoit quand même son entrée**, et la même règle vaut pour un nom
+  que le cluster ne porte plus. `ListeDeroulante` rend le libellé de l'option choisie : une valeur
+  absente des options n'afficherait **rien du tout**, sur une connexion qui porte pourtant
+  `svc/postgres` — le cas de toutes celles déclarées avant ce jour. Et la vider ferait changer ce que
+  la connexion joindra sans que personne l'ait demandé ;
+- **un nom qui porte déjà sa sorte l'emporte sur la liste.** `svc/postgres` tapé dans le champ du nom
+  est ce qu'écrit qui a l'habitude du champ d'avant, ou qui recopie une ligne de terminal : le
+  composer donnerait `service/svc/postgres`, que `kubectl` refuse, et l'erreur n'arriverait qu'à
+  l'ouverture. Ce n'est pas une correction de saisie — nous **honorons** ce qui est écrit, et le tour
+  suivant la liste des sortes affiche `svc` ;
+- **la sorte parcourue est le seul état que ce visage tient à côté du brouillon**, et il est
+  nécessaire. Un nom vide rend une ressource **vide** — `composerRessource` refuse d'écrire
+  `service/`, qui est une chaîne non vide et franchirait donc le contrôle du cœur, celui qui refuse
+  une ressource absente avec une phrase utile, pour échouer vingt secondes plus tard sur un message
+  de `kubectl`. Conséquence : une ressource vide n'a nulle part où porter sa sorte, donc choisir
+  « Pod » avant d'avoir un nom n'écrivait rien, donc **ne changeait rien**, et la liste retombait sur
+  « Service » sous le doigt qui venait d'en choisir une autre — le défaut n° 36 au milieu du geste
+  que le ticket demande. Dès qu'un objet est nommé, c'est la chaîne qui fait foi : il n'y a alors
+  qu'une vérité, et c'est celle qui partira ;
+- **un seul endroit compose la commande `kubectl`.** `commande_de_lecture` porte le `PATH` enrichi,
+  le `--kubeconfig` déclaré, l'entrée standard fermée et le `kill_on_drop`, et trois lectures
+  l'emploient — le contexte courant de l'en-tête, les espaces de noms, les ressources. Chacune posant
+  son `--kubeconfig` de son côté, il suffisait d'en oublier un pour qu'une liste décrive un cluster
+  et que la connexion en joigne un autre. C'est la leçon du `HOME` lu à quatre endroits : la question
+  n'a qu'une réponse, elle doit n'avoir qu'un lieu. Même raison pour `resoudre_la_reference`, extraite
+  pour que le refus d'une référence morte — la phrase qui dit **quoi faire** — n'existe qu'une fois ;
+- **`-o name`, et le cœur rend les noms sans leur préfixe.** La sortie est la plus courte à
+  transporter sur un cluster à mille pods, elle est stable depuis toujours là où un `jsonpath` se
+  périme avec le schéma, et elle est **lisible** — un test peut l'écrire à la main. Rendre la ligne
+  entière ferait entrer dans le champ le type **canonique du serveur** pendant que la liste des sortes
+  en porte un autre, donc deux sources pour une même moitié de la valeur.
+
+**Une garde de forme sur la sorte, et une seule.** Nous passons un argv direct, jamais un shell, donc
+il n'y a rien à échapper ; ce qu'il reste à empêcher est qu'une valeur change la **commande** plutôt
+que son sujet — une « sorte » nommée `--all-namespaces` serait lue par `kubectl` comme un drapeau, et
+la liste rendue décrirait autre chose que ce qu'on a demandé. Le motif est celui des noms de type de
+Kubernetes, ce qui laisse passer `svc`, `statefulset` et une ressource personnalisée.
+
+**Deux choses apprises en le vérifiant, et les deux par sabotage** (règle n° 1) :
+
+- **un test qui lit le `PATH` dans un message d'erreur mesure la troncature, pas l'héritage.** La
+  sortie d'erreur de `kubectl` est bornée à 400 caractères — `kubectl` écrit parfois une page
+  entière, et ce qui aide tient dans la première phrase —, or un `PATH` réel dépasse cette borne : le
+  premier jet cherchait le répertoire du faux binaire et ne le trouvait jamais. Il passe par un
+  fichier, et c'est la mesure qu'on voulait ;
+- **le décor doit porter deux espaces de noms qui ne contiennent pas la même chose.** Avec une liste
+  unique, la lecture partie avec le mauvais espace de noms rendrait exactement ce qu'on attendait, et
+  la garde du paragraphe ci-dessus resterait verte en la retirant (règle n° 5). Même raison pour la
+  démo, dont le cluster simulé en porte trois — dont un **vide**, sans quoi l'état « aucun objet de
+  cette sorte » n'existerait nulle part.
+
+**Trois niveaux de test, et aucun ne remplace les deux autres.** Ce qui se compose et se décompose se
+vérifie en pur ; le **câblage** — quel contrôle est rendu selon ce qu'on sait, ce qui part vers
+`kubectl` et quand — se vérifie sous Vitest avec un catalogue double, qui **diffère sa réponse d'un
+tour** (un double qui répond dans le tour synchrone de son appel ne mesure rien, la leçon du chargeur
+du diagramme) ; et la **géométrie** n'a pour juge que Playwright, jsdom ne calculant aucune mise en
+page (règle n° 9). Le test de bout en bout qui garde que l'écran **passe** le catalogue est le seul à
+pouvoir le faire : `TunnelPanel` est juste dans ses tests unitaires avec le décor qu'ils lui donnent,
+et sans ce câblage les deux champs resteraient des saisies sur un poste qui a `kubectl`, sans qu'un
+seul test rougisse (règle n° 8).
+
+**Ce qui reste à voir à l'œil, et c'est le plus gros de ce chantier** : **rien n'a jamais parlé à un
+vrai serveur d'API.** Tout le pilotage est couvert par un faux `kubectl` en shell — les arguments,
+le `PATH` de l'enfant, le refus, la référence morte — et la démo simule son cluster au même degré que
+son `runSql`. Ce qu'il reste à faire à la main, et qui est le seul geste qui prouve l'ensemble :
+déclarer un kubeconfig, ouvrir le visage Kubernetes, et **voir les trois listes se remplir** contre
+un cluster réel — puis mesurer ce que la première lecture coûte derrière un *exec credential plugin*,
+qui est la seule chose que le délai de vingt secondes anticipe sans l'avoir observée. Et le panneau
+sous WKWebView et en « Nuit », même réserve que les dix écrans.
+
+**Ce qui reste hors périmètre** : la sorte n'est pas lue au cluster (`kubectl api-resources`), pour
+la raison écrite plus haut ; et rien ne propose le **port** de la base d'après le service choisi,
+alors que `kubectl` le connaît — ce serait un troisième appel, sur un champ que le formulaire porte
+déjà et que l'utilisateur sait remplir.
+
 ### Les filtres suivent la colonne (3 septembre 2026)
 
 Le popover d'en-tête proposait **les mêmes cinq opérateurs à toutes les colonnes**, et les quatre
@@ -3453,9 +3583,15 @@ en déclare un, ce qui est le cas courant des fichiers engendrés par un outil.
 **La ressource est transmise telle quelle, jamais réécrite.** `kubectl` accepte `svc/postgres`,
 `pod/postgres-0`, `statefulset/postgres` ou un nom nu — qu'il lit comme un pod. La liste de ses
 types est la sienne et grandit sans nous, et le projet ne corrige aucune saisie : un `svc/` ajouté
-d'office viserait un service là où l'utilisateur nommait un pod. Le `placeholder` propose `svc/…`,
-qui survit à un redéploiement là où un nom de pod change, mais refuser un nom de pod interdirait le
-seul geste possible quand aucun service n'expose la base.
+d'office viserait un service là où l'utilisateur nommait un pod. Refuser un nom de pod interdirait
+d'ailleurs le seul geste possible quand aucun service n'expose la base.
+
+**Depuis `API-73` (18 septembre 2026), la chaîne est *composée* par deux listes** — une sorte et un
+nom —, ce qui ne contredit pas la phrase ci-dessus : nous composons une valeur, nous n'en corrigeons
+aucune, et une sorte que la liste ne propose pas reste lisible et modifiable. C'est là qu'est passée
+la recommandation de `svc/…`, que le `placeholder` portait : la liste des sortes ouvre sur
+« Service », qui survit à un redéploiement là où un nom de pod change. Voir « Le cluster remplit ses
+propres listes ».
 
 **`--pod-running-timeout` est passé à `kubectl`, et il doit rester sous notre propre délai.** C'est
 l'ordre des deux délais qui décide du message que l'utilisateur lit : `kubectl` attend qu'un pod soit
@@ -4836,6 +4972,13 @@ présenter comme vérifiées tant qu'un humain ne les a pas faites :
   chemin réellement non exercé : le lancement d'un *exec credential plugin*, donc la raison d'être de
   l'enrichissement du `PATH`. Le geste décisif est de lancer le bundle **depuis le Finder** et
   d'ouvrir une connexion GKE : c'est là, et seulement là, que le `PATH` est minimal.
+
+  **Et depuis `API-73`, le même geste doit d'abord regarder les trois listes se remplir** : espaces
+  de noms, sortes, objets. Elles sont lues par les mêmes commandes et par le même `PATH` enrichi que
+  le transfert, donc elles échouent et réussissent avec lui — mais elles échouent **plus tôt**, sur
+  un formulaire, ce qui en fait aussi le meilleur endroit où voir ce qu'un *exec credential plugin*
+  coûte à la première lecture. C'est la seule valeur que le délai de vingt secondes anticipe sans
+  l'avoir observée.
 - **Laisser une connexion mourir pour de vrai**, puis lire une table. Le correctif du 8 septembre
   2026 est exercé contre une session que `pg_terminate_backend` coupe — donc une coupure **franche
   et immédiate**. Les causes réelles ne le sont pas : mettre le Mac en veille une heure, débrancher
@@ -5125,15 +5268,18 @@ Aucun de ces points ne bloque le code en place.
   composé. **Et il porte un champ « Hôte » inemployé et non grisé**, là où le visage Kubernetes
   grise le sien : la cohérence demanderait de trancher les deux ensemble, ce qu'un passage de
   design fera mieux qu'un alignement décidé au passage.
-- **Le visage Kubernetes n'a pas été conçu non plus** (31 août 2026) : trois champs, leurs libellés
-  et leur cote sont inventés sur le patron du visage SSH — hauteurs de 28 px, espace de noms sur une
-  piste, kubeconfig et ressource sur la rangée entière. **Le champ de saisie du kubeconfig est
-  devenu une liste avec `API-70`** (18 septembre 2026), et la question du bouton « Parcourir… » s'est
-  déplacée avec lui : il vit désormais dans les préférences, où l'on déclare — donc le visage d'`A2`
-  n'en a toujours pas, et n'en a plus besoin. La cote de la liste est celle des autres `Select` du
-  formulaire, non un dessin nouveau. Ce qui manque le plus à l'œil reste le même : **rien ne dit à
-  l'écran quel contexte sera employé**, l'information n'existant que dans l'en-tête du journal, donc
-  seulement en cas d'échec. C'est la réserve qui reste après le retrait du champ « Contexte », et un
+- **Le visage Kubernetes n'a pas été conçu non plus** (31 août 2026) : ses champs, leurs libellés et
+  leur cote sont inventés sur le patron du visage SSH — hauteurs de 28 px, espace de noms sur la
+  rangée entière, kubeconfig sur une piste. **Le champ du kubeconfig est devenu une liste avec
+  `API-70`** (18 septembre 2026), et la question du bouton « Parcourir… » s'est déplacée avec lui :
+  il vit désormais dans les préférences, où l'on déclare — donc le visage d'`A2` n'en a toujours pas,
+  et n'en a plus besoin. **`API-73` y a ajouté un quatrième contrôle le même jour**, la sorte de la
+  ressource, sur une rangée à deux pistes `130px 1fr` : la première est celle de « Type » dans la
+  grille au-dessus, reprise pour que les deux listes du panneau s'alignent — une valeur choisie au
+  jugé aurait fait deux bords gauches à deux pixels l'un de l'autre. Les cotes des listes sont celles
+  des autres `Select` du formulaire, non un dessin nouveau. Ce qui manque le plus à l'œil reste le
+  même : **rien ne dit à l'écran quel contexte sera employé**, l'information n'existant que dans
+  l'en-tête du journal, donc seulement en cas d'échec. C'est la réserve qui reste après le retrait du champ « Contexte », et un
   rappel discret sous le fichier serait la vraie réponse ; l'inventer aurait été inventer un état que
   le handoff ne décrit pas.
 - **`export-types` voyage dans le bundle** — 6,3 Mo d'un outil de développement dans le `.app`

@@ -886,6 +886,54 @@ const KUBECONFIGS_DEMO: Kubeconfigs = {
   default: 'prod',
 }
 
+/**
+ * Ce que la démo « lit » d'un cluster (`API-73`).
+ *
+ * **Simulé au même degré que son `runSql`** : rien n'est exécuté, et les noms sont inventés comme
+ * tout décor de ce dépôt. Ce qu'il achète est que les trois listes du visage Kubernetes soient
+ * **visibles et mesurables** sans `kubectl` ni cluster — jsdom ne calcule aucune mise en page
+ * (règle n° 9), donc leur géométrie n'a pas d'autre juge que Playwright, et Playwright n'a pas de
+ * pont IPC.
+ *
+ * **Deux espaces de noms qui ne portent pas les mêmes objets**, et c'est le décor qui compte : avec
+ * une liste unique, changer d'espace de noms rendrait la même chose, donc un relevé pris au mauvais
+ * endroit serait indiscernable du bon (règle n° 5). Et un espace de noms **vide** — `bac-a-sable` —
+ * pour que l'état « aucun objet de cette sorte » existe quelque part.
+ *
+ * La réponse est **différée d'un tour**, sans quoi la lecture s'achèverait dans le tour synchrone de
+ * son appel et l'état « Lecture… » ne serait jamais rendu : un double qui répond tout de suite ne
+ * mesure rien (la leçon du chargeur du diagramme).
+ */
+const CLUSTER_DEMO: Record<string, Record<string, string[]>> = {
+  comptoir: {
+    service: ['postgres', 'postgres-replique', 'redis'],
+    pod: ['postgres-0', 'postgres-replique-0', 'redis-7d4b9f6c5-xk2ql'],
+    deployment: ['redis'],
+    statefulset: ['postgres', 'postgres-replique'],
+  },
+  'atelier-nord': {
+    service: ['mysql'],
+    pod: ['mysql-0'],
+    deployment: [],
+    statefulset: ['mysql'],
+  },
+  'bac-a-sable': { service: [], pod: [], deployment: [], statefulset: [] },
+}
+
+const CATALOGUE_KUBERNETES_DEMO = {
+  espacesDeNoms: async () => {
+    await Promise.resolve()
+    return Object.keys(CLUSTER_DEMO)
+  },
+  ressources: async (_kubeconfig: string, namespace: string, sorte: string) => {
+    await Promise.resolve()
+    // Un espace de noms vide vaut « celui de kubectl » : la démo prend le premier, comme un
+    // contexte en désignerait un.
+    const espace = CLUSTER_DEMO[namespace || 'comptoir']
+    return espace?.[sorte] ?? []
+  },
+}
+
 const INSTANCES_DEMO: ManagedInstance[] = [
   {
     id: 'pg-atelier',
@@ -1534,6 +1582,7 @@ export function WorkbenchDemo() {
       {edition && (
         <NewConnection
           kubeconfigs={kubeconfigs}
+          catalogueKubernetes={CATALOGUE_KUBERNETES_DEMO}
           onDeclareKubeconfig={async () => {
             // La démo ne déclare rien de réel : elle rend la référence d'une déclaration du décor,
             // au même degré que son `runSql` rend un résultat sans rien exécuter.
@@ -1565,6 +1614,7 @@ export function WorkbenchDemo() {
             environments: projet.environments,
           }))}
           kubeconfigs={kubeconfigs}
+          catalogueKubernetes={CATALOGUE_KUBERNETES_DEMO}
           onDeclareKubeconfig={async () => 'bac-a-sable'}
           onClose={() => setCreationOuverte(null)}
           onProjets={setProjets}
@@ -1880,6 +1930,7 @@ export function WorkbenchDemo() {
       {instanceOuverte !== null && (
         <NewInstance
           kubeconfigs={kubeconfigs}
+          catalogueKubernetes={CATALOGUE_KUBERNETES_DEMO}
           onDeclareKubeconfig={async () => 'bac-a-sable'}
           {...(instanceOuverte.instance === undefined ? {} : { edition: instanceOuverte.instance })}
           onClose={() => setInstanceOuverte(null)}

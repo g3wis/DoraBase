@@ -38,6 +38,7 @@ import styles from './NewConnection.module.css'
 import { ouvrirSelecteurDeCle } from './ouvrirSelecteurDeCle'
 import { TunnelPanel } from './TunnelPanel'
 import { codeDe, messageDe, testerLaConnexion } from './testerLaConnexion'
+import type { CatalogueKubernetes } from './useCatalogueKubernetes'
 
 type NewConnectionProps = {
   onClose: () => void
@@ -66,6 +67,11 @@ type NewConnectionProps = {
   kubeconfigs?: Kubeconfigs
   /** Déclare un kubeconfig et rend sa référence. Injectée pour la raison d'`onBrowseKey`. */
   onDeclareKubeconfig?: () => Promise<string | null>
+  /**
+   * Ce que l'hôte sait demander à `kubectl` pour remplir les listes du visage Kubernetes
+   * (`API-73`). Traversé tel quel, et absent hors de la webview.
+   */
+  catalogueKubernetes?: CatalogueKubernetes
   /** Le sélecteur du fichier de compte de service Google, injecté pour la même raison. */
   /**
    * Appelle la commande `test_connection`.
@@ -172,6 +178,7 @@ export function NewConnection({
   onBrowseKey = ouvrirSelecteurDeCle,
   kubeconfigs = {},
   onDeclareKubeconfig = async () => null,
+  catalogueKubernetes,
   onTest = testerLaConnexion,
   onSave = enregistrerLaBase,
   edition,
@@ -546,6 +553,7 @@ export function NewConnection({
         onBrowseKey={onBrowseKey}
         kubeconfigs={kubeconfigs}
         onDeclareKubeconfig={onDeclareKubeconfig}
+        {...(catalogueKubernetes === undefined ? {} : { catalogueKubernetes })}
       />
       <ConnectionForm
         draft={draft}

@@ -6,10 +6,15 @@ import type { Kubeconfigs } from '../../domain/config'
 import { LanguageProvider } from '../../i18n/LanguageContext'
 import { choisirDansLaListe, optionsDeLaListe } from '../../ui/Select/pourLesTests'
 import { NewConnection } from './NewConnection'
+import type { CatalogueKubernetes } from './useCatalogueKubernetes'
 
 function monter(
   onBrowseKey?: () => Promise<string | null>,
-  kube: { kubeconfigs?: Kubeconfigs; onDeclareKubeconfig?: () => Promise<string | null> } = {},
+  kube: {
+    kubeconfigs?: Kubeconfigs
+    onDeclareKubeconfig?: () => Promise<string | null>
+    catalogueKubernetes?: CatalogueKubernetes
+  } = {},
 ) {
   return render(
     <>
@@ -20,6 +25,9 @@ function monter(
           onBrowseKey={onBrowseKey ?? (async () => null)}
           kubeconfigs={kube.kubeconfigs ?? {}}
           onDeclareKubeconfig={kube.onDeclareKubeconfig ?? (async () => null)}
+          {...(kube.catalogueKubernetes === undefined
+            ? {}
+            : { catalogueKubernetes: kube.catalogueKubernetes })}
         />
       </LanguageProvider>
     </>,
@@ -89,13 +97,14 @@ test('le sélecteur de type propose les trois sortes', async () => {
   expect(await optionsDeLaListe('Type')).toEqual(['SSH', 'Cloud SQL', 'Kubernetes'])
 })
 
-test('le visage Kubernetes montre ses trois champs, et aucun de ceux des autres sortes', async () => {
+test('le visage Kubernetes montre ses quatre contrôles, et aucun de ceux des autres sortes', async () => {
   monter()
   const panneau = await choisirLeType('Kubernetes')
 
-  // Le kubeconfig est une **liste** depuis `API-70`, donc un `combobox` et non un champ de saisie :
-  // c'est le rôle qu'on interroge, pas la forme du contrôle.
+  // Le kubeconfig est une **liste** depuis `API-70`, la sorte depuis `API-73` : c'est le rôle qu'on
+  // interroge, pas la forme du contrôle.
   expect(panneau.getByRole('combobox', { name: 'Fichier kubeconfig' })).toBeInTheDocument()
+  expect(panneau.getByRole('combobox', { name: 'Sorte' })).toBeInTheDocument()
   for (const nom of ['Espace de noms', 'Ressource']) {
     expect(panneau.getByLabelText(nom)).toBeInTheDocument()
   }
@@ -122,12 +131,14 @@ test('les champs Kubernetes disent ce que leur vide vaut', async () => {
   const espace = panneau.getByLabelText('Espace de noms').getAttribute('placeholder') ?? ''
   expect(espace).toContain('default')
   expect(espace).toContain('contexte')
-  // La ressource, elle, est obligatoire : son placeholder enseigne la forme plutôt qu'une absence,
-  // et il propose `svc/` — qui survit à un redéploiement là où un nom de pod change.
-  expect(panneau.getByLabelText('Ressource')).toHaveAttribute(
-    'placeholder',
-    expect.stringContaining('svc/'),
-  )
+  // **La ressource ne demande plus que le nom** (`API-73`) : la sorte est la liste d'à côté, et
+  // c'est tout le point du ticket — « no writing pod/xxxx ». Le placeholder ne doit donc **pas**
+  // enseigner la forme `svc/…`, sinon il redemanderait ce que la liste porte déjà.
+  const ressource = panneau.getByLabelText('Ressource').getAttribute('placeholder') ?? ''
+  expect(ressource).not.toContain('/')
+  // Et la sorte proposée d'entrée est `Service`, celle qui survit à un redéploiement là où un nom
+  // de pod change — ce que le placeholder disait avant.
+  expect(panneau.getByRole('combobox', { name: 'Sorte' })).toHaveTextContent('Service')
 })
 
 test('aucun champ de contexte n’est proposé', async () => {
@@ -518,4 +529,180 @@ test('sans proxy Cloud SQL, ni le port ni le mot de passe ne sont grisés', asyn
   expect(port).toBeEnabled()
   expect((port as HTMLInputElement).value).toBe('5432')
   expect(screen.getByLabelText('Mot de passe')).toBeEnabled()
+})
+
+// --- Les listes lues au cluster (`API-73`) ---
+//
+// Ce que ces tests gardent est le **câblage** : quel contrôle est rendu selon ce qu'on sait, ce qui
+// part vers `kubectl` et quand, et ce qui est écrit dans `resource`. La géométrie — deux listes sur
+// une rangée — n'a pour juge que Playwright, jsdom ne calculant aucune mise en page (règle n° 9).
+
+/** Un cluster de test : deux espaces de noms, qui ne portent pas les mêmes objets. */
+const CLUSTER: Record<string, Record<string, string[]>> = {
+  comptoir: { service: ['postgres', 'redis'], pod: ['postgres-0'] },
+  atelier: { service: ['mysql'], pod: ['mysql-0'] },
+}
+
+/**
+ * Un catalogue qui répond, et qui **note ce qu'on lui a demandé**.
+ *
+ * Il diffère sa réponse d'un tour : un double qui répond dans le tour synchrone de son appel ne
+ * mesure rien — la lecture serait finie avant qu'on ait pu observer « Lecture… », et le test
+ * resterait vert en retirant l'état d'attente (la leçon du chargeur du diagramme).
+ */
+function catalogueQuiRepond() {
+  const appels: { namespace: string; sorte: string }[] = []
+  return {
+    appels,
+    catalogue: {
+      espacesDeNoms: async () => {
+        await Promise.resolve()
+        return Object.keys(CLUSTER)
+      },
+      ressources: async (_kubeconfig: string, namespace: string, sorte: string) => {
+        await Promise.resolve()
+        appels.push({ namespace, sorte })
+        return CLUSTER[namespace || 'comptoir']?.[sorte] ?? []
+      },
+    } satisfies CatalogueKubernetes,
+  }
+}
+
+test('sans catalogue, les deux champs restent des saisies et n’annoncent rien', async () => {
+  // **L'état de la galerie et des tests unitaires**, et c'est ce qui rend `API-73` sans effet là où
+  // il n'y a pas de pont : annoncer « la liste n'a pas pu être lue » sur un hôte qui ne sait rien
+  // demander serait annoncer une panne qui n'existe pas.
+  monter()
+  const panneau = await choisirLeType('Kubernetes')
+
+  expect(panneau.getByLabelText('Espace de noms').tagName).toBe('INPUT')
+  expect(panneau.getByLabelText('Ressource').tagName).toBe('INPUT')
+  expect(panneau.queryByRole('button', { name: 'Choisir dans la liste' })).not.toBeInTheDocument()
+  expect(panneau.queryByText(/n’a pas pu être lue/)).not.toBeInTheDocument()
+})
+
+test('avec un catalogue, les deux champs deviennent des listes portant ce que le cluster rend', async () => {
+  const { catalogue } = catalogueQuiRepond()
+  monter(undefined, { catalogueKubernetes: catalogue })
+  const panneau = await choisirLeType('Kubernetes')
+
+  // L'assemblage, et non la vitrine : ce qui est gardé est que le panneau **déclenche** la lecture
+  // en arrivant sur le visage, et qu'il en fasse des options.
+  await screen.findByRole('combobox', { name: 'Espace de noms' })
+  expect(await optionsDeLaListe('Espace de noms')).toEqual(
+    expect.arrayContaining(['comptoir', 'atelier']),
+  )
+  expect(await optionsDeLaListe('Ressource')).toEqual(expect.arrayContaining(['postgres', 'redis']))
+  expect(panneau.queryByRole('button', { name: 'Choisir dans la liste' })).not.toBeInTheDocument()
+})
+
+test('choisir un espace de noms relit les objets de celui-là, et non du précédent', async () => {
+  // **Le défaut que ce test existe pour attraper** : le panneau relit dans le geste même où il pose
+  // le nouvel espace de noms, donc avant le rendu suivant. Sans le passer explicitement, la lecture
+  // partirait avec l'espace de noms d'**avant** — une liste plausible, tirée du mauvais endroit.
+  const { appels, catalogue } = catalogueQuiRepond()
+  monter(undefined, { catalogueKubernetes: catalogue })
+  await choisirLeType('Kubernetes')
+  await screen.findByRole('combobox', { name: 'Espace de noms' })
+
+  await choisirDansLaListe('Espace de noms', 'atelier')
+  await vi.waitFor(() => expect(appels.at(-1)).toEqual({ namespace: 'atelier', sorte: 'service' }))
+})
+
+test('changer de sorte relit les objets de cette sorte', async () => {
+  const { appels, catalogue } = catalogueQuiRepond()
+  monter(undefined, { catalogueKubernetes: catalogue })
+  await choisirLeType('Kubernetes')
+  await screen.findByRole('combobox', { name: 'Ressource' })
+
+  await choisirDansLaListe('Sorte', 'Pod')
+  await vi.waitFor(() => expect(appels.at(-1)?.sorte).toBe('pod'))
+})
+
+test('choisir une sorte et un objet écrit « sorte/nom » dans la ressource', async () => {
+  // **Ce que le ticket demande**, mesuré sur ce qui part : « kind must become a dropdown as well,
+  // no writing pod/xxxx ». Le badge atteste que le proxy est déclaré ; la valeur écrite se relit
+  // dans la liste des sortes, seule trace de `resource` visible depuis le panneau.
+  const { catalogue } = catalogueQuiRepond()
+  monter(undefined, { catalogueKubernetes: catalogue })
+  const panneau = await choisirLeType('Kubernetes')
+  await screen.findByRole('combobox', { name: 'Ressource' })
+
+  await choisirDansLaListe('Sorte', 'Pod')
+  await vi.waitFor(async () =>
+    expect(await optionsDeLaListe('Ressource')).toEqual(expect.arrayContaining(['postgres-0'])),
+  )
+  await choisirDansLaListe('Ressource', 'postgres-0')
+
+  expect(panneau.getByText('Kubernetes activé')).toBeInTheDocument()
+  expect(panneau.getByRole('combobox', { name: 'Sorte' })).toHaveTextContent('Pod')
+  expect(panneau.getByRole('combobox', { name: 'Ressource' })).toHaveTextContent('postgres-0')
+})
+
+test('une lecture refusée laisse le champ saisissable, et dit pourquoi', async () => {
+  // La décision d'`API-73` : un poste sans `kubectl`, un cluster injoignable, un rôle sans droit de
+  // lister sont ordinaires devant un formulaire, et aucun ne doit empêcher de déclarer la connexion.
+  const catalogue: CatalogueKubernetes = {
+    espacesDeNoms: async () => {
+      throw { message: 'kubectl est introuvable' }
+    },
+    ressources: async () => {
+      throw { message: 'kubectl est introuvable' }
+    },
+  }
+  monter(undefined, { catalogueKubernetes: catalogue })
+  const panneau = await choisirLeType('Kubernetes')
+
+  await screen.findAllByText(/kubectl est introuvable/)
+  expect(panneau.getByLabelText('Ressource').tagName).toBe('INPUT')
+  // Et le geste de retour existe : le même bouton réessaie et ramène la liste — vouloir la liste et
+  // vouloir qu'on la relise sont le même souhait, donc un seul contrôle les porte.
+  expect(panneau.getAllByRole('button', { name: 'Choisir dans la liste' })).not.toHaveLength(0)
+
+  // Le champ reste **écrivable**, ce qui est tout l'objet du repli.
+  await userEvent.type(panneau.getByLabelText('Ressource'), 'postgres-0')
+  expect(panneau.getByText('Kubernetes activé')).toBeInTheDocument()
+})
+
+test('« Saisir à la main… » rend un champ, et le bouton ramène la liste', async () => {
+  const { catalogue } = catalogueQuiRepond()
+  monter(undefined, { catalogueKubernetes: catalogue })
+  const panneau = await choisirLeType('Kubernetes')
+  await screen.findByRole('combobox', { name: 'Ressource' })
+
+  await choisirDansLaListe('Ressource', 'Saisir à la main…')
+  expect(panneau.getByLabelText('Ressource').tagName).toBe('INPUT')
+
+  // Un objet qui n'existe **pas encore** est le cas le plus ordinaire de ce repli, et il ne doit
+  // rien refuser.
+  await userEvent.type(panneau.getByLabelText('Ressource'), 'postgres-a-venir-0')
+  expect(panneau.getByText('Kubernetes activé')).toBeInTheDocument()
+
+  await userEvent.click(panneau.getByRole('button', { name: 'Choisir dans la liste' }))
+  expect(await screen.findByRole('combobox', { name: 'Ressource' })).toBeInTheDocument()
+  // La valeur saisie **survit** au retour dans la liste, et s'y montre marquée : la vider ferait
+  // changer ce que la connexion joindra sans que personne l'ait demandé.
+  expect(await optionsDeLaListe('Ressource')).toEqual(
+    expect.arrayContaining([expect.stringContaining('postgres-a-venir-0')]),
+  )
+})
+
+test('un espace de noms sans objet de cette sorte laisse un champ, et le dit', async () => {
+  // Une liste déroulante qui n'offrirait que ses deux entrées d'action se lirait comme une panne ;
+  // le champ reste saisissable, et la phrase dit que la lecture a bien eu lieu.
+  const catalogue: CatalogueKubernetes = {
+    espacesDeNoms: async () => {
+      await Promise.resolve()
+      return ['vide']
+    },
+    ressources: async () => {
+      await Promise.resolve()
+      return []
+    },
+  }
+  monter(undefined, { catalogueKubernetes: catalogue })
+  const panneau = await choisirLeType('Kubernetes')
+
+  await screen.findByText(/Aucun objet de cette sorte/)
+  expect(panneau.getByLabelText('Ressource').tagName).toBe('INPUT')
 })

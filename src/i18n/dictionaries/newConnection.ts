@@ -70,8 +70,21 @@ export const newConnectionFr: Dictionnaire = {
     kubeconfigRetire: ({ reference }: Record<string, string | number>) => `${reference} — retiré`,
     namespaceLabel: 'Espace de noms',
     namespacePlaceholder: 'vide : « default », ou celui que le contexte déclare',
+    resourceKindLabel: 'Sorte',
     resourceLabel: 'Ressource',
-    resourcePlaceholder: 'svc/postgres — ou pod/postgres-0',
+    resourcePlaceholder: 'postgres — le nom de l’objet',
+    resourceAChoisir: 'À choisir',
+    // Les entrées qui **agissent** dans les deux listes lues au cluster (`API-73`), et ce qui se
+    // dit d'une lecture qui n'a rien rendu ou qui a échoué.
+    catalogueRafraichir: 'Rafraîchir la liste',
+    catalogueALaMain: 'Saisir à la main…',
+    catalogueChoisir: 'Choisir dans la liste',
+    catalogueEnLecture: 'Lecture…',
+    catalogueAbsent: ({ nom }: Record<string, string | number>) => `${nom} — absent du cluster`,
+    catalogueEchec: ({ raison }: Record<string, string | number>) =>
+      `La liste n’a pas pu être lue : ${raison}. Saisissez le nom à la main, ou réessayez.`,
+    catalogueAucunEspace: 'Aucun espace de noms lu sur ce cluster.',
+    catalogueAucuneRessource: 'Aucun objet de cette sorte dans cet espace de noms.',
     kubernetesHintPrefix: 'Le transfert passe par le',
     kubernetesHintSuffix:
       " installé sur cette machine. Le champ « Port » est celui de la base *dans le pod* ; l'hôte n'est pas employé, c'est la ressource qui la désigne. Déclarez vos fichiers kubeconfig dans les préférences, section « Connexions » : une application n'hérite pas du $KUBECONFIG de votre terminal.",
@@ -175,8 +188,19 @@ export const newConnectionEn: Dictionnaire = {
     kubeconfigRetire: ({ reference }: Record<string, string | number>) => `${reference} — removed`,
     namespaceLabel: 'Namespace',
     namespacePlaceholder: 'empty: “default”, or the one the context declares',
+    resourceKindLabel: 'Kind',
     resourceLabel: 'Resource',
-    resourcePlaceholder: 'svc/postgres — or pod/postgres-0',
+    resourcePlaceholder: 'postgres — the object’s name',
+    resourceAChoisir: 'Pick one',
+    catalogueRafraichir: 'Refresh the list',
+    catalogueALaMain: 'Type it in…',
+    catalogueChoisir: 'Pick from the list',
+    catalogueEnLecture: 'Reading…',
+    catalogueAbsent: ({ nom }: Record<string, string | number>) => `${nom} — not on the cluster`,
+    catalogueEchec: ({ raison }: Record<string, string | number>) =>
+      `The list could not be read: ${raison}. Type the name in, or try again.`,
+    catalogueAucunEspace: 'No namespace was read on this cluster.',
+    catalogueAucuneRessource: 'No object of this kind in this namespace.',
     kubernetesHintPrefix: 'Forwarding goes through the',
     kubernetesHintSuffix:
       ' installed on this machine. The “Port” field is the database’s port *inside the pod*; the host is not used — the resource locates it. Declare your kubeconfig files in Preferences, “Connections”: an application does not inherit your terminal’s $KUBECONFIG.',

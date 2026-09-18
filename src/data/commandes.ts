@@ -165,6 +165,39 @@ export async function saveKubeconfigs(kubeconfigs: Kubeconfigs): Promise<Kubecon
   return appeler<Kubeconfigs>('save_kubeconfigs', { kubeconfigs })
 }
 
+/**
+ * Les espaces de noms du cluster que ce kubeconfig désigne (`API-73`).
+ *
+ * **Appelée pendant qu'on remplit `A2`**, donc sans triplet et sans connexion ouverte : une
+ * référence de kubeconfig suffit à désigner un cluster.
+ *
+ * **Le rejet est une réponse, pas une panne.** Un poste sans `kubectl`, un cluster injoignable, un
+ * rôle sans droit de lister : les trois sont ordinaires devant un formulaire, et l'écran rend alors
+ * le champ saisissable en disant pourquoi. C'est pour cela que le cœur refuse plutôt que de rendre
+ * une liste vide, qui se lirait comme un cluster sans espace de noms.
+ */
+export async function listKubernetesNamespaces(kubeconfig: string): Promise<string[]> {
+  return appeler<string[]>('list_kubernetes_namespaces', { kubeconfig: kubeconfig || null })
+}
+
+/**
+ * Les objets d'une sorte donnée, dans un espace de noms (`API-73`).
+ *
+ * **Les noms seuls**, sans le préfixe de type : c'est `A2` qui recompose `sorte/nom`, la sorte
+ * venant de sa propre liste. Voir `ressourceKubernetes.ts`.
+ */
+export async function listKubernetesResources(
+  kubeconfig: string,
+  namespace: string,
+  kind: string,
+): Promise<string[]> {
+  return appeler<string[]>('list_kubernetes_resources', {
+    kubeconfig: kubeconfig || null,
+    namespace: namespace || null,
+    kind,
+  })
+}
+
 export async function closeDatabase(key: DatabaseKey): Promise<void> {
   return appeler<void>('close_database', { key })
 }

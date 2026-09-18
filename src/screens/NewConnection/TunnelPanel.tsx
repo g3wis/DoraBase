@@ -1,13 +1,16 @@
-import { useId } from 'react'
+import { useId, useState } from 'react'
 import type { Kubeconfigs } from '../../domain/config'
 import { useT } from '../../i18n/LanguageContext'
 import { Badge } from '../../ui/Badge/Badge'
 import { CollapsiblePanel } from '../../ui/CollapsiblePanel/CollapsiblePanel'
 import { Field } from '../../ui/Field/Field'
 import { Select } from '../../ui/Select/Select'
+import { ChampCatalogue } from './ChampCatalogue'
 import { emptyProxy, type ProxyDraft, type ProxyKind, type TunnelDraft } from './ConnectionDraft'
 import { AUTRE_FICHIER, optionsDeKubeconfig } from './kubeconfigs'
 import styles from './NewConnection.module.css'
+import { composerRessource, decomposerRessource, optionsDeSorte } from './ressourceKubernetes'
+import { type CatalogueKubernetes, useCatalogueKubernetes } from './useCatalogueKubernetes'
 
 type TunnelPanelProps = {
   /** `null` quand la connexion ne passe par aucun proxy. */
@@ -52,6 +55,15 @@ type TunnelPanelProps = {
    * hors de la webview, et la commande qui déclare écrit dans la configuration.
    */
   onDeclareKubeconfig: () => Promise<string | null>
+  /**
+   * Ce que l'hôte sait demander à `kubectl` pour remplir les listes du visage Kubernetes
+   * (`API-73`).
+   *
+   * **Facultatif, et son absence est un état** : la galerie et les tests unitaires n'ont pas de
+   * pont, donc les deux champs y restent ce qu'ils étaient — des champs de saisie, sans bouton ni
+   * explication. Injecté pour la raison d'`onBrowseKey`.
+   */
+  catalogueKubernetes?: CatalogueKubernetes
 }
 
 /**
@@ -78,6 +90,7 @@ export function TunnelPanel({
   onBrowseKey,
   kubeconfigs,
   onDeclareKubeconfig,
+  catalogueKubernetes,
 }: TunnelPanelProps) {
   const t = useT()
   const aideId = useId()
@@ -113,6 +126,53 @@ export function TunnelPanel({
     'cloud-sql': t('newConnection.tunnel.badges.cloudSql'),
     kubernetes: t('newConnection.tunnel.badges.kubernetes'),
   }
+
+  /**
+   * Les deux moitiés de la ressource, **dérivées** de la chaîne enregistrée (`API-73`).
+   *
+   * Le brouillon ne porte que `resource` : rouvrir une connexion sans toucher à ce visage la laisse
+   * intacte au caractère près. Voir `ressourceKubernetes.ts`.
+   */
+  const ecrite = decomposerRessource(proxy.kind === 'kubernetes' ? proxy.resource : '')
+
+  /**
+   * La sorte **qu'on parcourt**, quand aucun objet n'est encore nommé.
+   *
+   * C'est le seul état que ce visage tient à côté du brouillon, et il est nécessaire : une ressource
+   * vide n'a pas de sorte à porter — `composerRessource` rend le vide plutôt que `service/`, pour
+   * que le refus du cœur garde sa phrase utile. Sans lui, choisir « Pod » avant d'avoir un nom
+   * n'écrirait rien, donc **ne changerait rien**, et la liste retomberait sur « Service » sous le
+   * doigt qui vient d'en choisir une autre — un contrôle inerte, le défaut n° 36.
+   *
+   * Dès qu'un objet est nommé, c'est la chaîne qui fait foi : il n'y a alors qu'une vérité, et c'est
+   * celle qui partira à `kubectl`. Initialisé depuis la ressource pour qu'effacer un nom rende la
+   * sorte qui était enregistrée, et non celle d'un formulaire neuf.
+   */
+  const [sorteParcourue, setSorteParcourue] = useState(ecrite.sorte)
+  const sorte = ecrite.nom === '' ? sorteParcourue : ecrite.sorte
+  const nom = ecrite.nom
+  const espaceDeNoms = proxy.kind === 'kubernetes' ? proxy.namespace : ''
+  const kubeconfigChoisi = proxy.kind === 'kubernetes' ? proxy.kubeconfig : ''
+
+  // Ce que l'hôte sait demander. Faux dans la galerie et sous Vitest : les deux champs y restent ce
+  // qu'ils étaient avant `API-73`, sans bouton ni explication — annoncer une panne là où il n'y a
+  // pas de pont serait mentir.
+  const disponibleKubernetes = catalogueKubernetes !== undefined
+
+  /**
+   * Ce que le cluster contient, lu quand le visage Kubernetes est **à l'écran** — donc panneau
+   * déplié et sorte choisie, jamais autrement : chaque lecture est une requête authentifiée.
+   *
+   * Le hook est appelé inconditionnellement, comme tout hook : c'est `actif` qui décide, et non un
+   * appel conditionnel que React refuserait.
+   */
+  const catalogue = useCatalogueKubernetes({
+    actif: open && proxy.kind === 'kubernetes',
+    ...(catalogueKubernetes === undefined ? {} : { catalogue: catalogueKubernetes }),
+    kubeconfig: kubeconfigChoisi,
+    namespace: espaceDeNoms,
+    sorte,
+  })
 
   /**
    * Ouvre un sélecteur natif, et applique ce qu'il rend.
@@ -267,25 +327,59 @@ export function TunnelPanel({
                     ce que la rangée lui donne de trop ne coûte rien, cette rangée étant déjà à
                     `1fr` unique. Placé avant la ressource, qui est la coordonnée la plus fine des
                     trois : contexte, espace de noms, ressource. */}
-                <Field
+                <ChampCatalogue
                   label={t('newConnection.tunnel.namespaceLabel')}
-                  size="sm"
-                  mono
-                  placeholder={t('newConnection.tunnel.namespacePlaceholder')}
                   value={proxy.namespace}
-                  onChange={(event) => onProxyChange({ ...proxy, namespace: event.target.value })}
+                  piste={catalogue.espaces}
+                  disponible={disponibleKubernetes}
+                  placeholder={t('newConnection.tunnel.namespacePlaceholder')}
+                  /* Le vide **est** une valeur ici — « celui que kubectl emploierait » —, donc la
+                     liste lui donne son entrée, comme la liste des kubeconfigs donne la sienne à
+                     « Celui de kubectl ». */
+                  videLibelle={t('newConnection.tunnel.namespacePlaceholder')}
+                  videMessage={t('newConnection.tunnel.catalogueAucunEspace')}
+                  onChange={(valeur, origine) => {
+                    onProxyChange({ ...proxy, namespace: valeur })
+                    // **Seulement depuis la liste** : à la frappe, `prod` enverrait quatre
+                    // requêtes authentifiées. L'espace de noms est passé explicitement — le lire
+                    // dans l'état donnerait celui d'avant, ce rendu n'ayant pas encore eu lieu.
+                    if (origine === 'liste') catalogue.relireLesRessourcesPour(valeur)
+                  }}
                 />
-                {/* La ressource prend la rangée entière : `statefulset/postgres-principal` tient
-                    mal dans une colonne, et c'est le seul champ obligatoire de ce visage. */}
-                <Field
-                  label={t('newConnection.tunnel.resourceLabel')}
-                  size="sm"
-                  mono
-                  aria-describedby={aideId}
-                  placeholder={t('newConnection.tunnel.resourcePlaceholder')}
-                  value={proxy.resource}
-                  onChange={(event) => onProxyChange({ ...proxy, resource: event.target.value })}
-                />
+                {/* **La sorte et le nom, deux listes pour une seule chaîne** (`API-73`). La sorte
+                    prend la piste étroite — « StatefulSet » est le plus long des quatre libellés —
+                    et le nom le reste : `postgres-principal-0` tient mal dans une colonne, et c'est
+                    la moitié qu'on lit. Ce que l'union des deux écrit est `resource`, inchangée
+                    dans le modèle. */}
+                <div className={styles.tunnelResourceRow}>
+                  <Select
+                    label={t('newConnection.tunnel.resourceKindLabel')}
+                    size="sm"
+                    options={optionsDeSorte(sorte)}
+                    value={sorte}
+                    onValueChange={(choix) => {
+                      setSorteParcourue(choix)
+                      onProxyChange({ ...proxy, resource: composerRessource(choix, nom) })
+                    }}
+                  />
+                  <ChampCatalogue
+                    label={t('newConnection.tunnel.resourceLabel')}
+                    value={nom}
+                    piste={catalogue.ressources}
+                    disponible={disponibleKubernetes}
+                    placeholder={t('newConnection.tunnel.resourcePlaceholder')}
+                    /* **Pas d'entrée du vide une fois un objet choisi** : le vide n'est pas une
+                       valeur pour la ressource, c'est son absence — et ce visage n'a rien d'autre
+                       d'obligatoire. Tant que rien n'est choisi, l'entrée existe, sans quoi la
+                       liste afficherait un libellé vide. */
+                    videLibelle={nom === '' ? t('newConnection.tunnel.resourceAChoisir') : null}
+                    videMessage={t('newConnection.tunnel.catalogueAucuneRessource')}
+                    aideId={aideId}
+                    onChange={(valeur) =>
+                      onProxyChange({ ...proxy, resource: composerRessource(sorte, valeur) })
+                    }
+                  />
+                </div>
                 {/* **Deux faits qu'aucun champ ne dit et qu'on ne devine pas.** Que le transfert
                     dépende d'un `kubectl` installé sur la machine — donc qu'une absence
                     d'installation soit la première chose à vérifier. Et que le champ « Port » du

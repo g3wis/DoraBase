@@ -849,6 +849,74 @@ pub async fn export_result(
     Ok(octets)
 }
 
+/// Les espaces de noms du cluster que ce kubeconfig désigne (`API-73`).
+///
+/// **Appelée pendant qu'on *remplit* `A2`, donc avant qu'aucune connexion n'existe** : elle ne prend
+/// pas de triplet et ne touche pas au registre. La référence de kubeconfig suffit à désigner un
+/// cluster, et c'est tout ce que la liste a besoin de savoir.
+///
+/// **L'échec remonte tel quel, et c'est le contrat avec l'écran.** Un poste sans `kubectl`, un
+/// cluster injoignable, un rôle sans droit de lister : les trois sont ordinaires devant un
+/// formulaire, et aucun ne doit empêcher de déclarer la connexion. `A2` rend alors le champ
+/// saisissable **en disant pourquoi** — d'où une erreur plutôt qu'une liste vide, que l'écran
+/// prendrait pour un cluster sans espace de noms.
+#[tauri::command]
+pub async fn list_kubernetes_namespaces(
+    app: tauri::AppHandle,
+    kubeconfig: Option<String>,
+) -> Result<Vec<String>, EngineError> {
+    let binaire = crate::engine::kubernetes::binaire::localiser()?;
+    let kubeconfigs = contexte_de_proxy(&app).kubeconfigs;
+    let lus = crate::engine::kubernetes::catalogue::espaces_de_noms(
+        &binaire,
+        kubeconfig.as_deref(),
+        &kubeconfigs,
+    )
+    .await;
+    // Le **compte**, jamais les noms : un espace de noms nomme un projet, un client, une équipe, et
+    // un journal ne doit pas devenir une copie du cluster. Même règle que pour les colonnes d'un
+    // export.
+    log::info!(
+        "list_kubernetes_namespaces → {}",
+        match &lus {
+            Ok(noms) => format!("{} espace(s) de noms", noms.len()),
+            Err(erreur) => format!("échec ({erreur})"),
+        }
+    );
+    lus
+}
+
+/// Les objets d'une sorte donnée, dans un espace de noms (`API-73`).
+///
+/// La **sorte** vient de la liste d'`A2` et le **nom** de celle-ci : c'est l'écran qui recompose
+/// `sorte/nom` pour le champ « Ressource ». Voir `catalogue::noms` pour la raison de ce partage.
+#[tauri::command]
+pub async fn list_kubernetes_resources(
+    app: tauri::AppHandle,
+    kubeconfig: Option<String>,
+    namespace: Option<String>,
+    kind: String,
+) -> Result<Vec<String>, EngineError> {
+    let binaire = crate::engine::kubernetes::binaire::localiser()?;
+    let kubeconfigs = contexte_de_proxy(&app).kubeconfigs;
+    let lus = crate::engine::kubernetes::catalogue::ressources(
+        &binaire,
+        kubeconfig.as_deref(),
+        namespace.as_deref(),
+        &kind,
+        &kubeconfigs,
+    )
+    .await;
+    log::info!(
+        "list_kubernetes_resources ({kind}) → {}",
+        match &lus {
+            Ok(noms) => format!("{} objet(s)", noms.len()),
+            Err(erreur) => format!("échec ({erreur})"),
+        }
+    );
+    lus
+}
+
 fn repertoire_de_configuration(app: &tauri::AppHandle) -> Result<std::path::PathBuf, EngineError> {
     use tauri::Manager;
     app.path()

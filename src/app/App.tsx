@@ -1,9 +1,11 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import {
   createConsole,
   declareKubeconfig,
   deleteConsole,
   deleteInstance,
+  listKubernetesNamespaces,
+  listKubernetesResources,
   renameConsole,
   saveConsole,
   saveInstance,
@@ -268,6 +270,23 @@ export function App() {
   }
 
   /**
+   * Ce que l'application sait demander à `kubectl` pour les listes du visage Kubernetes (`API-73`).
+   *
+   * **Mémoïsé, et ce n'est pas de l'optimisation** : `useCatalogueKubernetes` garde cet objet hors
+   * de ses dépendances d'effet précisément parce qu'un appelant peut le reconstruire à chaque rendu
+   * — c'est le piège de `10d`, désarmé à la source. Le mémoïser ici est la ceinture, comme la démo
+   * mémoïse sa passerelle de transaction : gratuit, et le jour où le hook cesserait de se garder,
+   * ce n'est pas une boucle de requêtes authentifiées qu'on veut découvrir en production.
+   */
+  const catalogueKubernetes = useMemo(
+    () => ({
+      espacesDeNoms: listKubernetesNamespaces,
+      ressources: listKubernetesResources,
+    }),
+    [],
+  )
+
+  /**
    * « Ajouter un fichier… » : choisir un kubeconfig et le déclarer.
    *
    * **Le sélecteur natif n'est pas testable**, même angle mort que « Parcourir… » de la clé privée
@@ -453,6 +472,7 @@ export function App() {
                 : { edition: instanceOuverte.instance })}
               kubeconfigs={kubeconfigs}
               onDeclareKubeconfig={declarerUnKubeconfigEtRendreSaReference}
+              catalogueKubernetes={catalogueKubernetes}
               onClose={() => setInstanceOuverte(null)}
               onEnregistrer={async (requete) => {
                 setInstances(
@@ -519,6 +539,7 @@ export function App() {
                 : { environnement: connexionOuverte.environment })}
               kubeconfigs={kubeconfigs}
               onDeclareKubeconfig={declarerUnKubeconfigEtRendreSaReference}
+              catalogueKubernetes={catalogueKubernetes}
               onSaved={setProjects}
             />
           )}
@@ -560,6 +581,7 @@ export function App() {
           projets={projetsPourLesEcrans}
           kubeconfigs={kubeconfigs}
           onDeclareKubeconfig={declarerUnKubeconfigEtRendreSaReference}
+          catalogueKubernetes={catalogueKubernetes}
           onClose={() => setProjetOuvert(null)}
           onProjets={setProjects}
         />
