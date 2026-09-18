@@ -93,7 +93,16 @@ struct Recette {
     moteur: crate::config::Engine,
     variante: ConnectionSettings,
     mot_de_passe: Option<Secret>,
-    known_hosts: std::path::PathBuf,
+    /// Ce que la couche proxy a besoin de savoir de son environnement — clés d'hôte SSH et
+    /// kubeconfigs déclarés.
+    ///
+    /// **Figé à l'ouverture réussie**, comme le `known_hosts` qu'il remplace. Conséquence à
+    /// connaître (`API-70`) : déplacer un kubeconfig dans les préférences pendant qu'une connexion
+    /// est ouverte ne change rien pour elle, et une **reconnexion** rejouerait l'ancien chemin. Le
+    /// cas est étroit — il faut que la connexion tombe entre les deux — et il échoue bruyamment,
+    /// `kubectl` ne trouvant pas le fichier. Relire les déclarations ici demanderait au registre de
+    /// connaître le magasin de configuration, qu'il ignore délibérément.
+    contexte: crate::engine::proxy::ContexteDeProxy,
 }
 
 /// L'issue d'un essai, du point de vue de `avec`.
@@ -235,7 +244,7 @@ impl ConnectionRegistry {
         moteur: crate::config::Engine,
         variante: &ConnectionSettings,
         mot_de_passe: Option<&Secret>,
-        known_hosts: &std::path::Path,
+        contexte: &crate::engine::proxy::ContexteDeProxy,
     ) -> Result<(), EngineError> {
         if self.ouvertes.lock().await.contains_key(cle) {
             return Ok(());
@@ -246,7 +255,7 @@ impl ConnectionRegistry {
             .await
             .insert(cle.to_owned(), ConnectionState::Connecting);
 
-        match AnyEngine::connect_via(moteur, variante, mot_de_passe, known_hosts).await {
+        match AnyEngine::connect_via(moteur, variante, mot_de_passe, contexte).await {
             Ok(adaptateur) => {
                 let sonde = adaptateur.probe().await;
                 let (version, port) = match sonde {
@@ -291,7 +300,7 @@ impl ConnectionRegistry {
                         moteur,
                         variante: variante.clone(),
                         mot_de_passe: mot_de_passe.cloned(),
-                        known_hosts: known_hosts.to_path_buf(),
+                        contexte: contexte.clone(),
                     },
                 );
                 Ok(())
@@ -415,7 +424,7 @@ impl ConnectionRegistry {
                     recette.moteur,
                     &recette.variante,
                     recette.mot_de_passe.as_ref(),
-                    &recette.known_hosts,
+                    &recette.contexte,
                 )
                 .await
             }
@@ -674,7 +683,7 @@ impl ConnectionRegistry {
             recette.moteur,
             &variante,
             recette.mot_de_passe.as_ref(),
-            &recette.known_hosts,
+            &recette.contexte,
         )
         .await?;
 
@@ -1139,7 +1148,7 @@ mod tests_transaction {
                 Engine::Sqlite,
                 &variante,
                 None,
-                std::path::Path::new("/aucun/known_hosts"),
+                &crate::engine::proxy::ContexteDeProxy::pour_les_tests(),
             )
             .await
             .expect("un fichier SQLite doit s'ouvrir");
@@ -1834,10 +1843,10 @@ mod tests_db {
             .map(|octets| Secret::new(String::from_utf8_lossy(octets).into_owned()))
     }
 
-    fn known_hosts() -> std::path::PathBuf {
-        // Aucun tunnel dans ces tests : le chemin n'est jamais lu, mais le passer explicitement
-        // évite de toucher le `~/.ssh/known_hosts` de la machine.
-        std::path::PathBuf::from("/aucun/known_hosts")
+    fn contexte() -> crate::engine::proxy::ContexteDeProxy {
+        // Aucun tunnel dans ces tests : ni les clés d'hôte ni les kubeconfigs ne sont lus, mais
+        // les passer explicitement évite de toucher le `~/.ssh/known_hosts` de la machine.
+        crate::engine::proxy::ContexteDeProxy::pour_les_tests()
     }
 
     /// **Le point du registre.** `09d` déplie un schéma puis une table : chaque commande
@@ -1866,7 +1875,7 @@ mod tests_db {
                 crate::config::Engine::PostgreSql,
                 &variante(),
                 secret().as_ref(),
-                &known_hosts(),
+                &contexte(),
             )
             .await
             .expect("ouverture");
@@ -1910,7 +1919,7 @@ mod tests_db {
                 crate::config::Engine::PostgreSql,
                 &variante(),
                 secret().as_ref(),
-                &known_hosts(),
+                &contexte(),
             )
             .await
             .expect("la base de test doit s'ouvrir");
@@ -1977,7 +1986,7 @@ mod tests_db {
                 crate::config::Engine::PostgreSql,
                 &variante(),
                 secret().as_ref(),
-                &known_hosts(),
+                &contexte(),
             )
             .await
             .expect("la base de test doit s'ouvrir");
@@ -2123,7 +2132,7 @@ mod tests_db {
                 crate::config::Engine::PostgreSql,
                 &variante(),
                 secret().as_ref(),
-                &known_hosts(),
+                &contexte(),
             )
             .await
             .expect("ouverture");
@@ -2185,7 +2194,7 @@ mod tests_db {
                 crate::config::Engine::PostgreSql,
                 &variante(),
                 secret().as_ref(),
-                &known_hosts(),
+                &contexte(),
             )
             .await
             .expect("ouverture");
@@ -2227,7 +2236,7 @@ mod tests_db {
                 crate::config::Engine::PostgreSql,
                 &variante(),
                 secret().as_ref(),
-                &known_hosts(),
+                &contexte(),
             )
             .await
             .expect("ouverture");
@@ -2260,7 +2269,7 @@ mod tests_db {
                 crate::config::Engine::PostgreSql,
                 &variante(),
                 secret().as_ref(),
-                &known_hosts(),
+                &contexte(),
             )
             .await
             .expect("ouverture");
@@ -2337,7 +2346,7 @@ mod tests_db {
                 crate::config::Engine::PostgreSql,
                 &variante(),
                 secret().as_ref(),
-                &known_hosts(),
+                &contexte(),
             )
             .await
             .expect("ouverture");
@@ -2374,7 +2383,7 @@ mod tests_db {
                 crate::config::Engine::PostgreSql,
                 &variante(),
                 secret().as_ref(),
-                &known_hosts(),
+                &contexte(),
             )
             .await
             .expect("première ouverture");
@@ -2387,7 +2396,7 @@ mod tests_db {
                 crate::config::Engine::PostgreSql,
                 &cassee,
                 None,
-                &known_hosts(),
+                &contexte(),
             )
             .await
             .expect("la seconde ouverture doit rendre sans rien tenter");
@@ -2414,7 +2423,7 @@ mod tests_db {
                 crate::config::Engine::PostgreSql,
                 &variante(),
                 secret().as_ref(),
-                &known_hosts(),
+                &contexte(),
             )
             .await
             .expect("ouverture");
@@ -2443,7 +2452,7 @@ mod tests_db {
                 crate::config::Engine::PostgreSql,
                 &muette,
                 None,
-                &known_hosts(),
+                &contexte(),
             )
             .await
             .expect_err("un port fermé doit échouer");
@@ -2454,7 +2463,7 @@ mod tests_db {
                 crate::config::Engine::PostgreSql,
                 &variante(),
                 secret().as_ref(),
-                &known_hosts(),
+                &contexte(),
             )
             .await
             .expect("la base joignable doit s'ouvrir malgré l'échec de l'autre");
@@ -2482,7 +2491,7 @@ mod tests_db {
                 crate::config::Engine::PostgreSql,
                 &variante(),
                 secret().as_ref(),
-                &known_hosts(),
+                &contexte(),
             )
             .await
             .expect("ouverture");
@@ -2503,7 +2512,7 @@ mod tests_db {
                 crate::config::Engine::PostgreSql,
                 &variante(),
                 secret().as_ref(),
-                &known_hosts(),
+                &contexte(),
             )
             .await
             .expect("ouverture");
@@ -2536,7 +2545,7 @@ mod tests_db {
                 crate::config::Engine::PostgreSql,
                 &inconnue,
                 secret().as_ref(),
-                &known_hosts(),
+                &contexte(),
             )
             .await
             .expect_err("une base inconnue doit échouer");
@@ -2565,7 +2574,7 @@ mod tests_db {
                 crate::config::Engine::PostgreSql,
                 &mauvaise,
                 Some(&Secret::new(sentinelle)),
-                &known_hosts(),
+                &contexte(),
             )
             .await
             .expect_err("un utilisateur inexistant doit échouer");

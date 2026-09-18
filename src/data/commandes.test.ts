@@ -33,6 +33,7 @@ test('un fichier absent donne un état neuf sans projet', () => {
     projects: [],
     preferences: PREFERENCES_PAR_DEFAUT,
     instances: [],
+    kubeconfigs: {},
   })
 })
 
@@ -51,12 +52,14 @@ test('un fichier lu rend ses projets', () => {
       projects: projets,
       preferences: PREFERENCES_PAR_DEFAUT,
       instances: [],
+      kubeconfigs: {},
     }),
   ).toEqual({
     kind: 'loaded',
     projects: projets,
     preferences: PREFERENCES_PAR_DEFAUT,
     instances: [],
+    kubeconfigs: {},
   })
 })
 

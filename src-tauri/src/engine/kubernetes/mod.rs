@@ -40,7 +40,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::config::ProxyKubernetes;
+use crate::config::{Kubeconfigs, ProxyKubernetes};
 use crate::engine::journal::Journal;
 use crate::engine::port;
 use crate::engine::programme;
@@ -132,6 +132,7 @@ impl KubernetesProxy {
         proxy: &ProxyKubernetes,
         port_local_demande: Option<u16>,
         port_cible: u16,
+        kubeconfigs: &Kubeconfigs,
     ) -> Result<Self, EngineError> {
         // **`localiser` d'abord, `controler` ensuite** — dans cet ordre, comme `CloudSqlProxy`
         // met `localiser` avant `identifiants::controler`. Sur un poste sans `kubectl` *et* sans
@@ -143,7 +144,7 @@ impl KubernetesProxy {
         // ici en ferait un contrôle écrit deux fois, dont l'un pourrait cesser d'être appelé sans
         // que rien le dise.
         let binaire = binaire::localiser()?;
-        Self::ouvrir_avec(&binaire, proxy, port_local_demande, port_cible).await
+        Self::ouvrir_avec(&binaire, proxy, port_local_demande, port_cible, kubeconfigs).await
     }
 
     /// La même chose, avec le binaire en paramètre.
@@ -156,12 +157,14 @@ impl KubernetesProxy {
         proxy: &ProxyKubernetes,
         port_local_demande: Option<u16>,
         port_cible: u16,
+        kubeconfigs: &Kubeconfigs,
     ) -> Result<Self, EngineError> {
         Self::ouvrir_avec_delai(
             binaire,
             proxy,
             port_local_demande,
             port_cible,
+            kubeconfigs,
             DELAI_DEMARRAGE,
         )
         .await
@@ -174,14 +177,23 @@ impl KubernetesProxy {
         proxy: &ProxyKubernetes,
         port_local_demande: Option<u16>,
         port_cible: u16,
+        kubeconfigs: &Kubeconfigs,
         delai: Duration,
     ) -> Result<Self, EngineError> {
         controler(proxy, port_cible)?;
+        // **La référence est résolue ici, et une seule fois** (`API-70`) : c'est le chemin par
+        // lequel passent les trois formes d'ouverture, comme `controler` juste au-dessus. La
+        // résoudre plus haut la ferait exister en deux exemplaires ; plus bas, `arguments` et
+        // `entete` la résoudraient chacun de leur côté et pourraient diverger — or ce sont
+        // exactement les deux endroits qui doivent nommer le **même** fichier, faute de quoi
+        // l'en-tête affirme un cluster qui n'est pas celui qu'on joint.
+        let declare = resoudre(proxy, kubeconfigs)?;
         let port_demande = port::choisir_port_libre(port_local_demande).await?;
 
         let mut commande = programme::commande_asynchrone(binaire);
         commande.args(arguments(
             proxy,
+            declare,
             port_demande,
             port_cible,
             delai_du_pod(delai),
@@ -197,7 +209,7 @@ impl KubernetesProxy {
         // deviné. C'est le compromis de `ProxyKubernetes::context` : un contexte optionnel laisse
         // la connexion suivre `kubectl config current-context`, donc ce qui est deviné doit être
         // dit — dans tout message d'échec, sans avoir à le redemander.
-        let journal = Arc::new(Journal::avec_entete(entete(binaire, proxy).await));
+        let journal = Arc::new(Journal::avec_entete(entete(binaire, proxy, declare).await));
 
         SousProcessus::ouvrir(commande, REPERES, port_demande, delai, journal, SUJET)
             .await
@@ -291,6 +303,7 @@ fn controler(proxy: &ProxyKubernetes, port_cible: u16) -> Result<(), EngineError
 /// `kubectl` ; il accepte l'inverse, mais un journal se lit mieux dans l'ordre attendu.
 fn arguments(
     proxy: &ProxyKubernetes,
+    kubeconfig_declare: Option<&str>,
     port_local: u16,
     port_cible: u16,
     delai_du_pod: Duration,
@@ -310,7 +323,7 @@ fn arguments(
 
     // Le fichier d'abord : c'est lui qui *définit* le contexte courant, donc un lecteur du journal
     // lit les coordonnées dans l'ordre où elles se déterminent.
-    if let Some(chemin) = kubeconfig(proxy) {
+    if let Some(chemin) = chemin_de_kubeconfig(kubeconfig_declare) {
         arguments.push("--kubeconfig".to_owned());
         arguments.push(chemin.display().to_string());
     }
@@ -328,14 +341,39 @@ fn arguments(
     arguments
 }
 
+/// Le chemin du kubeconfig que la connexion désigne, ou `None` pour celui de `kubectl`.
+///
+/// **Une référence qui ne désigne rien est un refus, jamais un repli** (`API-70`). Se rabattre sur
+/// le défaut de `kubectl` serait ouvrir **un autre cluster, avec succès** — le seul mode de
+/// défaillance que ce module traite comme inacceptable : se tromper d'espace de noms échoue en le
+/// disant, se tromper de cluster réussit. Le cas arrive d'un fichier de configuration écrit à la
+/// main, ou d'une déclaration retirée hors de l'application ; le message nomme la référence et le
+/// geste, comme les autres refus d'ici.
+fn resoudre<'a>(
+    proxy: &ProxyKubernetes,
+    kubeconfigs: &'a Kubeconfigs,
+) -> Result<Option<&'a str>, EngineError> {
+    let Some(reference) = &proxy.kubeconfig else {
+        return Ok(None);
+    };
+    match kubeconfigs.resoudre(reference) {
+        Some(chemin) => Ok(Some(chemin)),
+        None => Err(EngineError::local(format!(
+            "le kubeconfig « {reference} » n'est plus déclaré. Ouvrez les préférences, section \
+             « Connexions », pour le déclarer à nouveau, ou choisissez-en un autre dans la connexion."
+        ))),
+    }
+}
+
 /// Le kubeconfig déclaré, développé, ou rien.
 ///
-/// **Une valeur vide ou blanche vaut absente**, comme pour le contexte et l'espace de noms : un
-/// `--kubeconfig ''` ferait échouer `kubectl` sur un fichier qui n'existe pas, avec le message le
-/// moins utile possible. Et le `~/` de tête est développé, parce que nous passons un argv direct et
-/// que rien ne le ferait à notre place — voir `programme::chemin_utilisateur`.
-fn kubeconfig(proxy: &ProxyKubernetes) -> Option<PathBuf> {
-    valeur_utile(&proxy.kubeconfig).map(programme::chemin_utilisateur)
+/// **Une valeur vide ou blanche vaut absente**, comme pour l'espace de noms : un `--kubeconfig ''`
+/// ferait échouer `kubectl` sur un fichier qui n'existe pas, avec le message le moins utile
+/// possible. Et le `~/` de tête est développé, parce que nous passons un argv direct et que rien ne
+/// le ferait à notre place — voir `programme::chemin_utilisateur`.
+fn chemin_de_kubeconfig(declare: Option<&str>) -> Option<PathBuf> {
+    let chemin = declare?.trim();
+    (!chemin.is_empty()).then(|| programme::chemin_utilisateur(chemin))
 }
 
 /// Le répertoire de `kubectl`, en liste d'un élément pour `path_enrichi`.
@@ -352,10 +390,14 @@ fn repertoire(binaire: &Path) -> Vec<PathBuf> {
 /// Les trois coordonnées y sont, et le contexte porte **comment il a été obtenu**. C'est ce qui
 /// distingue « vous avez visé ce cluster » de « vous avez visé le cluster que votre kubeconfig
 /// désignait à cet instant » — deux phrases très différentes devant une base de production.
-async fn entete(binaire: &Path, proxy: &ProxyKubernetes) -> String {
+async fn entete(
+    binaire: &Path,
+    proxy: &ProxyKubernetes,
+    kubeconfig_declare: Option<&str>,
+) -> String {
     // Le contexte est **toujours** deviné depuis le kubeconfig — aucun champ ne le déclare —, donc
     // il est toujours lu et toujours dit. C'est ce qui reste de l'arbitrage de la première version.
-    let contexte = match contexte_courant(binaire, proxy).await {
+    let contexte = match contexte_courant(binaire, kubeconfig_declare).await {
         Some(courant) => format!("« {courant} »"),
         // Ne pas savoir est un fait, et il se dit : un en-tête qui affirmerait un contexte qu'on
         // n'a pas lu serait pire que celui qui avoue.
@@ -367,7 +409,7 @@ async fn entete(binaire: &Path, proxy: &ProxyKubernetes) -> String {
     // ferait : un en-tête qui affirmerait `~/.kube/config` supposerait que `$KUBECONFIG` est vide,
     // ce que nous ne lisons pas — et une app lancée depuis le Finder ne le verrait pas de toute
     // façon. Ne pas savoir est un fait, et il se dit.
-    let fichier = match kubeconfig(proxy) {
+    let fichier = match chemin_de_kubeconfig(kubeconfig_declare) {
         Some(chemin) => format!("kubeconfig « {} » (déclaré)", chemin.display()),
         None => "kubeconfig par défaut de kubectl".to_owned(),
     };
@@ -385,14 +427,14 @@ async fn entete(binaire: &Path, proxy: &ProxyKubernetes) -> String {
 /// toucher au réseau, donc il coûte quelques millisecondes, et il est borné par `DELAI_CONTEXTE`.
 /// Ce qu'il achète est le seul remède au compromis de `ProxyKubernetes::context` — sans lui, un
 /// échec sur le mauvais cluster ne dirait pas lequel.
-async fn contexte_courant(binaire: &Path, proxy: &ProxyKubernetes) -> Option<String> {
+async fn contexte_courant(binaire: &Path, kubeconfig_declare: Option<&str>) -> Option<String> {
     let mut commande = programme::commande_asynchrone(binaire);
     // **Le même `--kubeconfig` que le transfert, et c'est indispensable** (31 août 2026). Sans lui,
     // cet appel lirait le fichier *par défaut* pendant que le transfert emploie celui qui est
     // déclaré : l'en-tête nommerait un contexte venu d'un autre fichier — donc affirmerait, avec
     // aplomb, un cluster qui n'est pas celui qu'on vise. Un en-tête faux est pire que pas d'en-tête,
     // puisque c'est lui qu'on croit en cherchant pourquoi une connexion a échoué.
-    if let Some(chemin) = kubeconfig(proxy) {
+    if let Some(chemin) = chemin_de_kubeconfig(kubeconfig_declare) {
         commande.arg("--kubeconfig").arg(chemin);
     }
     commande
@@ -451,6 +493,7 @@ fn traduire_l_echec(binaire: &Path, echec: EchecDeLancement) -> EngineError {
 #[cfg(test)]
 mod tests_arguments {
     use super::*;
+    use crate::config::KubeconfigId;
 
     fn configuration() -> ProxyKubernetes {
         ProxyKubernetes {
@@ -462,7 +505,12 @@ mod tests_arguments {
 
     /// Les arguments, en une chaîne, pour des assertions lisibles.
     fn ligne(proxy: &ProxyKubernetes) -> String {
-        arguments(proxy, 63342, 5432, Duration::from_secs(15)).join(" ")
+        ligne_avec(proxy, None)
+    }
+
+    /// La ligne composée pour un kubeconfig **déjà résolu** — ce que `ouvrir_avec_delai` passe.
+    fn ligne_avec(proxy: &ProxyKubernetes, kubeconfig: Option<&str>) -> String {
+        arguments(proxy, kubeconfig, 63342, 5432, Duration::from_secs(15)).join(" ")
     }
 
     #[test]
@@ -521,11 +569,11 @@ mod tests_arguments {
     #[test]
     fn un_kubeconfig_declare_est_passe_et_aucun_contexte_ne_l_est() {
         let proxy = ProxyKubernetes {
-            kubeconfig: Some("/etc/kubeconfig-prod".into()),
+            kubeconfig: Some(KubeconfigId::brut("prod")),
             namespace: None,
             resource: "svc/postgres".into(),
         };
-        let ligne = ligne(&proxy);
+        let ligne = ligne_avec(&proxy, Some("/etc/kubeconfig-prod"));
         assert!(
             ligne.contains("--kubeconfig /etc/kubeconfig-prod"),
             "{ligne}"
@@ -544,11 +592,11 @@ mod tests_arguments {
             return;
         };
         let proxy = ProxyKubernetes {
-            kubeconfig: Some("~/.kube/prod".into()),
+            kubeconfig: Some(KubeconfigId::brut("prod")),
             namespace: None,
             resource: "svc/postgres".into(),
         };
-        let ligne = ligne(&proxy);
+        let ligne = ligne_avec(&proxy, Some("~/.kube/prod"));
         assert!(
             ligne.contains(&maison.join(".kube/prod").display().to_string()),
             "{ligne}"
@@ -562,17 +610,66 @@ mod tests_arguments {
         // — et `--namespace ''` ferait chercher dans un espace de noms qui n'existe pas, avec le
         // message le moins utile possible. Même règle qu'`auth_database` en `18b`.
         let proxy = ProxyKubernetes {
-            kubeconfig: Some("  ".into()),
+            kubeconfig: Some(KubeconfigId::brut("prod")),
             namespace: Some(String::new()),
             resource: "  svc/postgres  ".into(),
         };
-        let ligne = ligne(&proxy);
+        // Une déclaration dont le chemin est blanc : le cas du fichier écrit à la main.
+        let ligne = ligne_avec(&proxy, Some("  "));
         assert!(!ligne.contains("--kubeconfig"), "{ligne}");
         assert!(!ligne.contains("--context"), "{ligne}");
         assert!(!ligne.contains("--namespace"), "{ligne}");
         // Et la ressource est **rognée**, sans l'être « corrigée » : un espace de tête vient d'un
         // copier-coller, pas d'une intention.
         assert!(ligne.contains(" svc/postgres 63342:5432"), "{ligne}");
+    }
+
+    #[test]
+    fn une_reference_qui_ne_designe_rien_est_refusee_plutot_que_rabattue() {
+        // **Le refus le plus important du module** (`API-70`). Se rabattre sur le kubeconfig par
+        // défaut de `kubectl` ouvrirait **un autre cluster, avec succès** — le seul mode de
+        // défaillance que ce fichier traite comme inacceptable : se tromper d'espace de noms échoue
+        // en le disant, se tromper de cluster réussit.
+        let proxy = ProxyKubernetes {
+            kubeconfig: Some(KubeconfigId::brut("disparu")),
+            namespace: None,
+            resource: "svc/postgres".into(),
+        };
+
+        let erreur = resoudre(&proxy, &Kubeconfigs::default())
+            .expect_err("une référence morte doit être refusée");
+        // Le message nomme la référence et la manœuvre : sans elle, « kubeconfig introuvable »
+        // enverrait chercher un fichier, là où c'est la déclaration qui manque.
+        assert!(erreur.message.contains("disparu"), "{erreur}");
+        assert!(erreur.message.contains("préférences"), "{erreur}");
+    }
+
+    #[test]
+    fn une_reference_declaree_resout_vers_son_chemin() {
+        // **Le contrôle positif** : sans lui, un `resoudre` qui refuserait tout passerait le test
+        // ci-dessus.
+        let mut kubeconfigs = Kubeconfigs::default();
+        let reference = kubeconfigs.declarer("/etc/kubeconfig-prod");
+        let proxy = ProxyKubernetes {
+            kubeconfig: Some(reference),
+            namespace: None,
+            resource: "svc/postgres".into(),
+        };
+
+        assert_eq!(
+            resoudre(&proxy, &kubeconfigs).expect("une déclaration doit résoudre"),
+            Some("/etc/kubeconfig-prod")
+        );
+    }
+
+    #[test]
+    fn aucune_reference_vaut_le_kubeconfig_de_kubectl() {
+        // L'autre contrôle : l'absence de référence n'est **pas** une erreur. C'est l'état de
+        // presque toutes les connexions, et il vaut « celui que `kubectl` choisirait ».
+        assert_eq!(
+            resoudre(&configuration(), &Kubeconfigs::default()).expect("une absence est valide"),
+            None
+        );
     }
 
     #[test]
@@ -590,7 +687,7 @@ mod tests_arguments {
                 namespace: None,
                 resource: saisie.into(),
             };
-            let arguments = arguments(&proxy, 63342, 5432, Duration::from_secs(15));
+            let arguments = arguments(&proxy, None, 63342, 5432, Duration::from_secs(15));
             assert!(
                 arguments.contains(&saisie.to_owned()),
                 "{saisie} : {arguments:?}"
@@ -700,9 +797,15 @@ while true; do sleep 1; done
     #[tokio::test]
     async fn un_transfert_qui_annonce_son_port_est_pret_et_rend_ce_port() {
         let binaire = faux_kubectl("heureux", HEUREUX);
-        let proxy = KubernetesProxy::ouvrir_avec(&binaire, &configuration(), None, 5432)
-            .await
-            .expect("le transfert doit s'ouvrir");
+        let proxy = KubernetesProxy::ouvrir_avec(
+            &binaire,
+            &configuration(),
+            None,
+            5432,
+            &Kubeconfigs::default(),
+        )
+        .await
+        .expect("le transfert doit s'ouvrir");
 
         assert_ne!(proxy.port_local(), 0);
         assert_eq!(proxy.etat(), EtatProxy::Vivant);
@@ -719,9 +822,15 @@ while true; do sleep 1; done
 while true; do sleep 1; done
 "#,
         );
-        let proxy = KubernetesProxy::ouvrir_avec(&menteur, &configuration(), None, 5432)
-            .await
-            .expect("ouverture");
+        let proxy = KubernetesProxy::ouvrir_avec(
+            &menteur,
+            &configuration(),
+            None,
+            5432,
+            &Kubeconfigs::default(),
+        )
+        .await
+        .expect("ouverture");
         assert_eq!(proxy.port_local(), 65010);
         proxy.fermer().await;
     }
@@ -734,9 +843,15 @@ while true; do sleep 1; done
 exit 1
 "#,
         );
-        let erreur = KubernetesProxy::ouvrir_avec(&mourant, &configuration(), None, 5432)
-            .await
-            .expect_err("un kubectl mort ne doit pas passer pour ouvert");
+        let erreur = KubernetesProxy::ouvrir_avec(
+            &mourant,
+            &configuration(),
+            None,
+            5432,
+            &Kubeconfigs::default(),
+        )
+        .await
+        .expect_err("un kubectl mort ne doit pas passer pour ouvert");
 
         // Ce que `kubectl` a dit, **pas** « délai dépassé » : chaque échec a son message précis, et
         // l'écraser rendrait le diagnostic impossible.
@@ -763,16 +878,23 @@ exit 1
             resource: "   ".into(),
         };
 
-        let erreur = KubernetesProxy::ouvrir_avec(&nulle_part, &proxy, None, 5432)
-            .await
-            .expect_err("une ressource vide doit être refusée");
+        let erreur =
+            KubernetesProxy::ouvrir_avec(&nulle_part, &proxy, None, 5432, &Kubeconfigs::default())
+                .await
+                .expect_err("une ressource vide doit être refusée");
         assert!(erreur.message.contains("svc/postgres"), "{erreur}");
         assert!(!erreur.message.contains("lancé"), "{erreur}");
 
         // Et le port nul par le même chemin : `A2` envoie 0 quand la saisie n'est pas un nombre.
-        let erreur = KubernetesProxy::ouvrir_avec(&nulle_part, &configuration(), None, 0)
-            .await
-            .expect_err("un port nul doit être refusé");
+        let erreur = KubernetesProxy::ouvrir_avec(
+            &nulle_part,
+            &configuration(),
+            None,
+            0,
+            &Kubeconfigs::default(),
+        )
+        .await
+        .expect_err("un port nul doit être refusé");
         assert!(erreur.message.contains("Port"), "{erreur}");
         assert!(!erreur.message.contains("lancé"), "{erreur}");
     }
@@ -785,6 +907,7 @@ exit 1
             &configuration(),
             None,
             5432,
+            &Kubeconfigs::default(),
             Duration::from_millis(300),
         )
         .await
@@ -797,9 +920,15 @@ exit 1
     #[tokio::test]
     async fn fermer_tue_le_processus_et_libere_le_port() {
         let binaire = faux_kubectl("fermeture", HEUREUX);
-        let proxy = KubernetesProxy::ouvrir_avec(&binaire, &configuration(), None, 5432)
-            .await
-            .expect("ouverture");
+        let proxy = KubernetesProxy::ouvrir_avec(
+            &binaire,
+            &configuration(),
+            None,
+            5432,
+            &Kubeconfigs::default(),
+        )
+        .await
+        .expect("ouverture");
         let pid = proxy.identifiant().expect("le pid doit être connu");
 
         proxy.fermer().await;
@@ -825,9 +954,15 @@ echo "error: lost connection to pod" >&2
 exit 1
 "#,
         );
-        let proxy = KubernetesProxy::ouvrir_avec(&bref, &configuration(), None, 5432)
-            .await
-            .expect("ouverture");
+        let proxy = KubernetesProxy::ouvrir_avec(
+            &bref,
+            &configuration(),
+            None,
+            5432,
+            &Kubeconfigs::default(),
+        )
+        .await
+        .expect("ouverture");
 
         attendre_dans_le_journal(&proxy, "lost connection").await;
         // L'état est interrogé **après** que la ligne est arrivée : une lecture sèche daterait la
@@ -867,9 +1002,15 @@ echo "E0831 10:00:00.000000 1 portforward.go:409] an error occurred forwarding: 
 while true; do sleep 1; done
 "#,
         );
-        let proxy = KubernetesProxy::ouvrir_avec(&survivant, &configuration(), None, 5432)
-            .await
-            .expect("ouverture");
+        let proxy = KubernetesProxy::ouvrir_avec(
+            &survivant,
+            &configuration(),
+            None,
+            5432,
+            &Kubeconfigs::default(),
+        )
+        .await
+        .expect("ouverture");
 
         // **Une borne large, pas la fenêtre de production** (défaut n° 112) : la boucle rend la
         // main dès que `kubectl` a parlé, donc la borne ne coûte rien quand tout va bien.
@@ -899,9 +1040,15 @@ while true; do sleep 1; done
         // La fenêtre d'explication ne doit pas transformer un échec ordinaire — base inexistante,
         // mot de passe faux — en un message qui accuse le transfert.
         let binaire = faux_kubectl("muet-mais-vivant", HEUREUX);
-        let proxy = KubernetesProxy::ouvrir_avec(&binaire, &configuration(), None, 5432)
-            .await
-            .expect("ouverture");
+        let proxy = KubernetesProxy::ouvrir_avec(
+            &binaire,
+            &configuration(),
+            None,
+            5432,
+            &Kubeconfigs::default(),
+        )
+        .await
+        .expect("ouverture");
 
         let erreur = EngineError::from_engine("28P01", "password authentication failed");
         let qualifiee = proxy
@@ -932,9 +1079,10 @@ while true; do sleep 1; done
             namespace: Some("bases".into()),
             resource: "svc/postgres".into(),
         };
-        let ouvert = KubernetesProxy::ouvrir_avec(&mouchard, &proxy, None, 5432)
-            .await
-            .expect("ouverture");
+        let ouvert =
+            KubernetesProxy::ouvrir_avec(&mouchard, &proxy, None, 5432, &Kubeconfigs::default())
+                .await
+                .expect("ouverture");
         let journal = ouvert.journal();
         let port_local = ouvert.port_local();
         ouvert.fermer().await;
@@ -973,9 +1121,15 @@ echo "Forwarding from 127.0.0.1:${dernier%%:*} -> ${dernier##*:}"
 while true; do sleep 1; done
 "#,
         );
-        let proxy = KubernetesProxy::ouvrir_avec(&bavard, &configuration(), None, 5432)
-            .await
-            .expect("ouverture");
+        let proxy = KubernetesProxy::ouvrir_avec(
+            &bavard,
+            &configuration(),
+            None,
+            5432,
+            &Kubeconfigs::default(),
+        )
+        .await
+        .expect("ouverture");
         let journal = proxy.journal();
         proxy.fermer().await;
 
@@ -1019,9 +1173,15 @@ while true; do sleep 1; done
         // `kubectl config current-context` — donc ce qui est deviné doit être **dit**, dans tout
         // message d'échec, sans avoir à le redemander.
         let binaire = faux_kubectl("entete-devinee", HEUREUX);
-        let proxy = KubernetesProxy::ouvrir_avec(&binaire, &configuration(), None, 5432)
-            .await
-            .expect("ouverture");
+        let proxy = KubernetesProxy::ouvrir_avec(
+            &binaire,
+            &configuration(),
+            None,
+            5432,
+            &Kubeconfigs::default(),
+        )
+        .await
+        .expect("ouverture");
         let journal = proxy.journal();
         proxy.fermer().await;
 
@@ -1049,12 +1209,16 @@ while true; do sleep 1; done
         // Le faux binaire répond « contexte-du-fichier-declare » **si et seulement si** on lui
         // passe `--kubeconfig` : c'est ce qui rend l'assertion discriminante.
         let binaire = faux_kubectl("kubeconfig-declare", HEUREUX);
+        // La connexion ne porte plus le chemin mais une **référence** (`API-70`) : ce que le test
+        // exerce est donc aussi la résolution, de bout en bout.
+        let mut kubeconfigs = Kubeconfigs::default();
+        let reference = kubeconfigs.declarer("/etc/kubeconfig-prod");
         let proxy = ProxyKubernetes {
-            kubeconfig: Some("/etc/kubeconfig-prod".into()),
+            kubeconfig: Some(reference),
             namespace: None,
             resource: "svc/postgres".into(),
         };
-        let ouvert = KubernetesProxy::ouvrir_avec(&binaire, &proxy, None, 5432)
+        let ouvert = KubernetesProxy::ouvrir_avec(&binaire, &proxy, None, 5432, &kubeconfigs)
             .await
             .expect("ouverture");
         let journal = ouvert.journal();
@@ -1076,9 +1240,15 @@ while true; do sleep 1; done
         // une app lancée depuis le Finder ne le verrait pas de toute façon. Ne pas savoir est un
         // fait, et il se dit.
         let binaire = faux_kubectl("kubeconfig-defaut", HEUREUX);
-        let proxy = KubernetesProxy::ouvrir_avec(&binaire, &configuration(), None, 5432)
-            .await
-            .expect("ouverture");
+        let proxy = KubernetesProxy::ouvrir_avec(
+            &binaire,
+            &configuration(),
+            None,
+            5432,
+            &Kubeconfigs::default(),
+        )
+        .await
+        .expect("ouverture");
         let journal = proxy.journal();
         proxy.fermer().await;
 
@@ -1101,9 +1271,10 @@ while true; do sleep 1; done
             namespace: Some("bases".into()),
             resource: "pod/postgres-0".into(),
         };
-        let ouvert = KubernetesProxy::ouvrir_avec(&binaire, &proxy, None, 5432)
-            .await
-            .expect("ouverture");
+        let ouvert =
+            KubernetesProxy::ouvrir_avec(&binaire, &proxy, None, 5432, &Kubeconfigs::default())
+                .await
+                .expect("ouverture");
         let journal = ouvert.journal();
         ouvert.fermer().await;
 

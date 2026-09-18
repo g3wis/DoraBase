@@ -46,7 +46,10 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use super::enregistrer::reference_de;
-use super::model::{Console, Database, EnvironmentId, Project, Proxy, SecretRef};
+use super::model::{
+    Console, Database, EnvironmentId, KubeconfigDeclaration, KubeconfigId, Kubeconfigs, Project,
+    Proxy, SecretRef,
+};
 use super::store::VERSION_COURANTE;
 use crate::secrets::Secret;
 
@@ -113,6 +116,22 @@ pub struct FichierDeProjets {
     /// raison.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub passwords: BTreeMap<String, String>,
+    /// Les kubeconfigs que les projets exportés **référencent** (`API-70`).
+    ///
+    /// **Sans eux, l'import serait cassé en silence.** Une connexion Kubernetes ne porte plus le
+    /// chemin de son fichier mais une référence, et les déclarations vivent hors des projets — donc
+    /// hors de la portée de cet export. Un fichier qui ne les porterait pas donnerait, sur l'autre
+    /// machine, des connexions désignant une déclaration que personne n'y a jamais faite.
+    ///
+    /// **Seulement celles qui sont référencées**, comme `passwords` ne porte que les références
+    /// employées : exporter un projet ne doit pas divulguer la liste des clusters de son auteur.
+    ///
+    /// **Ce n'est pas une préférence qui voyage.** Le chemin d'un kubeconfig décrit ce dont la
+    /// connexion a besoin pour s'ouvrir, au même titre que le chemin d'une clé privée de bastion —
+    /// que ce fichier fait voyager depuis toujours, et que l'import **nomme**. Le défaut, lui, ne
+    /// voyage pas : c'est un choix de poste.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub kubeconfigs: Vec<KubeconfigDeclaration>,
 }
 
 impl std::fmt::Debug for FichierDeProjets {
@@ -333,6 +352,15 @@ pub struct ProjectOutcome {
     /// réécrire ou les vider serait pire. Mais ils décrivent une autre machine, donc l'import le
     /// **dit** plutôt que de laisser le découvrir sur un « fichier introuvable ».
     pub local_paths: Vec<String>,
+    /// Les connexions dont le kubeconfig référencé **n'est déclaré nulle part dans le fichier**
+    /// (`API-70`).
+    ///
+    /// Un export écrit par DoraBase porte toujours les déclarations qu'il référence ; ce cas vient
+    /// d'un fichier édité à la main. La référence est alors **gardée telle quelle**, et non vidée :
+    /// la vider ferait ouvrir le kubeconfig par défaut de `kubectl`, c'est-à-dire un autre cluster,
+    /// **avec succès**. Gardée, elle est refusée à l'ouverture par un message qui la nomme — et le
+    /// rapport le dit ici plutôt que de laisser le découvrir à ce moment-là.
+    pub kubeconfigs_missing: Vec<String>,
 }
 
 impl ProjectOutcome {
@@ -345,6 +373,7 @@ impl ProjectOutcome {
             connections_added: Vec::new(),
             connections_kept: Vec::new(),
             connections_rejected: Vec::new(),
+            kubeconfigs_missing: Vec::new(),
             consoles_added: Vec::new(),
             consoles_kept: Vec::new(),
             passwords_stored: Vec::new(),
@@ -361,6 +390,13 @@ impl ProjectOutcome {
 #[derive(Debug)]
 pub struct Fusion {
     pub projects: Vec<Project>,
+    /// Les kubeconfigs déclarés **après** versement (`API-70`) : ceux de cette machine, plus ceux
+    /// que les connexions ajoutées ont fait déclarer.
+    ///
+    /// **Rendus plutôt qu'écrits ici**, comme les projets et pour la même raison : `fusionner` sert
+    /// l'aperçu autant que l'écriture, et un aperçu qui déclarerait des kubeconfigs serait un aperçu
+    /// qui écrit.
+    pub kubeconfigs: Kubeconfigs,
     pub report: ImportReport,
     /// Les mots de passe à ranger, sous leur référence **locale**. Vide quand le fichier n'en porte
     /// pas.
@@ -383,7 +419,13 @@ fn etiquette(base: &Database) -> String {
 /// Le `match` sur [`Proxy`] est exhaustif, sans bras attrape-tout : une quatrième sorte de proxy
 /// fera échouer la compilation ici, là où son auteur doit décider si elle porte un chemin (règle
 /// n° 16).
-fn chemins_locaux(base: &Database) -> Vec<String> {
+///
+/// `declarations` est la liste **telle qu'elle est après versement** (`API-70`), et l'ordre compte :
+/// la référence de la connexion a déjà été remise sur la déclaration locale quand on arrive ici, donc
+/// la chercher dans celle du fichier ne trouverait rien — et le rapport tairait un chemin qu'il
+/// existe précisément pour nommer. Le chemin, lui, est le même des deux côtés : c'est par lui que la
+/// déclaration a été reprise ou posée.
+fn chemins_locaux(base: &Database, declarations: &[KubeconfigDeclaration]) -> Vec<String> {
     let mut chemins = Vec::new();
     let reglages = &base.connection;
 
@@ -410,13 +452,18 @@ fn chemins_locaux(base: &Database) -> Vec<String> {
             // Un nom d'instance Cloud SQL n'est pas un chemin, et l'authentification passe par les
             // identifiants par défaut de l'application, qui n'en déclarent aucun ici (`06i`).
             Proxy::CloudSql(_) => {}
+            // La référence est résolue dans les déclarations du fichier : c'est le **chemin** qui
+            // décrit une machine, pas l'identifiant qui le désigne. Une référence que le fichier ne
+            // déclare pas ne nomme rien — elle est signalée ailleurs, par la fusion.
             Proxy::Kubernetes(kube) => {
-                if let Some(kubeconfig) = kube
-                    .kubeconfig
-                    .as_deref()
-                    .filter(|chemin| !chemin.trim().is_empty())
-                {
-                    chemins.push(kubeconfig.to_owned());
+                if let Some(chemin) = kube.kubeconfig.as_ref().and_then(|reference| {
+                    declarations
+                        .iter()
+                        .find(|declaration| &declaration.id == reference)
+                        .map(|declaration| declaration.path.trim())
+                        .filter(|chemin| !chemin.is_empty())
+                }) {
+                    chemins.push(chemin.to_owned());
                 }
             }
         }
@@ -469,6 +516,7 @@ pub fn preparer(
     projects: Vec<Project>,
     avec_les_mots_de_passe: bool,
     magasin: &dyn crate::secrets::SecretStore,
+    kubeconfigs: &Kubeconfigs,
 ) -> Result<(FichierDeProjets, ExportReport), TransfertError> {
     let mut passwords = BTreeMap::new();
     let mut manquants = Vec::new();
@@ -506,6 +554,8 @@ pub fn preparer(
         }
     }
 
+    let declarations = declarations_referencees(&projects, kubeconfigs);
+
     let report = ExportReport {
         projects: projects.len(),
         connections: connexions,
@@ -524,9 +574,45 @@ pub fn preparer(
         },
         projects,
         passwords,
+        kubeconfigs: declarations,
     };
 
     Ok((fichier, report))
+}
+
+/// Les déclarations de kubeconfig que ces projets référencent (`API-70`).
+///
+/// **Déterministe et sans doublon** : l'ordre est celui de la liste déclarée, non celui des
+/// connexions rencontrées, de sorte que deux exports de la même configuration rendent le même
+/// fichier octet pour octet — la propriété que `passwords` obtient de sa `BTreeMap`.
+///
+/// Une référence que la configuration ne déclare plus est simplement absente : elle ne désigne rien
+/// ici non plus, et l'export n'a rien à en dire que l'import puisse employer.
+fn declarations_referencees(
+    projects: &[Project],
+    kubeconfigs: &Kubeconfigs,
+) -> Vec<KubeconfigDeclaration> {
+    let mut references: Vec<&KubeconfigId> = Vec::new();
+    for projet in projects {
+        for base in &projet.databases {
+            let Some(tunnel) = &base.connection.tunnel else {
+                continue;
+            };
+            if let Proxy::Kubernetes(kube) = &tunnel.proxy {
+                if let Some(reference) = &kube.kubeconfig {
+                    if !references.contains(&reference) {
+                        references.push(reference);
+                    }
+                }
+            }
+        }
+    }
+    kubeconfigs
+        .declarations
+        .iter()
+        .filter(|declaration| references.contains(&&declaration.id))
+        .cloned()
+        .collect()
 }
 
 /// Écrit le fichier.
@@ -625,6 +711,11 @@ struct Enveloppe {
     version: u32,
     #[serde(default)]
     passwords: BTreeMap<String, String>,
+    /// **Lues telles quelles, sans migration** (`API-70`) : ce sont des déclarations, pas des
+    /// projets, et leur forme n'a pas de version antérieure — un fichier d'avant la v6 n'en porte
+    /// aucune, et ce sont celles que la chaîne de migration vient de créer qui comptent alors.
+    #[serde(default)]
+    kubeconfigs: Vec<KubeconfigDeclaration>,
 }
 
 /// Lit un fichier de transfert, en migrant ses projets si sa version est antérieure.
@@ -655,8 +746,17 @@ pub fn lire(chemin: &Path) -> Result<FichierDeProjets, TransfertError> {
         });
     }
 
-    let projects = super::store::projets_du_document(valeur, enveloppe.version)
+    // **Les déclarations d'un fichier antérieur à la v6 sont celles que la migration vient de
+    // créer** : là-bas, les chemins sont encore écrits dans les connexions, et c'est le cran qui les
+    // relève. Un fichier déjà en v6 les porte, et la migration ne tourne pas — d'où le `if`, et non
+    // un `unwrap_or` qui aurait laissé croire à un repli.
+    let (projects, declarees) = super::store::projets_du_document(valeur, enveloppe.version)
         .map_err(|raison| TransfertError::Illisible { raison })?;
+    let kubeconfigs = if enveloppe.version < VERSION_COURANTE {
+        declarees.declarations
+    } else {
+        enveloppe.kubeconfigs
+    };
 
     Ok(FichierDeProjets {
         kind: enveloppe.kind,
@@ -671,6 +771,7 @@ pub fn lire(chemin: &Path) -> Result<FichierDeProjets, TransfertError> {
         },
         projects,
         passwords: enveloppe.passwords,
+        kubeconfigs,
     })
 }
 
@@ -697,10 +798,12 @@ pub fn lire(chemin: &Path) -> Result<FichierDeProjets, TransfertError> {
 /// nom : l'aperçu tout-retenu décrit donc exactement ce que n'importe quel sous-ensemble fera.
 pub fn fusionner(
     locaux: &[Project],
+    kubeconfigs_locaux: &Kubeconfigs,
     fichier: &FichierDeProjets,
     retenus: Option<&[String]>,
 ) -> Fusion {
     let mut projects = locaux.to_vec();
+    let mut kubeconfigs = kubeconfigs_locaux.clone();
     let mut sorts = Vec::with_capacity(fichier.projects.len());
     let mut secrets_a_ranger = Vec::new();
 
@@ -827,7 +930,23 @@ pub fn fusionner(
                         arrivante.connection.password = Some(locale);
                     }
 
-                    for chemin in chemins_locaux(&arrivante) {
+                    // La référence de kubeconfig est **remise sur la déclaration locale**, pour la
+                    // raison exacte de la référence de secret ci-dessus : celle du fichier est une
+                    // coordonnée de l'autre machine. `declarer` dédoublonne par le **chemin**, donc
+                    // un fichier déjà déclaré ici est repris plutôt que doublé, et deux connexions
+                    // importées qui nommaient le même fichier le partagent encore après le voyage.
+                    if let Some(reference) = reference_de_kubeconfig(&arrivante) {
+                        match chemin_declare(&fichier.kubeconfigs, &reference) {
+                            Some(chemin) => {
+                                let locale = kubeconfigs.declarer(chemin);
+                                poser_la_reference_de_kubeconfig(&mut arrivante, locale);
+                            }
+                            // Gardée telle quelle : voir `ImportReport::kubeconfigs_missing`.
+                            None => sort.kubeconfigs_missing.push(nom.clone()),
+                        }
+                    }
+
+                    for chemin in chemins_locaux(&arrivante, &kubeconfigs.declarations) {
                         sort.local_paths.push(format!("{nom} : {chemin}"));
                     }
                     for console in &arrivante.consoles {
@@ -875,8 +994,39 @@ pub fn fusionner(
             secrets: fichier.secrets,
             projects: sorts,
         },
+        kubeconfigs,
         secrets_a_ranger,
     }
+}
+
+/// La référence de kubeconfig d'une connexion, s'il y en a une.
+fn reference_de_kubeconfig(base: &Database) -> Option<KubeconfigId> {
+    let tunnel = base.connection.tunnel.as_ref()?;
+    match &tunnel.proxy {
+        Proxy::Kubernetes(kube) => kube.kubeconfig.clone(),
+        Proxy::Ssh(_) | Proxy::CloudSql(_) => None,
+    }
+}
+
+/// Repose la référence de kubeconfig d'une connexion.
+fn poser_la_reference_de_kubeconfig(base: &mut Database, reference: KubeconfigId) {
+    if let Some(tunnel) = base.connection.tunnel.as_mut() {
+        if let Proxy::Kubernetes(kube) = &mut tunnel.proxy {
+            kube.kubeconfig = Some(reference);
+        }
+    }
+}
+
+/// Le chemin qu'une déclaration du **fichier** donne à cette référence.
+fn chemin_declare<'a>(
+    declarations: &'a [KubeconfigDeclaration],
+    reference: &KubeconfigId,
+) -> Option<&'a str> {
+    declarations
+        .iter()
+        .find(|declaration| &declaration.id == reference)
+        .map(|declaration| declaration.path.trim())
+        .filter(|chemin| !chemin.is_empty())
 }
 
 /// Verse les consoles d'une connexion entrante dans une connexion **déjà déclarée**.
@@ -918,13 +1068,21 @@ fn verser_les_consoles(
 /// déclaré nulle part. Ce qui peut se trouver sous cette référence est un orphelin, resté d'une
 /// connexion retirée dont le magasin n'avait pas su effacer le secret : l'écraser est exactement ce
 /// qu'il faut faire.
+/// Ce qu'[`appliquer`] appelle pour écrire : les projets versés **et** les kubeconfigs déclarés.
+///
+/// **Les deux ensemble, en une écriture** (`API-70`) : le versement fait grandir la liste des
+/// déclarations, donc les écrire séparément laisserait une fenêtre où les connexions importées
+/// désignent une déclaration qui n'est pas encore sur le disque.
+type EcrireLaConfiguration<'a> = dyn FnMut(&[Project], &Kubeconfigs) -> Result<(), String> + 'a;
+
 pub fn appliquer(
     fusion: Fusion,
     magasin: &dyn crate::secrets::SecretStore,
-    ecrire: &mut dyn FnMut(&[Project]) -> Result<(), String>,
+    ecrire: &mut EcrireLaConfiguration<'_>,
 ) -> Result<(Vec<Project>, ImportReport), TransfertError> {
     let Fusion {
         projects,
+        kubeconfigs,
         report,
         secrets_a_ranger,
     } = fusion;
@@ -943,7 +1101,7 @@ pub fn appliquer(
         ecrits.push(reference.clone());
     }
 
-    match ecrire(&projects) {
+    match ecrire(&projects, &kubeconfigs) {
         Ok(()) => Ok((projects, report)),
         Err(raison) => Err(TransfertError::Ecriture {
             raison,
@@ -970,7 +1128,7 @@ mod tests {
     /// cochée ne consulte pas le magasin ». Un test qui vérifierait seulement que le fichier ne porte
     /// pas de mot de passe resterait vert si l'export lisait le Trousseau pour rien — et sur macOS,
     /// une lecture peut poser une question à l'utilisateur.
-    struct Magasin {
+    pub(super) struct Magasin {
         table: Mutex<HashMap<String, String>>,
         lectures: Mutex<usize>,
         panne_en_lecture: bool,
@@ -985,7 +1143,7 @@ mod tests {
     }
 
     impl Magasin {
-        fn neuf() -> Self {
+        pub(super) fn neuf() -> Self {
             Self {
                 table: Mutex::new(HashMap::new()),
                 lectures: Mutex::new(0),
@@ -1081,7 +1239,7 @@ mod tests {
         }
     }
 
-    fn connexion(nom: &str, env: &str) -> Database {
+    pub(super) fn connexion(nom: &str, env: &str) -> Database {
         Database {
             name: nom.to_owned(),
             label: None,
@@ -1093,7 +1251,7 @@ mod tests {
         }
     }
 
-    fn projet(nom: &str, envs: &[&str], bases: Vec<Database>) -> Project {
+    pub(super) fn projet(nom: &str, envs: &[&str], bases: Vec<Database>) -> Project {
         Project {
             name: nom.to_owned(),
             environments: envs.iter().map(|id| declaration(id, false)).collect(),
@@ -1103,12 +1261,21 @@ mod tests {
     }
 
     fn fichier_de(projects: Vec<Project>) -> FichierDeProjets {
+        fichier_de_avec(projects, Vec::new())
+    }
+
+    /// Un fichier qui porte aussi des déclarations de kubeconfig (`API-70`).
+    fn fichier_de_avec(
+        projects: Vec<Project>,
+        kubeconfigs: Vec<KubeconfigDeclaration>,
+    ) -> FichierDeProjets {
         FichierDeProjets {
             kind: SORTE.to_owned(),
             version: VERSION_COURANTE,
             secrets: CarriedSecrets::NotCarried,
             projects,
             passwords: BTreeMap::new(),
+            kubeconfigs,
         }
     }
 
@@ -1178,6 +1345,7 @@ mod tests {
             vec![projet("Halle", &["prod"], vec![base])],
             false,
             &magasin,
+            &Kubeconfigs::default(),
         )
         .expect("préparation");
 
@@ -1201,9 +1369,13 @@ mod tests {
         base.connection.password = Some(SecretRef::new("Halle/catalogue/prod"));
         let magasin = Magasin::avec(&[("Halle/catalogue/prod", "s3cr3t")]);
 
-        let (fichier, report) =
-            preparer(vec![projet("Halle", &["prod"], vec![base])], true, &magasin)
-                .expect("préparation");
+        let (fichier, report) = preparer(
+            vec![projet("Halle", &["prod"], vec![base])],
+            true,
+            &magasin,
+            &Kubeconfigs::default(),
+        )
+        .expect("préparation");
 
         assert_eq!(
             fichier
@@ -1230,6 +1402,7 @@ mod tests {
             vec![projet("Halle", &["prod"], vec![avec, sans])],
             true,
             &magasin,
+            &Kubeconfigs::default(),
         )
         .expect("préparation");
 
@@ -1248,8 +1421,13 @@ mod tests {
         let mut magasin = Magasin::neuf();
         magasin.panne_en_lecture = true;
 
-        let erreur = preparer(vec![projet("Halle", &["prod"], vec![base])], true, &magasin)
-            .expect_err("refus");
+        let erreur = preparer(
+            vec![projet("Halle", &["prod"], vec![base])],
+            true,
+            &magasin,
+            &Kubeconfigs::default(),
+        )
+        .expect_err("refus");
 
         assert!(
             matches!(erreur, TransfertError::Secret { .. }),
@@ -1272,8 +1450,10 @@ mod tests {
         ]);
         let source = vec![projet("Halle", &["prod"], vec![une, autre])];
 
-        let (premier, _) = preparer(source.clone(), true, &magasin).expect("premier");
-        let (second, _) = preparer(source, true, &magasin).expect("second");
+        let (premier, _) =
+            preparer(source.clone(), true, &magasin, &Kubeconfigs::default()).expect("premier");
+        let (second, _) =
+            preparer(source, true, &magasin, &Kubeconfigs::default()).expect("second");
 
         assert_eq!(
             serde_json::to_string_pretty(&premier).expect("json"),
@@ -1533,7 +1713,7 @@ mod tests {
         }];
         let fichier = fichier_de(vec![projet("Quai", &["dev"], vec![base])]);
 
-        let fusion = fusionner(&[], &fichier, None);
+        let fusion = fusionner(&[], &Kubeconfigs::default(), &fichier, None);
 
         assert!(matches!(
             fusion.report.projects[0].verdict,
@@ -1568,7 +1748,7 @@ mod tests {
         }];
         let fichier = fichier_de(vec![projet("Halle", &["dev"], vec![entrante])]);
 
-        let fusion = fusionner(&locaux, &fichier, None);
+        let fusion = fusionner(&locaux, &Kubeconfigs::default(), &fichier, None);
 
         let base = &fusion.projects[0].databases[0];
         assert_eq!(
@@ -1604,7 +1784,7 @@ mod tests {
         }];
         let fichier = fichier_de(vec![projet("Halle", &["dev"], vec![entrante])]);
 
-        let fusion = fusionner(&locaux, &fichier, None);
+        let fusion = fusionner(&locaux, &Kubeconfigs::default(), &fichier, None);
 
         let consoles = &fusion.projects[0].databases[0].consoles;
         assert_eq!(consoles.len(), 1);
@@ -1628,7 +1808,7 @@ mod tests {
         entrant.environments = vec![declaration("prod", false), declaration("dev", false)];
         let fichier = fichier_de(vec![entrant]);
 
-        let fusion = fusionner(&locaux, &fichier, None);
+        let fusion = fusionner(&locaux, &Kubeconfigs::default(), &fichier, None);
 
         let prod = fusion.projects[0]
             .environnement(&EnvironmentId::brut("prod"))
@@ -1647,7 +1827,7 @@ mod tests {
         entrant.databases.push(connexion("stocks", "fantome"));
         let fichier = fichier_de(vec![entrant]);
 
-        let fusion = fusionner(&[], &fichier, None);
+        let fusion = fusionner(&[], &Kubeconfigs::default(), &fichier, None);
 
         let sort = &fusion.report.projects[0];
         assert_eq!(
@@ -1673,7 +1853,12 @@ mod tests {
             projet("Rive", &["dev"], vec![connexion("stocks", "dev")]),
         ]);
 
-        let fusion = fusionner(&[], &fichier, Some(&["Rive".to_owned()]));
+        let fusion = fusionner(
+            &[],
+            &Kubeconfigs::default(),
+            &fichier,
+            Some(&["Rive".to_owned()]),
+        );
 
         assert_eq!(fusion.projects.len(), 1);
         assert_eq!(fusion.projects[0].name, "Rive");
@@ -1702,8 +1887,14 @@ mod tests {
         ]);
         let locaux = vec![projet("Halle", &["dev"], Vec::new())];
 
-        let tout = fusionner(&locaux, &fichier, None).report;
-        let seul = fusionner(&locaux, &fichier, Some(&["Quai".to_owned()])).report;
+        let tout = fusionner(&locaux, &Kubeconfigs::default(), &fichier, None).report;
+        let seul = fusionner(
+            &locaux,
+            &Kubeconfigs::default(),
+            &fichier,
+            Some(&["Quai".to_owned()]),
+        )
+        .report;
 
         assert_eq!(tout.projects[1], seul.projects[1]);
     }
@@ -1731,11 +1922,15 @@ mod tests {
             }),
         });
 
+        // Le kubeconfig voyage **par référence** depuis `API-70` : le chemin nommé dans le rapport
+        // est celui que la déclaration *du fichier* porte, non l'identifiant qui la désigne.
+        let mut declarees = Kubeconfigs::default();
+        let reference = declarees.declarer("~/.kube/prod");
         let mut cluster = connexion("commandes", "dev");
         cluster.connection.tunnel = Some(Tunnel {
             local_port: None,
             proxy: Proxy::Kubernetes(ProxyKubernetes {
-                kubeconfig: Some("~/.kube/prod".into()),
+                kubeconfig: Some(reference),
                 namespace: None,
                 resource: "svc/postgres".into(),
             }),
@@ -1746,7 +1941,12 @@ mod tests {
             &["dev"],
             vec![fichier_sqlite, certificat, bastion, cluster],
         );
-        let fusion = fusionner(&[], &fichier_de(vec![entrant]), None);
+        let fusion = fusionner(
+            &[],
+            &Kubeconfigs::default(),
+            &fichier_de_avec(vec![entrant], declarees.declarations),
+            None,
+        );
 
         assert_eq!(
             fusion.report.projects[0].local_paths,
@@ -1766,6 +1966,7 @@ mod tests {
         // vérifier sur chaque connexion PostgreSQL du fichier.
         let fusion = fusionner(
             &[],
+            &Kubeconfigs::default(),
             &fichier_de(vec![projet(
                 "Quai",
                 &["dev"],
@@ -1793,7 +1994,7 @@ mod tests {
         let sans = connexion("journal", "prod");
         let fichier = fichier_de(vec![projet("Halle", &["prod"], vec![avec, sans])]);
 
-        let fusion = fusionner(&[], &fichier, None);
+        let fusion = fusionner(&[], &Kubeconfigs::default(), &fichier, None);
 
         let sort = &fusion.report.projects[0];
         assert_eq!(sort.passwords_missing, vec!["catalogue (prod)".to_owned()]);
@@ -1829,7 +2030,7 @@ mod tests {
             ..fichier_de(vec![projet("Halle", &["prod"], vec![base])])
         };
 
-        let fusion = fusionner(&[], &fichier, None);
+        let fusion = fusionner(&[], &Kubeconfigs::default(), &fichier, None);
 
         let attendue = reference_de("Halle", "catalogue", "prod");
         assert_eq!(
@@ -1868,7 +2069,7 @@ mod tests {
             ])
         };
 
-        let fusion = fusionner(&[], &fichier, None);
+        let fusion = fusionner(&[], &Kubeconfigs::default(), &fichier, None);
 
         assert!(
             matches!(
@@ -1917,7 +2118,7 @@ mod tests {
             ..fichier_de(vec![voisin, fautif])
         };
 
-        let fusion = fusionner(&[], &fichier, None);
+        let fusion = fusionner(&[], &Kubeconfigs::default(), &fichier, None);
 
         assert!(matches!(
             fusion.report.projects[1].verdict,
@@ -1951,7 +2152,12 @@ mod tests {
         }];
         fautif.databases = vec![sqlite];
 
-        let fusion = fusionner(&[], &fichier_de(vec![fautif]), None);
+        let fusion = fusionner(
+            &[],
+            &Kubeconfigs::default(),
+            &fichier_de(vec![fautif]),
+            None,
+        );
 
         let sort = &fusion.report.projects[0];
         assert_eq!(
@@ -1967,6 +2173,7 @@ mod tests {
                 connections_added: Vec::new(),
                 connections_kept: Vec::new(),
                 connections_rejected: Vec::new(),
+                kubeconfigs_missing: Vec::new(),
                 consoles_added: Vec::new(),
                 consoles_kept: Vec::new(),
                 passwords_stored: Vec::new(),
@@ -1990,10 +2197,14 @@ mod tests {
         let magasin = Magasin::neuf();
         let mut ecrits: Vec<usize> = Vec::new();
 
-        let (projects, _) = appliquer(fusionner(&[], &fichier, None), &magasin, &mut |projets| {
-            ecrits.push(projets.len());
-            Ok(())
-        })
+        let (projects, _) = appliquer(
+            fusionner(&[], &Kubeconfigs::default(), &fichier, None),
+            &magasin,
+            &mut |projets, _kubeconfigs| {
+                ecrits.push(projets.len());
+                Ok(())
+            },
+        )
         .expect("import");
 
         assert_eq!(projects.len(), 1);
@@ -2017,9 +2228,11 @@ mod tests {
         };
         let magasin = Magasin::neuf();
 
-        let erreur = appliquer(fusionner(&[], &fichier, None), &magasin, &mut |_| {
-            Err("disque plein".to_owned())
-        })
+        let erreur = appliquer(
+            fusionner(&[], &Kubeconfigs::default(), &fichier, None),
+            &magasin,
+            &mut |_, _| Err("disque plein".to_owned()),
+        )
         .expect_err("refus");
 
         assert!(
@@ -2057,10 +2270,14 @@ mod tests {
         magasin.panne_a_l_ecriture = Some(2);
         let mut ecrit = false;
 
-        let erreur = appliquer(fusionner(&[], &fichier, None), &magasin, &mut |_| {
-            ecrit = true;
-            Ok(())
-        })
+        let erreur = appliquer(
+            fusionner(&[], &Kubeconfigs::default(), &fichier, None),
+            &magasin,
+            &mut |_, _| {
+                ecrit = true;
+                Ok(())
+            },
+        )
         .expect_err("refus");
 
         assert!(
@@ -2074,5 +2291,202 @@ mod tests {
             "le mot de passe rangé avant le refus doit repartir : rien ne le déclarerait, donc \
              rien ne le nettoierait jamais"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests_kubeconfigs {
+    use super::tests::{connexion, projet, Magasin};
+    use super::*;
+
+    /// Une connexion qui vise un cluster par la référence donnée.
+    fn cluster(nom: &str, env: &str, reference: &KubeconfigId) -> Database {
+        let mut base = connexion(nom, env);
+        base.connection.tunnel = Some(crate::config::Tunnel {
+            local_port: None,
+            proxy: Proxy::Kubernetes(crate::config::ProxyKubernetes {
+                kubeconfig: Some(reference.clone()),
+                namespace: None,
+                resource: "svc/postgres".into(),
+            }),
+        });
+        base
+    }
+
+    /// L'identifiant que le **fichier** porte pour son kubeconfig.
+    ///
+    /// **Volontairement différent de celui que cette machine dériverait** du même chemin
+    /// (`~/.kube/prod/config` donne `prod` ici). Sans cet écart, « la référence a été remappée sur la
+    /// déclaration locale » et « la référence du fichier a été reprise telle quelle » rendent la
+    /// **même valeur** — et le sabotage du remappage reste vert. C'est la règle n° 5, et c'est la
+    /// même leçon que la référence de secret d'`API-30`, qu'un décor `Halle/catalogue/prod` des deux
+    /// côtés ne distinguait pas.
+    const ID_DU_FICHIER: &str = "venu-d-ailleurs";
+
+    /// Un export dont les projets référencent `ID_DU_FICHIER`, et la configuration qui le porte.
+    fn exporte() -> (FichierDeProjets, Kubeconfigs) {
+        let mut declarees = Kubeconfigs {
+            declarations: vec![KubeconfigDeclaration {
+                id: KubeconfigId::brut(ID_DU_FICHIER),
+                label: "prod de l'autre poste".into(),
+                path: "~/.kube/prod/config".into(),
+            }],
+            default: None,
+        };
+        let prod = KubeconfigId::brut(ID_DU_FICHIER);
+        declarees.declarer("~/.kube/jamais-employe.yaml");
+
+        let entrant = projet(
+            "Quai",
+            &["dev"],
+            vec![
+                cluster("commandes", "dev", &prod),
+                cluster("stocks", "dev", &prod),
+            ],
+        );
+        let (fichier, _) =
+            preparer(vec![entrant], false, &Magasin::neuf(), &declarees).expect("export");
+        (fichier, declarees)
+    }
+
+    #[test]
+    fn l_export_ne_porte_que_les_declarations_referencees() {
+        // **Comme `passwords` ne porte que les références employées** : exporter un projet ne doit
+        // pas divulguer la liste des clusters de son auteur.
+        let (fichier, _) = exporte();
+
+        assert_eq!(fichier.kubeconfigs.len(), 1);
+        assert_eq!(fichier.kubeconfigs[0].path, "~/.kube/prod/config");
+    }
+
+    #[test]
+    fn un_import_sur_une_machine_vierge_declare_le_fichier_et_remappe() {
+        // **Sans cela, `API-70` casserait `API-30` en silence** : la connexion arriverait en
+        // désignant une déclaration que cette machine n'a jamais eue, et n'ouvrirait plus.
+        let (fichier, _) = exporte();
+        let fusion = fusionner(&[], &Kubeconfigs::default(), &fichier, None);
+
+        assert_eq!(fusion.kubeconfigs.declarations.len(), 1);
+        let arrivee = &fusion.projects[0].databases[0];
+        let reference = match &arrivee.connection.tunnel.as_ref().unwrap().proxy {
+            Proxy::Kubernetes(kube) => kube.kubeconfig.clone().expect("une référence"),
+            autre => panic!("un transfert Kubernetes : {autre:?}"),
+        };
+        // **La référence est locale, pas celle du fichier** — l'assertion qui distingue le
+        // remappage de la reprise, et sans laquelle le sabotage reste vert.
+        assert_ne!(reference.as_str(), ID_DU_FICHIER);
+        assert_eq!(
+            fusion.kubeconfigs.resoudre(&reference),
+            Some("~/.kube/prod/config")
+        );
+        // Et les deux connexions partagent encore la même déclaration après le voyage.
+        assert_eq!(
+            fusion.projects[0].databases[1]
+                .connection
+                .tunnel
+                .as_ref()
+                .map(|tunnel| {
+                    match &tunnel.proxy {
+                        Proxy::Kubernetes(kube) => kube.kubeconfig.clone(),
+                        _ => None,
+                    }
+                }),
+            Some(Some(reference))
+        );
+    }
+
+    #[test]
+    fn un_import_reprend_la_declaration_locale_qui_porte_deja_ce_chemin() {
+        // **La dédup se fait par le chemin**, non par l'identifiant : celui du fichier est une
+        // coordonnée de l'autre machine. Sans cela, importer deux fois poserait deux déclarations
+        // sur le même fichier, et la liste des préférences se remplirait de doublons.
+        let (fichier, _) = exporte();
+        let mut locaux = Kubeconfigs {
+            declarations: vec![KubeconfigDeclaration {
+                id: KubeconfigId::brut("mon-cluster"),
+                label: "mon cluster".into(),
+                path: "~/.kube/prod/config".into(),
+            }],
+            default: None,
+        };
+        let deja = KubeconfigId::brut("mon-cluster");
+        locaux.declarer("~/.kube/autre.yaml");
+
+        let fusion = fusionner(&[], &locaux, &fichier, None);
+
+        assert_eq!(fusion.kubeconfigs.declarations.len(), 2);
+        let arrivee = match &fusion.projects[0].databases[0]
+            .connection
+            .tunnel
+            .as_ref()
+            .unwrap()
+            .proxy
+        {
+            Proxy::Kubernetes(kube) => kube.kubeconfig.clone().expect("une référence"),
+            autre => panic!("un transfert Kubernetes : {autre:?}"),
+        };
+        assert_eq!(arrivee, deja);
+    }
+
+    #[test]
+    fn le_chemin_importe_est_nomme_dans_le_rapport() {
+        // Il décrit **une autre machine** : l'import le dit plutôt que de laisser le découvrir sur
+        // un « fichier introuvable » à la première ouverture.
+        let (fichier, _) = exporte();
+        let fusion = fusionner(&[], &Kubeconfigs::default(), &fichier, None);
+
+        assert!(
+            fusion.report.projects[0]
+                .local_paths
+                .iter()
+                .any(|ligne| ligne.contains("~/.kube/prod/config")),
+            "{:?}",
+            fusion.report.projects[0].local_paths
+        );
+    }
+
+    #[test]
+    fn une_reference_que_le_fichier_ne_declare_pas_est_gardee_et_nommee() {
+        // Le cas du fichier **édité à la main**. La référence est gardée telle quelle : la vider
+        // ferait ouvrir le kubeconfig par défaut de `kubectl`, donc un autre cluster, avec succès.
+        let (mut fichier, _) = exporte();
+        fichier.kubeconfigs.clear();
+
+        let fusion = fusionner(&[], &Kubeconfigs::default(), &fichier, None);
+
+        assert_eq!(fusion.report.projects[0].kubeconfigs_missing.len(), 2);
+        assert!(fusion.kubeconfigs.declarations.is_empty());
+        match &fusion.projects[0].databases[0]
+            .connection
+            .tunnel
+            .as_ref()
+            .unwrap()
+            .proxy
+        {
+            Proxy::Kubernetes(kube) => assert!(kube.kubeconfig.is_some()),
+            autre => panic!("un transfert Kubernetes : {autre:?}"),
+        }
+    }
+
+    #[test]
+    fn un_fichier_sans_connexion_kubernetes_ne_porte_aucune_declaration() {
+        // **Le contrôle négatif** : sans lui, un export qui embarquerait *toutes* les déclarations
+        // passerait les tests ci-dessus, en divulguant la liste des clusters de son auteur.
+        let mut declarees = Kubeconfigs::default();
+        declarees.declarer("~/.kube/prod/config");
+
+        let (fichier, _) = preparer(
+            vec![projet(
+                "Quai",
+                &["dev"],
+                vec![connexion("catalogue", "dev")],
+            )],
+            false,
+            &Magasin::neuf(),
+            &declarees,
+        )
+        .expect("export");
+
+        assert!(fichier.kubeconfigs.is_empty());
     }
 }

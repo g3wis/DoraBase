@@ -208,15 +208,15 @@ impl AnyEngine {
         moteur: crate::config::Engine,
         variante: &crate::config::ConnectionSettings,
         mot_de_passe: Option<&crate::secrets::Secret>,
-        known_hosts: &std::path::Path,
+        contexte: &crate::engine::proxy::ContexteDeProxy,
     ) -> Result<Self, EngineError> {
         use crate::config::Engine;
         match moteur {
             Engine::PostgreSql => Ok(Self::Postgres(
-                postgres::PostgresAdapter::connect_via(variante, mot_de_passe, known_hosts).await?,
+                postgres::PostgresAdapter::connect_via(variante, mot_de_passe, contexte).await?,
             )),
             Engine::MongoDb => Ok(Self::MongoDb(
-                mongo::MongoAdapter::connect_via(variante, mot_de_passe, known_hosts).await?,
+                mongo::MongoAdapter::connect_via(variante, mot_de_passe, contexte).await?,
             )),
             // **Ces deux-là étaient tombés dans le refus par omission.** Leurs adaptateurs
             // existent, leurs variantes d'`AnyEngine` existent, et les six autres `match` de ce
@@ -229,16 +229,16 @@ impl AnyEngine {
             // le prix du message de refus, et la raison pour laquelle l'oubli n'a fait aucun
             // bruit — ni à la compilation, ni aux tests, qui appellent les adaptateurs en direct.
             Engine::Sqlite => Ok(Self::Sqlite(
-                sqlite::SqliteAdapter::connect_via(variante, mot_de_passe, known_hosts).await?,
+                sqlite::SqliteAdapter::connect_via(variante, mot_de_passe, contexte).await?,
             )),
             Engine::MySql => Ok(Self::MySql(
-                mysql::MysqlAdapter::connect_via(variante, mot_de_passe, known_hosts).await?,
+                mysql::MysqlAdapter::connect_via(variante, mot_de_passe, contexte).await?,
             )),
             // **`21` a comblé l'obstacle que `raison_du_refus` décrivait** : le décor de test
             // manquait, pas le contrat. Il manque encore — voir le commentaire de tête de
             // `bigquery/mod.rs` — mais le pilote, lui, est joint comme les quatre autres.
             Engine::BigQuery => Ok(Self::BigQuery(Box::new(
-                bigquery::BigQueryAdapter::connect_via(variante, mot_de_passe, known_hosts).await?,
+                bigquery::BigQueryAdapter::connect_via(variante, mot_de_passe, contexte).await?,
             ))),
             // **Refusé, avec ce qui manque — pas seulement un numéro de spec.** La règle de `09f`
             // appliquée à un moteur : un message qui nomme l'échéance vaut mieux qu'un échec de
@@ -671,7 +671,7 @@ mod tests_refus {
     /// réseau ou sur le fichier. La distinction est exactement celle qui manquait.
     #[tokio::test]
     async fn chacun_des_moteurs_livres_joint_son_pilote() {
-        let known_hosts = std::path::Path::new("/inexistant/known_hosts");
+        let contexte = crate::engine::proxy::ContexteDeProxy::pour_les_tests();
 
         for moteur in [
             Engine::PostgreSql,
@@ -687,7 +687,7 @@ mod tests_refus {
 
             // `expect_err` demanderait `Debug` sur `AnyEngine`, que les adaptateurs refusent
             // délibérément (`05c` : un dérivé exposerait la configuration, donc le mot de passe).
-            let erreur = match AnyEngine::connect_via(moteur, &variante, None, known_hosts).await {
+            let erreur = match AnyEngine::connect_via(moteur, &variante, None, &contexte).await {
                 Ok(adaptateur) => {
                     adaptateur.close().await;
                     panic!(
@@ -720,7 +720,7 @@ mod tests_refus {
                 moteur,
                 &variante_injoignable(),
                 None,
-                std::path::Path::new("/inexistant/known_hosts"),
+                &crate::engine::proxy::ContexteDeProxy::pour_les_tests(),
             )
             .await
             {
@@ -758,7 +758,7 @@ mod tests_refus {
             Engine::BigQuery,
             &variante,
             None,
-            std::path::Path::new("/inexistant/known_hosts"),
+            &crate::engine::proxy::ContexteDeProxy::pour_les_tests(),
         )
         .await
         {

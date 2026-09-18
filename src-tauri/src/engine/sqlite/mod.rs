@@ -59,7 +59,7 @@ impl SqliteAdapter {
     pub async fn connect_via(
         variante: &ConnectionSettings,
         _mot_de_passe: Option<&Secret>,
-        _known_hosts: &std::path::Path,
+        _contexte: &crate::engine::proxy::ContexteDeProxy,
     ) -> Result<Self, EngineError> {
         // **Le mot de passe est ignoré, et le `known_hosts` aussi.** Un fichier local n'a ni l'un ni
         // l'autre ; les paramètres restent dans la signature parce que `AnyEngine` appelle les sept
@@ -371,9 +371,13 @@ mod tests_fichier {
     }
 
     async fn adaptateur(chemin: &std::path::Path) -> SqliteAdapter {
-        SqliteAdapter::connect_via(&variante(chemin), None, std::path::Path::new("/dev/null"))
-            .await
-            .expect("ouverture du fichier de test")
+        SqliteAdapter::connect_via(
+            &variante(chemin),
+            None,
+            &crate::engine::proxy::ContexteDeProxy::pour_les_tests(),
+        )
+        .await
+        .expect("ouverture du fichier de test")
     }
 
     #[tokio::test]

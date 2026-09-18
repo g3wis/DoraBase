@@ -92,7 +92,10 @@ pub fn tls_non_verifie(mode: SslMode) -> bool {
 /// l'utilisateur enregistre » laisserait un port lié et une session SSH vivante sur un
 /// formulaire abandonné.
 #[tauri::command]
-pub async fn test_connection(request: ConnectionRequest) -> Result<ConnectionTest, EngineError> {
+pub async fn test_connection(
+    app: tauri::AppHandle,
+    request: ConnectionRequest,
+) -> Result<ConnectionTest, EngineError> {
     // Entrée du pont, côté Rust. `host` et `port` seulement : le nom d'utilisateur suffirait
     // à identifier une personne, et un mot de passe n'a jamais sa place dans un journal.
     log::info!(
@@ -113,7 +116,13 @@ pub async fn test_connection(request: ConnectionRequest) -> Result<ConnectionTes
     );
 
     let secret = request.password.as_deref().map(Secret::new);
-    let resultat = tester(request.engine, &request.variant, secret.as_ref()).await;
+    let resultat = tester(
+        request.engine,
+        &request.variant,
+        secret.as_ref(),
+        &contexte_de_proxy(&app),
+    )
+    .await;
 
     match &resultat {
         Ok(test) => log::info!(
@@ -144,9 +153,9 @@ async fn tester(
     moteur: crate::config::Engine,
     variante: &ConnectionSettings,
     secret: Option<&Secret>,
+    contexte: &crate::engine::proxy::ContexteDeProxy,
 ) -> Result<ConnectionTest, EngineError> {
-    let adaptateur =
-        AnyEngine::connect_via(moteur, variante, secret, &known_hosts_utilisateur()).await?;
+    let adaptateur = AnyEngine::connect_via(moteur, variante, secret, contexte).await?;
     let sonde = adaptateur.probe().await?;
     let tunnel_local_port = adaptateur.port_local_tunnel();
 
@@ -259,6 +268,7 @@ mod tests {
             crate::config::Engine::PostgreSql,
             &v,
             Some(&Secret::new(sentinelle)),
+            &crate::engine::proxy::ContexteDeProxy::pour_les_tests(),
         )
         .await
         .expect_err("un port fermé doit échouer");
@@ -345,7 +355,7 @@ pub async fn open_database(
             engine,
             &variant,
             secret.as_ref(),
-            &known_hosts_utilisateur(),
+            &contexte_de_proxy(&app),
         )
         .await?;
 
@@ -844,6 +854,28 @@ fn repertoire_de_configuration(app: &tauri::AppHandle) -> Result<std::path::Path
     app.path()
         .app_config_dir()
         .map_err(|e| EngineError::local(format!("répertoire de configuration introuvable : {e}")))
+}
+
+/// Ce que la couche proxy a besoin de savoir de ce poste : les clés d'hôte de l'utilisateur, et les
+/// kubeconfigs qu'il a déclarés (`API-70`).
+///
+/// **Les déclarations sont relues à chaque ouverture, jamais gardées.** C'est ce qui fait qu'un
+/// kubeconfig déplacé dans les préférences vaut pour la connexion suivante sans avoir à rouvrir quoi
+/// que ce soit — la raison d'être de la référence. Le coût est une lecture du fichier de
+/// configuration par ouverture de connexion, en regard d'une poignée de main réseau.
+///
+/// **Une lecture qui échoue ne refuse pas la connexion**, et rend des déclarations vides. Deux
+/// raisons : un fichier illisible est déjà traité au démarrage, avec sa quarantaine et son message ;
+/// et refuser ici retirerait aussi les connexions qui n'ont aucun kubeconfig, c'est-à-dire presque
+/// toutes. Sans déclaration, une référence ne résout pas — et c'est `engine::kubernetes` qui le
+/// **dit**, à l'endroit qui sait de quoi il parle.
+pub(crate) fn contexte_de_proxy(app: &tauri::AppHandle) -> crate::engine::proxy::ContexteDeProxy {
+    let kubeconfigs = repertoire_de_configuration(app)
+        .ok()
+        .map(|repertoire| crate::config::ConfigStore::open(repertoire.join("config.json")).0)
+        .and_then(|store| store.load_kubeconfigs().ok())
+        .unwrap_or_default();
+    crate::engine::proxy::ContexteDeProxy::nouveau(known_hosts_utilisateur(), kubeconfigs)
 }
 
 /// Le `known_hosts` de l'utilisateur — celui que `ssh` lit lui-même.

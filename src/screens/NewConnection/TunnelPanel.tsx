@@ -1,10 +1,12 @@
 import { useId } from 'react'
+import type { Kubeconfigs } from '../../domain/config'
 import { useT } from '../../i18n/LanguageContext'
 import { Badge } from '../../ui/Badge/Badge'
 import { CollapsiblePanel } from '../../ui/CollapsiblePanel/CollapsiblePanel'
 import { Field } from '../../ui/Field/Field'
 import { Select } from '../../ui/Select/Select'
 import { emptyProxy, type ProxyDraft, type ProxyKind, type TunnelDraft } from './ConnectionDraft'
+import { AUTRE_FICHIER, optionsDeKubeconfig } from './kubeconfigs'
 import styles from './NewConnection.module.css'
 
 type TunnelPanelProps = {
@@ -33,6 +35,23 @@ type TunnelPanelProps = {
    * du bouton testable, et laisse l'appel réel au seul endroit qui tourne dans l'app.
    */
   onBrowseKey: () => Promise<string | null>
+  /**
+   * Les kubeconfigs déclarés (`API-70`), que la liste du visage Kubernetes propose.
+   *
+   * **Passés plutôt que lus ici** : `A2` est monté par deux écrans — la connexion et l'instance
+   * managée — et aucun des deux ne lit la configuration lui-même. C'est aussi ce qui laisse la
+   * vitrine et la démo rendre ce visage sans pont IPC.
+   */
+  kubeconfigs: Kubeconfigs
+  /**
+   * Déclare un kubeconfig et rend sa référence, ou `null` si l'utilisateur renonce.
+   *
+   * **C'est « Autre fichier… », et il déclare** — la décision d'`API-70` : un fichier choisi ici
+   * entre dans la liste globale, de sorte qu'une référence ne peut jamais désigner une déclaration
+   * qui n'existe pas. Injecté pour la raison d'`onBrowseKey` : le sélecteur natif ne répond pas
+   * hors de la webview, et la commande qui déclare écrit dans la configuration.
+   */
+  onDeclareKubeconfig: () => Promise<string | null>
 }
 
 /**
@@ -57,6 +76,8 @@ export function TunnelPanel({
   open,
   onOpenChange,
   onBrowseKey,
+  kubeconfigs,
+  onDeclareKubeconfig,
 }: TunnelPanelProps) {
   const t = useT()
   const aideId = useId()
@@ -93,13 +114,20 @@ export function TunnelPanel({
     kubernetes: t('newConnection.tunnel.badges.kubernetes'),
   }
 
+  /**
+   * Ouvre un sélecteur natif, et applique ce qu'il rend.
+   *
+   * Employée par la clé privée SSH — qui en rend un **chemin** — et par « Autre fichier… » du
+   * visage Kubernetes, qui en rend une **référence** de déclaration (`API-70`). Les deux ont la
+   * même forme et la même règle d'annulation ; en écrire deux en aurait laissé une en arrière.
+   */
   async function parcourir(
     ouvrir: () => Promise<string | null>,
-    appliquer: (chemin: string) => ProxyDraft,
+    appliquer: (rendu: string) => ProxyDraft,
   ) {
-    const chemin = await ouvrir()
-    // `null` = l'utilisateur a annulé. Écraser le chemin déjà saisi serait une perte.
-    if (chemin !== null) onProxyChange(appliquer(chemin))
+    const rendu = await ouvrir()
+    // `null` = l'utilisateur a annulé. Écraser ce qui est déjà réglé serait une perte.
+    if (rendu !== null) onProxyChange(appliquer(rendu))
   }
 
   return (
@@ -174,17 +202,36 @@ export function TunnelPanel({
           )}
 
           {proxy.kind === 'kubernetes' && (
-            // **Un seul champ dans cette rangée depuis le retrait du contexte** (31 août 2026) : il
-            // n'y a plus de cote à répartir, l'espace de noms tenant largement dans une colonne
-            // `1fr`. Le fichier et la ressource vivent dans la rangée pleine largeur en dessous, où
-            // un chemin et un `statefulset/…` ont la place qu'ils demandent.
-            <Field
-              label={t('newConnection.tunnel.namespaceLabel')}
+            // **Un seul champ dans cette rangée depuis le retrait du contexte** (31 août 2026), et
+            // c'est le **kubeconfig** depuis le 18 septembre (`API-70`, à la demande : « kubeconfig
+            // selection switch places with namespace »). Il y a sa place parce qu'il a cessé d'être
+            // un chemin : la liste rend un **libellé** — « prod », « bac à sable » —, là où
+            // `~/.kube/prod/config` demandait la rangée entière. La raison qui l'avait mis en bas
+            // est morte avec le champ de saisie, et ce qui la remplace est l'ordre de lecture : on
+            // choisit d'abord le cluster, puis on précise où chercher dedans.
+            //
+            // **Une liste maison, jamais un `<select>` natif** — la prohibition du dépôt —, et elle
+            // porte ici une entrée qui *agit* (« Autre fichier… »), ce qu'un natif ne saurait pas
+            // distinguer d'une valeur.
+            <Select
+              label={t('newConnection.tunnel.kubeconfigLabel')}
               size="sm"
-              mono
-              placeholder={t('newConnection.tunnel.namespacePlaceholder')}
-              value={proxy.namespace}
-              onChange={(event) => onProxyChange({ ...proxy, namespace: event.target.value })}
+              options={optionsDeKubeconfig(kubeconfigs, t, proxy.kubeconfig)}
+              value={proxy.kubeconfig}
+              onValueChange={(choix) => {
+                if (choix !== AUTRE_FICHIER) {
+                  onProxyChange({ ...proxy, kubeconfig: choix })
+                  return
+                }
+                // **Renoncer ne change rien** : le choix précédent reste, plutôt que de retomber
+                // sur « celui de kubectl » — un sélecteur annulé ne doit pas défaire ce qu'on avait
+                // déjà réglé. C'est la règle de `parcourir`, et c'est pourquoi ce geste passe par
+                // elle plutôt que par une seconde mécanique.
+                void parcourir(onDeclareKubeconfig, (reference) => ({
+                  ...proxy,
+                  kubeconfig: reference,
+                }))
+              }}
             />
           )}
 
@@ -214,24 +261,19 @@ export function TunnelPanel({
 
             {proxy.kind === 'kubernetes' && (
               <>
-                {/* **Le kubeconfig est dans la rangée pleine largeur, et avant la ressource.** Un
-                    chemin de fichier ne tient pas dans une colonne de la grille, et cette rangée est
-                    déjà à `1fr` unique — donc aucune classe de grille à écrire. Placé avant la
-                    ressource parce que c'est ce fichier qui *désigne le cluster* : la lecture suit
-                    l'ordre où les coordonnées se déterminent.
-
-                    Pas de bouton « Parcourir… », à la différence de la clé privée SSH : le
-                    sélecteur natif de Tauri ne répond pas hors de la webview, donc chaque bouton de
-                    ce genre demande une prop injectée et un test de câblage. Un chemin de kubeconfig
-                    se tape ou se colle, et il est presque toujours sous `~/.kube/`. À reprendre si
-                    l'usage dit le contraire. */}
+                {/* **L'espace de noms a pris la rangée pleine largeur** (18 septembre 2026,
+                    `API-70`, à la demande) : il a échangé sa place avec le kubeconfig, monté dans la
+                    grille au-dessus. Il y tient sans peine — un nom d'espace de noms est court — et
+                    ce que la rangée lui donne de trop ne coûte rien, cette rangée étant déjà à
+                    `1fr` unique. Placé avant la ressource, qui est la coordonnée la plus fine des
+                    trois : contexte, espace de noms, ressource. */}
                 <Field
-                  label={t('newConnection.tunnel.kubeconfigLabel')}
+                  label={t('newConnection.tunnel.namespaceLabel')}
                   size="sm"
                   mono
-                  placeholder={t('newConnection.tunnel.kubeconfigPlaceholder')}
-                  value={proxy.kubeconfig}
-                  onChange={(event) => onProxyChange({ ...proxy, kubeconfig: event.target.value })}
+                  placeholder={t('newConnection.tunnel.namespacePlaceholder')}
+                  value={proxy.namespace}
+                  onChange={(event) => onProxyChange({ ...proxy, namespace: event.target.value })}
                 />
                 {/* La ressource prend la rangée entière : `statefulset/postgres-principal` tient
                     mal dans une colonne, et c'est le seul champ obligatoire de ce visage. */}

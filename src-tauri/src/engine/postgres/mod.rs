@@ -76,21 +76,34 @@ impl PostgresAdapter {
         variante: &ConnectionSettings,
         mot_de_passe: Option<&Secret>,
     ) -> Result<Self, EngineError> {
-        Self::connect_via(variante, mot_de_passe, &known_hosts_utilisateur()).await
+        // **Aucun kubeconfig déclaré ici, et c'est sans conséquence** : ce chemin ne sert qu'aux
+        // tests et aux appels qui n'ont pas d'`AppHandle` sous la main. Une connexion réelle passe
+        // par `open_database` ou `test_connection`, qui relisent les déclarations. Une référence
+        // Kubernetes arrivant ici serait **refusée** en le disant, jamais rabattue sur le défaut de
+        // `kubectl` — voir `engine::kubernetes::resoudre`.
+        Self::connect_via(
+            variante,
+            mot_de_passe,
+            &crate::engine::proxy::ContexteDeProxy::nouveau(
+                known_hosts_utilisateur(),
+                Default::default(),
+            ),
+        )
+        .await
     }
 
-    /// La même chose, avec le `known_hosts` en paramètre.
+    /// La même chose, avec le contexte de proxy en paramètre.
     ///
     /// Séparée pour que les tests n'aient pas à toucher le `~/.ssh/known_hosts` de la
     /// machine — ce qu'un test n'a pas le droit de faire.
     pub async fn connect_via(
         variante: &ConnectionSettings,
         mot_de_passe: Option<&Secret>,
-        known_hosts: &std::path::Path,
+        contexte: &crate::engine::proxy::ContexteDeProxy,
     ) -> Result<Self, EngineError> {
         let proxy = match &variante.tunnel {
             Some(tunnel) => {
-                Some(ProxyOuvert::ouvrir(tunnel, &variante.host, variante.port, known_hosts).await?)
+                Some(ProxyOuvert::ouvrir(tunnel, &variante.host, variante.port, contexte).await?)
             }
             None => None,
         };
@@ -776,7 +789,7 @@ mod tests {
         let adaptateur = PostgresAdapter::connect_via(
             &variante,
             secret.as_ref(),
-            std::path::Path::new("/dev/null"),
+            &crate::engine::proxy::ContexteDeProxy::pour_les_tests(),
         )
         .await
         .expect("la connexion doit passer par le proxy Cloud SQL");
@@ -813,10 +826,13 @@ mod tests {
             }),
         });
 
-        let erreur =
-            PostgresAdapter::connect_via(&variante, None, std::path::Path::new("/dev/null"))
-                .await
-                .expect_err("sans binaire ni identifiants, l'ouverture échoue");
+        let erreur = PostgresAdapter::connect_via(
+            &variante,
+            None,
+            &crate::engine::proxy::ContexteDeProxy::pour_les_tests(),
+        )
+        .await
+        .expect_err("sans binaire ni identifiants, l'ouverture échoue");
         assert!(
             !erreur.message.contains("ne sait pas encore"),
             "le refus de principe de 05d doit avoir disparu : {erreur}"
@@ -841,10 +857,13 @@ mod tests {
             }),
         });
 
-        let erreur =
-            PostgresAdapter::connect_via(&variante, None, std::path::Path::new("/dev/null"))
-                .await
-                .expect_err("une clé absente doit faire échouer l'ouverture");
+        let erreur = PostgresAdapter::connect_via(
+            &variante,
+            None,
+            &crate::engine::proxy::ContexteDeProxy::pour_les_tests(),
+        )
+        .await
+        .expect_err("une clé absente doit faire échouer l'ouverture");
         // L'échec vient du **tunnel** — la clé privée est introuvable —, donc l'aiguillage a
         // bien tenté de l'ouvrir au lieu de le refuser.
         assert!(
@@ -1125,9 +1144,13 @@ mod tests_db {
             "la prémisse est cassée : la base est joignable sans tunnel, ce test ne prouve rien"
         );
 
-        let adaptateur = PostgresAdapter::connect_via(&variante, secret.as_ref(), &known_hosts)
-            .await
-            .expect("la connexion doit passer par le tunnel");
+        let adaptateur = PostgresAdapter::connect_via(
+            &variante,
+            secret.as_ref(),
+            &crate::engine::proxy::ContexteDeProxy::nouveau(known_hosts, Default::default()),
+        )
+        .await
+        .expect("la connexion doit passer par le tunnel");
 
         // Et la connexion doit **servir** : une sonde, puis une vraie introspection.
         let sonde = adaptateur.probe().await.expect("sonde");
@@ -1156,9 +1179,13 @@ mod tests_db {
             return;
         };
 
-        let adaptateur = PostgresAdapter::connect_via(&variante, secret.as_ref(), &known_hosts)
-            .await
-            .expect("connexion");
+        let adaptateur = PostgresAdapter::connect_via(
+            &variante,
+            secret.as_ref(),
+            &crate::engine::proxy::ContexteDeProxy::nouveau(known_hosts, Default::default()),
+        )
+        .await
+        .expect("connexion");
 
         let fenetre = adaptateur
             .rows(&RowQuery::new(
@@ -3007,7 +3034,7 @@ mod tests_db {
         PostgresAdapter::connect_via(
             &variante,
             secret.as_ref(),
-            std::path::Path::new("/dev/null"),
+            &crate::engine::proxy::ContexteDeProxy::pour_les_tests(),
         )
         .await
     }

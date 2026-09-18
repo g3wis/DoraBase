@@ -20,6 +20,7 @@ function sort(name: string, patch: Partial<ProjectOutcome> = {}): ProjectOutcome
     passwordsStored: [],
     passwordsMissing: [],
     localPaths: [],
+    kubeconfigsMissing: [],
     ...patch,
   }
 }

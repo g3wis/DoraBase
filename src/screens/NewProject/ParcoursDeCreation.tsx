@@ -3,6 +3,7 @@ import type {
   CreateProjectRequest,
   EnvironmentDeclaration,
   EnvironmentId,
+  Kubeconfigs,
   Project,
 } from '../../domain/config'
 import { NewConnection } from '../NewConnection/NewConnection'
@@ -37,6 +38,15 @@ type ParcoursDeCreationProps = {
   /** Les projets à jour, après création ou enregistrement. */
   onProjets: (projects: Project[]) => void
   onCreate?: (request: CreateProjectRequest) => Promise<Project[]>
+  /**
+   * Les kubeconfigs déclarés, transmis tels quels à l'étape « connexion » (`API-70`).
+   *
+   * **Traversés plutôt que relus** : ce parcours ne lit rien de la configuration, et l'écran qui le
+   * monte les a déjà. Sans eux, la seconde étape offrirait une liste vide là où `A2` en offre une
+   * pleine — deux chemins vers la même modale, dont un en retard (règle n° 17).
+   */
+  kubeconfigs?: Kubeconfigs
+  onDeclareKubeconfig?: () => Promise<string | null>
 }
 
 /**
@@ -63,6 +73,8 @@ export function ParcoursDeCreation({
   onClose,
   onProjets,
   onCreate,
+  kubeconfigs = {},
+  onDeclareKubeconfig = async () => null,
 }: ParcoursDeCreationProps) {
   const [projetCree, setProjetCree] = useState<string | null>(
     depart.etape === 'connexion' ? depart.projet : null,
@@ -110,6 +122,8 @@ export function ParcoursDeCreation({
          étape vient d'être franchie — et qu'un projet a donc été créé, dont il faut dire ce qu'il
          devient si l'on renonce ici. */
       venantDuParcours
+      kubeconfigs={kubeconfigs}
+      onDeclareKubeconfig={onDeclareKubeconfig}
       onClose={onClose}
       onSaved={onProjets}
     />

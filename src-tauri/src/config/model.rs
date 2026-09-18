@@ -284,8 +284,8 @@ pub struct ProxyCloudSql {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "config.ts")]
 pub struct ProxyKubernetes {
-    /// Le fichier kubeconfig. `None` : celui que `kubectl` choisirait — `$KUBECONFIG`, à défaut
-    /// `~/.kube/config`.
+    /// Le kubeconfig à employer, **par référence** à une déclaration de [`Kubeconfigs`] (`API-70`).
+    /// `None` : celui que `kubectl` choisirait — `$KUBECONFIG`, à défaut `~/.kube/config`.
     ///
     /// **Ce champ existe parce qu'une app graphique n'hérite pas de `$KUBECONFIG`** (31 août 2026).
     /// C'est le même fait qui a imposé l'enrichissement du `PATH`, appliqué à une autre variable :
@@ -300,12 +300,16 @@ pub struct ProxyKubernetes {
     /// **Un chemin, pas une liste.** `$KUBECONFIG` accepte plusieurs fichiers séparés par `:`, que
     /// `kubectl` fusionne ; `--kubeconfig` n'en prend qu'un. Le cas de la fusion n'est donc pas
     /// couvert, et c'est assumé : une connexion vise **un** cluster, donc le fichier qui le déclare
-    /// suffit à la décrire. Ce qui se perd est la commodité d'un réglage global, pas une capacité.
+    /// suffit à la décrire.
     ///
-    /// Le `~/` de tête est développé (`programme::chemin_utilisateur`) : nous passons un argv direct,
-    /// jamais un shell, donc rien ne le ferait à notre place.
+    /// **Une référence et non le chemin, depuis `API-70`.** Un cluster porte souvent des dizaines de
+    /// bases : le chemin était ressaisi à chaque connexion, et le déplacer demandait de rouvrir
+    /// chacune. La référence met le chemin en **un** lieu. Ce qu'elle coûte est que le chemin n'est
+    /// plus lisible ici : il faut les déclarations pour l'obtenir, d'où le `ContexteDeProxy` que
+    /// l'ouverture reçoit — et un `#[serde(skip)]` qu'un appelant aurait dû remplir a été écarté
+    /// pour cela, l'oubli ouvrant **le cluster par défaut de `kubectl`, avec succès**.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub kubeconfig: Option<String>,
+    pub kubeconfig: Option<KubeconfigId>,
     /// L'espace de noms. `None` : celui que `kubectl` emploierait — celui du contexte s'il en
     /// déclare un, `default` sinon.
     ///
@@ -462,6 +466,15 @@ pub enum ModelError {
     /// Un projet sans environnement ne peut plus rien déclarer : une connexion appartient à un
     /// environnement (`23b`).
     AucunEnvironnement { project: String },
+    /// Deux kubeconfigs déclarés sous le même identifiant : une référence de connexion serait
+    /// ambiguë, et c'est la référence qui décide du cluster joint (`API-70`).
+    KubeconfigEnDouble { id: String },
+    /// Un kubeconfig déclaré sans chemin ne peut rien ouvrir, et son entrée dans la liste ferait
+    /// croire le contraire.
+    KubeconfigSansChemin { libelle: String },
+    /// Le kubeconfig par défaut désigne une déclaration qui n'existe pas — une connexion neuve se
+    /// préremplirait alors d'une référence morte.
+    KubeconfigParDefautInconnu { id: String },
 }
 
 impl std::fmt::Display for ModelError {
@@ -495,6 +508,17 @@ impl std::fmt::Display for ModelError {
                 f,
                 "le projet « {project} » doit déclarer au moins un environnement"
             ),
+            Self::KubeconfigEnDouble { id } => write!(
+                f,
+                "deux kubeconfigs sont déclarés sous l'identifiant « {id} »"
+            ),
+            Self::KubeconfigSansChemin { libelle } => write!(
+                f,
+                "le kubeconfig « {libelle} » est déclaré sans chemin de fichier"
+            ),
+            Self::KubeconfigParDefautInconnu { id } => {
+                write!(f, "le kubeconfig par défaut « {id} » n'est pas déclaré")
+            }
         }
     }
 }
@@ -879,6 +903,248 @@ impl Default for Guards {
             refuse_unrestricted_writes: true,
             keep_inverse_patch: true,
         }
+    }
+}
+
+/// L'identifiant **stable** d'un kubeconfig déclaré (`API-70`).
+///
+/// C'est la raison d'`EnvironmentId` et d'`InstanceId`, pour la troisième fois : une connexion
+/// Kubernetes garde une **référence** vers la déclaration, pas son chemin. Si l'identifiant suivait
+/// le libellé, renommer « prod » en « production » détacherait toutes les connexions qui s'y
+/// rattachent — sans erreur, sans message, et la suivante ouvrirait le kubeconfig **par défaut de
+/// `kubectl`**, c'est-à-dire un autre cluster, avec succès. C'est le mode de défaillance que ce
+/// dossier redoute le plus : se tromper d'espace de noms se voit, se tromper de cluster réussit.
+///
+/// Il est donc dérivé du libellé **une fois**, à la déclaration, puis figé. Renommer une déclaration
+/// change son libellé seul ; **déplacer le fichier change son chemin seul**, et c'est précisément ce
+/// que la référence achète — toutes les connexions suivent, sans qu'aucune soit rouverte.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[ts(export_to = "config.ts")]
+#[ts(type = "string")]
+pub struct KubeconfigId(String);
+
+impl KubeconfigId {
+    /// Dérive un identifiant d'un libellé, par la règle d'`EnvironmentId`.
+    ///
+    /// **La même fonction, délibérément** : trois règles de dérivation voisines mais distinctes
+    /// finiraient par diverger, et rien ne le dirait.
+    ///
+    /// Le résultat n'est **pas garanti unique** ; c'est [`Kubeconfigs::declarer`] qui écarte un
+    /// doublon, comme un projet refuse deux environnements de même identifiant.
+    pub fn depuis_le_libelle(libelle: &str) -> Self {
+        Self(
+            EnvironmentId::depuis_le_libelle(libelle)
+                .as_str()
+                .to_owned(),
+        )
+    }
+
+    /// Reprend un identifiant déjà écrit — configuration lue, migration, décor de test.
+    pub fn brut(valeur: impl Into<String>) -> Self {
+        Self(valeur.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for KubeconfigId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// Un kubeconfig déclaré une fois pour toutes, que les connexions désignent (`API-70`).
+///
+/// **Pourquoi ce type existe** : un cluster porte souvent des dizaines de bases, donc le même
+/// fichier était ressaisi connexion par connexion. Le déclarer une fois retire la ressaisie, et la
+/// **référence** retire la mise à jour en masse — déplacer le fichier se fait ici, et les connexions
+/// suivent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "config.ts")]
+pub struct KubeconfigDeclaration {
+    /// Figé à la déclaration. Voir [`KubeconfigId`].
+    pub id: KubeconfigId,
+    /// Ce que l'écran affiche. Peut diverger de l'identifiant, et c'est voulu.
+    pub label: String,
+    /// Le chemin du fichier, tel que l'utilisateur l'a donné.
+    ///
+    /// **Pas développé ici** : le `~/` de tête l'est par `programme::chemin_utilisateur`, au moment
+    /// de lancer `kubectl`, et là seulement. Développer en écrivant persisterait un chemin absolu
+    /// que personne n'a saisi, donc une déclaration qui cesse d'être vraie sous un autre compte.
+    pub path: String,
+}
+
+/// Les kubeconfigs déclarés, et celui qui prérègle une connexion neuve (`API-70`).
+///
+/// **Un type plutôt que deux champs à la racine du fichier** : l'invariant « le défaut nomme une
+/// déclaration qui existe » n'a alors qu'un seul lieu où il peut être faux, et [`Kubeconfigs::valider`]
+/// y répond. Deux champs voisins auraient laissé chaque écrivain le tenir de son côté.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "config.ts")]
+pub struct Kubeconfigs {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub declarations: Vec<KubeconfigDeclaration>,
+    /// Celui qui préremplit une connexion Kubernetes **neuve**, et rien de plus.
+    ///
+    /// **Jamais appliqué à une connexion déjà enregistrée** : changer le défaut repointerait en
+    /// silence des connexions qui marchent, ce qu'`update_variant` ferme une connexion pour éviter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<KubeconfigId>,
+}
+
+impl Kubeconfigs {
+    pub fn est_vide(&self) -> bool {
+        self.declarations.is_empty() && self.default.is_none()
+    }
+
+    pub fn get(&self, id: &KubeconfigId) -> Option<&KubeconfigDeclaration> {
+        self.declarations.iter().find(|d| &d.id == id)
+    }
+
+    /// La déclaration qui porte ce chemin, à l'espace près.
+    ///
+    /// C'est ce qui rend [`Kubeconfigs::declarer`] idempotent, et ce sur quoi l'import d'`API-30`
+    /// se raccorde : un fichier importé qui nomme un chemin déjà déclaré ici **reprend** la
+    /// déclaration locale au lieu d'en poser une seconde sur le même fichier.
+    pub fn par_chemin(&self, chemin: &str) -> Option<&KubeconfigDeclaration> {
+        let vise = chemin.trim();
+        self.declarations.iter().find(|d| d.path.trim() == vise)
+    }
+
+    /// Le chemin que `kubectl` doit recevoir pour cette référence.
+    ///
+    /// `None` quand la référence ne désigne rien — un fichier de configuration écrit à la main, ou
+    /// une déclaration retirée hors de l'application. L'appelant **refuse** alors plutôt que de se
+    /// rabattre sur le défaut de `kubectl` : voir `engine::kubernetes`.
+    pub fn resoudre(&self, id: &KubeconfigId) -> Option<&str> {
+        self.get(id).map(|d| d.path.as_str())
+    }
+
+    /// Déclare un kubeconfig, ou **rend celui qui porte déjà ce chemin**.
+    ///
+    /// L'idempotence par le chemin est ce qui permet à « Autre fichier… » d'`A2` de déclarer sans
+    /// rien demander : choisir deux fois le même fichier ne pose pas deux entrées.
+    ///
+    /// **Le libellé se dérive du fichier, et n'est pas demandé.** Aucune modale du produit ne nomme
+    /// un objet à sa création ; le renommage se fait ensuite, sur place, dans les préférences.
+    /// Une collision de libellé prend le répertoire parent en renfort, puis un rang — ce n'est pas la
+    /// « génération de suffixe » que le dépôt refuse pour une connexion en double, où le suffixe
+    /// masquerait une collision que l'utilisateur doit voir : ici personne n'a saisi de nom, donc il
+    /// n'y a pas de saisie à contredire, et refuser interdirait de déclarer deux fichiers que leurs
+    /// auteurs ont tous deux nommés `config.yaml`.
+    pub fn declarer(&mut self, chemin: &str) -> KubeconfigId {
+        let chemin = chemin.trim();
+        if let Some(deja) = self.par_chemin(chemin) {
+            return deja.id.clone();
+        }
+        let libelle = libelle_depuis_le_chemin(chemin);
+        let libelle = self.libelle_libre(&libelle, chemin);
+        let id = self.identifiant_libre(&libelle);
+        self.declarations.push(KubeconfigDeclaration {
+            id: id.clone(),
+            label: libelle,
+            path: chemin.to_owned(),
+        });
+        id
+    }
+
+    fn libelle_libre(&self, souhaite: &str, chemin: &str) -> String {
+        if !self.declarations.iter().any(|d| d.label == souhaite) {
+            return souhaite.to_owned();
+        }
+        let avec_parent = match parent_du_chemin(chemin) {
+            Some(parent) => format!("{parent}/{souhaite}"),
+            None => souhaite.to_owned(),
+        };
+        if !self.declarations.iter().any(|d| d.label == avec_parent) {
+            return avec_parent;
+        }
+        (2..)
+            .map(|rang| format!("{avec_parent} ({rang})"))
+            .find(|candidat| !self.declarations.iter().any(|d| &d.label == candidat))
+            .expect("la suite des rangs est infinie")
+    }
+
+    fn identifiant_libre(&self, libelle: &str) -> KubeconfigId {
+        let souhaite = KubeconfigId::depuis_le_libelle(libelle);
+        if self.get(&souhaite).is_none() {
+            return souhaite;
+        }
+        (2..)
+            .map(|rang| KubeconfigId::brut(format!("{souhaite}-{rang}")))
+            .find(|candidat| self.get(candidat).is_none())
+            .expect("la suite des rangs est infinie")
+    }
+
+    /// Les invariants du type, vérifiés avant toute écriture.
+    ///
+    /// Le pendant de `Project::valider` : ce que les refus nommés ne couvrent pas, celui-ci
+    /// l'attrape — un identifiant en double, un chemin vide, un défaut qui ne désigne rien.
+    pub fn valider(&self) -> Result<(), ModelError> {
+        let mut vus: Vec<&KubeconfigId> = Vec::new();
+        for declaration in &self.declarations {
+            if declaration.path.trim().is_empty() {
+                return Err(ModelError::KubeconfigSansChemin {
+                    libelle: declaration.label.clone(),
+                });
+            }
+            if vus.contains(&&declaration.id) {
+                return Err(ModelError::KubeconfigEnDouble {
+                    id: declaration.id.to_string(),
+                });
+            }
+            vus.push(&declaration.id);
+        }
+        if let Some(defaut) = &self.default {
+            if self.get(defaut).is_none() {
+                return Err(ModelError::KubeconfigParDefautInconnu {
+                    id: defaut.to_string(),
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Le libellé qu'un chemin suggère : le nom du fichier, sans son extension.
+///
+/// `~/.kube/prod.yaml` rend « prod ». Un fichier nommé `config` — le cas le plus courant — rend le
+/// **répertoire parent** quand il y en a un, parce que « config » ne distingue rien : c'est
+/// `~/.kube/prod/config` qui veut dire « prod ».
+fn libelle_depuis_le_chemin(chemin: &str) -> String {
+    let sans_barre = chemin.trim().trim_end_matches(['/', '\\']);
+    let fichier = sans_barre
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(sans_barre)
+        .trim();
+    let tronc = fichier.rsplit_once('.').map_or(fichier, |(avant, _)| avant);
+    let tronc = if tronc.is_empty() { fichier } else { tronc };
+    if tronc.eq_ignore_ascii_case("config") {
+        if let Some(parent) = parent_du_chemin(sans_barre) {
+            return parent.to_owned();
+        }
+    }
+    if tronc.is_empty() {
+        "kubeconfig".to_owned()
+    } else {
+        tronc.to_owned()
+    }
+}
+
+/// Le dernier segment du répertoire qui contient ce fichier, quand il y en a un.
+fn parent_du_chemin(chemin: &str) -> Option<&str> {
+    let sans_barre = chemin.trim().trim_end_matches(['/', '\\']);
+    let (avant, _) = sans_barre.rsplit_once(['/', '\\'])?;
+    let parent = avant.rsplit(['/', '\\']).next()?.trim();
+    if parent.is_empty() || parent == "~" {
+        None
+    } else {
+        Some(parent)
     }
 }
 
@@ -1289,5 +1555,151 @@ mod tests {
         // produire un proxy par défaut : `05b` met en quarantaine ce qu'il ne sait pas lire.
         let brut = r#"{"localPort":null,"proxy":{"kind":"socks5","host":"h"}}"#;
         assert!(serde_json::from_str::<Tunnel>(brut).is_err());
+    }
+}
+
+#[cfg(test)]
+mod tests_kubeconfigs {
+    use super::*;
+
+    #[test]
+    fn declarer_deux_fois_le_meme_chemin_rend_la_meme_declaration() {
+        // **L'idempotence par le chemin est ce qui permet à « Autre fichier… » de déclarer sans rien
+        // demander** : choisir deux fois le même fichier ne pose pas deux entrées, donc la liste ne
+        // se remplit pas de doublons au fil des connexions.
+        let mut kubeconfigs = Kubeconfigs::default();
+        let premier = kubeconfigs.declarer("~/.kube/prod/config");
+        let second = kubeconfigs.declarer("  ~/.kube/prod/config  ");
+
+        assert_eq!(premier, second);
+        assert_eq!(kubeconfigs.declarations.len(), 1);
+    }
+
+    #[test]
+    fn le_libelle_vient_du_fichier_et_le_parent_sauve_les_config() {
+        // `prod.yaml` se nomme « prod ». Mais un fichier nommé `config` — le cas le plus courant —
+        // ne distingue rien : c'est `~/.kube/prod/config` qui veut dire « prod ».
+        let mut kubeconfigs = Kubeconfigs::default();
+        kubeconfigs.declarer("~/.kube/prod.yaml");
+        kubeconfigs.declarer("~/.kube/recette/config");
+
+        let libelles: Vec<&str> = kubeconfigs
+            .declarations
+            .iter()
+            .map(|d| d.label.as_str())
+            .collect();
+        assert_eq!(libelles, vec!["prod", "recette"]);
+    }
+
+    #[test]
+    fn deux_fichiers_config_de_repertoires_differents_ne_se_confondent_pas() {
+        // **Le cas que la dérivation doit traiter et qu'un refus rendrait impraticable** : deux
+        // clusters dont les outils ont tous deux écrit `config`. Refuser interdirait de déclarer le
+        // second, alors que personne n'a saisi de nom qu'on pourrait contredire.
+        let mut kubeconfigs = Kubeconfigs::default();
+        let prod = kubeconfigs.declarer("~/.kube/prod/config");
+        let recette = kubeconfigs.declarer("~/.kube/recette/config");
+
+        assert_ne!(prod, recette);
+        assert_eq!(kubeconfigs.declarations.len(), 2);
+        assert_eq!(kubeconfigs.resoudre(&prod), Some("~/.kube/prod/config"));
+        assert_eq!(
+            kubeconfigs.resoudre(&recette),
+            Some("~/.kube/recette/config")
+        );
+    }
+
+    #[test]
+    fn un_libelle_deja_pris_prend_son_parent_puis_un_rang() {
+        // Trois fichiers qui veulent tous le libellé « prod ». Le second prend son répertoire, le
+        // troisième un rang — et **les trois restent distincts**, ce qui est tout ce qu'on demande.
+        let mut kubeconfigs = Kubeconfigs::default();
+        kubeconfigs.declarer("/a/prod");
+        kubeconfigs.declarer("/equipe/prod");
+        kubeconfigs.declarer("/equipe/autre/../prod");
+
+        let libelles: Vec<&str> = kubeconfigs
+            .declarations
+            .iter()
+            .map(|d| d.label.as_str())
+            .collect();
+        let uniques: std::collections::BTreeSet<&&str> = libelles.iter().collect();
+        assert_eq!(uniques.len(), libelles.len(), "{libelles:?}");
+    }
+
+    #[test]
+    fn resoudre_une_reference_inconnue_ne_rend_rien() {
+        // C'est ce qui fait **refuser** l'ouverture plutôt que se rabattre sur le défaut de
+        // `kubectl` — voir `engine::kubernetes::resoudre`.
+        let kubeconfigs = Kubeconfigs::default();
+        assert_eq!(kubeconfigs.resoudre(&KubeconfigId::brut("disparu")), None);
+    }
+
+    #[test]
+    fn valider_refuse_un_defaut_qui_ne_designe_rien() {
+        let kubeconfigs = Kubeconfigs {
+            declarations: Vec::new(),
+            default: Some(KubeconfigId::brut("disparu")),
+        };
+        assert!(matches!(
+            kubeconfigs.valider(),
+            Err(ModelError::KubeconfigParDefautInconnu { .. })
+        ));
+    }
+
+    #[test]
+    fn valider_refuse_deux_identifiants_egaux_et_un_chemin_vide() {
+        let double = Kubeconfigs {
+            declarations: vec![
+                KubeconfigDeclaration {
+                    id: KubeconfigId::brut("prod"),
+                    label: "prod".into(),
+                    path: "/a".into(),
+                },
+                KubeconfigDeclaration {
+                    id: KubeconfigId::brut("prod"),
+                    label: "autre".into(),
+                    path: "/b".into(),
+                },
+            ],
+            default: None,
+        };
+        assert!(matches!(
+            double.valider(),
+            Err(ModelError::KubeconfigEnDouble { .. })
+        ));
+
+        let sans_chemin = Kubeconfigs {
+            declarations: vec![KubeconfigDeclaration {
+                id: KubeconfigId::brut("prod"),
+                label: "prod".into(),
+                path: "   ".into(),
+            }],
+            default: None,
+        };
+        assert!(matches!(
+            sans_chemin.valider(),
+            Err(ModelError::KubeconfigSansChemin { .. })
+        ));
+    }
+
+    #[test]
+    fn valider_accepte_une_liste_saine() {
+        // **Le contrôle positif** : sans lui, un `valider` qui refuserait tout passerait les trois
+        // tests ci-dessus.
+        let mut kubeconfigs = Kubeconfigs::default();
+        let prod = kubeconfigs.declarer("~/.kube/prod/config");
+        kubeconfigs.default = Some(prod);
+
+        assert!(kubeconfigs.valider().is_ok());
+    }
+
+    #[test]
+    fn une_liste_vide_ne_s_ecrit_pas_dans_le_fichier() {
+        // `skip_serializing_if` : le fichier de configuration est lisible à la main, et une clé qui
+        // ne porte rien fait chercher à quoi elle sert.
+        assert!(Kubeconfigs::default().est_vide());
+        let json = serde_json::to_string(&Kubeconfigs::default()).expect("sérialisation");
+        assert_eq!(json, "{}");
     }
 }

@@ -5,6 +5,7 @@ import type {
   Engine,
   EnvironmentDeclaration,
   EnvironmentId,
+  Kubeconfigs,
   Project,
   UpdateVariantRequest,
 } from '../../domain/config'
@@ -55,6 +56,16 @@ type NewConnectionProps = {
    * c'est l'appel réel.
    */
   onBrowseKey?: () => Promise<string | null>
+  /**
+   * Les kubeconfigs déclarés (`API-70`), pour la liste du visage Kubernetes.
+   *
+   * **Un défaut vide plutôt qu'une prop obligatoire** : la vitrine, la démo et les tests montent cet
+   * écran sans configuration, et ce qu'ils y verraient — une liste qui ne propose que « celui de
+   * kubectl » et « Autre fichier… » — est exactement l'état d'un poste qui n'a rien déclaré.
+   */
+  kubeconfigs?: Kubeconfigs
+  /** Déclare un kubeconfig et rend sa référence. Injectée pour la raison d'`onBrowseKey`. */
+  onDeclareKubeconfig?: () => Promise<string | null>
   /** Le sélecteur du fichier de compte de service Google, injecté pour la même raison. */
   /**
    * Appelle la commande `test_connection`.
@@ -159,6 +170,8 @@ export function NewConnection({
   onClose,
   projects = [],
   onBrowseKey = ouvrirSelecteurDeCle,
+  kubeconfigs = {},
+  onDeclareKubeconfig = async () => null,
   onTest = testerLaConnexion,
   onSave = enregistrerLaBase,
   edition,
@@ -531,6 +544,8 @@ export function NewConnection({
         open={tunnelOuvert}
         onOpenChange={setTunnelOuvert}
         onBrowseKey={onBrowseKey}
+        kubeconfigs={kubeconfigs}
+        onDeclareKubeconfig={onDeclareKubeconfig}
       />
       <ConnectionForm
         draft={draft}

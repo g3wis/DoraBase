@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::model::{
-    Database, EnvironmentColor, EnvironmentDeclaration, EnvironmentId, ManagedInstance,
-    Preferences, Project,
+    Database, EnvironmentColor, EnvironmentDeclaration, EnvironmentId, Kubeconfigs,
+    ManagedInstance, Preferences, Project,
 };
 
 /// La version du format sur disque. À incrémenter pour tout changement de forme, en ajoutant la
@@ -32,7 +32,14 @@ use super::model::{
 /// ignore les champs qu'il ne connaît pas, donc un fichier v4 se relit tel quel et se réécrit sans
 /// le champ. La version monte quand même, parce que sans elle une ancienne application relirait ce
 /// fichier sans erreur et y rétablirait un environnement actif arbitraire.
-pub const VERSION_COURANTE: u32 = 5;
+///
+/// **v6, par `API-70`** : un transfert Kubernetes cesse de porter le **chemin** de son kubeconfig et
+/// porte une **référence** vers une déclaration, rassemblée à la racine sous `kubeconfigs`. Le cran
+/// transforme, lui : les chemins écrits dans les connexions sont relevés, déclarés une fois chacun,
+/// et remplacés par leur identifiant. Un `serde(default)` n'aurait pas suffi — le champ n'est pas
+/// ajouté, il **change de sens**, et une v5 relue sans cran donnerait des références qui sont en
+/// réalité des chemins, donc ne résolvant rien.
+pub const VERSION_COURANTE: u32 = 6;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct ConfigFile {
@@ -56,6 +63,18 @@ struct ConfigFile {
     /// le fichier est lisible à la main, et une clé qui ne porte rien fait chercher à quoi elle sert.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     instances: Vec<ManagedInstance>,
+    /// Les kubeconfigs déclarés d'`API-70`, et celui qui prérègle une connexion neuve.
+    ///
+    /// **À la racine, à côté des projets, et non dans `preferences`.** Une connexion les
+    /// **référence** : ce sont des objets que le modèle désigne, comme les instances managées, et
+    /// non un réglage d'affichage. Les mettre dans `preferences` aurait fait passer un
+    /// `save_preferences` par-dessus des déclarations dont dépendent des connexions ouvertes.
+    ///
+    /// **Et c'est ce qui permet au fichier de transfert de porter la même clé au même endroit**
+    /// (`API-30`) : l'enveloppe de transfert se lit comme un document de configuration, donc la
+    /// chaîne de migration y traite les kubeconfigs sans rien savoir de qui l'appelle.
+    #[serde(default, skip_serializing_if = "Kubeconfigs::est_vide")]
+    kubeconfigs: Kubeconfigs,
 }
 
 /// L'issue d'une lecture. Quatre cas distincts, délibérément : confondre « absent » et
@@ -71,6 +90,8 @@ pub enum LoadOutcome {
         preferences: Preferences,
         /// Les instances managées (`API-32`). Vide quand le fichier n'en portait pas.
         instances: Vec<ManagedInstance>,
+        /// Les kubeconfigs déclarés (`API-70`). Vides quand le fichier n'en portait pas.
+        kubeconfigs: Kubeconfigs,
     },
     /// Fichier présent mais incompréhensible. L'original est **conservé** sous
     /// `quarantined_to` : c'est peut-être la seule copie du travail de l'utilisateur.
@@ -170,6 +191,7 @@ pub(crate) fn ecrire_temporaire_sans_renommer(
     projects: &[Project],
     preferences: &Preferences,
     instances: &[ManagedInstance],
+    kubeconfigs: &Kubeconfigs,
 ) -> Result<PathBuf, StoreError> {
     if let Some(parent) = cible.parent() {
         fs::create_dir_all(parent)?;
@@ -182,6 +204,7 @@ pub(crate) fn ecrire_temporaire_sans_renommer(
         // disque reviendrait à chaque démarrage.
         preferences: preferences.clone().borner(),
         instances: instances.to_vec(),
+        kubeconfigs: kubeconfigs.clone(),
     })?;
 
     let temporaire = chemin_temporaire(cible);
@@ -208,8 +231,10 @@ pub fn save(
     projects: &[Project],
     preferences: &Preferences,
     instances: &[ManagedInstance],
+    kubeconfigs: &Kubeconfigs,
 ) -> Result<(), StoreError> {
-    let temporaire = ecrire_temporaire_sans_renommer(cible, projects, preferences, instances)?;
+    let temporaire =
+        ecrire_temporaire_sans_renommer(cible, projects, preferences, instances, kubeconfigs)?;
     fs::rename(&temporaire, cible)?;
     Ok(())
 }
@@ -270,6 +295,7 @@ pub fn load(cible: &Path) -> LoadOutcome {
                 // Bornées à la lecture aussi : le fichier est éditable à la main.
                 preferences: fichier.preferences.borner(),
                 instances: fichier.instances,
+                kubeconfigs: fichier.kubeconfigs,
             }
         }
         Err(erreur) => mettre_en_quarantaine(cible, format!("forme inattendue : {erreur}")),
@@ -292,10 +318,11 @@ fn migrer(cible: &Path, brut: &str, valeur: serde_json::Value, depuis: u32) -> L
     }
 
     match migrer_le_document(valeur, depuis) {
-        Ok((projects, preferences, instances)) => LoadOutcome::Loaded {
+        Ok((projects, preferences, instances, kubeconfigs)) => LoadOutcome::Loaded {
             projects,
             preferences: preferences.borner(),
             instances,
+            kubeconfigs,
         },
         Err(raison) => LoadOutcome::Unreadable {
             reason: raison,
@@ -324,7 +351,7 @@ fn migrer(cible: &Path, brut: &str, valeur: serde_json::Value, depuis: u32) -> L
 pub(crate) fn migrer_le_document(
     mut valeur: serde_json::Value,
     depuis: u32,
-) -> Result<(Vec<Project>, Preferences, Vec<ManagedInstance>), String> {
+) -> Result<(Vec<Project>, Preferences, Vec<ManagedInstance>, Kubeconfigs), String> {
     // **Le cran du proxy passe en premier, et il est le seul à travailler sur le JSON.** `05d`
     // remplace un tunnel plat par `{ localPort, proxy }` partout où un tunnel apparaît ; il ne
     // connaît ni les projets, ni les bases, ni les environnements. L'appliquer d'abord, sur la
@@ -339,6 +366,11 @@ pub(crate) fn migrer_le_document(
     if depuis < 4 {
         retirer_les_comptes_de_service(&mut valeur);
     }
+    // v5 → v6 (`API-70`) : même patron que les deux crans ci-dessus — il ne connaît ni les projets,
+    // ni les bases, seulement la forme d'un proxy Kubernetes, et il s'applique avant les crans à
+    // types dédiés. Il est le premier à **rendre** quelque chose : les déclarations qu'il a créées
+    // ne sont pas dans le document d'origine, donc rien ne pourrait les relire après coup.
+    let declarees = (depuis < 6).then(|| declarer_les_kubeconfigs(&mut valeur));
     let brut_migre = valeur.to_string();
 
     // v0 → v1 : la v0 n'a jamais été diffusée, sa forme est celle de la v1.
@@ -350,8 +382,8 @@ pub(crate) fn migrer_le_document(
     // ignore un champ qu'il ne connaît pas. Relire suffit ; le champ ne sera simplement pas réécrit.
     let migre = match depuis {
         0 | 1 => migration_v1_vers_v2(&brut_migre),
-        // `2..=4` et non `2 | 3 | 4` : clippy refuse l'énumération d'entiers contigus.
-        2..=4 => serde_json::from_str::<ConfigFile>(&brut_migre)
+        // `2..=5` et non `2 | 3 | 4 | 5` : clippy refuse l'énumération d'entiers contigus.
+        2..=5 => serde_json::from_str::<ConfigFile>(&brut_migre)
             .map(|fichier| (fichier.projects, fichier.preferences, fichier.instances)),
         _ => {
             return Err(format!(
@@ -360,7 +392,20 @@ pub(crate) fn migrer_le_document(
         }
     };
 
-    migre.map_err(|erreur| format!("migration depuis la version {depuis} impossible : {erreur}"))
+    migre
+        .map(|(projets, preferences, instances)| {
+            // **Ce que le cran a déclaré l'emporte**, et il n'y a pas de conflit possible : il ne
+            // tourne que pour `depuis < 6`, où le document ne portait aucune clé `kubeconfigs` à
+            // relire. `unwrap_or_default` est donc le cas d'un document déjà en v6, que seul
+            // `projets_du_document` peut présenter ici.
+            (
+                projets,
+                preferences,
+                instances,
+                declarees.unwrap_or_default(),
+            )
+        })
+        .map_err(|erreur| format!("migration depuis la version {depuis} impossible : {erreur}"))
 }
 
 /// Les projets d'un document `{ version, projects, … }` déjà analysé, migrés si sa version est
@@ -376,22 +421,32 @@ pub(crate) fn migrer_le_document(
 /// et lirait un fichier v5 comme s'il portait la forme v6. Séparés, l'oubli se dit : une version
 /// sans cran tombe sur « aucune migration connue ».
 ///
+/// **Ce jour est arrivé** (`API-70`, v5 → v6) : la plage a été élargie à `2..=5` *avec* la
+/// transformation qui va avec, et la séparation a tenu — c'est elle qui a fait remarquer qu'il y
+/// avait un cran à écrire plutôt qu'une borne à pousser.
+///
 /// Une version **postérieure** n'est pas traitée ici : l'appelant la refuse d'abord, avec son propre
 /// message — un fichier de transfert et une configuration ne se répondent pas de la même façon.
 pub(crate) fn projets_du_document(
     valeur: serde_json::Value,
     version: u32,
-) -> Result<Vec<Project>, String> {
-    let mut projects = if version == VERSION_COURANTE {
-        serde_json::from_value::<Vec<Project>>(
-            valeur
-                .get("projects")
-                .cloned()
-                .unwrap_or(serde_json::Value::Null),
+) -> Result<(Vec<Project>, Kubeconfigs), String> {
+    let (mut projects, kubeconfigs) = if version == VERSION_COURANTE {
+        (
+            serde_json::from_value::<Vec<Project>>(
+                valeur
+                    .get("projects")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null),
+            )
+            .map_err(|erreur| format!("forme inattendue : {erreur}"))?,
+            // Un document déjà en v6 porte ses déclarations à la racine ; c'est l'appelant qui les
+            // lit, avec le reste de son enveloppe.
+            Kubeconfigs::default(),
         )
-        .map_err(|erreur| format!("forme inattendue : {erreur}"))?
     } else {
-        migrer_le_document(valeur, version)?.0
+        let migre = migrer_le_document(valeur, version)?;
+        (migre.0, migre.3)
     };
 
     // **La même reprise qu'à la lecture de la configuration**, et pour la même raison : un fichier
@@ -399,7 +454,72 @@ pub(crate) fn projets_du_document(
     // consoles. Les laisser dans `queries` les rendrait invisibles jusqu'à la relecture suivante du
     // fichier de configuration — ou les perdrait, si le projet d'accueil a déjà une connexion.
     super::enregistrer::migrer_requetes_en_consoles(&mut projects);
-    Ok(projects)
+    Ok((projects, kubeconfigs))
+}
+
+/// v5 → v6 (`API-70`) : un transfert Kubernetes porte une **référence** au lieu d'un chemin.
+///
+/// Relève chaque `kubeconfig` écrit dans un proxy Kubernetes, le déclare une fois — deux connexions
+/// qui nommaient le même fichier partagent donc une déclaration, ce qui est tout l'objet du chantier
+/// — et remplace le chemin par l'identifiant obtenu.
+///
+/// **Écrite sur du `serde_json::Value`, comme les deux crans précédents, et pour la même raison** :
+/// un proxy Kubernetes apparaît sous une connexion de projet *et* sous une instance managée, et le
+/// même document sert de fichier de transfert. Descendre l'arbre en cherchant les proxys plutôt
+/// qu'en connaissant les chemins qui y mènent est la seule écriture qui ne se répète pas trois fois.
+///
+/// **Déterministe** : `serde_json::Map` est une `BTreeMap` — la crate n'active pas `preserve_order`
+/// — donc l'ordre de visite est celui des clés, et celui des tableaux est le leur. Deux migrations
+/// du même fichier rendent les mêmes identifiants, ce dont dépend le libellé attribué en cas de
+/// collision.
+///
+/// **Pas idempotente, et elle n'a pas à l'être** : un second passage prendrait les identifiants
+/// qu'elle vient d'écrire pour des chemins. C'est `depuis < 6` qui la garde, comme `depuis < 3`
+/// garde le hissage des tunnels — lequel est idempotent par construction, non par précaution.
+fn declarer_les_kubeconfigs(valeur: &mut serde_json::Value) -> Kubeconfigs {
+    let mut kubeconfigs = Kubeconfigs::default();
+    referencer_les_kubeconfigs(valeur, &mut kubeconfigs);
+    kubeconfigs
+}
+
+fn referencer_les_kubeconfigs(valeur: &mut serde_json::Value, kubeconfigs: &mut Kubeconfigs) {
+    match valeur {
+        serde_json::Value::Object(objet) => {
+            if objet.get("kind").and_then(serde_json::Value::as_str) == Some("kubernetes") {
+                // **Une valeur blanche vaut absente**, comme partout ailleurs pour ce champ : la
+                // déclarer poserait une entrée sans chemin dans la liste des préférences, que
+                // `Kubeconfigs::valider` refuserait ensuite — donc une configuration migrée qui ne
+                // se réécrit plus.
+                let chemin = objet
+                    .get("kubeconfig")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::trim)
+                    .filter(|chemin| !chemin.is_empty())
+                    .map(str::to_owned);
+                match chemin {
+                    Some(chemin) => {
+                        let id = kubeconfigs.declarer(&chemin);
+                        objet.insert(
+                            "kubeconfig".to_owned(),
+                            serde_json::Value::from(id.as_str()),
+                        );
+                    }
+                    None => {
+                        objet.remove("kubeconfig");
+                    }
+                }
+            }
+            for (_, enfant) in objet.iter_mut() {
+                referencer_les_kubeconfigs(enfant, kubeconfigs);
+            }
+        }
+        serde_json::Value::Array(elements) => {
+            for element in elements {
+                referencer_les_kubeconfigs(element, kubeconfigs);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// v2 → v3 (`05d`) : le tunnel plat devient `{ localPort, proxy: { kind: "ssh", … } }`.
@@ -703,13 +823,35 @@ impl ConfigStore {
         projects: &[Project],
         preferences: &Preferences,
         instances: &[ManagedInstance],
+        kubeconfigs: &Kubeconfigs,
     ) -> Result<(), StoreError> {
         if let Some(raison) = &self.refus {
             return Err(StoreError::EcritureRefusee {
                 raison: raison.clone(),
             });
         }
-        save(&self.chemin, projects, preferences, instances)
+        save(&self.chemin, projects, preferences, instances, kubeconfigs)
+    }
+
+    /// Relit les kubeconfigs déclarés du disque (`API-70`).
+    ///
+    /// **Même raison que `load_instances`** : le fichier est réécrit entier, donc toute commande qui
+    /// écrit *quelque chose* doit d'abord relire ce qu'elle n'écrit pas. Sans cette lecture,
+    /// enregistrer un projet effacerait les déclarations — et **chaque connexion Kubernetes du
+    /// fichier deviendrait une référence morte**, ce qui est pire que la perte des instances : ce
+    /// n'est pas une liste qui disparaît, ce sont des connexions qui cessent d'ouvrir.
+    pub fn load_kubeconfigs(&self) -> Result<Kubeconfigs, String> {
+        if let Some(raison) = &self.refus {
+            return Err(raison.clone());
+        }
+        match load(&self.chemin) {
+            LoadOutcome::Fresh => Ok(Kubeconfigs::default()),
+            LoadOutcome::Loaded { kubeconfigs, .. } => Ok(kubeconfigs),
+            LoadOutcome::Unreadable { reason, .. } => Err(reason),
+            LoadOutcome::TooNew { found, supported } => Err(format!(
+                "le fichier est en version {found}, cette application comprend la version {supported}"
+            )),
+        }
     }
 
     /// Relit les instances managées du disque (`API-32`).
@@ -839,7 +981,7 @@ mod tests_preferences {
                 ..Guards::default()
             },
         };
-        save(&chemin, &[], &voulues, &[]).unwrap();
+        save(&chemin, &[], &voulues, &[], &Kubeconfigs::default()).unwrap();
 
         let LoadOutcome::Loaded { preferences, .. } = load(&chemin) else {
             panic!("le fichier doit se lire");
@@ -912,11 +1054,13 @@ mod tests_preferences {
             theme: Theme::Nuit,
             ..Preferences::default()
         };
-        save(&chemin, &[], &reglees, &[]).unwrap();
+        save(&chemin, &[], &reglees, &[], &Kubeconfigs::default()).unwrap();
 
         let (store, _) = ConfigStore::open(&chemin);
         let relues = store.load_preferences().unwrap();
-        store.save(&[], &relues, &[]).unwrap();
+        store
+            .save(&[], &relues, &[], &Kubeconfigs::default())
+            .unwrap();
 
         let LoadOutcome::Loaded { preferences, .. } = load(&chemin) else {
             panic!("le fichier doit se lire");
@@ -940,7 +1084,7 @@ mod tests {
         ConnectionSettings, Database, Engine, EnvironmentId, Proxy, ProxyCloudSql, SslMode,
     };
 
-    fn variante() -> ConnectionSettings {
+    pub(super) fn variante() -> ConnectionSettings {
         ConnectionSettings {
             host: "db.internal".into(),
             port: 5432,
@@ -993,7 +1137,14 @@ mod tests {
         let chemin = dir.path().join("config.json");
         let projets = vec![projet_nomme("Atelier Nord")];
 
-        save(&chemin, &projets, &Preferences::default(), &[]).unwrap();
+        save(
+            &chemin,
+            &projets,
+            &Preferences::default(),
+            &[],
+            &Kubeconfigs::default(),
+        )
+        .unwrap();
         let relu = match load(&chemin) {
             LoadOutcome::Loaded { projects, .. } => projects,
             autre => panic!("attendu Loaded, obtenu {autre:?}"),
@@ -1006,7 +1157,14 @@ mod tests {
     fn le_fichier_porte_un_numero_de_version() {
         let dir = tempfile::tempdir().unwrap();
         let chemin = dir.path().join("config.json");
-        save(&chemin, &[], &Preferences::default(), &[]).unwrap();
+        save(
+            &chemin,
+            &[],
+            &Preferences::default(),
+            &[],
+            &Kubeconfigs::default(),
+        )
+        .unwrap();
 
         let valeur: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(&chemin).unwrap()).unwrap();
@@ -1017,7 +1175,14 @@ mod tests {
     fn le_repertoire_est_cree_s_il_manque() {
         let dir = tempfile::tempdir().unwrap();
         let chemin = dir.path().join("sous/dossier/config.json");
-        save(&chemin, &[], &Preferences::default(), &[]).unwrap();
+        save(
+            &chemin,
+            &[],
+            &Preferences::default(),
+            &[],
+            &Kubeconfigs::default(),
+        )
+        .unwrap();
         assert!(chemin.exists());
     }
 
@@ -1033,6 +1198,7 @@ mod tests {
             &[projet_nomme("Ancien")],
             &Preferences::default(),
             &[],
+            &Kubeconfigs::default(),
         )
         .unwrap();
         let avant = fs::read_to_string(&chemin).unwrap();
@@ -1044,6 +1210,7 @@ mod tests {
             &[projet_nomme("Nouveau")],
             &Preferences::default(),
             &[],
+            &Kubeconfigs::default(),
         )
         .unwrap();
 
@@ -1066,7 +1233,14 @@ mod tests {
     fn le_temporaire_ne_subsiste_pas_apres_une_ecriture_reussie() {
         let dir = tempfile::tempdir().unwrap();
         let chemin = dir.path().join("config.json");
-        save(&chemin, &[], &Preferences::default(), &[]).unwrap();
+        save(
+            &chemin,
+            &[],
+            &Preferences::default(),
+            &[],
+            &Kubeconfigs::default(),
+        )
+        .unwrap();
         assert!(!chemin_temporaire(&chemin).exists());
     }
 
@@ -1093,6 +1267,7 @@ mod tests {
             &[projet_nomme("Premier")],
             &Preferences::default(),
             &[],
+            &Kubeconfigs::default(),
         )
         .unwrap();
         let inode_avant = fs::metadata(&chemin).unwrap().ino();
@@ -1102,6 +1277,7 @@ mod tests {
             &[projet_nomme("Second")],
             &Preferences::default(),
             &[],
+            &Kubeconfigs::default(),
         )
         .unwrap();
         let inode_apres = fs::metadata(&chemin).unwrap().ino();
@@ -1192,7 +1368,12 @@ mod tests {
         let (store, issue) = ConfigStore::open(&chemin);
         assert!(matches!(issue, LoadOutcome::Unreadable { .. }));
 
-        let erreur = store.save(&[projet_nomme("Nouveau")], &Preferences::default(), &[]);
+        let erreur = store.save(
+            &[projet_nomme("Nouveau")],
+            &Preferences::default(),
+            &[],
+            &Kubeconfigs::default(),
+        );
         assert!(matches!(erreur, Err(StoreError::EcritureRefusee { .. })));
         // Rien n'a été écrit à la place.
         assert!(!chemin.exists());
@@ -1207,7 +1388,7 @@ mod tests {
 
         let (store, _) = ConfigStore::open(&chemin);
         assert!(matches!(
-            store.save(&[], &Preferences::default(), &[]),
+            store.save(&[], &Preferences::default(), &[], &Kubeconfigs::default()),
             Err(StoreError::EcritureRefusee { .. })
         ));
         assert_eq!(fs::read_to_string(&chemin).unwrap(), futur);
@@ -1221,7 +1402,12 @@ mod tests {
         let (store, issue) = ConfigStore::open(&chemin);
         assert!(matches!(issue, LoadOutcome::Fresh));
         assert!(store
-            .save(&[projet_nomme("Premier")], &Preferences::default(), &[])
+            .save(
+                &[projet_nomme("Premier")],
+                &Preferences::default(),
+                &[],
+                &Kubeconfigs::default()
+            )
             .is_ok());
     }
 
@@ -1619,12 +1805,22 @@ mod tests {
         else {
             panic!("un fichier v4 doit se lire");
         };
-        save(&chemin, &projects, &preferences, &[]).unwrap();
+        save(
+            &chemin,
+            &projects,
+            &preferences,
+            &[],
+            &Kubeconfigs::default(),
+        )
+        .unwrap();
 
         let reecrit = fs::read_to_string(&chemin).unwrap();
         assert!(!reecrit.contains("activeEnvironment"));
         let valeur: serde_json::Value = serde_json::from_str(&reecrit).unwrap();
-        assert_eq!(valeur["version"], serde_json::json!(5));
+        // `VERSION_COURANTE` et non un littéral : ce que le test garde est qu'un fichier réécrit
+        // porte la version de l'application, non telle valeur — sinon chaque cran le ferait rougir
+        // pour une raison qui n'est pas la sienne.
+        assert_eq!(valeur["version"], serde_json::json!(VERSION_COURANTE));
     }
 
     #[test]
@@ -1834,7 +2030,14 @@ mod tests {
                 visible_schemas: None,
             }],
         };
-        save(&chemin, &[projet], &Preferences::default(), &[]).unwrap();
+        save(
+            &chemin,
+            &[projet],
+            &Preferences::default(),
+            &[],
+            &Kubeconfigs::default(),
+        )
+        .unwrap();
 
         let issue = load(&chemin);
         assert!(matches!(issue, LoadOutcome::Loaded { .. }), "{issue:?}");
@@ -1876,7 +2079,14 @@ mod tests {
             }],
         };
 
-        save(&chemin, &[projet], &Preferences::default(), &[]).unwrap();
+        save(
+            &chemin,
+            &[projet],
+            &Preferences::default(),
+            &[],
+            &Kubeconfigs::default(),
+        )
+        .unwrap();
 
         // Lecture en texte brut : la seule vérification qui vaille.
         let brut = fs::read_to_string(&chemin).unwrap();
@@ -1930,7 +2140,14 @@ mod tests {
             sql: "select 1".into(),
         }];
 
-        save(&cible, &projets, &Preferences::default(), &[]).expect("écriture");
+        save(
+            &cible,
+            &projets,
+            &Preferences::default(),
+            &[],
+            &Kubeconfigs::default(),
+        )
+        .expect("écriture");
         match load(&cible) {
             LoadOutcome::Loaded { projects, .. } => {
                 // Le concept a disparu du modèle rendu à l'écran…
@@ -1956,13 +2173,27 @@ mod tests {
             name: "CA par jour".into(),
             sql: "select 1".into(),
         }];
-        save(&cible, &projets, &Preferences::default(), &[]).expect("écriture");
+        save(
+            &cible,
+            &projets,
+            &Preferences::default(),
+            &[],
+            &Kubeconfigs::default(),
+        )
+        .expect("écriture");
 
         let projets = match load(&cible) {
             LoadOutcome::Loaded { projects, .. } => projects,
             autre => panic!("la lecture doit réussir : {autre:?}"),
         };
-        save(&cible, &projets, &Preferences::default(), &[]).expect("réécriture");
+        save(
+            &cible,
+            &projets,
+            &Preferences::default(),
+            &[],
+            &Kubeconfigs::default(),
+        )
+        .expect("réécriture");
         let brut = std::fs::read_to_string(&cible).expect("lecture");
         assert!(!brut.contains("queries"));
         assert!(brut.contains("CA par jour"));
@@ -2216,6 +2447,7 @@ mod tests_instances {
             &[],
             &Preferences::default(),
             &[instance("pg-prod")],
+            &Kubeconfigs::default(),
         )
         .unwrap();
 
@@ -2249,7 +2481,14 @@ mod tests_instances {
         // fait chercher à quoi elle sert.
         let dir = tempdir().unwrap();
         let chemin = dir.path().join("config.json");
-        save(&chemin, &[], &Preferences::default(), &[]).unwrap();
+        save(
+            &chemin,
+            &[],
+            &Preferences::default(),
+            &[],
+            &Kubeconfigs::default(),
+        )
+        .unwrap();
 
         assert!(!fs::read_to_string(&chemin).unwrap().contains("instances"));
     }
@@ -2267,10 +2506,18 @@ mod tests_instances {
             &[],
             &Preferences::default(),
             &[instance("pg-prod")],
+            &Kubeconfigs::default(),
         )
         .unwrap();
 
-        save(&chemin, &[], &Preferences::default(), &[]).unwrap();
+        save(
+            &chemin,
+            &[],
+            &Preferences::default(),
+            &[],
+            &Kubeconfigs::default(),
+        )
+        .unwrap();
 
         let LoadOutcome::Loaded { instances, .. } = load(&chemin) else {
             panic!("le fichier doit se relire");
@@ -2290,6 +2537,7 @@ mod tests_instances {
             &[],
             &Preferences::default(),
             &[instance("pg-prod")],
+            &Kubeconfigs::default(),
         )
         .unwrap();
 
@@ -2336,5 +2584,186 @@ mod tests_instances {
             !instances[0].production,
             "et le drapeau de prod rester éteint"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests_migration_kubeconfigs {
+    use super::tests::variante;
+    use super::*;
+    use crate::config::{Engine, KubeconfigId};
+
+    /// Un document v5 portant trois connexions Kubernetes, dont **deux sur le même fichier**.
+    ///
+    /// **Composé depuis les vraies structures, puis rétrogradé** : un JSON écrit à la main se périme
+    /// au premier champ ajouté au modèle, et le test échouerait alors sur une forme et non sur ce
+    /// qu'il garde. Seule la forme du kubeconfig est réécrite — c'est précisément ce que la v5
+    /// portait et que la v6 remplace.
+    fn document_v5() -> serde_json::Value {
+        let bases: Vec<Database> = [
+            ("catalogue", "~/.kube/prod/config"),
+            ("commandes", "~/.kube/prod/config"),
+            ("stocks", "~/.kube/recette.yaml"),
+        ]
+        .into_iter()
+        .map(|(nom, _)| {
+            let mut reglages = variante();
+            reglages.tunnel = Some(crate::config::Tunnel {
+                local_port: None,
+                proxy: crate::config::Proxy::Kubernetes(crate::config::ProxyKubernetes {
+                    // Remplacé par le chemin juste après : en v5, ce champ portait une chaîne.
+                    kubeconfig: None,
+                    namespace: None,
+                    resource: "svc/postgres".to_owned(),
+                }),
+            });
+            Database {
+                name: nom.to_owned(),
+                label: None,
+                engine: Engine::PostgreSql,
+                environment: EnvironmentId::brut("prod"),
+                connection: reglages,
+                consoles: Vec::new(),
+                visible_schemas: None,
+            }
+        })
+        .collect();
+
+        let projet = Project {
+            name: "Halle".to_owned(),
+            environments: crate::config::model::EnvironmentDeclaration::trio_par_defaut(),
+            queries: Vec::new(),
+            databases: bases,
+        };
+
+        let mut document = serde_json::json!({ "version": 5, "projects": [projet] });
+        for (rang, chemin) in [
+            "~/.kube/prod/config",
+            "~/.kube/prod/config",
+            "~/.kube/recette.yaml",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            document["projects"][0]["databases"][rang]["connection"]["tunnel"]["proxy"]
+                ["kubeconfig"] = serde_json::json!(chemin);
+        }
+        document
+    }
+
+    fn reference(projets: &[Project], base: &str) -> Option<KubeconfigId> {
+        let base = projets[0]
+            .databases
+            .iter()
+            .find(|candidate| candidate.name == base)?;
+        match &base.connection.tunnel.as_ref()?.proxy {
+            crate::config::Proxy::Kubernetes(kube) => kube.kubeconfig.clone(),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn deux_connexions_sur_le_meme_fichier_partagent_une_declaration() {
+        // **C'est tout l'objet du chantier** : un cluster porte des dizaines de bases, et le chemin
+        // était ressaisi à chacune. La migration doit donc *rassembler*, pas recopier.
+        let (projets, _, _, kubeconfigs) =
+            migrer_le_document(document_v5(), 5).expect("la migration doit aboutir");
+
+        assert_eq!(kubeconfigs.declarations.len(), 2);
+        assert_eq!(
+            reference(&projets, "catalogue"),
+            reference(&projets, "commandes")
+        );
+        assert_ne!(
+            reference(&projets, "catalogue"),
+            reference(&projets, "stocks")
+        );
+    }
+
+    #[test]
+    fn la_reference_migree_resout_vers_le_chemin_d_origine() {
+        // **L'assertion qui compte vraiment.** Sans elle, une migration qui rassemblerait bien mais
+        // attribuerait la mauvaise déclaration passerait le test précédent — et ouvrirait le mauvais
+        // cluster, avec succès.
+        let (projets, _, _, kubeconfigs) =
+            migrer_le_document(document_v5(), 5).expect("la migration doit aboutir");
+
+        let catalogue = reference(&projets, "catalogue").expect("une référence");
+        let stocks = reference(&projets, "stocks").expect("une référence");
+        assert_eq!(
+            kubeconfigs.resoudre(&catalogue),
+            Some("~/.kube/prod/config")
+        );
+        assert_eq!(kubeconfigs.resoudre(&stocks), Some("~/.kube/recette.yaml"));
+    }
+
+    #[test]
+    fn un_kubeconfig_blanc_devient_une_absence_et_ne_declare_rien() {
+        // Le cas du fichier écrit à la main. Le déclarer poserait une entrée **sans chemin**, que
+        // `Kubeconfigs::valider` refuserait ensuite — donc une configuration migrée qui ne se
+        // réécrit plus. `None` est la valeur juste : « celui que `kubectl` choisirait ».
+        let mut document = document_v5();
+        document["projects"][0]["databases"][0]["connection"]["tunnel"]["proxy"]["kubeconfig"] =
+            serde_json::json!("   ");
+
+        let (projets, _, _, kubeconfigs) =
+            migrer_le_document(document, 5).expect("la migration doit aboutir");
+
+        assert_eq!(reference(&projets, "catalogue"), None);
+        assert!(kubeconfigs.valider().is_ok());
+        // Les deux autres connexions sont intactes : une valeur blanche n'emporte pas ses voisines.
+        assert_eq!(kubeconfigs.declarations.len(), 2);
+    }
+
+    #[test]
+    fn les_proxys_des_autres_sortes_ne_sont_pas_touches() {
+        // **Le contrôle négatif de la descente d'arbre.** Elle cherche `kind == "kubernetes"` ; sans
+        // ce test, une condition trop large réécrirait le `privateKeyPath` d'un bastion, ou le nom
+        // d'instance d'un proxy Cloud SQL, en croyant y voir un kubeconfig.
+        let mut document = document_v5();
+        document["projects"][0]["databases"][2]["connection"]["tunnel"]["proxy"] = serde_json::json!({
+            "kind": "ssh", "bastionHost": "bastion.interne", "bastionPort": 22,
+            "username": "dora", "privateKeyPath": "~/.ssh/id_ed25519"
+        });
+
+        let (projets, _, _, kubeconfigs) =
+            migrer_le_document(document, 5).expect("la migration doit aboutir");
+
+        assert_eq!(kubeconfigs.declarations.len(), 1);
+        match &projets[0].databases[2]
+            .connection
+            .tunnel
+            .as_ref()
+            .unwrap()
+            .proxy
+        {
+            crate::config::Proxy::Ssh(ssh) => {
+                assert_eq!(ssh.private_key_path, "~/.ssh/id_ed25519");
+            }
+            autre => panic!("le bastion doit rester un bastion : {autre:?}"),
+        }
+    }
+
+    #[test]
+    fn un_document_deja_en_v6_garde_ses_declarations() {
+        // La migration ne tourne pas — `depuis < 6` la garde —, et elle n'est **pas idempotente** :
+        // un second passage prendrait les identifiants pour des chemins. Ce test garde la borne.
+        let dir = tempfile::tempdir().unwrap();
+        let chemin = dir.path().join("config.json");
+        let mut kubeconfigs = Kubeconfigs::default();
+        let prod = kubeconfigs.declarer("~/.kube/prod/config");
+        kubeconfigs.default = Some(prod.clone());
+
+        save(&chemin, &[], &Preferences::default(), &[], &kubeconfigs).unwrap();
+        let LoadOutcome::Loaded {
+            kubeconfigs: relus, ..
+        } = load(&chemin)
+        else {
+            panic!("un fichier courant doit se lire");
+        };
+
+        assert_eq!(relus.declarations.len(), 1);
+        assert_eq!(relus.resoudre(&prod), Some("~/.kube/prod/config"));
+        assert_eq!(relus.default, Some(prod));
     }
 }

@@ -143,17 +143,18 @@ test('la modale des préférences tient dans la fenêtre minimale', async ({ pag
   expect(tient?.dansLaHauteur).toBe(true)
 })
 
-test('les cinq sections sont atteignables au clavier', async ({ page }) => {
+test('les six sections sont atteignables au clavier', async ({ page }) => {
   await ouvrirLesPreferences(page)
   // **Porté sur la modale** : la bande d'onglets de l'écran de travail en a aussi, et une
   // assertion à l'échelle de la page les compterait ensemble.
   const modale = page.getByRole('dialog', { name: 'Préférences' })
   const onglets = modale.getByRole('tab')
-  await expect(onglets).toHaveCount(5)
+  // Six depuis `API-70` : « Connexions » est revenue, portant les kubeconfigs déclarés.
+  await expect(onglets).toHaveCount(6)
 
   // `role="tablist"` **promet** la navigation aux flèches, il ne la fournit pas : un rôle ARIA
   // annonce une convention, et c'est au code de la tenir. Sans elle, un lecteur d'écran annonce
-  // « onglet 1 sur 5 » et les flèches ne font rien.
+  // « onglet 1 sur 6 » et les flèches ne font rien.
   await modale.getByRole('tab', { name: 'Général' }).focus()
   await page.keyboard.press('ArrowDown')
   await expect(modale.getByRole('tab', { name: 'Apparence' })).toBeFocused()
@@ -210,5 +211,112 @@ test.describe('sur une fenêtre trop courte', () => {
     // et le panneau de droite défile déjà de lui-même.
     expect(mesures?.hauteurDesColonnes).toBeLessThan(340)
     expect(mesures?.modaleDefile).toBe(false)
+  })
+})
+
+// --- La section « Connexions » : les kubeconfigs déclarés (`API-70`).
+//
+// **Ici et non en Vitest** : jsdom ne calcule aucune mise en page, donc ni « la liste tient dans la
+// modale » ni « le retrait refusé porte sa raison au survol » n'y ont de juge (règle n° 9). Le décor
+// de `?demo` déclare deux fichiers, dont un par défaut.
+test.describe('les kubeconfigs déclarés', () => {
+  test('la section liste les déclarations, avec leur chemin, sans sortir de la modale', async ({
+    page,
+  }) => {
+    await ouvrirLesPreferences(page)
+    const modale = page.getByRole('dialog', { name: 'Préférences' })
+    await modale.getByRole('tab', { name: 'Connexions' }).click()
+
+    // Les deux déclarations du décor, **et leur chemin** : c'est le chemin qui dit *quel* fichier,
+    // là où le libellé ne dit que le nom qu'on lui a donné.
+    const valeurs = await modale
+      .locator('input[type=text], input:not([type])')
+      .evaluateAll((champs) => champs.map((champ) => (champ as HTMLInputElement).value))
+    expect(valeurs).toContain('prod')
+    expect(valeurs).toContain('~/.kube/prod/config')
+    expect(valeurs).toContain('~/.kube/bac-a-sable.yaml')
+
+    // **Rien ne franchit le bord de la modale.** Deux champs et deux actions par entrée, dans une
+    // colonne de droite dont la largeur n'a jamais été composée pour cela.
+    const deborde = await page.evaluate(() => {
+      const dialogue = document.querySelector('[role=dialog]')
+      if (!dialogue) return null
+      const cadre = dialogue.getBoundingClientRect()
+      return [...dialogue.querySelectorAll('input, button')].some((element) => {
+        const boite = element.getBoundingClientRect()
+        return boite.width > 0 && (boite.right > cadre.right + 1 || boite.left < cadre.left - 1)
+      })
+    })
+    expect(deborde).toBe(false)
+  })
+
+  test('l’étiquette « Par défaut » et « Retirer » se lisent comme le reste de la section', async ({
+    page,
+  }) => {
+    // **Le défaut que ce test empêche a été livré une fois, et il était déjà écrit dans
+    // `AGENTS.md`** (rapporté à l'usage, 18 septembre 2026 : « wrong font and font size »). Deux
+    // causes, toutes deux muettes :
+    //
+    // - `font-size: var(--text-sm)` désignait un jeton qui **n'existe pas** — ni TypeScript, ni
+    //   Biome, ni Vitest, ni aucune assertion de rôle ne le dit, et la déclaration est simplement
+    //   ignorée ;
+    // - `font: inherit` sur le bouton, posé pour « neutraliser » la police de formulaire d'un
+    //   `<button>` — ce qu'il n'y avait pas à neutraliser, les styles d'auteur l'emportant de toute
+    //   façon — reposait au passage famille, graisse et hauteur de ligne. C'est la leçon d'`API-55`,
+    //   à la lettre, sur le fichier d'à côté.
+    //
+    // **Ce qui est gardé est une égalité, pas une valeur** : les deux contrôles se lisent comme la
+    // note de la section. Figer « 11px Nunito 500 » périmerait au premier passage de design.
+    await ouvrirLesPreferences(page)
+    const modale = page.getByRole('dialog', { name: 'Préférences' })
+    await modale.getByRole('tab', { name: 'Connexions' }).click()
+
+    const polices = await page.evaluate(() => {
+      const dialogue = document.querySelector('[role=dialog]')
+      if (!dialogue) return null
+      const police = (element: Element | null | undefined) => {
+        if (!element) return null
+        const calcule = getComputedStyle(element)
+        return [calcule.fontFamily, calcule.fontSize, calcule.fontWeight, calcule.lineHeight].join(
+          ' | ',
+        )
+      }
+      return {
+        // La référence : la note de la section, qui porte la police que le dépôt donne à ce
+        // registre de texte.
+        note: police(dialogue.querySelector('[class*=note]')),
+        defaut: police(dialogue.querySelector('[class*=kubeconfigDefaut]')),
+        retirer: police(dialogue.querySelector('[class*=kubeconfigRetrait]')),
+      }
+    })
+
+    expect(polices?.note).not.toBeNull()
+    expect(polices?.defaut).toBe(polices?.note)
+    expect(polices?.retirer).toBe(polices?.note)
+  })
+
+  test('le bouton de retrait porte aria-disabled, jamais disabled', async ({ page }) => {
+    await ouvrirLesPreferences(page)
+    const modale = page.getByRole('dialog', { name: 'Préférences' })
+    await modale.getByRole('tab', { name: 'Connexions' }).click()
+
+    // **`aria-disabled` et non `disabled`** : un bouton désactivé ne reçoit ni focus ni survol, donc
+    // son infobulle serait inatteignable — exactement là où elle est le plus utile, puisqu'elle dit
+    // *quoi changer d'abord*. C'est le piège n° 3, et ce test est ce qui l'empêche de revenir.
+    const retraits = modale.getByRole('button', { name: 'Retirer' })
+    await expect(retraits).toHaveCount(2)
+
+    // Aucune connexion du décor ne vise ces fichiers : les deux se retirent. C'est le **contrôle
+    // positif** — sans lui, un refus qui refuserait tout passerait pour une garde qui marche.
+    //
+    // **Le refus lui-même est vérifié ailleurs**, et à deux niveaux : le câblage de l'écran — le
+    // grisé et sa raison — dans `PreferencesDialog.test.tsx`, qui peut poser le décor qu'il faut
+    // sans toucher à celui de `?demo` ; et la garantie du cœur dans `config::commands`. Ici il n'y
+    // a que ce que jsdom ne sait pas juger : la géométrie, et le fait que le bouton reste
+    // atteignable au survol.
+    for (const rang of [0, 1]) {
+      await expect(retraits.nth(rang)).toHaveAttribute('aria-disabled', 'false')
+      await expect(retraits.nth(rang)).not.toHaveAttribute('disabled', '')
+    }
   })
 })

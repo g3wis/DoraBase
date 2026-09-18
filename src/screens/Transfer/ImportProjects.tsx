@@ -257,6 +257,15 @@ function Ligne({
             {t('transfer.import.localPaths', { count: sort.localPaths.length })}
           </span>
         )}
+        {/* **En `refus` et non en `reserve`** (`API-70`) : une connexion dont le kubeconfig n'est
+            déclaré nulle part dans le fichier **n'ouvrira pas**, là où un chemin local peut très
+            bien exister sur cette machine. Un import amputé en silence se lirait comme un import
+            complet, ce qui est le pire défaut que ce geste puisse avoir. */}
+        {sort.kubeconfigsMissing.length > 0 && (
+          <span className={styles.refus} title={sort.kubeconfigsMissing.join('\n')}>
+            {t('transfer.import.kubeconfigsMissing', { count: sort.kubeconfigsMissing.length })}
+          </span>
+        )}
         {sort.connectionsRejected.length > 0 && (
           <span className={styles.refus} title={sort.connectionsRejected.join('\n')}>
             {t('transfer.import.connectionsRejected', { count: sort.connectionsRejected.length })}

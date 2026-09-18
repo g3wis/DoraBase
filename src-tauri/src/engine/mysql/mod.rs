@@ -118,11 +118,11 @@ impl MysqlAdapter {
     pub async fn connect_via(
         variante: &ConnectionSettings,
         mot_de_passe: Option<&Secret>,
-        known_hosts: &std::path::Path,
+        contexte: &crate::engine::proxy::ContexteDeProxy,
     ) -> Result<Self, EngineError> {
         let proxy = match &variante.tunnel {
             Some(tunnel) => {
-                Some(ProxyOuvert::ouvrir(tunnel, &variante.host, variante.port, known_hosts).await?)
+                Some(ProxyOuvert::ouvrir(tunnel, &variante.host, variante.port, contexte).await?)
             }
             None => None,
         };
@@ -588,7 +588,7 @@ mod tests_db {
         MysqlAdapter::connect_via(
             &variante(),
             Some(&mot_de_passe()),
-            std::path::Path::new("/dev/null"),
+            &crate::engine::proxy::ContexteDeProxy::pour_les_tests(),
         )
         .await
         .expect("connexion au MySQL de test")
@@ -1274,7 +1274,7 @@ mod tests_db {
         let issue = MysqlAdapter::connect_via(
             &mauvaise,
             Some(&Secret::new(sentinelle)),
-            std::path::Path::new("/dev/null"),
+            &crate::engine::proxy::ContexteDeProxy::pour_les_tests(),
         )
         .await;
         let erreur = issue.expect_err("l'authentification doit échouer");
@@ -1320,7 +1320,7 @@ mod tests_db {
         MysqlAdapter::connect_via(
             &variante,
             Some(&mot_de_passe()),
-            std::path::Path::new("/dev/null"),
+            &crate::engine::proxy::ContexteDeProxy::pour_les_tests(),
         )
         .await
     }

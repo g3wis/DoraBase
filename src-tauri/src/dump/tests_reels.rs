@@ -353,7 +353,7 @@ async fn un_dump_passe_par_le_bastion() {
             crate::config::Engine::PostgreSql,
             &variante,
             secret.as_ref(),
-            &known_hosts,
+            &crate::engine::proxy::ContexteDeProxy::nouveau(known_hosts, Default::default()),
         )
         .await
         .expect("la base doit s'ouvrir à travers le bastion");

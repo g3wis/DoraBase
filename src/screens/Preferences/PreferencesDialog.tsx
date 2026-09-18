@@ -2,13 +2,29 @@ import { useState } from 'react'
 import { checkUpdate, installUpdate } from '../../data/commandes'
 import { Icon } from '../../design/icons/Icon'
 import type { IconName } from '../../design/icons/names'
-import type { Guards, Preferences, Theme } from '../../domain/config'
+import type {
+  Guards,
+  Kubeconfigs,
+  ManagedInstance,
+  Preferences,
+  Project,
+  Theme,
+} from '../../domain/config'
 import type { AvailableUpdate } from '../../domain/maj'
 import { useT } from '../../i18n/LanguageContext'
 import { raccourci } from '../../shell/plateforme'
 import { Button } from '../../ui/Button/Button'
+import { Field } from '../../ui/Field/Field'
 import { Modal } from '../../ui/Modal/Modal'
 import { Toggle } from '../../ui/Toggle/Toggle'
+import {
+  avecLeChemin,
+  avecLeDefaut,
+  avecLeLibelle,
+  declarationsDe,
+  sansLaDeclaration,
+  utilisationsDe,
+} from './kubeconfigs'
 import styles from './PreferencesDialog.module.css'
 import {
   borner,
@@ -55,6 +71,23 @@ type PreferencesDialogProps = {
    * `null` laisse la section sur « pas encore cherché », qui n'est pas « à jour ».
    */
   majDejaTrouvee?: AvailableUpdate | null
+  /** Les kubeconfigs déclarés (`API-70`), que la section « Connexions » règle. */
+  kubeconfigs: Kubeconfigs
+  onKubeconfigsChange: (kubeconfigs: Kubeconfigs) => void
+  /**
+   * Déclare un kubeconfig depuis un fichier choisi, et rend la liste qui en résulte.
+   *
+   * Injectée pour la raison d'`onBrowseKey` dans `A2` : le sélecteur natif ne répond pas hors de la
+   * webview, et la commande qui déclare écrit dans la configuration.
+   */
+  onDeclarerKubeconfig: () => Promise<void>
+  /**
+   * Ce qui se sert des déclarations — pour griser un retrait **avec sa raison**.
+   *
+   * Passés plutôt que lus : cette modale ne lit rien de la configuration, et `App` les a déjà.
+   */
+  projects: readonly Project[]
+  instances: readonly ManagedInstance[]
 }
 
 /**
@@ -62,10 +95,15 @@ type PreferencesDialogProps = {
  *
  * **« Éditeur SQL » et « Raccourcis » ont été retirées le 28 août 2026, « Connexions » le
  * 14 septembre (`API-59`)** : trois sections qui ne portaient qu'une phrase « à venir », et sans
- * date à laquelle ce contenu arrive. Elles reviendront quand il y aura quelque chose à y régler ;
- * ce que la dernière annonçait est porté par `API-60`.
+ * date à laquelle ce contenu arrive. Elles reviendront quand il y aura quelque chose à y régler.
+ *
+ * **« Connexions » est revenue le 18 septembre 2026 (`API-70`)**, et exactement sous cette
+ * condition : elle porte les kubeconfigs déclarés. C'est la règle d'`API-59` par son bon bout — ce
+ * qui l'avait fait partir n'était pas son sujet mais son vide. Les trois réglages qu'elle annonçait
+ * autrefois restent chez `API-60` et la rejoindront ; les mêler ici les remettrait à l'état de
+ * promesse, ce qu'`API-59` a justement retiré.
  */
-export type Section = 'general' | 'apparence' | 'grille' | 'securite' | 'maj'
+export type Section = 'general' | 'apparence' | 'connexions' | 'grille' | 'securite' | 'maj'
 
 /**
  * L'écran de préférences de `A10` (`15a` → `15d`).
@@ -83,12 +121,20 @@ export function PreferencesDialog({
   installerMiseAJour = installUpdate,
   sectionInitiale = 'apparence',
   majDejaTrouvee = null,
+  kubeconfigs,
+  onKubeconfigsChange,
+  onDeclarerKubeconfig,
+  projects,
+  instances,
 }: PreferencesDialogProps) {
   const t = useT()
 
   const SECTIONS: readonly { cle: Section; nom: string; icone: IconName }[] = [
     { cle: 'general', nom: t('preferences.sections.general'), icone: 'gear' },
     { cle: 'apparence', nom: t('preferences.sections.apparence'), icone: 'paint' },
+    // **À la place qu'elle occupait avant `API-59`**, entre l'apparence et la grille : elle revient
+    // là d'où elle est partie, plutôt qu'à la fin, où elle se lirait comme une nouveauté à chercher.
+    { cle: 'connexions', nom: t('preferences.sections.connexions'), icone: 'srv' },
     { cle: 'grille', nom: t('preferences.sections.grille'), icone: 'cols' },
     { cle: 'securite', nom: t('preferences.sections.securite'), icone: 'shield' },
     // **En dernier, et après les cinq du mockup.** Ce n'est pas un réglage : rien ne s'y règle, on y
@@ -209,6 +255,15 @@ export function PreferencesDialog({
             />
           )}
           {section === 'general' && <General preferences={preferences} onRegler={regler} />}
+          {section === 'connexions' && (
+            <Connexions
+              kubeconfigs={kubeconfigs}
+              onDeclarer={onDeclarerKubeconfig}
+              onRegler={onKubeconfigsChange}
+              projects={projects}
+              instances={instances}
+            />
+          )}
         </div>
       </div>
 
@@ -263,6 +318,121 @@ function General({
           </label>
         ))}
       </div>
+    </section>
+  )
+}
+
+/**
+ * La section « Connexions » : les kubeconfigs déclarés (`API-70`).
+ *
+ * **Revenue le 18 septembre 2026**, quatre jours après avoir été retirée pour n'avoir rien à régler
+ * (`API-59`) — et sous cette condition exactement : elle porte quelque chose.
+ *
+ * Chaque déclaration montre son **libellé**, modifiable, et son **chemin**, modifiable aussi : c'est
+ * ce dernier qui achète la référence — déplacer un fichier ici suit dans toutes les connexions, sans
+ * en rouvrir aucune. Ce qui ne bouge pas est l'identifiant, invisible, parce que c'est lui que les
+ * connexions désignent.
+ */
+function Connexions({
+  kubeconfigs,
+  onDeclarer,
+  onRegler,
+  projects,
+  instances,
+}: {
+  kubeconfigs: Kubeconfigs
+  onDeclarer: () => Promise<void>
+  onRegler: (kubeconfigs: Kubeconfigs) => void
+  projects: readonly Project[]
+  instances: readonly ManagedInstance[]
+}) {
+  const t = useT()
+  const declarations = declarationsDe(kubeconfigs)
+
+  return (
+    <section className={styles.bloc}>
+      <h3 className={styles.titre}>{t('preferences.connexions.kubeconfigsTitre')}</h3>
+
+      {declarations.length === 0 ? (
+        // **Une phrase, et non une liste vide** : sans elle, la section s'ouvrirait sur un seul
+        // bouton et ne dirait pas de quoi elle parle. Elle dit aussi *où* le geste sert, parce
+        // qu'un kubeconfig déclaré ici ne se voit qu'en ouvrant une connexion Kubernetes.
+        <p className={styles.note}>{t('preferences.connexions.kubeconfigsVide')}</p>
+      ) : (
+        <ul className={styles.kubeconfigs}>
+          {declarations.map((declaration) => {
+            const utilisations = utilisationsDe(declaration.id, projects, instances)
+            const employe = utilisations.length > 0
+            return (
+              <li key={declaration.id} className={styles.kubeconfig}>
+                <Field
+                  label={t('preferences.connexions.kubeconfigLibelle')}
+                  size="sm"
+                  value={declaration.label}
+                  onChange={(event) =>
+                    onRegler(avecLeLibelle(kubeconfigs, declaration.id, event.target.value))
+                  }
+                />
+                <Field
+                  label={t('preferences.connexions.kubeconfigChemin')}
+                  size="sm"
+                  mono
+                  value={declaration.path}
+                  onChange={(event) =>
+                    onRegler(avecLeChemin(kubeconfigs, declaration.id, event.target.value))
+                  }
+                />
+                <div className={styles.kubeconfigActions}>
+                  {/* **Une case à cocher, pas une radio** : on doit pouvoir *retirer* le défaut,
+                      et un groupe de radios n'a pas d'état « aucun » qu'on atteigne au clavier.
+                      Cocher celle d'une autre déplace le défaut, ce que `avecLeDefaut` fait en
+                      remplaçant plutôt qu'en ajoutant. */}
+                  <label className={styles.kubeconfigDefaut}>
+                    <input
+                      type="checkbox"
+                      checked={kubeconfigs.default === declaration.id}
+                      onChange={(event) =>
+                        onRegler(
+                          avecLeDefaut(kubeconfigs, event.target.checked ? declaration.id : null),
+                        )
+                      }
+                    />
+                    {t('preferences.connexions.kubeconfigDefaut')}
+                  </label>
+                  {/* **`aria-disabled` et non `disabled`** : la raison vit dans le `title`, qu'un
+                      bouton désactivé rendrait inatteignable — au survol comme au clavier. C'est le
+                      piège n° 3 d'accessibilité, et c'est ici qu'il coûterait le plus : la raison
+                      *nomme les connexions à changer d'abord*. */}
+                  <button
+                    type="button"
+                    className={styles.kubeconfigRetrait}
+                    aria-disabled={employe}
+                    title={
+                      employe
+                        ? t('preferences.connexions.kubeconfigEmploye', {
+                            utilisations: utilisations.join(', '),
+                          })
+                        : undefined
+                    }
+                    onClick={() => {
+                      if (employe) return
+                      onRegler(sansLaDeclaration(kubeconfigs, declaration.id))
+                    }}
+                  >
+                    {t('preferences.connexions.kubeconfigRetirer')}
+                  </button>
+                </div>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+
+      <Button variant="secondary" onClick={() => void onDeclarer()}>
+        {t('preferences.connexions.kubeconfigAjouter')}
+      </Button>
+
+      <p className={styles.note}>{t('preferences.connexions.kubeconfigsNote')}</p>
     </section>
   )
 }

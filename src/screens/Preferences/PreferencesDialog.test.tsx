@@ -2,7 +2,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { Sprite } from '../../design/icons/Sprite'
-import type { Preferences } from '../../domain/config'
+import type { Kubeconfigs, ManagedInstance, Preferences, Project } from '../../domain/config'
 import type { AvailableUpdate } from '../../domain/maj'
 import { LanguageProvider } from '../../i18n/LanguageContext'
 import { PreferencesDialog } from './PreferencesDialog'
@@ -16,9 +16,21 @@ function monter(
     chercher?: () => Promise<AvailableUpdate | null>
     installer?: () => Promise<void>
   } = {},
+  // Le décor des kubeconfigs (`API-70`). Vide par défaut : c'est l'état d'un poste qui n'a rien
+  // déclaré, et la plupart des tests d'ici ne touchent pas cette section.
+  kube: {
+    kubeconfigs?: Kubeconfigs
+    projects?: Project[]
+    instances?: ManagedInstance[]
+  } = {},
 ) {
   const onChange = vi.fn()
   const onClose = vi.fn()
+  const onKubeconfigsChange = vi.fn()
+  const onDeclarerKubeconfig = vi.fn(async () => {})
+  const kubeconfigs = kube.kubeconfigs ?? {}
+  const projects = kube.projects ?? []
+  const instances = kube.instances ?? []
   render(
     <>
       <Sprite />
@@ -33,11 +45,16 @@ function monter(
           version="DoraBase 0.4.2 (arm64)"
           chercherMiseAJour={maj.chercher ?? (() => Promise.reject(new Error('pas de pont')))}
           installerMiseAJour={maj.installer ?? (() => Promise.reject(new Error('pas de pont')))}
+          kubeconfigs={kubeconfigs}
+          onKubeconfigsChange={onKubeconfigsChange}
+          onDeclarerKubeconfig={onDeclarerKubeconfig}
+          projects={projects}
+          instances={instances}
         />
       </LanguageProvider>
     </>,
   )
-  return { onChange, onClose }
+  return { onChange, onClose, onKubeconfigsChange, onDeclarerKubeconfig }
 }
 
 function allerA(nom: string) {
@@ -45,11 +62,12 @@ function allerA(nom: string) {
 }
 
 describe('la coquille (`15a`)', () => {
-  it('liste les quatre sections du mockup, plus les mises à jour, et affiche la version', () => {
+  it('liste les cinq sections du mockup, plus les mises à jour, et affiche la version', () => {
     monter()
-    // Quatre, et non les cinq du mockup : « Connexions » est partie le 14 septembre 2026
-    // (`API-59`), n'ayant jamais rien porté qu'une phrase « à venir ».
-    expect(screen.getAllByRole('tab')).toHaveLength(5)
+    // Les cinq du mockup : « Connexions » est revenue le 18 septembre 2026 (`API-70`), portant les
+    // kubeconfigs déclarés. Elle était partie le 14 septembre (`API-59`) faute de rien porter —
+    // c'est le vide qui l'avait fait sortir, pas le sujet.
+    expect(screen.getAllByRole('tab')).toHaveLength(6)
     expect(screen.getByText('DoraBase 0.4.2 (arm64)')).toBeInTheDocument()
   })
 
@@ -64,11 +82,19 @@ describe('la coquille (`15a`)', () => {
 
   it('aucune section ne se contente d’annoncer ce qu’elle portera (`API-59`)', async () => {
     monter()
-    // La dernière est partie le 14 septembre 2026. L'assertion est **négative** et porte sur la
-    // liste d'onglets autant que sur les panneaux : sans elle, remettre une section « à venir »
-    // ne ferait échouer aucun test.
-    expect(screen.queryByRole('tab', { name: 'Connexions' })).not.toBeInTheDocument()
-    for (const nom of ['Général', 'Apparence', 'Grille de données', 'Sécurité & écriture']) {
+    // **L'assertion négative a changé de sujet, pas de règle** (`API-70`). Elle portait sur
+    // l'absence de l'onglet « Connexions », ce qui était la *forme* du remède d'`API-59` ; la règle,
+    // elle, est qu'aucune section ne se contente d'une promesse — et « Connexions » y est revenue en
+    // portant quelque chose. Garder l'ancienne assertion aurait interdit toute section future pour
+    // une raison qui n'est pas la sienne ; la retirer sans la remplacer aurait laissé revenir une
+    // section « à venir » sans qu'aucun test le dise.
+    for (const nom of [
+      'Général',
+      'Apparence',
+      'Connexions',
+      'Grille de données',
+      'Sécurité & écriture',
+    ]) {
       await allerA(nom)
       expect(screen.queryByText(/Cette section portera/)).not.toBeInTheDocument()
     }
@@ -333,5 +359,109 @@ describe('les mises à jour', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Installer et redémarrer' }))
     expect(await screen.findByText(/n’a pas abouti/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Installer et redémarrer' })).toBeEnabled()
+  })
+})
+
+describe('la section « Connexions » — les kubeconfigs déclarés (`API-70`)', () => {
+  const DEUX: Kubeconfigs = {
+    declarations: [
+      { id: 'prod', label: 'prod', path: '~/.kube/prod/config' },
+      { id: 'bac', label: 'bac à sable', path: '~/.kube/bac.yaml' },
+    ],
+    default: 'prod',
+  }
+
+  /** Une connexion qui vise le cluster `prod`. */
+  const PROJETS = [
+    {
+      name: 'Halle',
+      environments: [],
+      queries: [],
+      databases: [
+        {
+          name: 'catalogue',
+          engine: 'postgresql',
+          environment: 'prod',
+          consoles: [],
+          connection: {
+            tunnel: { localPort: null, proxy: { kind: 'kubernetes', kubeconfig: 'prod' } },
+          },
+        },
+      ],
+    },
+  ] as unknown as Project[]
+
+  async function allerAuxConnexions(kube: Parameters<typeof monter>[2]) {
+    const rendu = monter(PREFERENCES_PAR_DEFAUT, {}, kube)
+    await userEvent.click(screen.getByRole('tab', { name: 'Connexions' }))
+    return rendu
+  }
+
+  it('liste les déclarations, et rien de plus quand il n’y en a pas', async () => {
+    await allerAuxConnexions({})
+    // **Une phrase, pas une liste vide** : sans elle, la section s'ouvrirait sur un seul bouton et
+    // ne dirait pas de quoi elle parle.
+    expect(screen.getByText(/Aucun fichier déclaré/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Retirer' })).not.toBeInTheDocument()
+  })
+
+  it('renomme sans toucher au chemin, et rend la liste entière', async () => {
+    const { onKubeconfigsChange } = await allerAuxConnexions({ kubeconfigs: DEUX })
+
+    const [premierNom] = screen.getAllByLabelText('Nom')
+    if (!premierNom) throw new Error('la liste doit porter au moins une déclaration')
+    await userEvent.type(premierNom, 'X')
+
+    const [suivants] = onKubeconfigsChange.mock.calls.at(-1) ?? []
+    const modifiee = (suivants as Kubeconfigs).declarations?.[0]
+    expect(modifiee?.label).toBe('prodX')
+    // **L'identifiant ne bouge pas** : c'est lui que les connexions désignent, et le faire suivre
+    // le libellé les détacherait toutes — en silence, sur le kubeconfig par défaut de `kubectl`.
+    expect(modifiee?.id).toBe('prod')
+    expect(modifiee?.path).toBe('~/.kube/prod/config')
+  })
+
+  it('grise le retrait d’une déclaration employée, et la raison nomme la connexion', async () => {
+    await allerAuxConnexions({ kubeconfigs: DEUX, projects: PROJETS })
+
+    const [employee, libre] = screen.getAllByRole('button', { name: 'Retirer' })
+    if (!employee || !libre) throw new Error('la liste doit porter deux déclarations')
+    // `prod` est employée, `bac` non : le décor **distingue** les deux, sans quoi un grisé
+    // inconditionnel passerait le test (règle n° 5).
+    expect(employee).toHaveAttribute('aria-disabled', 'true')
+    expect(libre).toHaveAttribute('aria-disabled', 'false')
+    // La raison nomme *quoi changer d'abord* — un « impossible » nu enverrait chercher soi-même.
+    expect(employee.getAttribute('title')).toContain('Halle › catalogue (prod)')
+    // **`aria-disabled`, jamais `disabled`** : un bouton désactivé ne reçoit ni focus ni survol,
+    // donc son infobulle serait inatteignable (piège n° 3).
+    expect(employee).not.toBeDisabled()
+  })
+
+  it('ne retire rien quand le bouton est grisé', async () => {
+    // **Le grisé doit être plus qu'un attribut** : `aria-disabled` n'empêche aucun clic, à la
+    // différence de `disabled`. Sans la garde dans le gestionnaire, le bouton retirerait quand même.
+    const { onKubeconfigsChange } = await allerAuxConnexions({
+      kubeconfigs: DEUX,
+      projects: PROJETS,
+    })
+
+    const [employee] = screen.getAllByRole('button', { name: 'Retirer' })
+    if (!employee) throw new Error('la liste doit porter une déclaration')
+    await userEvent.click(employee)
+    expect(onKubeconfigsChange).not.toHaveBeenCalled()
+  })
+
+  it('retire une déclaration que personne n’emploie, et le défaut part avec elle', async () => {
+    // Le contrôle positif du test précédent : sans lui, un gestionnaire qui ne retirerait jamais
+    // rien passerait pour une garde qui marche.
+    const { onKubeconfigsChange } = await allerAuxConnexions({ kubeconfigs: DEUX })
+
+    const [premier] = screen.getAllByRole('button', { name: 'Retirer' })
+    if (!premier) throw new Error('la liste doit porter une déclaration')
+    await userEvent.click(premier)
+
+    const [suivants] = onKubeconfigsChange.mock.calls.at(-1) ?? []
+    expect((suivants as Kubeconfigs).declarations?.map((entree) => entree.id)).toEqual(['bac'])
+    expect((suivants as Kubeconfigs).default).toBeNull()
   })
 })

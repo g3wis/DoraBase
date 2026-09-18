@@ -110,7 +110,18 @@ passwordsMissing: Array<string>,
  * réécrire ou les vider serait pire. Mais ils décrivent une autre machine, donc l'import le
  * **dit** plutôt que de laisser le découvrir sur un « fichier introuvable ».
  */
-localPaths: Array<string>, };
+localPaths: Array<string>, 
+/**
+ * Les connexions dont le kubeconfig référencé **n'est déclaré nulle part dans le fichier**
+ * (`API-70`).
+ *
+ * Un export écrit par DoraBase porte toujours les déclarations qu'il référence ; ce cas vient
+ * d'un fichier édité à la main. La référence est alors **gardée telle quelle**, et non vidée :
+ * la vider ferait ouvrir le kubeconfig par défaut de `kubectl`, c'est-à-dire un autre cluster,
+ * **avec succès**. Gardée, elle est refusée à l'ouverture par un message qui la nomme — et le
+ * rapport le dit ici plutôt que de laisser le découvrir à ce moment-là.
+ */
+kubeconfigsMissing: Array<string>, };
 
 /**
  * Le sort d'un projet du fichier.
