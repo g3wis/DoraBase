@@ -27,13 +27,26 @@ Linear** — `API-28`, `API-33` —, et c'est la section « Le lien avec Linear 
 
 ## La langue de travail
 
-Au début de chaque session, **demander la langue de travail** en une question courte,
-avant toute autre chose, puis s'y tenir. Cela vaut pour la conversation, les
-explications et les questions. **Le code, les identifiants et
-les noms de fichiers techniques restent en anglais** — sauf le Rust de `src-tauri/`, dont
-les identifiants sont en français : le code en place fait foi, imitez-le.
+**Elle ne se demande pas, et elle ne s'écrit pas ici.** La question se posait au début de chaque
+session, avant toute autre chose ; elle a reçu la même réponse assez de fois pour cesser d'en être
+une (18 septembre 2026, rapporté à l'usage : « stop asking me my language every time »). Un réglage
+dont la valeur ne change jamais n'est pas un choix offert, c'est un péage — et celui-ci se payait au
+moment où l'on a le moins envie de répondre à une question, juste avant de commencer.
 
-Si la réponse a déjà été donnée dans la session, ne pas redemander.
+**Mais la réponse n'est pas la même pour tout le monde, et ce fichier est partagé.** Y écrire une
+langue en ferait une propriété du dépôt, alors que c'est une propriété de la **personne** : deux
+contributeurs travaillent ici, l'un en anglais, l'autre en français, et le premier aurait eu à
+défaire à chaque session ce que le second y avait écrit — le péage, rendu à l'autre bout. Chacun
+déclare donc la sienne dans sa configuration personnelle, `~/.claude/CLAUDE.md`, qui n'est pas
+versionnée et vaut pour tous ses dépôts. Une session qui n'y trouve rien prend le **français**, la
+langue de ce fichier ; une session qui veut en changer le dit, et c'est cette demande-là qui fait
+foi.
+
+Cela vaut pour la conversation, les explications et les questions. **Le code, les identifiants et
+les noms de fichiers techniques restent en anglais** — sauf le Rust de `src-tauri/`, dont les
+identifiants sont en français : le code en place fait foi, imitez-le. Ces deux-là ne sont pas des
+préférences et ne se déclarent nulle part : ils sont dans le dépôt, donc les mêmes pour tout le
+monde. C'est la ligne de partage, et les messages de commit tombent du même côté qu'eux.
 
 **Les messages de commit sont toujours en anglais, et toujours succincts** — quelle que soit
 la langue de travail de la session. Un historique se lit des années plus tard, souvent par
