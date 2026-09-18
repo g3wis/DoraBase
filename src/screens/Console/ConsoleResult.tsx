@@ -8,6 +8,7 @@ import { MenuContextuel } from '../../ui/MenuContextuel/MenuContextuel'
 import { Popover } from '../../ui/Popover/Popover'
 import { SegmentedControl } from '../../ui/SegmentedControl/SegmentedControl'
 import { largeurAjustee } from '../../ui/VirtualGrid/ajustement'
+import { useHauteurDisponible } from '../../ui/VirtualGrid/hauteurDisponible'
 import { type GridColumn, type PositionDuMenu, VirtualGrid } from '../../ui/VirtualGrid/VirtualGrid'
 import { estNumerique, rendreValeur, texteDeValeur } from '../TableView/cellule'
 import type { Dialecte } from '../Workbench/onglets'
@@ -154,6 +155,17 @@ export function ConsoleResult({
     }
     return parNom
   }, [resultat])
+  /**
+   * La hauteur que la grille a le droit de prendre, mesurée sur son emplacement (`API-74`).
+   *
+   * **Zéro retrait** : la ref est posée sur `.grille`, qui ne porte rien d'autre que la grille —
+   * la bande des vues et la barre de chiffres sont ses sœurs, non son contenu. C'est le cas
+   * simple, et l'écart avec `A5`, dont la ref englobe la toolbar.
+   *
+   * Déclarée **avant les quatre issues courtes**, comme les états ci-dessus : une des branches
+   * qui suivent rend l'emplacement, les autres non, et c'est la ref de rappel qui s'en accommode.
+   */
+  const hauteur = useHauteurDisponible()
   // **L'erreur passe avant tout le reste**, y compris un résultat précédent encore en mémoire :
   // l'afficher à côté d'une erreur le ferait lire comme le résultat de la requête qui vient
   // d'échouer — la lecture la plus naturelle, et la plus fausse.
@@ -291,7 +303,7 @@ export function ConsoleResult({
   return (
     <div className={styles.root}>
       {onglets}
-      <div className={styles.grille}>
+      <div className={styles.grille} ref={hauteur.ref}>
         <VirtualGrid
           rowHeight={rowHeight}
           label={t('console.resultat.grilleLabel', { n: resultat.rows.length })}
@@ -300,7 +312,7 @@ export function ConsoleResult({
           rowId={(_, index) => String(index)}
           selectedId={rangChoisi === null ? null : String(rangChoisi)}
           onSelect={(_, index) => setRangChoisi(index)}
-          viewportHeight={320}
+          viewportHeight={hauteur.valeur}
           onColumnResize={(cle, largeur) =>
             setLargeurs((precedent) => ({ ...precedent, [cle]: largeur }))
           }
