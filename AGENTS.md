@@ -1873,6 +1873,141 @@ mesuré contre un vrai fichier SQLite (`registry.rs`, sans `db-tests`, donc part
 PostgreSQL et un vrai MySQL, où le test regarde ce qu'une **autre session** voit avant la
 validation.
 
+### Retirer une instruction d'une transaction (18 septembre 2026, `API-40`)
+
+Une transaction manuelle ne se corrigeait pas : une instruction fautive abandonnait tout sur
+PostgreSQL — « Valider » disparaissait, et il ne restait qu'à annuler les vingt autres pour rejouer
+l'ensemble. Chaque carte du panneau porte désormais une poubelle. Le geste **annule la transaction,
+la rouvre, et rejoue tout ce qui reste** dans l'ordre, l'instruction retirée exceptée.
+
+**Le rejeu n'écrit pas deux fois, et c'est l'argument qui rend ce chantier possible.** Partout
+ailleurs ce dépôt refuse de rejouer une écriture : le serveur peut l'avoir validée avant que la
+coupure n'empêche l'accusé de réception d'arriver, donc la rejouer insérerait une seconde fois —
+c'est `Reprise::Unique` d'`API-37`, et c'est aussi pourquoi le patch inverse ne défait pas une
+insertion. Ici l'argument **tombe par son propre bout** : l'annulation *précède* le rejeu et défait
+tout ce que la transaction tenait, donc ce qui repart repart sur une base rendue à son état d'avant.
+
+**Et l'abandon se recalcule, plutôt que d'être rallumé.** Le journal est remplacé en entier par celui
+du second tour, donc `aborted` repart de faux : retirer la seule instruction refusée fait revenir
+« Valider » **sans que rien ne l'ait rallumé**. L'écran lit un état, il ne le compose pas — c'est ce
+que le ticket demandait, obtenu en ne l'écrivant nulle part.
+
+Neuf décisions à ne pas défaire :
+
+- **toutes les instructions portent la poubelle, pas seulement les refusées.** Le cas qui appelle le
+  geste est bien une instruction fautive ; une écriture qu'on regrette se retire par le même
+  mécanisme, et rien ne justifiait de l'interdire sur la moitié des cartes ;
+- **sans confirmation**, et c'est la règle de l'annulation prise par l'autre bout : ce geste
+  **répare**, et en demander la permission ferait de la réparation de cinq refus dix clics. Ce qui se
+  perd est le **texte** de l'instruction retirée — l'éditeur ne garde que la requête courante, pas
+  celles d'il y a cinq exécutions. C'est le prix, il est dit, et le journal montre ce qui reste avant
+  qu'on valide quoi que ce soit ;
+- **une à la fois, et le rejeu part aussitôt.** Marquer plusieurs cartes puis rejouer une fois aurait
+  économisé des allers-retours sur une transaction à cinq refus ; c'était un second panneau
+  « en attente » à concevoir, sur un écran dont aucune maquette ne dit rien. Le coût réel est borné —
+  une transaction de console tient rarement vingt instructions, et chacune est déjà bornée par
+  `RowLimit` ;
+- **MySQL refuse, et c'est le moteur qui répond.** Un `create`, un `alter`, un `drop` y provoquent un
+  `commit` **implicite avant de s'exécuter** : ce qui précède est alors durable, l'annulation ne
+  défait que la fin, et le rejeu réécrirait un début que rien n'a retiré — des lignes en double, sans
+  un mot. `AnyEngine::un_ddl_valide_la_transaction` est donc inhérente et répartie par un `match`
+  sans bras attrape-tout, comme `transaction_abandonnee_par_une_erreur` : **PostgreSQL et SQLite
+  rendent leur DDL transactionnel**, et répondre « oui » pour eux leur retirerait le geste dans le
+  cas le plus banal — une transaction qui crée une table puis la remplit. Le refus nomme
+  l'instruction qui l'empêche ;
+- **et la classification vit en Rust, à côté du refus qu'elle sert.** `transaction::modifie_la_structure`
+  n'est **pas** le `natureDe` de l'écran, et les deux doivent pouvoir diverger : celui-là classe un
+  texte pour décider d'afficher une **modale**, où se tromper coûte une question de trop ; celui-ci
+  décide si une **écriture peut partir deux fois**, où se tromper coûte des lignes que rien ne
+  signale. La seconde est donc délibérément plus large — la liste des instructions que MySQL
+  documente comme validant d'office —, et personne ne doit aller les « harmoniser ». Ce n'est pas la
+  règle n° 17 : ce ne sont pas deux voies pour un même acte, ce sont deux questions dont l'erreur ne
+  coûte pas la même chose ;
+- **le journal garde le SQL *d'entrée* et sa limite**, à côté du texte exécuté qu'il affichait déjà.
+  Rejouer la sortie — celle qui porte déjà son `limit` — ferait retomber `applied_limit` à `None` au
+  second tour, donc décrirait une même instruction de deux façons selon le nombre de retraits
+  traversés. Les deux champs vivent dans l'`Instruction` du registre et **non** dans
+  `TransactionStatement` : l'écran ne les affiche pas, et ce journal traverse l'IPC à chaque
+  exécution ;
+- **une seule inscription pour deux appelants.** `Journal::inscrire` est extraite de
+  `executer_une_requete`, que le rejeu emploie telle quelle : deux copies auraient divergé au premier
+  champ ajouté — `affected` et `displayable` s'y sont déjà glissés une fois — et le rejeu est
+  justement l'endroit où la divergence ne se verrait pas, son journal remplaçant l'autre (règle
+  n° 17) ;
+- **trois échecs, une seule issue.** Si l'annulation, la réouverture ou la session lâchent en route,
+  la session est **retirée et fermée**, comme dans `achever` et pour la même raison : plutôt qu'un
+  état qui dépend du moteur, on le rend vrai, et le panneau n'a qu'une chose à dire. Les deux refus
+  **d'entrée** — rang inconnu, moteur qui valide d'office — ne touchent à rien : ils n'ont rien
+  demandé au serveur, et fermer une transaction qu'on refuse seulement de retoucher serait la perdre
+  pour une adresse mal formée ;
+- **et le journal du second tour n'est écrit qu'une fois complet.** `rejouer` le rend, l'appelant le
+  substitue : l'écrire au fur et à mesure laisserait, sur un rejeu interrompu, une moitié de
+  transaction décrite comme entière — l'état que cette méthode existe pour ne jamais produire. Une
+  instruction **refusée**, elle, n'interrompt rien : elle est inscrite comme au premier tour, et sur
+  PostgreSQL la suite est refusée avec elle — ce qui est exactement ce qu'il faut montrer, retirer
+  *une* des fautives ne suffisant pas.
+
+**La poubelle est un frère de la carte, jamais un enfant.** En mode consultable la carte **est** un
+`<button>` : un bouton dans un bouton n'est ni du HTML valide ni cliquable de façon prévisible. C'est
+la parade d'`API-55`, à la lettre — posée en absolu par-dessus, dans un `<li>` devenu `relative`.
+
+**Et elle est visible en permanence, ce qui est l'écart assumé avec les actions de ligne d'`API-45`.**
+Là-bas un second chemin existe au clavier ; ici il n'y en a aucun, et `visibility: hidden` retirerait
+la poubelle du parcours de tabulation **comme de l'arbre d'accessibilité**. *Un chemin unique qu'on ne
+voit pas est un chemin qui n'existe pas* — le dépôt l'a payé au `⌘E` du mode édition, au `⇧`-clic du
+diagramme, au renommage d'une console et à l'import d'`API-30`. Son encre se relève d'`--ink-2` à
+`--danger-ink` au survol : ce n'est pas un état de survol inventé, c'est le relèvement d'encre que les
+actions de ligne et le bouton de saut de clé étrangère font déjà, et le rouge suit l'**acte** (la
+règle d'`API-45`). Le rang est **dans le nom accessible** — vingt poubelles dans la même fenêtre ne
+peuvent pas partager un nom, et rien d'autre ici ne les distingue (piège n° 1).
+
+**Sa place est réservée dans l'en-tête, et la cote se calcule.** Sans réserve, le bouton se peindrait
+par-dessus la durée, seule chose de cette ligne à être à droite — c'est `MARGE_DE_TRI` et la marge de
+valeur d'`API-55` par le même bout. La poubelle occupe `--space-3` + 18 px depuis le bord intérieur
+de la carte, soit 24 ; le rembourrage de l'enveloppe en rend 9, donc il en faut 15 de plus, et le cran
+suivant de l'échelle est **16**. `--space-7` vaut 14, et c'est un pixel de trop : **mesuré**, le
+recouvrement était d'exactement cela. Un jeton choisi « parce que ça se ressemble » l'aurait laissé.
+
+**Trois choses apprises en le vérifiant, et les trois par sabotage** (règle n° 1) :
+
+- **un `stopPropagation` y était inerte, et rien ne le disait.** Il avait été écrit par analogie avec
+  le bouton de saut d'`API-55` — là-bas il est nécessaire, le bouton étant posé *dans* la cellule qui
+  écoute le clic. Ici la poubelle est un **frère** de la carte : rien n'écoute au-dessus, donc rien ne
+  remonte. Le retirer ne faisait tomber aucun test, ce qui est la seule façon de s'en apercevoir —
+  c'est la famille du `var()` mort, du `grid-column` inerte et du `height: 100%` sur une hauteur
+  automatique. Ce qui garde la propriété est un test de **parenté**, qui tombe, lui, dès qu'on niche
+  les deux boutons ;
+- **le décor d'un test qui panique ne se remonte pas tout seul.** Le test MySQL crée une table témoin
+  et la retire à la fin ; quand il tombe, ce ménage ne part pas, et le tour suivant échoue sur le
+  `create` — un message qui n'a rien à voir avec ce qu'on mesure. Constaté en le sabotant : le
+  troisième sabotage a fait échouer un test qu'il ne visait pas. Le décor retire donc les deux tables
+  `if exists` **avant** de les créer ;
+- **et le test de recouvrement a mordu du premier coup**, sur un pixel. C'est la règle n° 9 dans sa
+  forme la plus simple — jsdom ne calcule aucune mise en page, donc « la poubelle est à droite de la
+  durée » n'a pour juge que Playwright —, et la règle n° 18 avec : les assertions comparent des
+  **écarts à zéro**, non deux valeurs du même rendu, et vérifient en plus que la boîte fait bien
+  18 px. Une largeur nulle satisferait les deux premières sans qu'il y ait rien à cliquer.
+
+**Ce qu'aucun niveau de test seul ne prouvait.** La galerie monte le panneau sans écran autour de lui,
+donc elle ne peut pas dire que la poubelle est branchée à la **session** de cette console (règle
+n° 8) : un test d'assemblage part de l'écran de travail et vérifie que le cœur reçoit la connexion,
+le jeton de session et le rang. Ce que la transaction fait vraiment — annuler, rejouer, recalculer
+l'abandon — est mesuré contre un vrai fichier SQLite (donc partout, sans `db-tests`), un vrai
+PostgreSQL pour le retour de « Valider », et un vrai MySQL pour le refus. **Ce dernier porte son
+propre contrôle positif** : la ligne écrite avant le `create` survit à l'annulation, ce qui prouve
+l'implicite dont le refus se garde — sans quoi le compte serait zéro et le refus n'aurait pas d'objet.
+
+**Ce qui reste à voir à l'œil** : le geste sous WKWebView, même réserve que les dix écrans. La carte,
+elle, a été **regardée** à `deviceScaleFactor: 6` en « Cahier » et en « Nuit » avant d'être retenue,
+comme les marques du diagramme : à treize pixels, un glyphe se juge à la loupe. Et le rejeu d'une
+transaction **longue** sur une base réelle — vingt instructions rejouées tiennent le verrou du journal
+le temps de vingt allers-retours, donc la lecture du panneau des autres consoles attend derrière ;
+c'est le comportement d'`executer_une_requete`, à vingt exemplaires, et personne ne l'a chronométré.
+
+**Ce qui reste hors périmètre** : retirer **plusieurs** instructions d'un geste, et le retrait sur un
+moteur qui valide d'office, que `API-40` refuse plutôt que de le rendre sûr — le rendre sûr
+demanderait de savoir *où* le moteur a validé, ce que ni MySQL ni le journal ne disent.
+
 ### L'export d'un résultat de console (9 septembre 2026, `API-29`)
 
 Un résultat de console ne pouvait sortir de l'application par aucun geste : il se lisait, il se

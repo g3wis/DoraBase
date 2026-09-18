@@ -2650,6 +2650,8 @@ describe('la transaction manuelle de la console', () => {
        */
       jetons: [] as string[],
       jetonsAnnules: [] as string[],
+      /** Les retraits demandés (`API-40`) : la connexion, le jeton de session, et le rang. */
+      retires: [] as { cle: DatabaseKey; console: string; rang: number }[],
     }
     /**
      * **Un journal par console**, comme le cœur tient une session par console (`API-38`).
@@ -2697,6 +2699,16 @@ describe('la transaction manuelle de la console', () => {
           // plus de transaction, et non une transaction ouverte et vide.
           const { [console]: _rendue, ...reste } = journaux
           journaux = reste
+        },
+        // **Le retrait laisse la transaction ouverte**, contrairement aux deux issues : c'est ce
+        // qui le distingue d'une annulation, et le décor doit le rendre — sinon un test qui
+        // vérifierait que le panneau reste là serait vert pour la mauvaise raison.
+        dropTransactionStatement: async (cle: DatabaseKey, console: string, rang: number) => {
+          vus.retires.push({ cle, console, rang })
+          journaux = {
+            ...journaux,
+            [console]: (journaux[console] ?? []).filter((_entree, place) => place !== rang),
+          }
         },
       },
     }
@@ -2885,6 +2897,101 @@ describe('la transaction manuelle de la console', () => {
     // Et le journal est relu : le panneau retombe sur son invite plutôt que de garder une liste que
     // la validation a emportée.
     await waitFor(() => expect(panneau).toHaveTextContent(/Rien n’est encore retenu/))
+  })
+
+  it('retirer une instruction la demande au cœur, et relit le journal', async () => {
+    const utilisateur = userEvent.setup()
+    const { vus } = await ouvrirUneConsoleAvecTransaction(utilisateur)
+    await utilisateur.click(screen.getByRole('switch', { name: 'Transaction manuelle' }))
+    for (const sql of ['delete from commandes', 'delete from ventes']) {
+      await saisir(utilisateur, sql)
+      await utilisateur.click(screen.getByRole('button', { name: /Exécuter/ }))
+    }
+    const panneau = await screen.findByRole('complementary', { name: 'Transaction en cours' })
+    await waitFor(() =>
+      expect(
+        within(panneau).getAllByRole('button', { name: /Retirer l’instruction/ }),
+      ).toHaveLength(2),
+    )
+
+    await utilisateur.click(
+      within(panneau).getByRole('button', {
+        name: 'Retirer l’instruction n° 1 et rejouer le reste',
+      }),
+    )
+
+    // **La connexion de la console et le jeton de sa session**, non l'identité de l'onglet : c'est
+    // cette session-là que le cœur doit rejouer, et c'est ce que la galerie ne peut pas prouver —
+    // elle monte le panneau sans écran autour de lui (règle n° 8).
+    await waitFor(() => expect(vus.retires).toHaveLength(1))
+    expect(vus.retires[0]).toEqual({
+      cle: { project: 'Atelier Nord', database: 'analytics', environment: 'prod' },
+      console: vus.jetons[0],
+      rang: 0,
+    })
+    // Et le journal est **relu** : le panneau perd la carte retirée plutôt que de garder une liste
+    // que le rejeu a remplacée.
+    await waitFor(() =>
+      expect(
+        within(panneau).getAllByRole('button', { name: /Retirer l’instruction/ }),
+      ).toHaveLength(1),
+    )
+    // **La transaction reste ouverte** : le retrait n'est pas une annulation, et le panneau ne
+    // retombe pas sur son invite.
+    expect(panneau).not.toHaveTextContent(/Rien n’est encore retenu/)
+    expect(vus.annules).toEqual([])
+  })
+
+  it('le refus d’un retrait est dit, et le panneau garde ses instructions', async () => {
+    const utilisateur = userEvent.setup()
+    const factice = passerelleTransactionFactice()
+    // Le refus du cœur sur un moteur qui valide d'office une modification de structure : sans cette
+    // phrase, une poubelle qui ne fait rien se lirait comme une panne (défaut n° 36).
+    const passerelle = {
+      ...factice.passerelle,
+      dropTransactionStatement: async () => {
+        throw new Error('l’instruction n° 2 modifie la structure')
+      },
+    }
+    const modes: TransactionMode[] = []
+    monter({
+      onSaveConsole: async () => {},
+      passerelleTransaction: passerelle,
+      passerelleExecution: {
+        runSql: async (_cle, sql, _limite, mode, console) => {
+          modes.push(mode)
+          factice.vus.jetons.push(console)
+          const reponse: QueryResult = { ...RESULTAT, sql, columns: [], rows: [], affected: 3 }
+          if (mode === 'manual' || factice.ouverte(console)) {
+            factice.inscrire(console, {
+              sql,
+              durationMs: 4,
+              returned: 0,
+              affected: 3,
+              displayable: false,
+              error: null,
+            })
+          }
+          return reponse
+        },
+      },
+    })
+    await ouvrirUneConsole(utilisateur)
+    await utilisateur.click(screen.getByRole('switch', { name: 'Transaction manuelle' }))
+    await saisir(utilisateur, 'delete from commandes')
+    await utilisateur.click(screen.getByRole('button', { name: /Exécuter/ }))
+    const panneau = await screen.findByRole('complementary', { name: 'Transaction en cours' })
+    await waitFor(() =>
+      expect(within(panneau).getByRole('button', { name: /Retirer l’instruction/ })).toBeVisible(),
+    )
+
+    await utilisateur.click(within(panneau).getByRole('button', { name: /Retirer l’instruction/ }))
+
+    expect(await within(panneau).findByRole('alert')).toHaveTextContent(/modifie la structure/)
+    // Un refus ne retire rien : la transaction est intacte, et sa carte est toujours là.
+    expect(within(panneau).getAllByRole('button', { name: /Retirer l’instruction/ })).toHaveLength(
+      1,
+    )
   })
 
   it('le régime est celui de la console, non de sa connexion', async () => {

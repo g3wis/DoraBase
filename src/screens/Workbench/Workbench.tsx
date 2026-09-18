@@ -2108,6 +2108,13 @@ export function Workbench({
                       // reste sur ce qu'elle montrait plutôt que de se vider.
                       if (resultat !== null) execution.poserLeResultat(resultat)
                     }}
+                    /* **Retirer une instruction annule la transaction et rejoue le reste**
+                       (`API-40`). Le rejeu n'écrit pas deux fois — l'annulation vient de défaire ce
+                       que la transaction tenait —, et c'est ce qui rend le geste possible ici alors
+                       que ce dépôt refuse partout ailleurs de rejouer une écriture. La grille garde
+                       ce qu'elle montrait : rien ne dit qu'il faille la vider, et le journal qu'on
+                       relit dit déjà ce qui reste. */
+                    onRetirer={(index) => transaction.retirer(consoleDeTransaction, index)}
                   />
                 }
               />

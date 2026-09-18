@@ -12,8 +12,8 @@ use crate::config::ConnectionSettings;
 use crate::engine::AnyEngine;
 use crate::engine::EngineError;
 use crate::engine::{
-    OrdreDeTransaction, QueryResult, RowLimit, TransactionMode, TransactionState,
-    TransactionStatement,
+    modifie_la_structure, OrdreDeTransaction, QueryResult, RowLimit, TransactionMode,
+    TransactionState, TransactionStatement,
 };
 use crate::secrets::Secret;
 
@@ -198,6 +198,20 @@ struct Instruction {
     rendue: TransactionStatement,
     /// La réponse, quand elle porte des lignes. `None` pour une écriture ou un refus.
     reponse: Option<QueryResult>,
+    /// Le SQL **tel qu'il est arrivé**, avant qu'une limite ne lui soit ajoutée (`API-40`).
+    ///
+    /// **Distinct de `rendue.sql`**, qui est le texte réellement exécuté — limite comprise — parce
+    /// que c'est celui qu'on montre. Un rejeu doit repartir de l'entrée, non de la sortie : rejouer
+    /// le texte déjà limité ferait qu'`applied_limit` retombe à `None` au second tour, donc qu'une
+    /// même instruction se décrive de deux façons selon le nombre de retraits qu'elle a traversés.
+    source: String,
+    /// La limite avec laquelle elle a été jouée, pour que le rejeu la rejoue à l'identique
+    /// (`API-40`).
+    ///
+    /// **Ici et non dans `TransactionStatement`** : l'écran ne l'affiche pas, et le journal traverse
+    /// l'IPC à chaque exécution. C'est la règle du projet — la webview ne reçoit que ce qu'elle
+    /// montre.
+    limite: RowLimit,
 }
 
 /// La transaction d'une console : ce qu'elle a joué, et si le moteur l'a abandonnée.
@@ -210,6 +224,72 @@ struct Instruction {
 struct Journal {
     instructions: Vec<Instruction>,
     abandonnee: bool,
+}
+
+impl Journal {
+    /// Inscrit ce qu'une instruction a donné, et met à jour l'abandon.
+    ///
+    /// **Écrit une fois pour deux appelants** : l'exécution ordinaire et le rejeu d'`API-40`
+    /// remplissent le même journal, et deux inscriptions séparées auraient divergé sur le premier
+    /// champ ajouté — `affected` et `displayable` s'y sont déjà glissés une fois (règle n° 17). Le
+    /// rejeu est justement l'endroit où une divergence ne se verrait pas : son journal remplace
+    /// l'autre, donc il n'y a rien à comparer.
+    ///
+    /// `abandonne_sur_refus` est la réponse **du moteur**
+    /// (`AnyEngine::transaction_abandonnee_par_une_erreur`), lue par l'appelant : ce module ne
+    /// consulte pas l'adaptateur, et le drapeau est figé au moment de l'échec plutôt que recalculé
+    /// à la lecture.
+    fn inscrire(
+        &mut self,
+        source: &str,
+        limite: RowLimit,
+        depart: std::time::Instant,
+        issue: &Result<QueryResult, EngineError>,
+        abandonne_sur_refus: bool,
+    ) {
+        self.abandonnee = self.abandonnee || (issue.is_err() && abandonne_sur_refus);
+        self.instructions.push(match issue {
+            Ok(resultat) => Instruction {
+                rendue: TransactionStatement {
+                    sql: resultat.sql.clone(),
+                    duration_ms: resultat.duration_ms,
+                    returned: resultat.rows.len() as u64,
+                    affected: resultat.affected,
+                    // **Consultable seulement s'il y a des lignes.** Une écriture n'a rien à
+                    // remettre dans une grille, et son compte de lignes touchées est déjà sa
+                    // réponse : son entrée ne se clique pas, plutôt qu'un clic qui viderait la
+                    // grille.
+                    displayable: !resultat.rows.is_empty(),
+                    error: None,
+                },
+                // Gardée pour que l'écran puisse la redemander : la grille du centre n'en tient
+                // qu'une, celle de la dernière exécution, et c'est le seul endroit où les autres
+                // existent encore.
+                reponse: (!resultat.rows.is_empty()).then(|| resultat.clone()),
+                source: source.to_owned(),
+                limite,
+            },
+            // **L'échec est inscrit, et la transaction reste ouverte.** C'est l'état réel : `begin`
+            // a réussi, donc il y a quelque chose à annuler — et sur PostgreSQL la transaction est
+            // désormais abandonnée, donc la suite sera refusée jusque-là. Un journal qui n'aurait
+            // que les succès laisserait chercher pourquoi plus rien ne répond.
+            Err(erreur) => Instruction {
+                rendue: TransactionStatement {
+                    sql: source.to_owned(),
+                    duration_ms: u64::try_from(depart.elapsed().as_millis()).unwrap_or(u64::MAX),
+                    returned: 0,
+                    affected: None,
+                    displayable: false,
+                    error: Some(erreur.message.clone()),
+                },
+                // Un refus n'a **rien** rendu. Le message du serveur est sa réponse, et il est dans
+                // l'entrée juste au-dessus.
+                reponse: None,
+                source: source.to_owned(),
+                limite,
+            },
+        });
+    }
 }
 
 impl ConnectionRegistry {
@@ -571,48 +651,12 @@ impl ConnectionRegistry {
             let issue = session.adaptateur.run_sql(sql, limite).await;
             let perdue = issue.is_err() && session.adaptateur.connexion_perdue();
             if !perdue {
-                session.journal.abandonnee = session.journal.abandonnee
-                    || (issue.is_err()
-                        && session.adaptateur.transaction_abandonnee_par_une_erreur());
-                session.journal.instructions.push(match &issue {
-                    Ok(resultat) => Instruction {
-                        rendue: TransactionStatement {
-                            sql: resultat.sql.clone(),
-                            duration_ms: resultat.duration_ms,
-                            returned: resultat.rows.len() as u64,
-                            affected: resultat.affected,
-                            // **Consultable seulement s'il y a des lignes.** Une écriture n'a rien
-                            // à remettre dans une grille, et son compte de lignes touchées est déjà
-                            // sa réponse : son entrée ne se clique pas, plutôt qu'un clic qui
-                            // viderait la grille.
-                            displayable: !resultat.rows.is_empty(),
-                            error: None,
-                        },
-                        // Gardée pour que l'écran puisse la redemander : la grille du centre n'en
-                        // tient qu'une, celle de la dernière exécution, et c'est le seul endroit où
-                        // les autres existent encore.
-                        reponse: (!resultat.rows.is_empty()).then(|| resultat.clone()),
-                    },
-                    // **L'échec est inscrit, et la transaction reste ouverte.** C'est l'état réel :
-                    // `begin` a réussi, donc il y a quelque chose à annuler — et sur PostgreSQL la
-                    // transaction est désormais abandonnée, donc la suite sera refusée jusque-là.
-                    // Un journal qui n'aurait que les succès laisserait chercher pourquoi plus rien
-                    // ne répond.
-                    Err(erreur) => Instruction {
-                        rendue: TransactionStatement {
-                            sql: sql.to_owned(),
-                            duration_ms: u64::try_from(depart.elapsed().as_millis())
-                                .unwrap_or(u64::MAX),
-                            returned: 0,
-                            affected: None,
-                            displayable: false,
-                            error: Some(erreur.message.clone()),
-                        },
-                        // Un refus n'a **rien** rendu. Le message du serveur est sa réponse, et il
-                        // est dans l'entrée juste au-dessus.
-                        reponse: None,
-                    },
-                });
+                // **Une seule inscription pour les deux appelants** : le rejeu d'`API-40` remplit le
+                // même journal, et deux copies auraient divergé au premier champ ajouté.
+                let abandonne = session.adaptateur.transaction_abandonnee_par_une_erreur();
+                session
+                    .journal
+                    .inscrire(sql, limite, depart, &issue, abandonne);
             }
             (issue, perdue.then(|| sessions.remove(&adresse)).flatten())
         };
@@ -939,6 +983,168 @@ impl ConnectionRegistry {
         seconde_chance
     }
 
+    /// Retire une instruction de la transaction, et rejoue ce qui reste (`API-40`).
+    ///
+    /// # Le rejeu n'écrit pas deux fois, et c'est ce qui rend le geste possible
+    ///
+    /// Partout ailleurs, ce dépôt refuse de rejouer une écriture : le serveur peut l'avoir validée
+    /// avant que la coupure n'empêche l'accusé de réception d'arriver, donc la rejouer insérerait
+    /// deux fois (`Reprise::Unique`, `API-37`). Ici l'argument tombe, et par son propre bout :
+    /// l'annulation **précède** le rejeu et défait tout ce que la transaction tenait. Ce qui repart
+    /// repart sur une base rendue à son état d'avant.
+    ///
+    /// **Sauf là où le moteur a déjà validé d'office** — voir `AnyEngine::un_ddl_valide_la_transaction`.
+    /// Le geste y est refusé plutôt que tenté : sur MySQL, une transaction qui porte un `create`
+    /// a déjà écrit ce qui le précédait, et le rejeu le réécrirait sans qu'un mot le dise.
+    ///
+    /// # Ce que le rejeu change, et qu'on ne cherche pas à cacher
+    ///
+    /// Les durées ne sont pas celles du premier tour, et une séquence consommée ne se rend pas :
+    /// sur PostgreSQL, un `insert` qui tire d'un `serial` prendra d'autres identifiants qu'à son
+    /// premier passage. C'est ce qu'une transaction annulée fait de toute façon, et le journal rendu
+    /// décrit le second tour — celui qui sera validé —, jamais le premier.
+    ///
+    /// # L'abandon se recalcule, et c'est ce que le ticket demande
+    ///
+    /// Le journal est **remplacé**, donc `abandonnee` repart de faux : une transaction dont on
+    /// retire la seule instruction refusée redevient validable, et « Valider » revient dans le
+    /// panneau de lui-même. Rien n'a eu à le rallumer — l'écran lit l'état, il ne le compose pas.
+    ///
+    /// # Trois échecs, une seule issue
+    ///
+    /// Si l'annulation, la réouverture ou la session elle-même lâchent en route, la session est
+    /// **retirée et fermée** plutôt que laissée dans un état qui dépend du moteur. C'est la conduite
+    /// d'`achever`, pour la même raison : le panneau doit pouvoir dire une seule chose, vraie
+    /// partout. Un rang inexistant et le refus de structure, eux, ne touchent à rien — ce sont des
+    /// refus d'entrée.
+    pub async fn retirer_une_instruction(
+        &self,
+        cle: &str,
+        console: &str,
+        rang: usize,
+    ) -> Result<(), EngineError> {
+        let adresse = (cle.to_owned(), console.to_owned());
+        let mut sessions = self.transactions.lock().await;
+
+        // **Les deux refus d'entrée d'abord, session intacte.** Ni l'un ni l'autre n'a touché au
+        // serveur : rien ne justifierait de fermer une transaction qu'on refuse seulement de
+        // retoucher.
+        let a_rejouer = {
+            let Some(session) = sessions.get(&adresse) else {
+                return Err(transaction_absente());
+            };
+            let compte = session.journal.instructions.len();
+            if rang >= compte {
+                return Err(EngineError::local(format!(
+                    "cette transaction ne porte pas d'instruction n° {} : elle en compte {compte}.",
+                    rang + 1,
+                )));
+            }
+            if session.adaptateur.un_ddl_valide_la_transaction() {
+                if let Some(place) = session
+                    .journal
+                    .instructions
+                    .iter()
+                    .position(|instruction| modifie_la_structure(&instruction.source))
+                {
+                    return Err(EngineError::local(format!(
+                        "l'instruction n° {} modifie la structure, et ce moteur valide d'office ce \
+                         qui attend avant d'exécuter une telle instruction : ce qui la précède est \
+                         donc déjà écrit, et l'annuler pour le rejouer l'écrirait deux fois. Cette \
+                         transaction ne peut plus être retouchée — validez-la ou annulez-la.",
+                        place + 1
+                    )));
+                }
+            }
+            // **L'entrée, non le texte exécuté**, et sa limite avec : c'est ce qui fait qu'une
+            // instruction rejouée se décrit exactement comme au premier tour.
+            session
+                .journal
+                .instructions
+                .iter()
+                .enumerate()
+                .filter(|(place, _)| *place != rang)
+                .map(|(_, instruction)| (instruction.source.clone(), instruction.limite))
+                .collect::<Vec<_>>()
+        };
+
+        // Sortie du registre le temps du rejeu : `rejouer` la prend en propre, et une session qui
+        // lâche en route ne doit pas y être remise.
+        let Some(mut session) = sessions.remove(&adresse) else {
+            return Err(transaction_absente());
+        };
+        match Self::rejouer(&mut session, a_rejouer).await {
+            Ok(journal) => {
+                session.journal = journal;
+                sessions.insert(adresse, session);
+                Ok(())
+            }
+            Err(erreur) => {
+                // **Fermée verrou rendu**, comme partout ailleurs dans ce fichier : une fermeture
+                // attend, et le journal des autres consoles doit rester lisible pendant ce temps.
+                drop(sessions);
+                session.adaptateur.close().await;
+                Err(erreur)
+            }
+        }
+    }
+
+    /// Annule, rouvre, et rejoue — le corps de `retirer_une_instruction` (`API-40`).
+    ///
+    /// Rend le journal du **second** tour, que l'appelant substitue au premier. Il n'est pas écrit
+    /// dans la session au fur et à mesure : un rejeu qui échouerait à mi-chemin y laisserait une
+    /// moitié de transaction décrite comme entière, et c'est justement l'état que cette méthode
+    /// existe pour ne jamais produire.
+    ///
+    /// **Une instruction refusée n'arrête pas le rejeu.** Elle est inscrite comme au premier tour,
+    /// et sur PostgreSQL la suite sera refusée avec elle — ce qui est exactement ce que le panneau
+    /// doit montrer : retirer *une* des instructions fautives ne suffit pas, et le journal le dit.
+    /// Seule une session perdue interrompt, parce qu'il n'y a plus personne à qui parler.
+    async fn rejouer(
+        session: &mut SessionDeConsole,
+        a_rejouer: Vec<(String, RowLimit)>,
+    ) -> Result<Journal, EngineError> {
+        session
+            .adaptateur
+            .transaction(OrdreDeTransaction::Annuler)
+            .await
+            .map_err(|erreur| {
+                EngineError::local(format!(
+                    "{} — retirer une instruction annule d'abord la transaction, et cette \
+                     annulation a échoué : la session est fermée, ce qui l'annule côté serveur. Il \
+                     faut rejouer les instructions.",
+                    erreur.message
+                ))
+            })?;
+        session
+            .adaptateur
+            .transaction(OrdreDeTransaction::Ouvrir)
+            .await
+            .map_err(|erreur| {
+                EngineError::local(format!(
+                    "{} — la transaction a bien été annulée, mais la suivante n'a pas pu être \
+                     ouverte : la session est fermée. Il faut rejouer les instructions.",
+                    erreur.message
+                ))
+            })?;
+
+        let abandonne = session.adaptateur.transaction_abandonnee_par_une_erreur();
+        let mut journal = Journal::default();
+        for (sql, limite) in a_rejouer {
+            let depart = std::time::Instant::now();
+            let issue = session.adaptateur.run_sql(&sql, limite).await;
+            if issue.is_err() && session.adaptateur.connexion_perdue() {
+                return Err(EngineError::local(format!(
+                    "{} La session de cette transaction est perdue pendant le rejeu : ce qu'elle \
+                     retenait a été annulé par le serveur, et il faut la rejouer.",
+                    issue.err().map(|erreur| erreur.message).unwrap_or_default()
+                )));
+            }
+            journal.inscrire(&sql, limite, depart, &issue, abandonne);
+        }
+        Ok(journal)
+    }
+
     /// Ferme et retire les sessions de console d'une connexion (`API-38`).
     ///
     /// Appelée par `fermer` et par `tenter` : la session d'une console passe par le proxy de la
@@ -1256,6 +1462,225 @@ mod tests_transaction {
             registre.etat_de_transaction(&cle, CONSOLE).await,
             TransactionState::default(),
             "une transaction validée n'est plus ouverte, et son journal est vide"
+        );
+    }
+
+    /// Le cœur d'`API-40` : ce qui reste est **rejoué**, ce qui est retiré ne l'est pas.
+    ///
+    /// **Le sabotage a trois formes, et chacune fait tomber ce test** — ne rien faire laisse deux
+    /// jetons, annuler sans rejouer n'en laisse aucun, rejouer sans retirer en laisse deux. C'est
+    /// ce qui rend le compte final digne d'être la mesure, plutôt que l'état du journal, qu'une
+    /// implémentation qui se contenterait de retirer une ligne du `Vec` satisferait aussi.
+    #[tokio::test]
+    async fn retirer_une_instruction_rejoue_ce_qui_reste_et_pas_elle() {
+        let (_dossier, registre, cle) = registre_sqlite().await;
+        for valeur in [1, 2, 3] {
+            registre
+                .executer_une_requete(
+                    &cle,
+                    &format!("insert into jetons (valeur) values ({valeur})"),
+                    RowLimit::OneHundred,
+                    TransactionMode::Manual,
+                    CONSOLE,
+                )
+                .await
+                .expect("écriture");
+        }
+
+        registre
+            .retirer_une_instruction(&cle, CONSOLE, 1)
+            .await
+            .expect("retrait");
+
+        let etat = registre.etat_de_transaction(&cle, CONSOLE).await;
+        assert!(
+            etat.open,
+            "le retrait rouvre une transaction, il n'en laisse pas sans"
+        );
+        assert_eq!(
+            etat.statements.len(),
+            2,
+            "l'instruction retirée n'est pas rejouée"
+        );
+        assert!(
+            etat.statements
+                .iter()
+                .all(|instruction| !instruction.sql.contains("(2)")),
+            "c'est bien la deuxième qui est partie : {:?}",
+            etat.statements
+                .iter()
+                .map(|instruction| instruction.sql.as_str())
+                .collect::<Vec<_>>()
+        );
+
+        registre
+            .valider_la_transaction(&cle, CONSOLE)
+            .await
+            .expect("validation");
+        // **La mesure est ce que la base porte**, non ce que le journal dit : un retrait qui se
+        // contenterait de retirer une entrée de la liste laisserait le jeton 2 écrit.
+        assert_eq!(
+            compte(&registre, &cle).await,
+            2,
+            "deux jetons écrits, et le retiré n'en fait pas partie"
+        );
+        let restants = registre
+            .executer_une_requete(
+                &cle,
+                "select valeur from jetons order by valeur",
+                RowLimit::OneHundred,
+                TransactionMode::Auto,
+                CONSOLE,
+            )
+            .await
+            .expect("relecture");
+        assert_eq!(
+            restants
+                .rows
+                .iter()
+                .map(|ligne| match &ligne[0] {
+                    crate::engine::Value::Int { value } => *value,
+                    autre => panic!("un jeton est un entier : {autre:?}"),
+                })
+                .collect::<Vec<_>>(),
+            vec![1, 3]
+        );
+    }
+
+    /// Retirer la **seule** instruction laisse une transaction ouverte et vide, non une session
+    /// close.
+    ///
+    /// C'est ce qui distingue ce geste d'une annulation : après lui, on peut continuer à exécuter.
+    #[tokio::test]
+    async fn retirer_la_derniere_instruction_laisse_la_transaction_ouverte() {
+        let (_dossier, registre, cle) = registre_sqlite().await;
+        registre
+            .executer_une_requete(
+                &cle,
+                "insert into jetons (valeur) values (9)",
+                RowLimit::OneHundred,
+                TransactionMode::Manual,
+                CONSOLE,
+            )
+            .await
+            .expect("écriture");
+
+        registre
+            .retirer_une_instruction(&cle, CONSOLE, 0)
+            .await
+            .expect("retrait");
+
+        let etat = registre.etat_de_transaction(&cle, CONSOLE).await;
+        assert!(etat.open, "la transaction est rouverte, vide");
+        assert!(etat.statements.is_empty());
+        assert_eq!(
+            registre.sessions_de_console().await,
+            1,
+            "la session tient toujours : le geste n'achève pas la transaction"
+        );
+    }
+
+    /// Un rang qui n'existe pas est un **refus d'entrée** : il ne touche pas à la transaction.
+    ///
+    /// C'est la moitié qu'un remède trop large emporterait — fermer la session à chaque refus
+    /// ferait perdre une transaction pour une adresse mal formée.
+    #[tokio::test]
+    async fn un_rang_inconnu_est_refuse_sans_rien_annuler() {
+        let (_dossier, registre, cle) = registre_sqlite().await;
+        registre
+            .executer_une_requete(
+                &cle,
+                "insert into jetons (valeur) values (4)",
+                RowLimit::OneHundred,
+                TransactionMode::Manual,
+                CONSOLE,
+            )
+            .await
+            .expect("écriture");
+
+        let refus = registre
+            .retirer_une_instruction(&cle, CONSOLE, 7)
+            .await
+            .expect_err("un rang inconnu est refusé");
+        assert!(
+            refus.message.contains("n° 8") && refus.message.contains("elle en compte 1"),
+            "le refus dit le rang demandé et ce que la transaction compte : {}",
+            refus.message
+        );
+
+        let etat = registre.etat_de_transaction(&cle, CONSOLE).await;
+        assert!(etat.open);
+        assert_eq!(
+            etat.statements.len(),
+            1,
+            "la transaction est intacte : rien n'a été annulé ni rejoué"
+        );
+    }
+
+    /// Retirer une instruction **sans transaction** est refusé comme les trois autres chemins.
+    #[tokio::test]
+    async fn retirer_sans_transaction_est_refuse_avec_sa_raison() {
+        let (_dossier, registre, cle) = registre_sqlite().await;
+        let refus = registre
+            .retirer_une_instruction(&cle, CONSOLE, 0)
+            .await
+            .expect_err("aucune transaction n'est ouverte");
+        assert!(
+            refus.message.contains("aucune transaction"),
+            "le refus nomme ce qui manque : {}",
+            refus.message
+        );
+    }
+
+    /// La réponse d'une instruction se redemande à son **nouveau** rang après un retrait.
+    ///
+    /// Le journal est remplacé, donc les rangs se resserrent : c'est ce que le panneau affiche, et
+    /// c'est l'adresse que `transaction_result` attend. Sans le rejeu, la réponse d'après aurait été
+    /// celle d'avant — la même liste, à un élément près.
+    #[tokio::test]
+    async fn apres_un_retrait_les_rangs_se_resserrent() {
+        let (_dossier, registre, cle) = registre_sqlite().await;
+        for valeur in [1, 2] {
+            registre
+                .executer_une_requete(
+                    &cle,
+                    &format!("insert into jetons (valeur) values ({valeur})"),
+                    RowLimit::OneHundred,
+                    TransactionMode::Manual,
+                    CONSOLE,
+                )
+                .await
+                .expect("écriture");
+        }
+        registre
+            .executer_une_requete(
+                &cle,
+                "select valeur from jetons order by valeur",
+                RowLimit::OneHundred,
+                TransactionMode::Manual,
+                CONSOLE,
+            )
+            .await
+            .expect("lecture");
+
+        registre
+            .retirer_une_instruction(&cle, CONSOLE, 0)
+            .await
+            .expect("retrait");
+
+        // La lecture était en 3ᵉ position, elle est en 2ᵉ — et elle rend une ligne de moins, le
+        // jeton 1 n'ayant pas été rejoué.
+        let reponse = registre
+            .reponse_de_transaction(&cle, CONSOLE, 1)
+            .await
+            .expect("la lecture est désormais la deuxième");
+        assert_eq!(reponse.rows.len(), 1, "un seul jeton reste inséré");
+        assert!(
+            registre
+                .reponse_de_transaction(&cle, CONSOLE, 2)
+                .await
+                .is_err(),
+            "il n'y a plus de troisième instruction"
         );
     }
 
@@ -1959,6 +2384,240 @@ mod tests_db {
             .expect("annulation");
         assert!(!registre.etat_de_transaction(cle, CONSOLE).await.open);
         registre.fermer(cle).await;
+    }
+
+    /// Ce que le ticket demande, contre un vrai PostgreSQL : **retirer l'instruction fautive rend
+    /// la transaction validable** (`API-40`).
+    ///
+    /// # Pourquoi PostgreSQL, et pourquoi SQLite ne peut pas porter ce test
+    ///
+    /// Il est le seul des cinq à **abandonner** une transaction sur un refus : chez lui `aborted`
+    /// passe à vrai, le panneau retire « Valider », et tout ce qui suit est refusé. Chez SQLite
+    /// `aborted` ne monte jamais, donc « il redescend » y serait vrai sans que rien ne l'ait fait.
+    /// C'est la règle n° 5 : un décor qui ne peut pas produire l'état qu'on mesure ne mesure rien.
+    ///
+    /// **Et la mesure finale est ce que la base porte**, non le drapeau : le `commit` doit réussir
+    /// *et* écrire. Sur une transaction abandonnée il aurait réussi en annulant tout, ce qui est
+    /// exactement le mensonge que `aborted` existe pour éviter.
+    #[tokio::test]
+    #[cfg_attr(not(feature = "db-tests"), ignore)]
+    async fn retirer_l_instruction_fautive_rend_la_transaction_validable() {
+        let registre = ConnectionRegistry::new();
+        let cle = "Halle/analytics/dev";
+        registre
+            .ouvrir(
+                cle,
+                crate::config::Engine::PostgreSql,
+                &variante(),
+                secret().as_ref(),
+                &contexte(),
+            )
+            .await
+            .expect("la base de test doit s'ouvrir");
+        executer(
+            &registre,
+            cle,
+            "drop table if exists api_40_jetons",
+            CONSOLE,
+        )
+        .await
+        .expect("décor");
+        executer(
+            &registre,
+            cle,
+            "create table api_40_jetons (valeur int)",
+            CONSOLE,
+        )
+        .await
+        .expect("décor");
+
+        registre
+            .executer_une_requete(
+                cle,
+                "insert into api_40_jetons (valeur) values (1)",
+                RowLimit::OneHundred,
+                TransactionMode::Manual,
+                CONSOLE,
+            )
+            .await
+            .expect("écriture");
+        registre
+            .executer_une_requete(
+                cle,
+                "select depuis_nulle_part",
+                RowLimit::OneHundred,
+                TransactionMode::Manual,
+                CONSOLE,
+            )
+            .await
+            .expect_err("une colonne inconnue doit être refusée");
+        assert!(
+            registre.etat_de_transaction(cle, CONSOLE).await.aborted,
+            "le décor doit bien produire une transaction abandonnée, sans quoi ce test ne mesure rien"
+        );
+
+        registre
+            .retirer_une_instruction(cle, CONSOLE, 1)
+            .await
+            .expect("retrait de l'instruction fautive");
+
+        let etat = registre.etat_de_transaction(cle, CONSOLE).await;
+        assert!(etat.open, "{etat:?}");
+        assert!(
+            !etat.aborted,
+            "l'abandon se recalcule sur le rejeu : plus rien n'échoue, donc « Valider » revient — {etat:?}"
+        );
+        assert_eq!(etat.statements.len(), 1, "{etat:?}");
+
+        registre
+            .valider_la_transaction(cle, CONSOLE)
+            .await
+            .expect("une transaction qui n'est plus abandonnée se valide");
+        let reste = executer(
+            &registre,
+            cle,
+            "select count(*) as n from api_40_jetons",
+            CONSOLE,
+        )
+        .await
+        .expect("relecture");
+        assert_eq!(
+            reste.rows[0][0],
+            crate::engine::Value::Int { value: 1 },
+            "le `commit` a bel et bien écrit : sur une transaction abandonnée il aurait tout annulé"
+        );
+
+        executer(&registre, cle, "drop table api_40_jetons", CONSOLE)
+            .await
+            .expect("ménage");
+        registre.fermer(cle).await;
+    }
+
+    /// MySQL refuse le retrait dès qu'une modification de structure est au journal (`API-40`).
+    ///
+    /// # Ce que ce refus évite, et qu'aucun autre moteur ne pose
+    ///
+    /// Un `create` y provoque un `commit` implicite **avant** de s'exécuter : l'`insert` qui le
+    /// précède est déjà durable, donc l'annulation ne le défait pas et le rejeu l'écrirait une
+    /// seconde fois — des lignes en double, sans qu'un mot le dise. Le geste est donc refusé, et le
+    /// refus dit laquelle des instructions l'empêche.
+    ///
+    /// **La mesure porte sur le compte**, non sur le seul message : c'est le doublon qu'on refuse,
+    /// et un refus qui aurait quand même rejoué laisserait deux lignes derrière lui.
+    #[tokio::test]
+    #[cfg_attr(not(feature = "db-tests"), ignore)]
+    async fn mysql_refuse_le_retrait_quand_un_ddl_a_deja_valide() {
+        let Ok(url) = std::env::var("DORABASE_TEST_MYSQL") else {
+            panic!("DORABASE_TEST_MYSQL doit nommer le décor — voir scripts/mysql-test.sh");
+        };
+        let registre = ConnectionRegistry::new();
+        let cle = "Halle/mysql/dev";
+        registre
+            .ouvrir(
+                cle,
+                crate::config::Engine::MySql,
+                &variante_mysql(&url),
+                Some(&crate::secrets::Secret::new("dorabase-test".to_owned())),
+                &contexte(),
+            )
+            .await
+            .expect("le décor MySQL doit s'ouvrir");
+        // **Les deux tables sont retirées d'abord, `if exists` compris** : ce test panique en
+        // plein milieu quand il tombe, donc son ménage de fin ne part pas — et un témoin resté
+        // debout ferait échouer le `create` du tour suivant, sur un message qui n'aurait rien à
+        // voir avec ce qu'on mesure. Un décor qui ne se remonte pas à l'identique après un échec
+        // fait chercher le défaut dans le sujet.
+        for sql in [
+            "drop table if exists api_40_jetons",
+            "drop table if exists api_40_temoin",
+            "create table api_40_jetons (valeur int)",
+        ] {
+            executer(&registre, cle, sql, CONSOLE).await.expect("décor");
+        }
+
+        for sql in [
+            "insert into api_40_jetons (valeur) values (1)",
+            // C'est celle-ci qui valide d'office ce qui la précède.
+            "create table api_40_temoin (valeur int)",
+        ] {
+            registre
+                .executer_une_requete(
+                    cle,
+                    sql,
+                    RowLimit::OneHundred,
+                    TransactionMode::Manual,
+                    CONSOLE,
+                )
+                .await
+                .expect("instruction");
+        }
+
+        let refus = registre
+            .retirer_une_instruction(cle, CONSOLE, 0)
+            .await
+            .expect_err("MySQL refuse de rejouer une transaction déjà validée d'office");
+        assert!(
+            refus.message.contains("n° 2") && refus.message.contains("deux fois"),
+            "le refus nomme l'instruction qui l'empêche et ce qu'elle coûterait : {}",
+            refus.message
+        );
+
+        // **Le doublon est ce qu'on refuse**, et c'est lui qu'on mesure : la ligne validée d'office
+        // est là une fois, et le refus ne l'a pas réécrite.
+        registre
+            .annuler_la_transaction(cle, CONSOLE)
+            .await
+            .expect("annulation");
+        let reste = executer(
+            &registre,
+            cle,
+            "select count(*) as n from api_40_jetons",
+            CONSOLE,
+        )
+        .await
+        .expect("relecture");
+        // **Et c'est le contrôle positif du refus lui-même** : cette ligne a été écrite *dans* la
+        // transaction, puis l'annulation est passée dessus — elle survit, donc le `create` l'avait
+        // bien validée d'office. Si MySQL ne le faisait pas, le compte serait zéro et le refus
+        // n'aurait aucun objet.
+        assert_eq!(
+            reste.rows[0][0],
+            crate::engine::Value::Int { value: 1 },
+            "la ligne a survécu à l'annulation : le `create` l'avait validée d'office, et un rejeu \
+             l'aurait donc écrite une seconde fois"
+        );
+
+        for sql in [
+            "drop table api_40_jetons",
+            "drop table if exists api_40_temoin",
+        ] {
+            executer(&registre, cle, sql, CONSOLE)
+                .await
+                .expect("ménage");
+        }
+        registre.fermer(cle).await;
+    }
+
+    /// La variante du décor MySQL, lue dans `DORABASE_TEST_MYSQL`.
+    fn variante_mysql(url: &str) -> ConnectionSettings {
+        let reste = url.trim_start_matches("mysql://");
+        let (_identifiants, hote_et_base) = reste.split_once('@').expect("un @ dans l'URL");
+        let (hote, base) = hote_et_base.split_once('/').expect("une base dans l'URL");
+        let (hote, port) = hote.split_once(':').expect("un port dans l'URL");
+        ConnectionSettings {
+            host: hote.to_owned(),
+            port: port.parse().expect("un port"),
+            default_database: base.to_owned(),
+            username: "dorabase".to_owned(),
+            password: None,
+            // Le décor n'active pas TLS ; ce test porte sur la transaction, pas sur le transport.
+            ssl_mode: SslMode::Disable,
+            ca_certificate: None,
+            auth_database: None,
+            read_only: false,
+            reconnect_on_startup: false,
+            tunnel: None,
+        }
     }
 
     /// **Deux transactions à la fois, sur la même base, et chacune la sienne** (`API-38`).

@@ -33,7 +33,16 @@ type TransactionPanelProps = {
    * d'avant » là où l'on regarde celle qui vient d'arriver.
    */
   affichee?: number | null
-  /** Vrai pendant l'un des deux gestes : les boutons attendent. */
+  /**
+   * Retire une instruction de la transaction, et rejoue ce qui reste (`API-40`).
+   *
+   * **Toutes les instructions le portent, pas seulement les refusées.** Le cas qui appelle ce geste
+   * est bien une instruction fautive — c'est elle qui a fait retirer « Valider » —, mais une
+   * écriture qu'on regrette se retire par le même mécanisme, et rien ne justifiait de l'interdire
+   * sur la moitié des cartes.
+   */
+  onRetirer?: (index: number) => void
+  /** Vrai pendant l'un des trois gestes : les boutons attendent. */
   enCours?: boolean
 }
 
@@ -61,6 +70,7 @@ export function TransactionPanel({
   onValider,
   onAnnuler,
   onAfficher,
+  onRetirer,
   affichee = null,
   enCours = false,
 }: TransactionPanelProps) {
@@ -116,6 +126,8 @@ export function TransactionPanel({
                 rang={rang + 1}
                 affichee={affichee === rang}
                 onAfficher={onAfficher === undefined ? undefined : () => onAfficher(rang)}
+                onRetirer={onRetirer === undefined ? undefined : () => onRetirer(rang)}
+                enCours={enCours}
               />
             ))}
           </ol>
@@ -177,11 +189,15 @@ function Instruction({
   rang,
   affichee,
   onAfficher,
+  onRetirer,
+  enCours,
 }: {
   instruction: TransactionStatement
   rang: number
   affichee: boolean
   onAfficher?: () => void
+  onRetirer?: () => void
+  enCours: boolean
 }) {
   const t = useT()
   const refusee = instruction.error !== null
@@ -213,7 +229,39 @@ function Instruction({
   )
 
   return (
+    // `position: relative` porte la poubelle : elle est posée **par-dessus** la carte, jamais
+    // dedans. En mode consultable la carte *est* un `<button>`, et un bouton dans un bouton n'est
+    // ni du HTML valide ni cliquable de façon prévisible — c'est l'arbitrage du bouton de saut
+    // d'une cellule de clé étrangère (`API-55`), et la même parade : un frère en absolu.
     <li className={cx(styles.instruction, refusee && styles.refusee)}>
+      {onRetirer !== undefined && (
+        /* **Visible en permanence, non révélée au survol.** C'est l'écart assumé avec les actions
+           de ligne d'`API-45` : là-bas un second chemin existe au clavier, ici il n'y en a pas, et
+           `visibility: hidden` retirerait la poubelle du parcours de tabulation comme de l'arbre
+           d'accessibilité. Un chemin unique qu'on ne voit pas est un chemin qui n'existe pas — le
+           dépôt l'a déjà payé trois fois.
+
+           **`aria-disabled` et non `disabled`** pendant un rejeu : la raison vit dans l'infobulle,
+           qu'un bouton désactivé rendrait inatteignable (piège n° 3). */
+        <button
+          type="button"
+          className={styles.retirer}
+          aria-disabled={enCours}
+          // Le rang **dans le nom** : vingt poubelles dans la même fenêtre ne peuvent pas partager
+          // un nom accessible, et rien d'autre ici ne les distingue (piège n° 1).
+          aria-label={t('console.transaction.retirer', { rang })}
+          title={enCours ? t('console.transaction.retirerEnCours') : undefined}
+          /* **Aucun `stopPropagation`, et c'est une propriété de la structure.** Le bouton de
+             saut d'`API-55` en a besoin parce qu'il est posé *dans* la cellule qui écoute le clic ;
+             celui-ci est un **frère** de la carte, tous deux enfants du `<li>`, et rien n'écoute
+             au-dessus — donc rien à arrêter. Un appel y aurait été inerte, et un sabotage l'a dit :
+             le retirer ne faisait tomber aucun test (règle n° 1). C'est la famille du `var()` mort.
+             Ce qui garde la propriété est le test de parenté juste à côté. */
+          onClick={enCours ? undefined : onRetirer}
+        >
+          <Icon name="trash" size={13} strokeWidth={2.1} />
+        </button>
+      )}
       {choisissable ? (
         // **Un bouton, et la carte entière** : la cible est ce qu'on lit — le SQL et sa réponse —,
         // et une petite action « Afficher » à côté aurait demandé de viser 60 px après en avoir lu

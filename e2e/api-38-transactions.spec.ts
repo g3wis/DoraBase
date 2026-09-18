@@ -234,3 +234,64 @@ test('le libellé de la bascule et les deux boutons tiennent dans leur boîte', 
   })
   expect(debordements).toEqual([])
 })
+
+test('la poubelle ne recouvre rien, et retirer rejoue ce qui reste (API-40)', async ({ page }) => {
+  await page.getByRole('switch', { name: 'Transaction manuelle' }).click()
+  for (const sql of ['update ventes set statut = 1', 'select jour from ventes']) {
+    await page.locator('.cm-content').click()
+    await page.keyboard.press('Meta+a')
+    await page.keyboard.insertText(sql)
+    await page.getByRole('button', { name: /Exécuter/ }).click()
+  }
+  const transaction = page.locator(panneau)
+  await expect(transaction.getByRole('button', { name: /Retirer l’instruction/ })).toHaveCount(2)
+
+  // **La place de la poubelle est réservée dans l'en-tête**, et c'est ce que jsdom ne peut pas
+  // dire : sans la marge, le bouton se peindrait par-dessus la durée — la seule chose de cette
+  // ligne qui soit à droite. Mesuré en coordonnées, la seule façon de distinguer « voisin » de
+  // « par-dessus » (défaut n° 35, dans sa forme la plus simple).
+  const recouvrements = await page.evaluate(() => {
+    const cartes = [...document.querySelectorAll('aside[aria-label="Transaction en cours"] li')]
+    return cartes.map((carte) => {
+      const poubelle = carte.querySelector('button[aria-label^="Retirer"]')?.getBoundingClientRect()
+      const durees = [...carte.querySelectorAll('span')]
+        .map((span) => ({ texte: span.textContent ?? '', boite: span.getBoundingClientRect() }))
+        .filter((span) => / ms$/.test(span.texte))
+      const panneau = document
+        .querySelector('aside[aria-label="Transaction en cours"]')
+        ?.getBoundingClientRect()
+      const duree = durees.at(0)?.boite
+      if (!poubelle || durees.length !== 1 || !duree || !panneau) return null
+      return {
+        // Positif quand la poubelle commence après la fin de la durée : les deux ne se touchent pas.
+        ecart: Math.round(poubelle.left - duree.right),
+        // Positif quand la poubelle reste dans le panneau, bord droit compris.
+        marge: Math.round(panneau.right - poubelle.right),
+        largeur: Math.round(poubelle.width),
+      }
+    })
+  })
+
+  expect(recouvrements).toHaveLength(2)
+  for (const cote of recouvrements) {
+    expect(cote).not.toBeNull()
+    // **Des inégalités contre zéro, non deux valeurs du même rendu** (règle n° 18) : « la poubelle
+    // est à droite de la durée » resterait vrai en la peignant par-dessus.
+    expect(cote?.ecart).toBeGreaterThanOrEqual(0)
+    expect(cote?.marge).toBeGreaterThanOrEqual(0)
+    // Et elle est bien peinte : une boîte de largeur nulle satisferait les deux assertions
+    // précédentes sans qu'il y ait rien à cliquer.
+    expect(cote?.largeur).toBe(18)
+  }
+
+  // Le geste lui-même, de bout en bout : la première instruction part, la seconde reste.
+  await transaction
+    .getByRole('button', { name: 'Retirer l’instruction n° 1 et rejouer le reste' })
+    .click()
+  await expect(transaction.getByRole('button', { name: /Retirer l’instruction/ })).toHaveCount(1)
+  await expect(transaction).toContainText('select jour from ventes')
+  await expect(transaction).not.toContainText('update ventes set statut = 1')
+  // **La transaction reste ouverte** : le retrait n'est pas une annulation, et le panneau ne
+  // retombe pas sur son invite.
+  await expect(transaction).not.toContainText('Rien n’est encore retenu')
+})

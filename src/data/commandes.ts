@@ -505,6 +505,24 @@ export async function rollbackTransaction(key: DatabaseKey, console: string): Pr
 }
 
 /**
+ * Retire une instruction de la transaction, et rejoue ce qui reste (`API-40`).
+ *
+ * **`index` est le rang dans le journal**, la même adresse que `transactionResult` : la place d'une
+ * carte dans le panneau *est* le rang de son instruction, le journal étant celui de cette console.
+ *
+ * **Rien n'est rendu** : le journal a changé en entier — c'est celui du second tour —, donc l'écran
+ * le relit plutôt que d'en recevoir une moitié. Un rejeu dont une instruction échoue n'est pas un
+ * échec de cet appel : c'est ce que le journal dira, et c'est même ce qu'on vient y lire.
+ */
+export async function dropTransactionStatement(
+  key: DatabaseKey,
+  console: string,
+  index: number,
+): Promise<void> {
+  return appeler<void>('drop_transaction_statement', { key, console, index })
+}
+
+/**
  * La clé d'une base, composée **côté Rust**.
  *
  * Le front envoie les trois chaînes ; c'est `registry::cle` qui les assemble. Composer ici

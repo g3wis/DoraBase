@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   commitTransaction,
+  dropTransactionStatement,
   rollbackTransaction,
   transactionResult,
   transactionState,
@@ -19,6 +20,7 @@ export type PasserelleTransaction = {
   transactionResult: (key: DatabaseKey, console: string, index: number) => Promise<QueryResult>
   commitTransaction: (key: DatabaseKey, console: string) => Promise<void>
   rollbackTransaction: (key: DatabaseKey, console: string) => Promise<void>
+  dropTransactionStatement: (key: DatabaseKey, console: string, index: number) => Promise<void>
 }
 
 export const PASSERELLE_TRANSACTION: PasserelleTransaction = {
@@ -26,6 +28,7 @@ export const PASSERELLE_TRANSACTION: PasserelleTransaction = {
   transactionResult,
   commitTransaction,
   rollbackTransaction,
+  dropTransactionStatement,
 }
 
 /** Une transaction au repos : aucune n'est ouverte, et ce n'est pas une transaction vide. */
@@ -146,7 +149,17 @@ export type Transactions = {
   /** Valide pour de bon. Appelé par la confirmation. */
   valider: (console: Console) => void
   annuler: (console: Console) => void
-  /** Vrai pendant une validation ou une annulation : les deux boutons attendent. */
+  /**
+   * Retire une instruction de la transaction, et rejoue ce qui reste (`API-40`).
+   *
+   * **Sans confirmation**, et c'est la raison de l'annulation prise par l'autre bout : ce geste
+   * *répare* une transaction — le cas qui l'appelle est une instruction refusée qui a fait retirer
+   * « Valider » —, et en demander la permission ferait de la réparation de cinq refus dix clics.
+   * Ce qui se perd est le texte de l'instruction retirée, que l'éditeur ne garde pas ; c'est le prix
+   * dit du geste, et le journal montre ce qui reste avant qu'on valide quoi que ce soit.
+   */
+  retirer: (console: Console, index: number) => void
+  /** Vrai pendant une validation, une annulation ou un retrait : les boutons attendent. */
   enCours: boolean
 }
 
@@ -427,6 +440,34 @@ export function useTransaction(
     // et le confronter à une question ferait hésiter là où il n'y a rien à perdre. Ce qui se perd —
     // les instructions qu'on avait écrites — est dans l'éditeur, que rien n'efface.
     annuler: (console) => achever(console, 'annuler'),
+    retirer: (console, rang) => {
+      const { cle, id } = console
+      // **Le même témoin que les deux issues**, et non un troisième : les trois gestes attendent le
+      // serveur, et un panneau qui figerait « Valider » sans figer les poubelles laisserait lancer
+      // un second rejeu par-dessus le premier.
+      setEnCours(true)
+      passerelle
+        .dropTransactionStatement(cle, jetonDe(id), rang)
+        .then(() => setErreurs((precedent) => ({ ...precedent, [id]: null })))
+        // **Le refus se dit** : c'est un geste demandé, et c'est même ici qu'il porte le plus —
+        // sur un moteur qui valide d'office une modification de structure, la phrase du cœur est la
+        // seule chose qui explique pourquoi la poubelle ne fait rien (défaut n° 36).
+        .catch((raison: unknown) =>
+          setErreurs((precedent) => ({ ...precedent, [id]: messageDe(raison) })),
+        )
+        .finally(() => {
+          setEnCours(false)
+          // **La marque part, et il le faut** : le journal est celui du second tour, donc les rangs
+          // se sont resserrés — garder le précédent désignerait une autre instruction que celle
+          // qu'on regardait. La grille, elle, garde ce qu'elle montrait : rien ne dit qu'il faille
+          // la vider, et la vider serait perdre une réponse qu'on venait de demander.
+          setAffichees((precedent) => ({ ...precedent, [id]: null }))
+          // Relu dans les deux cas : côté Rust le journal a changé en entier quand le retrait a
+          // abouti, et il est inchangé quand il a été refusé. Le relire plutôt que de le supposer
+          // garde une seule vérité — la conduite d'`achever`.
+          relire(console)
+        })
+    },
     enCours,
   }
 }

@@ -531,6 +531,44 @@ pub async fn commit_transaction(
     resultat
 }
 
+/// Retire une instruction de la transaction, et rejoue ce qui reste (`API-40`).
+///
+/// **`index` est le rang dans le journal**, la même adresse que `transaction_result` — et pour la
+/// même raison : le journal est celui d'une console, donc la place d'une carte dans le panneau
+/// *est* son rang. Aucun identifiant à distribuer, rien à faire voyager avec chaque exécution.
+///
+/// **Rien n'est rendu**, et l'écran relit : le journal a changé en entier — il est celui du second
+/// tour —, donc en renvoyer une moitié ici ferait vivre l'état à deux endroits. C'est la conduite
+/// de `commit_transaction`, dont le panneau relit aussi l'issue.
+///
+/// **Un rejeu dont une instruction échoue n'est pas un échec de cette commande.** Le journal le dit,
+/// et c'est même ce qu'on vient y lire : retirer une seule des instructions fautives ne suffit pas.
+/// Ce qui remonte ici est le refus d'entrée — rang inconnu, moteur qui valide d'office — ou la perte
+/// de la session.
+///
+/// Journalisée dans les deux cas, comme `commit_transaction` : ce geste annule puis réécrit, et
+/// savoir après coup qu'il a eu lieu vaut la ligne. Aucun SQL — un journal ne doit pas devenir une
+/// copie des données.
+#[tauri::command]
+pub async fn drop_transaction_statement(
+    key: DatabaseKey,
+    console: String,
+    index: usize,
+    registry: tauri::State<'_, ConnectionRegistry>,
+) -> Result<(), EngineError> {
+    let resultat = registry
+        .retirer_une_instruction(&key.cle(), &console, index)
+        .await;
+    match &resultat {
+        Ok(()) => log::info!(
+            "drop_transaction_statement → instruction n° {} retirée",
+            index + 1
+        ),
+        Err(erreur) => log::warn!("drop_transaction_statement → refusé : {erreur}"),
+    }
+    resultat
+}
+
 /// Annule la transaction manuelle **d'une console** (`API-38`).
 #[tauri::command]
 pub async fn rollback_transaction(

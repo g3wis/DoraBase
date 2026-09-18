@@ -68,7 +68,8 @@ pub use rows::{
     Value,
 };
 pub use transaction::{
-    OrdreDeTransaction, TransactionMode, TransactionState, TransactionStatement,
+    modifie_la_structure, OrdreDeTransaction, TransactionMode, TransactionState,
+    TransactionStatement,
 };
 
 /// Ce que chaque moteur doit savoir faire.
@@ -315,6 +316,41 @@ impl AnyEngine {
             // La question ne se pose pas : leurs consoles n'ont pas de transaction manuelle — la
             // mongo ne fait que lire, BigQuery n'a pas de session à tenir. La valeur n'est jamais
             // lue, et « n'abandonne pas » est la réponse la moins présomptueuse.
+            Self::MongoDb(_) | Self::BigQuery(_) => false,
+        }
+    }
+
+    /// Une modification de structure **valide-t-elle d'office** ce qui attend ? (`API-40`)
+    ///
+    /// # Ce que la réponse décide
+    ///
+    /// Retirer une instruction d'une transaction l'annule et rejoue ce qui reste. Le rejeu n'écrit
+    /// pas deux fois — l'annulation vient de défaire ce que la transaction tenait —, **sauf là où le
+    /// moteur a déjà validé**. Sur MySQL, un `create`, un `alter` ou un `drop` provoque un `commit`
+    /// implicite *avant* de s'exécuter : ce qui précédait est alors durable, l'annulation ne défait
+    /// que la fin, et le rejeu réécrit un début que rien n'a retiré. Des lignes en double, sans un
+    /// mot — le pire mode de défaillance que ce chemin puisse porter, et celui qui fait refuser le
+    /// geste plutôt que de le tenter.
+    ///
+    /// **PostgreSQL et SQLite rendent leur DDL transactionnel**, tous les deux : un `create table`
+    /// y est annulé par un `rollback` comme n'importe quelle écriture. Répondre « oui » pour eux
+    /// leur retirerait le geste dans le cas le plus banal — une transaction qui crée une table puis
+    /// la remplit —, alors qu'il y est parfaitement sûr.
+    ///
+    /// **Inhérente et répartie par un `match` sans bras attrape-tout**, comme
+    /// `transaction_abandonnee_par_une_erreur` et `connexion_perdue` : un sixième moteur ne
+    /// compilera pas tant qu'il n'aura pas répondu, et c'est voulu — un corps par défaut lui
+    /// donnerait « non », donc l'autorisation de réécrire, sans que personne l'ait choisi.
+    pub fn un_ddl_valide_la_transaction(&self) -> bool {
+        match self {
+            // Le seul des cinq. Voir la documentation du serveur, « Statements That Cause an
+            // Implicit Commit » : toute la DDL y figure, et `transaction::VALIDENT_D_OFFICE` en est
+            // la restriction à ce qu'une console exécute.
+            Self::MySql(_) => true,
+            // DDL transactionnel : un `rollback` défait un `create table` comme le reste.
+            Self::Postgres(_) | Self::Sqlite(_) => false,
+            // La question ne se pose pas : leurs consoles n'ont pas de transaction manuelle, donc
+            // rien à retirer ni à rejouer. La valeur n'est jamais lue.
             Self::MongoDb(_) | Self::BigQuery(_) => false,
         }
     }
