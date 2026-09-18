@@ -226,3 +226,101 @@ test('le compte des instructions est celui de la transaction', () => {
   expect(panneau).toBeInTheDocument()
   expect(screen.getAllByRole('listitem')).toHaveLength(3)
 })
+
+test('chaque instruction porte sa poubelle, et son nom dit laquelle', async () => {
+  const utilisateur = userEvent.setup()
+  const retirer = vi.fn()
+  monter(
+    {
+      open: true,
+      statements: [
+        instruction({ sql: 'insert into commandes (id) values (1)' }),
+        instruction({ sql: 'delete from commandes', error: 'syntaxe' }),
+      ],
+    },
+    { onRetirer: retirer },
+  )
+
+  // **Toutes les instructions, pas seulement les refusées** : le cas qui appelle le geste est bien
+  // une instruction fautive, mais une écriture qu'on regrette se retire par le même mécanisme.
+  const poubelles = screen.getAllByRole('button', { name: /Retirer l’instruction/ })
+  expect(poubelles).toHaveLength(2)
+  // **Deux contrôles de la même fenêtre ne peuvent pas partager un nom accessible**, et rien
+  // d'autre ici ne les distingue — c'est le piège n° 1 par le bout qu'aucune espace n'arrange.
+  expect(poubelles[0]).toHaveAccessibleName('Retirer l’instruction n° 1 et rejouer le reste')
+  expect(poubelles[1]).toHaveAccessibleName('Retirer l’instruction n° 2 et rejouer le reste')
+
+  await utilisateur.click(
+    screen.getByRole('button', { name: 'Retirer l’instruction n° 2 et rejouer le reste' }),
+  )
+  // Le **rang du journal**, qui est l'adresse que le cœur attend — non la place dans une liste
+  // filtrée.
+  expect(retirer).toHaveBeenCalledWith(1)
+})
+
+test('la poubelle n’est pas un enfant de la carte consultable', () => {
+  monter(
+    {
+      open: true,
+      statements: [
+        instruction({ sql: 'select 1', displayable: true, affected: null, returned: 1 }),
+      ],
+    },
+    { onRetirer: vi.fn(), onAfficher: vi.fn() },
+  )
+
+  const carte = screen.getByRole('button', { name: /Afficher ce résultat/ })
+  const poubelle = screen.getByRole('button', { name: /Retirer l’instruction/ })
+  // **Un bouton dans un bouton n'est ni du HTML valide ni cliquable de façon prévisible** : la
+  // poubelle est posée par-dessus la carte, jamais dedans (`API-55`). L'assertion porte sur la
+  // parenté, la seule chose qui distingue les deux — jsdom ne calcule aucune mise en page.
+  expect(carte.contains(poubelle)).toBe(false)
+  expect(poubelle.closest('button')).toBe(poubelle)
+})
+
+test('retirer une instruction ne désigne pas la carte qu’on fait disparaître', async () => {
+  const utilisateur = userEvent.setup()
+  const afficher = vi.fn()
+  const retirer = vi.fn()
+  monter(
+    {
+      open: true,
+      statements: [
+        instruction({ sql: 'select 1', displayable: true, affected: null, returned: 1 }),
+      ],
+    },
+    { onRetirer: retirer, onAfficher: afficher },
+  )
+
+  await utilisateur.click(screen.getByRole('button', { name: /Retirer l’instruction/ }))
+  expect(retirer).toHaveBeenCalledWith(0)
+  // **Ce que ce test garde est la structure, non un appel.** La poubelle est un frère de la carte,
+  // donc le clic ne remonte à aucun gestionnaire : un `stopPropagation` y serait inerte, et un
+  // sabotage l'a montré — le retirer ne faisait tomber aucun test. Ce qui ferait tomber celui-ci
+  // est de nicher la poubelle dans la carte, ou de poser un gestionnaire sur le `<li>` : les deux
+  // feraient désigner l'instruction qu'on vient de faire disparaître.
+  expect(afficher).not.toHaveBeenCalled()
+})
+
+test('pendant un rejeu, la poubelle porte sa raison et ne déclenche rien', async () => {
+  const utilisateur = userEvent.setup()
+  const retirer = vi.fn()
+  monter({ open: true, statements: [instruction()] }, { onRetirer: retirer, enCours: true })
+
+  const poubelle = screen.getByRole('button', { name: /Retirer l’instruction/ })
+  // `aria-disabled`, jamais `disabled` : la raison vit dans l'infobulle, qu'un bouton désactivé
+  // rendrait inatteignable (piège n° 3).
+  expect(poubelle).toHaveAttribute('aria-disabled', 'true')
+  expect(poubelle).not.toBeDisabled()
+  expect(poubelle).toHaveAttribute('title', expect.stringContaining('rejeu'))
+  await utilisateur.click(poubelle)
+  // Le pendant : `aria-disabled` n'empêche pas le clic, c'est le gestionnaire retiré qui l'empêche.
+  expect(retirer).not.toHaveBeenCalled()
+})
+
+test('sans gestionnaire, aucune poubelle n’est rendue', () => {
+  // Le contrôle négatif : la galerie monte ce panneau sans écran autour d'elle, et un carré mort
+  // annoncerait un geste que rien ne peut exécuter — le défaut n° 36.
+  monter({ open: true, statements: [instruction()] })
+  expect(screen.queryByRole('button', { name: /Retirer l’instruction/ })).not.toBeInTheDocument()
+})

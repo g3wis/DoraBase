@@ -67,7 +67,12 @@
   gap: var(--space-4);
 }
 
+/* `position: relative` pour la poubelle d'`API-40`, posée **par-dessus** la carte : en mode
+ * consultable, celle-ci est un `<button>`, et un bouton dans un bouton n'est pas du HTML valide.
+ * C'est la parade du bouton de saut d'une cellule de clé étrangère (`API-55`) — un frère en absolu,
+ * jamais un enfant. */
 .instruction {
+  position: relative;
   border-radius: var(--radius-control-2);
   background: var(--warn-bg-2);
   border: 1px solid var(--warn-bg);
@@ -162,12 +167,69 @@
   color: var(--ink-2);
 }
 
+/* **La place de la poubelle est réservée dans l'en-tête de chaque carte**, et c'est la leçon de
+ * `MARGE_DE_TRI` et de la marge de valeur d'`API-55` : sans elle, le bouton se peindrait par-dessus
+ * la durée — la seule chose de cette ligne qui soit à droite.
+ *
+ * **La cote se calcule, elle ne se choisit pas.** La poubelle occupe `--space-3` + 18 px depuis le
+ * bord intérieur de la carte, soit 24 ; le rembourrage de l'enveloppe en rend déjà 9, donc il faut
+ * 15 de plus. Le cran suivant de l'échelle est 16 — `--space-7` vaut 14, et c'est un pixel de trop :
+ * mesuré, la poubelle recouvrait la durée d'exactement cela. */
 .duree {
   flex: none;
+  margin-right: var(--space-8);
   font-family: var(--font-mono);
   font-size: var(--text-caps-sm);
   font-weight: var(--weight-medium);
   color: var(--ink-meta);
+}
+
+/* La poubelle d'une instruction (`API-40`), en haut à droite de sa carte.
+ *
+ * **Sans fond ni filet**, comme les actions d'une ligne de grille : ce qui la révèle est sa forme,
+ * et un fond se composerait avec celui de la carte survolée — la case plus sombre qu'`API-45` a
+ * justement retirée.
+ *
+ * **L'encre se relève d'`--ink-2` à `--danger-ink` au survol.** Ce n'est pas un état de survol
+ * inventé : c'est le relèvement d'encre que les actions de ligne, la bande de sidebar et le bouton
+ * de saut de clé étrangère font déjà. Le rouge, lui, suit l'**acte** — la règle d'`API-45` —, et
+ * `--danger-ink` parce que c'est une encre ; `--danger` est une surface. */
+.retirer {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-control-2);
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.retirer:hover {
+  color: var(--danger-ink);
+}
+
+.retirer:focus-visible {
+  outline: none;
+  color: var(--danger-ink);
+  box-shadow: var(--shadow-focus);
+}
+
+/* Le grisé est à écrire : `aria-disabled` ne le pose pas, et c'est lui qu'on a choisi pour que
+   l'infobulle reste atteignable (piège n° 3). */
+.retirer[aria-disabled="true"] {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.retirer[aria-disabled="true"]:hover {
+  color: var(--ink-2);
 }
 
 .sql {

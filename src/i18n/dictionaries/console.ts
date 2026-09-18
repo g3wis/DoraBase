@@ -104,6 +104,11 @@ export const consoleFr: Dictionnaire = {
     // **Le verbe du bouton**, ajouté au nom accessible de la carte : sans lui, celle-ci s'annoncerait
     // « #2 12 lignes rendues 4 ms select … », ce qui décrit sans dire ce qu'un clic fera.
     afficher: 'Afficher ce résultat dans la grille',
+    // **Le rang est dans le nom**, et il le faut : sans lui, vingt poubelles porteraient le même
+    // nom accessible dans la même fenêtre, et rien ne dirait laquelle on vise (piège n° 1, par le
+    // bout qu'aucune espace n'arrange). C'est la leçon des boutons de zoom du diagramme.
+    retirer: (p) => `Retirer l’instruction n° ${p.rang} et rejouer le reste`,
+    retirerEnCours: 'Une transaction est en cours de rejeu : attendez qu’elle réponde.',
     valider: 'Valider',
     annuler: 'Annuler',
     enCours: 'Validation…',
@@ -294,6 +299,8 @@ export const consoleEn: Dictionnaire = {
     touchees: (p) => `${p.n} row${Number(p.n) > 1 ? 's' : ''} affected`,
     refusee: 'refused',
     afficher: 'Show this result in the grid',
+    retirer: (p) => `Drop statement #${p.rang} and replay the rest`,
+    retirerEnCours: 'A transaction is being replayed: wait for it to answer.',
     valider: 'Commit',
     annuler: 'Roll back',
     enCours: 'Committing…',

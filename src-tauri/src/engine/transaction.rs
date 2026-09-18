@@ -143,6 +143,90 @@ impl OrdreDeTransaction {
     }
 }
 
+/// Les premiers mots qui, sur au moins un moteur, **valident d'office** ce qui attend (`API-40`).
+///
+/// C'est la liste que MySQL documente comme provoquant un `commit` implicite, restreinte à ce
+/// qu'une console exécute réellement. Elle est délibérément **large** : le sens de l'erreur compte,
+/// et il n'est pas symétrique — refuser un retrait qui aurait été sûr coûte un geste, l'autoriser
+/// sur une transaction déjà validée d'office écrit deux fois.
+const VALIDENT_D_OFFICE: [&str; 9] = [
+    "create", "alter", "drop", "truncate", "rename", "grant", "revoke", "lock", "unlock",
+];
+
+/// Vrai quand ce SQL modifie la structure, donc quand son rejeu n'est pas garanti (`API-40`).
+///
+/// # Ce que cette question décide, et pourquoi elle est ici
+///
+/// Retirer une instruction d'une transaction annule celle-ci et **rejoue** ce qui reste. Le rejeu
+/// n'écrit pas deux fois — l'annulation vient de défaire ce que la transaction tenait —, sauf là où
+/// le moteur a déjà validé d'office : sur MySQL, un `create`, un `alter` ou un `drop` valide ce qui
+/// attend *avant* de s'exécuter, donc l'annulation ne défait que la fin et le rejeu rejoue un début
+/// déjà durable. C'est `AnyEngine::un_ddl_valide_la_transaction` qui dit lesquels sont concernés ;
+/// celle-ci dit lesquelles des instructions le sont.
+///
+/// # Ce n'est pas le classificateur de l'écran, et les deux doivent pouvoir diverger
+///
+/// `nature.ts` classe un texte pour décider d'afficher une **modale** : se tromper y coûte une
+/// question de trop. Celle-ci décide si une **écriture peut partir deux fois** : se tromper y coûte
+/// des lignes en double, que rien ne signale. La seconde doit donc pouvoir être plus large que la
+/// première sans que personne aille les « harmoniser » — d'où deux listes, et non une traduction de
+/// l'autre.
+///
+/// # Ce qu'elle ne couvre pas, et qui était déjà vrai avant
+///
+/// Un `begin`, un `start transaction` ou un `set autocommit` tapé **dans** une transaction manuelle
+/// en termine une aussi, chez MySQL. Le cas est antérieur — `API-38` ne s'en garde pas davantage —
+/// et il n'est pas propre au retrait : il rend déjà le « Valider » du panneau approximatif.
+pub fn modifie_la_structure(sql: &str) -> bool {
+    let nu = sans_commentaires(sql);
+    let debut = nu.trim_start().to_ascii_lowercase();
+    VALIDENT_D_OFFICE.iter().any(|mot| {
+        debut
+            .strip_prefix(mot)
+            // Le mot entier, jamais un préfixe : sans cette garde, `dropped_at` ferait un `drop` et
+            // `created` un `create` — donc un refus sur un `select` parfaitement ordinaire.
+            .is_some_and(|reste| {
+                reste.is_empty() || !reste.starts_with(|c: char| c.is_alphanumeric() || c == '_')
+            })
+    })
+}
+
+/// Le SQL débarrassé de ses commentaires, pour l'analyse seulement.
+///
+/// **Les deux formes, et non les seules lignes `--`** : un `/* … */` en préambule masquerait le
+/// premier mot, et c'est le sens dangereux — un `drop` qu'on ne voit pas est un rejeu qu'on
+/// autorise. `postgres::rows` en porte une variante qui ne traite que `--` ; là-bas l'erreur va
+/// dans l'autre sens, celui de ne pas ajouter de limite.
+fn sans_commentaires(sql: &str) -> String {
+    let mut sortie = String::with_capacity(sql.len());
+    let mut reste = sql;
+    loop {
+        // Le **premier** des deux marqueurs rencontrés, jamais toujours le même : traiter `--` en
+        // priorité sortirait un tiret d'un `/* -- */`, et l'inverse sortirait un bloc d'un `-- /*`.
+        let prise = match (reste.find("--"), reste.find("/*")) {
+            (None, None) => None,
+            (Some(ligne), None) => Some((ligne, "\n", 0)),
+            (None, Some(bloc)) => Some((bloc, "*/", 2)),
+            (Some(ligne), Some(bloc)) if ligne < bloc => Some((ligne, "\n", 0)),
+            (Some(_), Some(bloc)) => Some((bloc, "*/", 2)),
+        };
+        let Some((debut, fermeture, saut)) = prise else {
+            sortie.push_str(reste);
+            return sortie;
+        };
+        sortie.push_str(&reste[..debut]);
+        // Une espace à la place de ce qu'on retire : sans elle, `select/*x*/1` deviendrait
+        // `select1`, donc un mot que personne n'a écrit. Le saut de ligne d'un `--`, lui, est
+        // laissé en place — il sépare déjà.
+        sortie.push(' ');
+        match reste[debut..].find(fermeture) {
+            Some(fin) => reste = &reste[debut + fin + saut..],
+            // Un commentaire jamais refermé avale tout ce qui suit, comme le serveur le ferait.
+            None => return sortie,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,5 +252,63 @@ mod tests {
         let etat = TransactionState::default();
         assert!(!etat.open);
         assert!(etat.statements.is_empty());
+    }
+
+    #[test]
+    fn les_instructions_qui_valident_d_office_sont_reconnues() {
+        for sql in [
+            "create table t (a int)",
+            "ALTER TABLE t ADD COLUMN b int",
+            "  drop index i",
+            "truncate commandes",
+            "rename table a to b",
+            "grant select on t to lecteur",
+            "revoke all on t from lecteur",
+            "lock tables t write",
+            "unlock tables",
+        ] {
+            assert!(modifie_la_structure(sql), "« {sql} » modifie la structure");
+        }
+    }
+
+    #[test]
+    fn une_ecriture_ordinaire_n_en_est_pas_une() {
+        // Le contrôle positif de la liste : sans lui, une fonction qui rendrait toujours `true`
+        // passerait le test d'au-dessus — et retirerait le geste à toute transaction.
+        for sql in [
+            "select 1",
+            "insert into t (a) values (1)",
+            "update t set a = 2 where id = 1",
+            "delete from t where id = 1",
+            "with x as (select 1) select * from x",
+        ] {
+            assert!(
+                !modifie_la_structure(sql),
+                "« {sql} » ne modifie pas la structure"
+            );
+        }
+    }
+
+    #[test]
+    fn un_nom_de_colonne_qui_commence_comme_un_verbe_ne_compte_pas() {
+        // Le piège du préfixe : `dropped_at` et `created_at` sont des noms de colonne courants, et
+        // les prendre pour un `drop` ou un `create` retirerait le geste à des transactions qui ne
+        // touchent à aucune structure.
+        assert!(!modifie_la_structure("select dropped_at from t"));
+        assert!(!modifie_la_structure("created_at"));
+    }
+
+    #[test]
+    fn un_commentaire_en_preambule_ne_masque_pas_le_verbe() {
+        // **Le sens dangereux**, et la raison d'être de `sans_commentaires` ici : un `drop` qu'on ne
+        // voit pas est un rejeu qu'on autorise sur une transaction déjà validée d'office.
+        assert!(modifie_la_structure("-- remise à plat\ndrop table t"));
+        assert!(modifie_la_structure("/* remise à plat */ drop table t"));
+        assert!(modifie_la_structure(
+            "/* a */ /* b */\n  alter table t add c int"
+        ));
+        // Et un bloc jamais refermé avale la suite, comme le serveur le ferait : il ne reste aucun
+        // premier mot, donc rien à reconnaître.
+        assert!(!modifie_la_structure("/* drop table t"));
     }
 }

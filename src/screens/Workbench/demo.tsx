@@ -1434,6 +1434,19 @@ export function WorkbenchDemo() {
       rollbackTransaction: async (_cle: DatabaseKey, console: string) => {
         delete journaux.current[console]
       },
+      // **Le retrait, simulé au même degré que le reste** (`API-40`) : la démo n'a rien exécuté,
+      // donc elle n'a rien à rejouer — elle retire l'entrée, et les rangs se resserrent d'eux-mêmes.
+      // Ce qu'un vrai rejeu fait — annuler, rouvrir, tout relancer, et recalculer l'abandon — est
+      // ce que les tests Rust mesurent contre un vrai PostgreSQL et un vrai MySQL.
+      dropTransactionStatement: async (_cle: DatabaseKey, console: string, rang: number) => {
+        const journal = journaux.current[console]
+        // Le même refus que le cœur : sans lui, un rang hors liste ne ferait rien et le panneau se
+        // tairait — ce qui est exactement le défaut n° 36.
+        if (journal === undefined || journal[rang] === undefined) {
+          throw new Error('cette transaction ne porte pas cette instruction.')
+        }
+        journaux.current[console] = journal.filter((_entree, place) => place !== rang)
+      },
     }),
     [],
   )

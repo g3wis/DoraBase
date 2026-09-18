@@ -98,6 +98,7 @@ pub fn run() {
             engine::commands::transaction_result,
             engine::commands::commit_transaction,
             engine::commands::rollback_transaction,
+            engine::commands::drop_transaction_statement,
             instances::commands::save_instance,
             instances::commands::delete_instance,
             instances::commands::open_instance,
