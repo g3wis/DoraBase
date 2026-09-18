@@ -29,10 +29,12 @@
 //!
 //! Découpage :
 //! - `binaire` — trouver `kubectl`, ou dire comment l'installer ;
+//! - `catalogue` — lire les espaces de noms et les ressources d'un cluster (`API-73`) ;
 //! - `sortie` — les trois lignes de journal dont on dépend ;
 //! - `diagnostic` — reconnaître un échec de `kubectl` pour y joindre la manœuvre.
 
 pub mod binaire;
+pub mod catalogue;
 pub mod diagnostic;
 pub mod sortie;
 
@@ -40,7 +42,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::config::{Kubeconfigs, ProxyKubernetes};
+use crate::config::{KubeconfigId, Kubeconfigs, ProxyKubernetes};
 use crate::engine::journal::Journal;
 use crate::engine::port;
 use crate::engine::programme;
@@ -353,10 +355,28 @@ fn resoudre<'a>(
     proxy: &ProxyKubernetes,
     kubeconfigs: &'a Kubeconfigs,
 ) -> Result<Option<&'a str>, EngineError> {
-    let Some(reference) = &proxy.kubeconfig else {
+    resoudre_la_reference(
+        proxy.kubeconfig.as_ref().map(KubeconfigId::as_str),
+        kubeconfigs,
+    )
+}
+
+/// La même résolution, à partir de la **référence seule** (`API-73`).
+///
+/// Extraite parce que le catalogue en a besoin sans avoir de `ProxyKubernetes` sous la main : la
+/// liste des espaces de noms se lit pendant qu'on *remplit* le formulaire, donc avant qu'aucun proxy
+/// n'existe. Ce qu'il ne fallait pas faire est réécrire le refus à côté — c'est la phrase qui dit
+/// **quoi faire** d'une référence morte, et deux exemplaires auraient divergé (règle n° 17).
+pub(crate) fn resoudre_la_reference<'a>(
+    reference: Option<&str>,
+    kubeconfigs: &'a Kubeconfigs,
+) -> Result<Option<&'a str>, EngineError> {
+    // Une référence vide vaut absente, comme partout ailleurs dans ce module : l'écran envoie `null`,
+    // mais rien n'empêche un appelant de passer `""`.
+    let Some(reference) = reference.map(str::trim).filter(|texte| !texte.is_empty()) else {
         return Ok(None);
     };
-    match kubeconfigs.resoudre(reference) {
+    match kubeconfigs.resoudre(&KubeconfigId::brut(reference)) {
         Some(chemin) => Ok(Some(chemin)),
         None => Err(EngineError::local(format!(
             "le kubeconfig « {reference} » n'est plus déclaré. Ouvrez les préférences, section \
@@ -421,6 +441,36 @@ async fn entete(
     )
 }
 
+/// Un `kubectl` prêt à **répondre**, sans le sous-commande : le `PATH` enrichi, le kubeconfig
+/// déclaré, aucune entrée standard, et tué si on le lâche.
+///
+/// **En un seul endroit, et c'est le point** (`API-73`). Trois lectures l'emploient — le contexte
+/// courant de l'en-tête, les espaces de noms et les ressources du catalogue — et les trois doivent
+/// viser le **même fichier** que le transfert. Chacune posant son `--kubeconfig` de son côté, il
+/// suffisait d'en oublier un pour qu'une liste décrive un cluster et que la connexion en joigne un
+/// autre, sans que rien le dise. C'est la leçon du `HOME` lu à quatre endroits : la question n'a
+/// qu'une réponse, elle doit n'avoir qu'un lieu.
+///
+/// **Le `PATH` enrichi n'est pas un détail non plus** : ces lectures passent par le serveur d'API,
+/// donc `kubectl` peut avoir à lancer un *exec credential plugin* — la même raison qu'à l'ouverture,
+/// et le même échec (« executable gke-gcloud-auth-plugin not found ») si on l'oublie.
+///
+/// Les drapeaux globaux d'abord, la sous-commande ensuite : c'est l'ordre que `kubectl` documente.
+pub(crate) fn commande_de_lecture(
+    binaire: &Path,
+    kubeconfig_declare: Option<&str>,
+) -> tokio::process::Command {
+    let mut commande = programme::commande_asynchrone(binaire);
+    if let Some(chemin) = chemin_de_kubeconfig(kubeconfig_declare) {
+        commande.arg("--kubeconfig").arg(chemin);
+    }
+    commande
+        .env("PATH", programme::path_enrichi(&repertoire(binaire)))
+        .stdin(std::process::Stdio::null())
+        .kill_on_drop(true);
+    commande
+}
+
 /// Le contexte que `kubectl config current-context` désigne, s'il en désigne un.
 ///
 /// **Un sous-processus de plus par ouverture, et c'est assumé** : l'appel lit le kubeconfig sans
@@ -428,21 +478,8 @@ async fn entete(
 /// Ce qu'il achète est le seul remède au compromis de `ProxyKubernetes::context` — sans lui, un
 /// échec sur le mauvais cluster ne dirait pas lequel.
 async fn contexte_courant(binaire: &Path, kubeconfig_declare: Option<&str>) -> Option<String> {
-    let mut commande = programme::commande_asynchrone(binaire);
-    // **Le même `--kubeconfig` que le transfert, et c'est indispensable** (31 août 2026). Sans lui,
-    // cet appel lirait le fichier *par défaut* pendant que le transfert emploie celui qui est
-    // déclaré : l'en-tête nommerait un contexte venu d'un autre fichier — donc affirmerait, avec
-    // aplomb, un cluster qui n'est pas celui qu'on vise. Un en-tête faux est pire que pas d'en-tête,
-    // puisque c'est lui qu'on croit en cherchant pourquoi une connexion a échoué.
-    if let Some(chemin) = chemin_de_kubeconfig(kubeconfig_declare) {
-        commande.arg("--kubeconfig").arg(chemin);
-    }
-    commande
-        .arg("config")
-        .arg("current-context")
-        .env("PATH", programme::path_enrichi(&repertoire(binaire)))
-        .stdin(std::process::Stdio::null())
-        .kill_on_drop(true);
+    let mut commande = commande_de_lecture(binaire, kubeconfig_declare);
+    commande.arg("config").arg("current-context");
 
     let sortie = tokio::time::timeout(DELAI_CONTEXTE, commande.output())
         .await

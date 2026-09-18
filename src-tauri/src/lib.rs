@@ -81,6 +81,8 @@ pub fn run() {
             engine::commands::open_database,
             engine::commands::close_database,
             engine::commands::connection_states,
+            engine::commands::list_kubernetes_namespaces,
+            engine::commands::list_kubernetes_resources,
             engine::commands::list_schemas,
             engine::commands::list_objects,
             engine::commands::create_schema,

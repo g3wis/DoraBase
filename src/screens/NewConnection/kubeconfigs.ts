@@ -6,6 +6,7 @@
  * sous Vitest sans rendre quoi que ce soit, comme `environments.ts` le fait pour le trio
  * d'environnements.
  */
+import type { IconName } from '../../design/icons/names'
 import type { KubeconfigDeclaration, Kubeconfigs } from '../../domain/config'
 
 /**
@@ -46,9 +47,9 @@ export function optionsDeKubeconfig(
   kubeconfigs: Kubeconfigs,
   t: Traduire,
   choisi: string = AUCUN,
-): { value: string; label: string }[] {
+): { value: string; label: string; icone?: IconName }[] {
   const declarations = kubeconfigs.declarations ?? []
-  const options = [
+  const options: { value: string; label: string; icone?: IconName }[] = [
     { value: AUCUN, label: t('newConnection.tunnel.kubeconfigDefaut') },
     ...declarations.map((declaration) => ({
       value: declaration.id,
@@ -63,7 +64,15 @@ export function optionsDeKubeconfig(
     })
   }
 
-  options.push({ value: AUTRE_FICHIER, label: t('newConnection.tunnel.kubeconfigAutre') })
+  // **Le même glyphe que les deux entrées d'`API-73` deux rangées plus bas**, et pour la même
+  // raison : c'est le même genre d'entrée — une qui *agit* au milieu d'entrées qui désignent. La
+  // laisser nue pendant que ses voisines sont ornées ferait deux dessins pour un seul genre, dans le
+  // même panneau. `plus` parce qu'elle **déclare** : un fichier choisi ici entre dans la liste.
+  options.push({
+    value: AUTRE_FICHIER,
+    label: t('newConnection.tunnel.kubeconfigAutre'),
+    icone: 'plus',
+  })
   return options
 }
 

@@ -119,3 +119,58 @@ test('désactivé, il ne se pilote plus', async () => {
   await utilisateur.tab()
   expect(champ).not.toHaveFocus()
 })
+
+// --- L'ornement d'une entrée, et l'alignement qu'il impose (18 septembre 2026) ---
+
+/** Une liste où **une seule** entrée porte un ornement : le cas qui décide de l'alignement. */
+function AvecOrnement() {
+  const [valeur, setValeur] = useState('prod')
+  return (
+    <Select
+      label="Espace de noms"
+      options={[
+        { value: 'prod', label: 'prod' },
+        { value: 'recette', label: 'recette' },
+        { value: '-agit', label: 'Saisir à la main…', ornement: <span data-testid="glyphe" /> },
+      ]}
+      value={valeur}
+      onValueChange={setValeur}
+    />
+  )
+}
+
+test('l’ornement d’une entrée est rendu dans la liste', async () => {
+  render(<AvecOrnement />)
+  await userEvent.click(screen.getByRole('combobox'))
+  expect(screen.getByTestId('glyphe')).toBeInTheDocument()
+})
+
+test('dès qu’une entrée porte un ornement, toutes réservent sa place', async () => {
+  // **La règle de `MenuContextuel`, appliquée ici** : « un menu sans icône aligne ses libellés au
+  // bord, un menu qui en a les aligne après le glyphe ». Sans la réserve, l'entrée ornée décalerait
+  // son libellé et la liste se lirait en escalier — or l'ornement existe pour distinguer une entrée
+  // qui **agit**, et un décalage ne dit pas laquelle fait quoi.
+  //
+  // Le compte, et non une mesure : jsdom ne calcule aucune mise en page (règle n° 9). Ce qui est
+  // vérifiable ici est que la boîte existe pour les trois, la largeur étant tenue par la CSS.
+  render(<AvecOrnement />)
+  await userEvent.click(screen.getByRole('combobox'))
+
+  const entrees = screen.getAllByRole('option')
+  expect(entrees).toHaveLength(3)
+  for (const entree of entrees) {
+    expect(entree.querySelector('[class*=ornement]')).not.toBeNull()
+  }
+})
+
+test('sans aucun ornement, aucune entrée n’en réserve la place', async () => {
+  // Le contrôle négatif, et il n'est pas décoratif : sans lui, réserver **toujours** la boîte
+  // passerait le test ci-dessus, et les six listes du produit qui n'ont pas d'icône gagneraient une
+  // gouttière que personne n'a demandée.
+  render(<Piloté />)
+  await userEvent.click(screen.getByRole('combobox'))
+
+  for (const entree of screen.getAllByRole('option')) {
+    expect(entree.querySelector('[class*=ornement]')).toBeNull()
+  }
+})

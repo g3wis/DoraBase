@@ -126,6 +126,19 @@
   flex: 1;
 }
 
+/* La place de l'ornement, réservée pour toutes les entrées dès qu'une seule en porte un — voir
+ * `OptionDeListe.ornement`. Une boîte de largeur fixe plutôt qu'un `min-width` sur le glyphe : c'est
+ * la **colonne** qu'on aligne, et un glyphe absent doit occuper exactement la même que le plus large
+ * des présents. 13 px est la taille que les listes de ce dépôt donnent à leurs icônes. */
+.ornement {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  color: var(--ink-2);
+}
+
 /* La coche de l'option choisie : dans une liste ouverte au clavier, la teinte de parcours et la
  * sélection sont deux informations différentes, et une seule couleur ne peut pas dire les deux. */
 .coche {
