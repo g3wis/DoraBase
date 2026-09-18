@@ -362,45 +362,52 @@
    séparation, que la bordure porte déjà. */
 .kubeconfigs {
   list-style: none;
-  margin: 0 0 11px;
+  margin: 0 0 var(--space-6);
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 9px;
+  gap: var(--space-5);
 }
 
 .kubeconfig {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 9px;
+  gap: var(--space-3);
+  padding: var(--space-5);
   border: 1px solid var(--divider);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
 }
 
 .kubeconfigActions {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 9px;
+  gap: var(--space-5);
 }
 
+/* **La police en entier, en une abréviation qui nomme ses quatre parts** — l'idiome de `.note` et
+   de `.titre` plus haut. Une taille seule laisserait la famille et la graisse à ce que l'élément
+   hérite, ce qui n'est pas la même chose selon qu'il est un `<label>` ou un `<button>`. */
 .kubeconfigDefaut {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: var(--text-sm);
-  color: var(--ink-2);
+  gap: var(--space-3);
+  font: var(--weight-medium) var(--text-label) / var(--leading-ui) var(--font-ui);
+  color: var(--ink-meta);
 }
 
-/* `--danger-ink` et non `--danger`, qui est une **surface** : c'est l'encre d'un acte qui
-   retire, la même règle que la poubelle d'une ligne de grille. */
+/* **Aucun `font: inherit` ici**, et c'est la leçon d'`API-55` : il ne neutralisait rien — les
+   styles d'auteur l'emportent sur ceux de l'agent utilisateur quelle que soit leur spécificité —
+   et cette abréviation reposait au passage la famille, la graisse et la hauteur de ligne qu'on
+   venait de poser. La police se déclare donc en entier, comme pour l'étiquette voisine.
+
+   `--danger-ink` et non `--danger`, qui est une **surface** : c'est l'encre d'un acte qui retire,
+   la même règle que la poubelle d'une ligne de grille. */
 .kubeconfigRetrait {
   border: 0;
   background: none;
   padding: 0;
-  font: inherit;
-  font-size: var(--text-sm);
+  font: var(--weight-medium) var(--text-label) / var(--leading-ui) var(--font-ui);
   color: var(--danger-ink);
   cursor: pointer;
 }

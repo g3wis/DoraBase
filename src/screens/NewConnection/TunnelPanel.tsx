@@ -202,17 +202,36 @@ export function TunnelPanel({
           )}
 
           {proxy.kind === 'kubernetes' && (
-            // **Un seul champ dans cette rangée depuis le retrait du contexte** (31 août 2026) : il
-            // n'y a plus de cote à répartir, l'espace de noms tenant largement dans une colonne
-            // `1fr`. Le fichier et la ressource vivent dans la rangée pleine largeur en dessous, où
-            // un chemin et un `statefulset/…` ont la place qu'ils demandent.
-            <Field
-              label={t('newConnection.tunnel.namespaceLabel')}
+            // **Un seul champ dans cette rangée depuis le retrait du contexte** (31 août 2026), et
+            // c'est le **kubeconfig** depuis le 18 septembre (`API-70`, à la demande : « kubeconfig
+            // selection switch places with namespace »). Il y a sa place parce qu'il a cessé d'être
+            // un chemin : la liste rend un **libellé** — « prod », « bac à sable » —, là où
+            // `~/.kube/prod/config` demandait la rangée entière. La raison qui l'avait mis en bas
+            // est morte avec le champ de saisie, et ce qui la remplace est l'ordre de lecture : on
+            // choisit d'abord le cluster, puis on précise où chercher dedans.
+            //
+            // **Une liste maison, jamais un `<select>` natif** — la prohibition du dépôt —, et elle
+            // porte ici une entrée qui *agit* (« Autre fichier… »), ce qu'un natif ne saurait pas
+            // distinguer d'une valeur.
+            <Select
+              label={t('newConnection.tunnel.kubeconfigLabel')}
               size="sm"
-              mono
-              placeholder={t('newConnection.tunnel.namespacePlaceholder')}
-              value={proxy.namespace}
-              onChange={(event) => onProxyChange({ ...proxy, namespace: event.target.value })}
+              options={optionsDeKubeconfig(kubeconfigs, t, proxy.kubeconfig)}
+              value={proxy.kubeconfig}
+              onValueChange={(choix) => {
+                if (choix !== AUTRE_FICHIER) {
+                  onProxyChange({ ...proxy, kubeconfig: choix })
+                  return
+                }
+                // **Renoncer ne change rien** : le choix précédent reste, plutôt que de retomber
+                // sur « celui de kubectl » — un sélecteur annulé ne doit pas défaire ce qu'on avait
+                // déjà réglé. C'est la règle de `parcourir`, et c'est pourquoi ce geste passe par
+                // elle plutôt que par une seconde mécanique.
+                void parcourir(onDeclareKubeconfig, (reference) => ({
+                  ...proxy,
+                  kubeconfig: reference,
+                }))
+              }}
             />
           )}
 
@@ -242,36 +261,19 @@ export function TunnelPanel({
 
             {proxy.kind === 'kubernetes' && (
               <>
-                {/* **Le kubeconfig est dans la rangée pleine largeur, et avant la ressource.** Un
-                    libellé de fichier ne tient pas dans une colonne de la grille, et cette rangée
-                    est déjà à `1fr` unique — donc aucune classe de grille à écrire. Placé avant la
-                    ressource parce que c'est ce fichier qui *désigne le cluster* : la lecture suit
-                    l'ordre où les coordonnées se déterminent.
-
-                    **Une liste depuis `API-70`, et non un champ de saisie.** Un cluster porte
-                    souvent des dizaines de bases, donc le chemin était ressaisi connexion par
-                    connexion. La liste maison, jamais un `<select>` natif — la prohibition du
-                    dépôt, et elle porte ici une entrée qui *agit* (« Autre fichier… »), ce qu'un
-                    natif ne saurait pas distinguer d'une valeur. */}
-                <Select
-                  label={t('newConnection.tunnel.kubeconfigLabel')}
+                {/* **L'espace de noms a pris la rangée pleine largeur** (18 septembre 2026,
+                    `API-70`, à la demande) : il a échangé sa place avec le kubeconfig, monté dans la
+                    grille au-dessus. Il y tient sans peine — un nom d'espace de noms est court — et
+                    ce que la rangée lui donne de trop ne coûte rien, cette rangée étant déjà à
+                    `1fr` unique. Placé avant la ressource, qui est la coordonnée la plus fine des
+                    trois : contexte, espace de noms, ressource. */}
+                <Field
+                  label={t('newConnection.tunnel.namespaceLabel')}
                   size="sm"
-                  options={optionsDeKubeconfig(kubeconfigs, t, proxy.kubeconfig)}
-                  value={proxy.kubeconfig}
-                  onValueChange={(choix) => {
-                    if (choix !== AUTRE_FICHIER) {
-                      onProxyChange({ ...proxy, kubeconfig: choix })
-                      return
-                    }
-                    // **Renoncer ne change rien** : le choix précédent reste, plutôt que de
-                    // retomber sur « celui de kubectl » — un sélecteur annulé ne doit pas défaire
-                    // ce qu'on avait déjà réglé. C'est la règle de `parcourir`, et c'est pourquoi
-                    // ce geste passe par elle plutôt que par une seconde mécanique.
-                    void parcourir(onDeclareKubeconfig, (reference) => ({
-                      ...proxy,
-                      kubeconfig: reference,
-                    }))
-                  }}
+                  mono
+                  placeholder={t('newConnection.tunnel.namespacePlaceholder')}
+                  value={proxy.namespace}
+                  onChange={(event) => onProxyChange({ ...proxy, namespace: event.target.value })}
                 />
                 {/* La ressource prend la rangée entière : `statefulset/postgres-principal` tient
                     mal dans une colonne, et c'est le seul champ obligatoire de ce visage. */}

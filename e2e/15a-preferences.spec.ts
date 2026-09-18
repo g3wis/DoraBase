@@ -250,6 +250,51 @@ test.describe('les kubeconfigs déclarés', () => {
     expect(deborde).toBe(false)
   })
 
+  test('l’étiquette « Par défaut » et « Retirer » se lisent comme le reste de la section', async ({
+    page,
+  }) => {
+    // **Le défaut que ce test empêche a été livré une fois, et il était déjà écrit dans
+    // `AGENTS.md`** (rapporté à l'usage, 18 septembre 2026 : « wrong font and font size »). Deux
+    // causes, toutes deux muettes :
+    //
+    // - `font-size: var(--text-sm)` désignait un jeton qui **n'existe pas** — ni TypeScript, ni
+    //   Biome, ni Vitest, ni aucune assertion de rôle ne le dit, et la déclaration est simplement
+    //   ignorée ;
+    // - `font: inherit` sur le bouton, posé pour « neutraliser » la police de formulaire d'un
+    //   `<button>` — ce qu'il n'y avait pas à neutraliser, les styles d'auteur l'emportant de toute
+    //   façon — reposait au passage famille, graisse et hauteur de ligne. C'est la leçon d'`API-55`,
+    //   à la lettre, sur le fichier d'à côté.
+    //
+    // **Ce qui est gardé est une égalité, pas une valeur** : les deux contrôles se lisent comme la
+    // note de la section. Figer « 11px Nunito 500 » périmerait au premier passage de design.
+    await ouvrirLesPreferences(page)
+    const modale = page.getByRole('dialog', { name: 'Préférences' })
+    await modale.getByRole('tab', { name: 'Connexions' }).click()
+
+    const polices = await page.evaluate(() => {
+      const dialogue = document.querySelector('[role=dialog]')
+      if (!dialogue) return null
+      const police = (element: Element | null | undefined) => {
+        if (!element) return null
+        const calcule = getComputedStyle(element)
+        return [calcule.fontFamily, calcule.fontSize, calcule.fontWeight, calcule.lineHeight].join(
+          ' | ',
+        )
+      }
+      return {
+        // La référence : la note de la section, qui porte la police que le dépôt donne à ce
+        // registre de texte.
+        note: police(dialogue.querySelector('[class*=note]')),
+        defaut: police(dialogue.querySelector('[class*=kubeconfigDefaut]')),
+        retirer: police(dialogue.querySelector('[class*=kubeconfigRetrait]')),
+      }
+    })
+
+    expect(polices?.note).not.toBeNull()
+    expect(polices?.defaut).toBe(polices?.note)
+    expect(polices?.retirer).toBe(polices?.note)
+  })
+
   test('le bouton de retrait porte aria-disabled, jamais disabled', async ({ page }) => {
     await ouvrirLesPreferences(page)
     const modale = page.getByRole('dialog', { name: 'Préférences' })

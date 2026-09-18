@@ -389,17 +389,17 @@ test('les champs du visage Kubernetes font 28 px, et la ressource prend la rang�
   expect(new Set(mesures?.champs)).toHaveProperty('size', 1)
   expect(mesures?.champs[0]).toBe(30)
 
-  // **L'espace de noms tient dans une seule piste**, la deuxième — il n'y a plus de cote à
-  // répartir depuis le retrait du champ « Contexte » (31 août 2026), et un nom d'espace de noms est
-  // court. Mesuré contre la piste calculée et non par un ordre de grandeur : une comparaison
-  // laisserait passer un champ tombé dans la piste voisine, qui est le défaut qu'on veut voir.
+  // **Le kubeconfig tient dans une seule piste**, la deuxième — il a échangé sa place avec l'espace
+  // de noms le 18 septembre 2026 (`API-70`, à la demande), et il y tient parce qu'il a cessé d'être
+  // un chemin : la liste rend un libellé. Mesuré contre la piste **calculée** et non par un ordre de
+  // grandeur : une comparaison laisserait passer un champ tombé dans la piste voisine, qui est le
+  // défaut qu'on veut voir (règle n° 18).
   const [, piste2 = 0] = mesures?.pistes ?? []
-  expect(mesures?.espaceDeNoms ?? 0).toBeCloseTo(piste2, 0)
+  expect(mesures?.kubeconfig ?? 0).toBeCloseTo(piste2, 0)
 
-  // Le fichier et la ressource prennent la rangée entière : un libellé de kubeconfig et un
-  // `statefulset/postgres-principal` tiennent mal dans une colonne. Tolérance de 3 px pour les
+  // L'espace de noms et la ressource prennent la rangée entière. Tolérance de 3 px pour les
   // bordures, plutôt qu'une égalité que le sous-pixel ferait échouer.
-  for (const large of [mesures?.kubeconfig ?? 0, mesures?.ressource ?? 0]) {
+  for (const large of [mesures?.espaceDeNoms ?? 0, mesures?.ressource ?? 0]) {
     expect(large).toBeGreaterThan((mesures?.grilleLargeur ?? 0) - 3)
   }
 })

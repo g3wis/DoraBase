@@ -1353,7 +1353,13 @@ et les deux dernières valent partout :
   porte **deux classes** — l'idiome `cx(styles.a, styles.b)` de tout ce dépôt —, c'est l'ordre du
   fichier qui décide, pas l'intention. Sept autres `font: inherit` vivent dans `src/` et n'ont pas
   été audités : le premier qui suit une règle posant une police sur le même élément portera le même
-  défaut ;
+  défaut.
+
+  **Ils l'ont été le 18 septembre 2026** (`API-70`), après que le défaut se soit reproduit — sur du
+  code neuf, pas sur eux. **Aucun des sept n'est atteint** : pour chacun, aucune des classes que
+  `cx()` lui adjoint ne pose de police *avant* son `font: inherit`. La condition à chercher n'est
+  donc pas « un `font: inherit` existe », c'est « un `font: inherit` suit, **dans le même fichier**,
+  une règle qui pose une police sur le **même élément** » — le couple, jamais l'abréviation seule ;
 - **une police n'est ni une position ni une présence, et rien ne la mesurait.** Les 1 935 tests
   d'alors étaient verts : le DOM était juste, les rôles aussi, le nom accessible inchangé. Un test
   de bout en bout compare désormais la police **calculée** d'un lien sortant à celle d'un entrant —
@@ -2836,6 +2842,31 @@ Onze décisions à ne pas défaire :
   exactement le défaut que cette fonction existe pour empêcher, arrivé à sa neuvième chose à
   préserver ; le test qui le garde provoque délibérément la perte, comme celui des instances
   d'`API-32`.
+
+**Et deux défauts rapportés à l'usage le jour même, dont le premier était déjà écrit ici** :
+
+- **« wrong font and font size » sur « Par défaut » et « Retirer ».** Deux causes, toutes deux
+  muettes, et toutes deux nommées dans ce fichier avant d'être refaites. `font-size: var(--text-sm)`
+  désignait un jeton **qui n'existe pas** — ni TypeScript, ni Biome, ni Vitest, ni aucune assertion
+  de rôle ne le dit, et la déclaration est simplement ignorée. Et `font: inherit` sur le bouton,
+  posé pour « neutraliser » la police de formulaire d'un `<button>`, reposait au passage famille,
+  graisse et hauteur de ligne : c'est le défaut d'`API-55` à la lettre, sur le fichier d'à côté, et
+  son entrée prévenait que « le premier qui suit une règle posant une police sur le même élément
+  portera le même défaut ». **L'idiome du dépôt est l'abréviation qui nomme ses quatre parts** —
+  `font: var(--weight-medium) var(--text-label) / var(--leading-ui) var(--font-ui)` —, ce que
+  `.note` et `.titre` font trois règles plus haut ; une taille seule laisse le reste à ce que
+  l'élément hérite, qui n'est pas la même chose pour un `<label>` et pour un `<button>`. Un test de
+  bout en bout compare désormais la police **calculée** des deux contrôles à celle de la note de la
+  section : une **égalité**, non une valeur, qu'un passage de design périmerait ;
+- **et le kubeconfig a échangé sa place avec l'espace de noms** dans le visage Kubernetes d'`A2`
+  (« kubeconfig selection switch places with namespace »). Il monte dans la grille, sur une piste,
+  et l'espace de noms descend dans la rangée pleine largeur. **Ce qui rend l'échange possible est
+  qu'il a cessé d'être un chemin** : la raison qui l'avait mis en bas — « un chemin de fichier ne
+  tient pas dans une colonne » — est morte avec le champ de saisie, la liste rendant un libellé.
+  Ce qui la remplace est l'ordre de lecture : on choisit le cluster, puis on précise où chercher
+  dedans. Le test de géométrie a échangé ses deux assertions avec eux, et elles sont **mutuellement
+  exclusives** — l'une mesure une piste calculée, l'autre la rangée entière —, donc leur vert après
+  l'échange atteste l'échange.
 
 **Ce qui reste à voir à l'œil** : la section « Connexions » sous WKWebView et en « Nuit », même
 réserve que les dix écrans. Le **sélecteur de fichier** natif ne se clique pas depuis un test —
