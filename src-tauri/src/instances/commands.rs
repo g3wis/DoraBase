@@ -162,7 +162,7 @@ pub async fn open_instance(
             instance.engine,
             &instance.connection,
             secret.as_ref(),
-            &crate::engine::commands::known_hosts_utilisateur(),
+            &crate::engine::commands::contexte_de_proxy(&app),
         )
         .await?;
 
@@ -417,8 +417,12 @@ fn ecrire_les_instances(
         geste(&instances, &mut |suivantes| {
             let projects = store.load_projects()?;
             let preferences = store.load_preferences().unwrap_or_default();
+            // `API-70` : à préserver comme le reste — une instance managée peut elle aussi viser un
+            // cluster, donc effacer les déclarations en enregistrant une instance couperait
+            // jusqu'à celle qu'on est en train d'écrire.
+            let kubeconfigs = store.load_kubeconfigs().unwrap_or_default();
             store
-                .save(&projects, &preferences, suivantes)
+                .save(&projects, &preferences, suivantes, &kubeconfigs)
                 .map_err(|erreur| erreur.to_string())
         })
     })

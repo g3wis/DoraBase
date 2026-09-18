@@ -69,11 +69,11 @@ impl MongoAdapter {
     pub async fn connect_via(
         variante: &ConnectionSettings,
         mot_de_passe: Option<&Secret>,
-        known_hosts: &std::path::Path,
+        contexte: &crate::engine::proxy::ContexteDeProxy,
     ) -> Result<Self, EngineError> {
         let proxy = match &variante.tunnel {
             Some(tunnel) => {
-                Some(ProxyOuvert::ouvrir(tunnel, &variante.host, variante.port, known_hosts).await?)
+                Some(ProxyOuvert::ouvrir(tunnel, &variante.host, variante.port, contexte).await?)
             }
             None => None,
         };
@@ -743,9 +743,13 @@ mod tests_db {
     }
 
     async fn adaptateur() -> MongoAdapter {
-        MongoAdapter::connect_via(&variante(), None, std::path::Path::new("/dev/null"))
-            .await
-            .expect("connexion au MongoDB de test")
+        MongoAdapter::connect_via(
+            &variante(),
+            None,
+            &crate::engine::proxy::ContexteDeProxy::pour_les_tests(),
+        )
+        .await
+        .expect("connexion au MongoDB de test")
     }
 
     #[tokio::test]

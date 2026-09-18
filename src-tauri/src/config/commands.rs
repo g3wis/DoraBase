@@ -11,7 +11,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 use ts_rs::TS;
 
-use super::model::{ManagedInstance, Preferences, Project};
+use super::model::{Kubeconfigs, ManagedInstance, Preferences, Project};
 use super::store::{ConfigStore, LoadOutcome};
 
 /// Nom du fichier dans le répertoire de configuration de l'app.
@@ -47,6 +47,11 @@ pub enum ConfigLoad {
         /// même fichier ; deux commandes en feraient deux lectures, donc deux instants, et l'écran
         /// aurait à composer deux réponses dont l'une peut échouer sans l'autre.
         instances: Vec<ManagedInstance>,
+        /// Les kubeconfigs déclarés (`API-70`), lus avec les projets, **et pour la raison
+        /// ci-dessus, qui vaut ici plus fort encore** : une connexion Kubernetes porte une
+        /// référence, donc l'écran ne peut pas nommer le fichier d'une connexion sans eux. Les
+        /// demander à part ferait rendre `A2` avant de savoir ce que sa liste contient.
+        kubeconfigs: Kubeconfigs,
     },
     /// La configuration existe mais n'a pas pu être lue. **L'écriture est bloquée** — le
     /// front doit le dire à l'utilisateur au lieu de proposer de créer un projet, ce qui
@@ -68,10 +73,12 @@ impl From<LoadOutcome> for ConfigLoad {
                 projects,
                 preferences,
                 instances,
+                kubeconfigs,
             } => Self::Loaded {
                 projects,
                 preferences,
                 instances,
+                kubeconfigs,
             },
             LoadOutcome::Unreadable {
                 reason,
@@ -163,8 +170,11 @@ pub fn save_config(projects: Vec<Project>, state: State<'_, ConfigState>) -> Res
     // **Les instances aussi sont relues.** Le fichier est réécrit entier : ne pas les repasser
     // reviendrait à les effacer en enregistrant des projets.
     let instances = store.load_instances()?;
+    // **Et les kubeconfigs** (`API-70`), pour la même raison : ne pas les repasser les effacerait,
+    // et chaque connexion Kubernetes du fichier deviendrait une référence morte.
+    let kubeconfigs = store.load_kubeconfigs()?;
     store
-        .save(&projects, &preferences, &instances)
+        .save(&projects, &preferences, &instances, &kubeconfigs)
         .map_err(|erreur| erreur.to_string())
 }
 
@@ -193,8 +203,9 @@ pub fn save_preferences(
     // dans son curseur là où le disque porte 20 — deux vérités, dont la visible serait fausse.
     let bornees = preferences.borner();
     let instances = store.load_instances()?;
+    let kubeconfigs = store.load_kubeconfigs()?;
     store
-        .save(&projects, &bornees, &instances)
+        .save(&projects, &bornees, &instances, &kubeconfigs)
         .map_err(|erreur| erreur.to_string())?;
     Ok(bornees)
 }
@@ -718,8 +729,13 @@ pub fn rename_console(
 fn ecrire_le_reste_intact(store: &ConfigStore, projets: &[Project]) -> Result<(), String> {
     let preferences = store.load_preferences().unwrap_or_default();
     let instances = store.load_instances().unwrap_or_default();
+    // **La neuvième chose à préserver, et c'est le cas que cette fonction existait pour attraper**
+    // (`API-70`). Sans cette ligne, renommer un projet effacerait les kubeconfigs déclarés — et
+    // toute connexion Kubernetes du fichier cesserait d'ouvrir, sur une référence qui ne désigne
+    // plus rien.
+    let kubeconfigs = store.load_kubeconfigs().unwrap_or_default();
     store
-        .save(projets, &preferences, &instances)
+        .save(projets, &preferences, &instances, &kubeconfigs)
         .map_err(|erreur| erreur.to_string())
 }
 
@@ -741,6 +757,132 @@ pub(crate) fn avec_le_magasin<T>(
         .as_ref()
         .ok_or_else(|| "la configuration doit être lue avant d'être écrite".to_owned())?;
     operation(store)
+}
+
+/// Les kubeconfigs déclarés, relus du disque (`API-70`).
+#[tauri::command]
+pub fn list_kubeconfigs(state: State<'_, ConfigState>) -> Result<Kubeconfigs, String> {
+    avec_le_magasin(&state, ConfigStore::load_kubeconfigs)
+}
+
+/// Déclare un kubeconfig, ou **rend celui qui porte déjà ce chemin** (`API-70`).
+///
+/// **Une commande à part, et non un `save_kubeconfigs` que l'écran composerait.** Deux appelants la
+/// partagent — le bouton « Ajouter… » des préférences, et l'entrée « Autre fichier… » d'`A2` —, et
+/// ce qu'ils ont en commun est ce qu'il ne faut pas écrire deux fois : la dérivation du libellé, la
+/// règle de collision, et le fait que choisir un fichier **déjà déclaré** ne pose pas une seconde
+/// entrée. Composer la liste côté écran aurait mis ces trois règles dans le front, où le fichier de
+/// configuration écrit à la main ne les rencontrerait jamais.
+///
+/// **Elle rend la liste entière**, non la seule déclaration : l'appelant repose son état avec, comme
+/// `save_preferences` rend les préférences bornées. Rendre l'entrée seule obligerait l'écran à
+/// l'insérer lui-même, donc à tenir une seconde idée de ce que la liste contient.
+#[tauri::command]
+pub fn declare_kubeconfig(
+    path: String,
+    state: State<'_, ConfigState>,
+) -> Result<Kubeconfigs, String> {
+    let chemin = path.trim().to_owned();
+    if chemin.is_empty() {
+        return Err("un kubeconfig se déclare par le chemin d'un fichier".to_owned());
+    }
+    avec_le_magasin(&state, |store| {
+        let mut kubeconfigs = store.load_kubeconfigs()?;
+        kubeconfigs.declarer(&chemin);
+        ecrire_les_kubeconfigs(store, &kubeconfigs)?;
+        Ok(kubeconfigs)
+    })
+}
+
+/// Écrit la liste des kubeconfigs déclarés (`API-70`) : renommage, déplacement, retrait, défaut.
+///
+/// # Le retrait est refusé quand une connexion s'en sert
+///
+/// C'est le seul refus de cette commande, et il est **structurel** : une connexion garde une
+/// référence, donc retirer la déclaration qu'elle désigne la laisserait pointer dans le vide. Le
+/// refus nomme les connexions — et les instances managées, qui peuvent viser un cluster elles
+/// aussi —, parce qu'un « impossible » sans la liste de ce qui gêne demande de la chercher soi-même.
+///
+/// **L'écran désactive déjà le bouton avec sa raison, et ce n'est pas une redondance** : les deux
+/// gardent deux chemins différents. L'écran empêche le geste ; celui-ci tient la garantie quand la
+/// demande ne vient pas de l'écran — un front en retard sur son cœur, ou une commande appelée
+/// autrement.
+#[tauri::command]
+pub fn save_kubeconfigs(
+    kubeconfigs: Kubeconfigs,
+    state: State<'_, ConfigState>,
+) -> Result<Kubeconfigs, String> {
+    kubeconfigs.valider().map_err(|erreur| erreur.to_string())?;
+    avec_le_magasin(&state, |store| {
+        let projects = store.load_projects()?;
+        let instances = store.load_instances()?;
+        let retirees = retirees_encore_employees(&kubeconfigs, &projects, &instances);
+        if !retirees.is_empty() {
+            return Err(format!(
+                "ce kubeconfig est encore employé par : {}. Changez-les d'abord, ou gardez la \
+                 déclaration.",
+                retirees.join(", ")
+            ));
+        }
+        ecrire_les_kubeconfigs(store, &kubeconfigs)?;
+        Ok(kubeconfigs)
+    })
+}
+
+/// Ce qui référence une déclaration que la liste proposée ne porte plus.
+///
+/// Rend les **étiquettes** de ce qui s'en sert — `base (env)` pour une connexion, le libellé pour
+/// une instance —, jamais un compte : un nombre dit qu'il y a un obstacle, une liste dit lequel.
+fn retirees_encore_employees(
+    proposees: &Kubeconfigs,
+    projects: &[Project],
+    instances: &[ManagedInstance],
+) -> Vec<String> {
+    let mut employees = Vec::new();
+    let mut noter = |reference: &crate::config::KubeconfigId, etiquette: String| {
+        if proposees.get(reference).is_none() && !employees.contains(&etiquette) {
+            employees.push(etiquette);
+        }
+    };
+
+    for projet in projects {
+        for base in &projet.databases {
+            if let Some(reference) = reference_de_kubeconfig(&base.connection) {
+                noter(
+                    reference,
+                    format!("{} › {} ({})", projet.name, base.name, base.environment),
+                );
+            }
+        }
+    }
+    for instance in instances {
+        if let Some(reference) = reference_de_kubeconfig(&instance.connection) {
+            noter(reference, instance.nom_affiche().to_owned());
+        }
+    }
+    employees
+}
+
+/// La référence de kubeconfig d'une connexion, s'il y en a une.
+fn reference_de_kubeconfig(
+    reglages: &crate::config::ConnectionSettings,
+) -> Option<&crate::config::KubeconfigId> {
+    let tunnel = reglages.tunnel.as_ref()?;
+    match &tunnel.proxy {
+        crate::config::Proxy::Kubernetes(kube) => kube.kubeconfig.as_ref(),
+        crate::config::Proxy::Ssh(_) | crate::config::Proxy::CloudSql(_) => None,
+    }
+}
+
+/// Écrit les kubeconfigs **sans toucher au reste du fichier** — le pendant d'`ecrire_le_reste_intact`
+/// pour la seule chose que celle-ci ne peut pas écrire.
+fn ecrire_les_kubeconfigs(store: &ConfigStore, kubeconfigs: &Kubeconfigs) -> Result<(), String> {
+    let projects = store.load_projects()?;
+    let preferences = store.load_preferences().unwrap_or_default();
+    let instances = store.load_instances().unwrap_or_default();
+    store
+        .save(&projects, &preferences, &instances, kubeconfigs)
+        .map_err(|erreur| erreur.to_string())
 }
 
 /// Les instances déclarées, relues du disque (`API-32`).
@@ -1260,9 +1402,17 @@ pub fn export_projects(
         .to_path_buf();
     let magasin = crate::secrets::selectionner(&repertoire).map_err(|e| e.to_string())?;
 
-    let (fichier, report) =
-        super::transfert::preparer(retenus, request.include_passwords, magasin.store.as_ref())
-            .map_err(|erreur| erreur.to_string())?;
+    // Les déclarations de kubeconfig sont relues ici plutôt que reçues : l'export doit porter le
+    // chemin de celles que les projets retenus référencent, faute de quoi l'autre machine recevrait
+    // des connexions désignant une déclaration qu'elle n'a jamais eue (`API-70`).
+    let kubeconfigs = store.load_kubeconfigs()?;
+    let (fichier, report) = super::transfert::preparer(
+        retenus,
+        request.include_passwords,
+        magasin.store.as_ref(),
+        &kubeconfigs,
+    )
+    .map_err(|erreur| erreur.to_string())?;
 
     super::transfert::ecrire(std::path::Path::new(&request.file), &fichier)
         .map_err(|erreur| erreur.to_string())?;
@@ -1300,10 +1450,11 @@ pub fn inspect_projects_file(
         .ok_or_else(|| "la configuration doit être lue avant d'être comparée".to_owned())?;
 
     let projects = store.load_projects()?;
+    let kubeconfigs = store.load_kubeconfigs()?;
     let fichier =
         super::transfert::lire(std::path::Path::new(&file)).map_err(|erreur| erreur.to_string())?;
 
-    Ok(super::transfert::fusionner(&projects, &fichier, None).report)
+    Ok(super::transfert::fusionner(&projects, &kubeconfigs, &fichier, None).report)
 }
 
 /// Verse les projets d'un fichier de transfert dans la configuration (`API-30`).
@@ -1340,17 +1491,29 @@ pub fn import_projects(
         .to_path_buf();
     let magasin = crate::secrets::selectionner(&repertoire).map_err(|e| e.to_string())?;
 
-    let fusion = super::transfert::fusionner(&locaux, &fichier, request.projects.as_deref());
-    let (projects, report) =
-        super::transfert::appliquer(fusion, magasin.store.as_ref(), &mut |projets| {
+    let kubeconfigs = store.load_kubeconfigs()?;
+    let fusion =
+        super::transfert::fusionner(&locaux, &kubeconfigs, &fichier, request.projects.as_deref());
+    let (projects, report) = super::transfert::appliquer(
+        fusion,
+        magasin.store.as_ref(),
+        &mut |projets, kubeconfigs| {
             // **Par `ecrire_le_reste_intact`, et surtout pas par trois lignes à soi** : un import de
             // projets n'a rien à dire d'un thème ni d'une instance managée, et c'est exactement le
             // motif qui a fait extraire cette fonction — huit appelants avaient chacun pensé aux
             // préférences, aucun n'aurait pensé aux instances. En passant par elle, cette commande
             // n'est pas le neuvième oubli.
-            ecrire_le_reste_intact(store, projets)
-        })
-        .map_err(|erreur| erreur.to_string())?;
+            // **Sauf les kubeconfigs**, que ce versement vient justement de faire grandir : les
+            // relire écraserait les déclarations que l'import pose, et chaque connexion importée
+            // deviendrait une référence morte. C'est le seul appelant qui en écrit.
+            let preferences = store.load_preferences().unwrap_or_default();
+            let instances = store.load_instances().unwrap_or_default();
+            store
+                .save(projets, &preferences, &instances, kubeconfigs)
+                .map_err(|erreur| erreur.to_string())
+        },
+    )
+    .map_err(|erreur| erreur.to_string())?;
 
     for sort in &report.projects {
         log::info!(
@@ -1364,4 +1527,131 @@ pub fn import_projects(
     }
 
     Ok(ImportProjectsResult { projects, report })
+}
+
+#[cfg(test)]
+mod tests_kubeconfigs {
+    use super::*;
+    use crate::config::model::{
+        ConnectionSettings, Database, Engine, EnvironmentDeclaration, EnvironmentId, KubeconfigId,
+        Proxy, ProxyKubernetes, SslMode, Tunnel,
+    };
+
+    fn reglages(kubeconfig: Option<&str>) -> ConnectionSettings {
+        ConnectionSettings {
+            host: "127.0.0.1".into(),
+            port: 5432,
+            default_database: "catalogue".into(),
+            username: "dora".into(),
+            password: None,
+            ssl_mode: SslMode::Prefer,
+            ca_certificate: None,
+            auth_database: None,
+            read_only: false,
+            reconnect_on_startup: false,
+            tunnel: Some(Tunnel {
+                local_port: None,
+                proxy: Proxy::Kubernetes(ProxyKubernetes {
+                    kubeconfig: kubeconfig.map(KubeconfigId::brut),
+                    namespace: None,
+                    resource: "svc/postgres".into(),
+                }),
+            }),
+        }
+    }
+
+    fn projet(kubeconfig: Option<&str>) -> Project {
+        Project {
+            name: "Halle".into(),
+            environments: EnvironmentDeclaration::trio_par_defaut(),
+            queries: Vec::new(),
+            databases: vec![Database {
+                name: "catalogue".into(),
+                label: None,
+                engine: Engine::PostgreSql,
+                environment: EnvironmentId::brut("prod"),
+                connection: reglages(kubeconfig),
+                consoles: Vec::new(),
+                visible_schemas: None,
+            }],
+        }
+    }
+
+    /// La liste **proposée** : celle d'après le geste, donc sans la déclaration retirée.
+    fn sans_rien() -> Kubeconfigs {
+        Kubeconfigs::default()
+    }
+
+    /// **Le test que le sabotage a réclamé** (règle n° 1). Retirer la relecture des kubeconfigs dans
+    /// `ecrire_le_reste_intact` laissait les 837 tests verts — et aurait effacé toutes les
+    /// déclarations au premier renommage de projet, donc coupé **toutes** les connexions Kubernetes
+    /// du fichier sur une référence qui ne désigne plus rien.
+    ///
+    /// C'est le pendant exact du test des instances managées d'`API-32`, qui provoque délibérément
+    /// la perte pour que la conséquence soit écrite noir sur blanc.
+    #[test]
+    fn ecrire_des_projets_n_efface_pas_les_kubeconfigs_declares() {
+        let dir = tempfile::tempdir().unwrap();
+        let chemin = dir.path().join("config.json");
+
+        let mut kubeconfigs = Kubeconfigs::default();
+        let prod = kubeconfigs.declarer("~/.kube/prod/config");
+        crate::config::store::save(&chemin, &[], &Preferences::default(), &[], &kubeconfigs)
+            .expect("écriture initiale");
+
+        let (store, _) = ConfigStore::open(&chemin);
+        ecrire_le_reste_intact(&store, &[projet(None)]).expect("écriture des projets");
+
+        let relus = store.load_kubeconfigs().expect("relecture");
+        assert_eq!(
+            relus.resoudre(&prod),
+            Some("~/.kube/prod/config"),
+            "écrire des projets a effacé les kubeconfigs déclarés"
+        );
+    }
+
+    #[test]
+    fn retirer_une_declaration_qu_une_connexion_emploie_est_nomme() {
+        // **Le refus nomme ce qui gêne**, et c'est tout l'intérêt : « impossible » sans la liste
+        // demanderait de chercher soi-même laquelle des trente connexions s'en sert.
+        let employees = retirees_encore_employees(&sans_rien(), &[projet(Some("prod"))], &[]);
+
+        assert_eq!(employees, vec!["Halle › catalogue (prod)".to_owned()]);
+    }
+
+    #[test]
+    fn une_declaration_que_personne_n_emploie_se_retire() {
+        // **Le contrôle positif** : sans lui, un refus qui refuserait tout passerait le test
+        // ci-dessus, et plus aucune déclaration ne serait jamais retirable.
+        let employees = retirees_encore_employees(&sans_rien(), &[projet(None)], &[]);
+
+        assert!(employees.is_empty(), "{employees:?}");
+    }
+
+    #[test]
+    fn une_declaration_gardee_ne_gene_personne() {
+        // L'autre moitié : ce qui décide n'est pas « cette connexion a un kubeconfig », c'est
+        // « la liste proposée ne le porte plus ». Une liste qui garde tout ne refuse rien.
+        let mut gardee = Kubeconfigs::default();
+        gardee
+            .declarations
+            .push(crate::config::KubeconfigDeclaration {
+                id: KubeconfigId::brut("prod"),
+                label: "prod".into(),
+                path: "~/.kube/prod/config".into(),
+            });
+
+        let employees = retirees_encore_employees(&gardee, &[projet(Some("prod"))], &[]);
+        assert!(employees.is_empty(), "{employees:?}");
+    }
+
+    #[test]
+    fn une_connexion_qui_vise_une_autre_declaration_ne_gene_pas() {
+        let employees = retirees_encore_employees(&sans_rien(), &[projet(Some("bac"))], &[]);
+
+        // Elle est nommée parce que « bac » n'est pas dans la liste proposée non plus — la garde
+        // porte sur *toute* référence que la liste ne déclare plus, ce qui est le bon critère :
+        // une connexion sur une référence déjà morte n'a pas à empêcher de ranger le reste.
+        assert_eq!(employees, vec!["Halle › catalogue (prod)".to_owned()]);
+    }
 }

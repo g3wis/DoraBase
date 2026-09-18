@@ -360,7 +360,22 @@ test('les champs du visage Kubernetes font 28 px, et la ressource prend la rang�
         hauteur(i.parentElement?.className.includes('wrap') ? i.parentElement : i),
       ),
       espaceDeNoms: boite('input[placeholder*="default"]'),
-      kubeconfig: boite('input[placeholder*="KUBECONFIG"]'),
+      // **Le kubeconfig est une liste depuis `API-70`**, donc un `combobox` et non un `input`. Il
+      // est nommé par `aria-labelledby`, comme tout `Select` du dépôt : on résout l'étiquette
+      // plutôt que de viser une classe hachée, qui ne survivrait pas au prochain module CSS.
+      kubeconfig: (() => {
+        const liste = [...panneau.querySelectorAll('[role=combobox]')].find((candidat) => {
+          const etiquette = candidat.getAttribute('aria-labelledby')
+          return etiquette
+            ? (document.getElementById(etiquette)?.textContent ?? '').includes('kubeconfig')
+            : false
+        })
+        // **La racine du `Select`, et non le `combobox` qu'elle contient** : c'est elle qui est
+        // l'enfant de la grille, donc elle dont on dit qu'elle « prend la rangée ». Le contrôle
+        // vit à l'intérieur, sous l'étiquette, et mesure forcément moins.
+        const champ = liste?.closest('[class*=root]')
+        return Math.round(champ?.getBoundingClientRect().width ?? 0)
+      })(),
       ressource: boite('input[placeholder^="svc/postgres"]'),
       grilleLargeur: Math.round(grille.getBoundingClientRect().width),
       pistes: getComputedStyle(grille)
@@ -381,12 +396,32 @@ test('les champs du visage Kubernetes font 28 px, et la ressource prend la rang�
   const [, piste2 = 0] = mesures?.pistes ?? []
   expect(mesures?.espaceDeNoms ?? 0).toBeCloseTo(piste2, 0)
 
-  // Le fichier et la ressource prennent la rangée entière : un chemin de kubeconfig et un
+  // Le fichier et la ressource prennent la rangée entière : un libellé de kubeconfig et un
   // `statefulset/postgres-principal` tiennent mal dans une colonne. Tolérance de 3 px pour les
   // bordures, plutôt qu'une égalité que le sous-pixel ferait échouer.
   for (const large of [mesures?.kubeconfig ?? 0, mesures?.ressource ?? 0]) {
     expect(large).toBeGreaterThan((mesures?.grilleLargeur ?? 0) - 3)
   }
+})
+
+test('la liste des kubeconfigs porte les déclarations de la configuration', async ({ page }) => {
+  // **L'assemblage, et non la vitrine** (règle n° 8). `TunnelPanel` est juste dans ses tests
+  // unitaires avec un décor qu'ils lui donnent ; ce qu'aucun d'eux ne prouve est que l'écran qui le
+  // monte lui **passe** les déclarations de la configuration. Sans ce câblage, la liste offrirait
+  // « Celui de kubectl » et « Autre fichier… » et rien d'autre, sur un poste qui en a déclaré deux —
+  // et le chantier entier ne servirait à rien sans qu'un seul test rougisse.
+  await deplierTunnel(page)
+  await page.getByRole('combobox', { name: 'Type' }).click()
+  await page.getByRole('option', { name: 'Kubernetes' }).click()
+
+  await page.getByRole('combobox', { name: 'Fichier kubeconfig' }).click()
+  const liste = page.getByRole('listbox')
+  await expect(liste.getByRole('option', { name: 'prod', exact: true })).toBeVisible()
+  await expect(liste.getByRole('option', { name: 'bac à sable' })).toBeVisible()
+  // Le repli et l'entrée qui agit encadrent les déclarations — voir `kubeconfigs.test.ts` pour
+  // l'ordre, qui se vérifie en pur.
+  await expect(liste.getByRole('option', { name: 'Celui de kubectl' })).toBeVisible()
+  await expect(liste.getByRole('option', { name: 'Autre fichier…' })).toBeVisible()
 })
 
 test('le panneau est à égale distance du moteur et du formulaire', async ({ page }) => {

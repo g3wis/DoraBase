@@ -70,7 +70,7 @@ impl BigQueryAdapter {
     pub async fn connect_via(
         variante: &ConnectionSettings,
         mot_de_passe: Option<&Secret>,
-        _known_hosts: &std::path::Path,
+        _contexte: &crate::engine::proxy::ContexteDeProxy,
     ) -> Result<Self, EngineError> {
         // `known_hosts` est ignoré : un appel HTTPS vers l'API Google n'a pas de clé d'hôte SSH à
         // vérifier. Le paramètre reste dans la signature parce que `AnyEngine` appelle les sept

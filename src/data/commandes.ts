@@ -8,6 +8,7 @@ import type {
   ImportProjectsRequest,
   ImportProjectsResult,
   InstanceId,
+  Kubeconfigs,
   ManagedInstance,
   Preferences,
   Project,
@@ -140,6 +141,28 @@ export async function openDatabase(
  */
 export async function savePreferences(preferences: Preferences): Promise<Preferences> {
   return appeler<Preferences>('save_preferences', { preferences })
+}
+
+/**
+ * Déclare un kubeconfig par le chemin d'un fichier, et rend la liste qui en résulte (`API-70`).
+ *
+ * **Le chemin va au cœur, jamais l'identifiant** : la dérivation du libellé, la règle de collision
+ * et le fait qu'un fichier déjà déclaré soit *repris* plutôt que doublé vivent en Rust, où un
+ * fichier de configuration écrit à la main les rencontre aussi.
+ */
+export async function declareKubeconfig(path: string): Promise<Kubeconfigs> {
+  return appeler<Kubeconfigs>('declare_kubeconfig', { path })
+}
+
+/**
+ * Écrit la liste des kubeconfigs déclarés — renommage, déplacement, retrait, défaut.
+ *
+ * **Peut refuser**, et c'est le seul refus de cette commande : retirer une déclaration qu'une
+ * connexion référence la laisserait pointer dans le vide. L'écran grise déjà le bouton avec sa
+ * raison ; les deux gardent deux chemins différents.
+ */
+export async function saveKubeconfigs(kubeconfigs: Kubeconfigs): Promise<Kubeconfigs> {
+  return appeler<Kubeconfigs>('save_kubeconfigs', { kubeconfigs })
 }
 
 export async function closeDatabase(key: DatabaseKey): Promise<void> {
@@ -487,8 +510,20 @@ export function etatDe(
  * ce qui écraserait le fichier qu'on vient de refuser d'ouvrir.
  */
 export type EtatDeConfiguration =
-  | { kind: 'fresh'; projects: Project[]; preferences: Preferences; instances: ManagedInstance[] }
-  | { kind: 'loaded'; projects: Project[]; preferences: Preferences; instances: ManagedInstance[] }
+  | {
+      kind: 'fresh'
+      projects: Project[]
+      preferences: Preferences
+      instances: ManagedInstance[]
+      kubeconfigs: Kubeconfigs
+    }
+  | {
+      kind: 'loaded'
+      projects: Project[]
+      preferences: Preferences
+      instances: ManagedInstance[]
+      kubeconfigs: Kubeconfigs
+    }
   | {
       kind: 'blocked'
       projects: Project[]
@@ -499,6 +534,8 @@ export type EtatDeConfiguration =
        * par un fichier en quarantaine.
        */
       instances: ManagedInstance[]
+      /** Vides, pour la raison des instances : un fichier illisible ne dit rien de ses déclarations. */
+      kubeconfigs: Kubeconfigs
       reason: string
       quarantinedTo?: string
     }
@@ -506,13 +543,20 @@ export type EtatDeConfiguration =
 export function interpreter(issue: ConfigLoad): EtatDeConfiguration {
   switch (issue.kind) {
     case 'fresh':
-      return { kind: 'fresh', projects: [], preferences: PREFERENCES_PAR_DEFAUT, instances: [] }
+      return {
+        kind: 'fresh',
+        projects: [],
+        preferences: PREFERENCES_PAR_DEFAUT,
+        instances: [],
+        kubeconfigs: {},
+      }
     case 'loaded':
       return {
         kind: 'loaded',
         projects: issue.projects,
         preferences: issue.preferences,
         instances: issue.instances,
+        kubeconfigs: issue.kubeconfigs,
       }
     case 'unreadable':
       return {
@@ -523,6 +567,7 @@ export function interpreter(issue: ConfigLoad): EtatDeConfiguration {
         // lui-même illisible.
         preferences: PREFERENCES_PAR_DEFAUT,
         instances: [],
+        kubeconfigs: {},
         reason: issue.reason,
         quarantinedTo: issue.quarantinedTo,
       }
@@ -532,6 +577,7 @@ export function interpreter(issue: ConfigLoad): EtatDeConfiguration {
         projects: [],
         preferences: PREFERENCES_PAR_DEFAUT,
         instances: [],
+        kubeconfigs: {},
         reason: `le fichier de configuration est en version ${issue.found}, cette version de DoraBase comprend la version ${issue.supported}`,
       }
   }

@@ -7,6 +7,7 @@ export const preferencesFr: Dictionnaire = {
   sections: {
     general: 'Général',
     apparence: 'Apparence',
+    connexions: 'Connexions',
     grille: 'Grille de données',
     securite: 'Sécurité & écriture',
     maj: 'Mises à jour',
@@ -18,6 +19,20 @@ export const preferencesFr: Dictionnaire = {
   },
   general: {
     langueTitre: 'Langue',
+  },
+  connexions: {
+    kubeconfigsTitre: 'Fichiers kubeconfig',
+    kubeconfigsVide:
+      'Aucun fichier déclaré. Déclarez-en un ici pour le choisir ensuite dans une connexion Kubernetes, sans avoir à retaper son chemin.',
+    kubeconfigsNote:
+      'Une application n’hérite pas du $KUBECONFIG de votre terminal : c’est pourquoi ces fichiers se déclarent. Déplacer un fichier ici suit dans toutes les connexions qui l’emploient.',
+    kubeconfigLibelle: 'Nom',
+    kubeconfigChemin: 'Fichier',
+    kubeconfigDefaut: 'Par défaut',
+    kubeconfigAjouter: 'Ajouter un fichier…',
+    kubeconfigRetirer: 'Retirer',
+    kubeconfigEmploye: ({ utilisations }: Record<string, string | number>) =>
+      `Encore employé par : ${utilisations}. Changez-les d’abord.`,
   },
   langues: {
     fr: 'Français',
@@ -113,6 +128,7 @@ export const preferencesEn: Dictionnaire = {
   sections: {
     general: 'General',
     apparence: 'Appearance',
+    connexions: 'Connections',
     grille: 'Data grid',
     securite: 'Security & writes',
     maj: 'Updates',
@@ -124,6 +140,20 @@ export const preferencesEn: Dictionnaire = {
   },
   general: {
     langueTitre: 'Language',
+  },
+  connexions: {
+    kubeconfigsTitre: 'Kubeconfig files',
+    kubeconfigsVide:
+      'No file declared. Declare one here to pick it in a Kubernetes connection afterwards, without retyping its path.',
+    kubeconfigsNote:
+      'An application does not inherit your terminal’s $KUBECONFIG — that is why these files are declared. Moving a file here follows through in every connection that uses it.',
+    kubeconfigLibelle: 'Name',
+    kubeconfigChemin: 'File',
+    kubeconfigDefaut: 'Default',
+    kubeconfigAjouter: 'Add a file…',
+    kubeconfigRetirer: 'Remove',
+    kubeconfigEmploye: ({ utilisations }: Record<string, string | number>) =>
+      `Still used by: ${utilisations}. Change those first.`,
   },
   langues: {
     fr: 'Français',

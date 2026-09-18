@@ -1,11 +1,13 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import {
   createConsole,
+  declareKubeconfig,
   deleteConsole,
   deleteInstance,
   renameConsole,
   saveConsole,
   saveInstance,
+  saveKubeconfigs,
   savePreferences,
 } from '../data/commandes'
 import { useConfiguration } from '../data/useConfiguration'
@@ -13,6 +15,7 @@ import { Sprite } from '../design/icons/Sprite'
 import type {
   Database,
   EnvironmentId,
+  Kubeconfigs,
   ManagedInstance,
   Preferences,
   Project,
@@ -30,6 +33,7 @@ import {
 } from '../screens/NewConnection/enregistrerLaBase'
 import { NewConnection } from '../screens/NewConnection/NewConnection'
 import { ParcoursDeCreation } from '../screens/NewProject/ParcoursDeCreation'
+import { ouvrirSelecteurDeKubeconfig } from '../screens/Preferences/ouvrirSelecteurDeKubeconfig'
 import { PreferencesDialog } from '../screens/Preferences/PreferencesDialog'
 import { jetonsDe, PREFERENCES_PAR_DEFAUT, themeApplique } from '../screens/Preferences/preferences'
 import { type DemandeDeTransfert, TransferDialogs } from '../screens/Transfer/TransferDialogs'
@@ -125,6 +129,15 @@ export function App() {
    */
   const [instances, setInstances] = useState<ManagedInstance[]>([])
   /**
+   * Les kubeconfigs déclarés (`API-70`), lus avec les projets.
+   *
+   * **Le même montage que `projects` et `instances`** : le disque au démarrage, les commandes
+   * ensuite, et ce sont elles qui rendent la liste à jour. Un état à part plutôt qu'un champ de
+   * `preferences` : une connexion les **référence**, donc ce sont des objets que le modèle désigne,
+   * et `save_preferences` passerait par-dessus.
+   */
+  const [kubeconfigs, setKubeconfigs] = useState<Kubeconfigs>({})
+  /**
    * L'instance dont la modale de déclaration est ouverte.
    *
    * `{}` déclare une neuve, `{ instance }` en modifie une — **un seul état pour les deux usages**,
@@ -184,6 +197,7 @@ export function App() {
     setProjects(configuration.projects)
     setPreferences(configuration.preferences)
     setInstances(configuration.instances)
+    setKubeconfigs(configuration.kubeconfigs)
   }, [configuration])
 
   /**
@@ -231,6 +245,61 @@ export function App() {
     } catch {
       // Une écriture refusée (fichier en quarantaine) ne doit pas défaire le réglage à l'écran :
       // l'utilisateur verrait son geste annulé sans raison. Le blocage est déjà dit par `09b`.
+    }
+  }
+
+  /**
+   * Écrit la liste des kubeconfigs, et repose ce que le cœur a retenu (`API-70`).
+   *
+   * **L'écran d'abord, comme pour les préférences** : renommer une déclaration doit se voir à la
+   * frappe. Un refus — retirer une déclaration qu'une connexion emploie — **défait** le geste à
+   * l'écran, à l'inverse des préférences : là-bas un refus vient d'un fichier en quarantaine et ne
+   * dit rien du réglage, ici il dit que ce réglage précis est impossible, et le garder afficherait
+   * une liste que le disque ne porte pas.
+   */
+  const reglerLesKubeconfigs = async (suivants: Kubeconfigs) => {
+    const avant = kubeconfigs
+    setKubeconfigs(suivants)
+    try {
+      setKubeconfigs(await saveKubeconfigs(suivants))
+    } catch {
+      setKubeconfigs(avant)
+    }
+  }
+
+  /**
+   * « Ajouter un fichier… » : choisir un kubeconfig et le déclarer.
+   *
+   * **Le sélecteur natif n'est pas testable**, même angle mort que « Parcourir… » de la clé privée
+   * SSH : l'appel réel vit ici, et les écrans reçoivent la fonction. Renoncer ne déclare rien et ne
+   * dit rien — il n'y a ni réussite ni échec à annoncer sur un geste qu'on vient d'annuler.
+   */
+  const declarerUnKubeconfig = async () => {
+    await declarerUnKubeconfigEtRendreSaReference()
+  }
+
+  /**
+   * Déclare un kubeconfig et **rend sa référence** — ce dont `A2` a besoin pour la choisir.
+   *
+   * **La même fonction que le bouton des préférences**, à ce retour près : deux voies pour un même
+   * acte en laissent une en arrière (règle n° 17), et c'est ici que la liste globale se remplit
+   * depuis « Autre fichier… ». La référence est retrouvée **par le chemin** dans la liste rendue,
+   * parce que `declarer` dédoublonne par lui : choisir un fichier déjà déclaré rend la déclaration
+   * existante, ce qui est le comportement voulu.
+   */
+  const declarerUnKubeconfigEtRendreSaReference = async (): Promise<string | null> => {
+    const chemin = await ouvrirSelecteurDeKubeconfig()
+    if (chemin === null) return null
+    try {
+      const suivants = await declareKubeconfig(chemin)
+      setKubeconfigs(suivants)
+      const posee = (suivants.declarations ?? []).find(
+        (declaration) => declaration.path.trim() === chemin.trim(),
+      )
+      return posee?.id ?? null
+    } catch {
+      // Une écriture refusée est déjà dite par le blocage de configuration (`09b`).
+      return null
     }
   }
 
@@ -382,6 +451,8 @@ export function App() {
               {...(instanceOuverte.instance === undefined
                 ? {}
                 : { edition: instanceOuverte.instance })}
+              kubeconfigs={kubeconfigs}
+              onDeclareKubeconfig={declarerUnKubeconfigEtRendreSaReference}
               onClose={() => setInstanceOuverte(null)}
               onEnregistrer={async (requete) => {
                 setInstances(
@@ -446,6 +517,8 @@ export function App() {
               {...(connexionOuverte === null
                 ? {}
                 : { environnement: connexionOuverte.environment })}
+              kubeconfigs={kubeconfigs}
+              onDeclareKubeconfig={declarerUnKubeconfigEtRendreSaReference}
               onSaved={setProjects}
             />
           )}
@@ -485,6 +558,8 @@ export function App() {
             ...(projetOuvert.raison === undefined ? {} : { raison: projetOuvert.raison }),
           }}
           projets={projetsPourLesEcrans}
+          kubeconfigs={kubeconfigs}
+          onDeclareKubeconfig={declarerUnKubeconfigEtRendreSaReference}
           onClose={() => setProjetOuvert(null)}
           onProjets={setProjects}
         />
@@ -520,6 +595,11 @@ export function App() {
             setMajAInstaller(null)
           }}
           version={VERSION_AFFICHEE}
+          kubeconfigs={kubeconfigs}
+          onKubeconfigsChange={(suivants) => void reglerLesKubeconfigs(suivants)}
+          onDeclarerKubeconfig={declarerUnKubeconfig}
+          projects={projects}
+          instances={instances}
           {...(majAInstaller === null
             ? {}
             : { sectionInitiale: 'maj' as const, majDejaTrouvee: majAInstaller })}

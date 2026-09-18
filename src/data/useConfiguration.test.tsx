@@ -39,6 +39,7 @@ test('un fichier lu remplit les projets', async () => {
         ],
         preferences: PREFERENCES_PAR_DEFAUT,
         instances: [],
+        kubeconfigs: {},
       })}
     />,
   )

@@ -1,19 +1,37 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { vi } from 'vitest'
 import { Sprite } from '../../design/icons/Sprite'
+import type { Kubeconfigs } from '../../domain/config'
 import { LanguageProvider } from '../../i18n/LanguageContext'
 import { choisirDansLaListe, optionsDeLaListe } from '../../ui/Select/pourLesTests'
 import { NewConnection } from './NewConnection'
 
-function monter(onBrowseKey?: () => Promise<string | null>) {
+function monter(
+  onBrowseKey?: () => Promise<string | null>,
+  kube: { kubeconfigs?: Kubeconfigs; onDeclareKubeconfig?: () => Promise<string | null> } = {},
+) {
   return render(
     <>
       <Sprite />
       <LanguageProvider preferences={{ language: 'fr' }}>
-        <NewConnection onClose={() => {}} onBrowseKey={onBrowseKey ?? (async () => null)} />
+        <NewConnection
+          onClose={() => {}}
+          onBrowseKey={onBrowseKey ?? (async () => null)}
+          kubeconfigs={kube.kubeconfigs ?? {}}
+          onDeclareKubeconfig={kube.onDeclareKubeconfig ?? (async () => null)}
+        />
       </LanguageProvider>
     </>,
   )
+}
+
+/** Deux déclarations, dont une par défaut — le décor de la liste de kubeconfigs (`API-70`). */
+const KUBECONFIGS: Kubeconfigs = {
+  declarations: [
+    { id: 'prod', label: 'prod', path: '~/.kube/prod/config' },
+    { id: 'bac', label: 'bac à sable', path: '~/.kube/bac.yaml' },
+  ],
 }
 
 /** Déplie le panneau et bascule son sélecteur « Type » sur la sorte demandée. */
@@ -75,7 +93,10 @@ test('le visage Kubernetes montre ses trois champs, et aucun de ceux des autres 
   monter()
   const panneau = await choisirLeType('Kubernetes')
 
-  for (const nom of ['Fichier kubeconfig', 'Espace de noms', 'Ressource']) {
+  // Le kubeconfig est une **liste** depuis `API-70`, donc un `combobox` et non un champ de saisie :
+  // c'est le rôle qu'on interroge, pas la forme du contrôle.
+  expect(panneau.getByRole('combobox', { name: 'Fichier kubeconfig' })).toBeInTheDocument()
+  for (const nom of ['Espace de noms', 'Ressource']) {
     expect(panneau.getByLabelText(nom)).toBeInTheDocument()
   }
   // L'autre moitié du critère, et la plus importante : les champs des autres sortes ne sont pas
@@ -119,41 +140,50 @@ test('aucun champ de contexte n’est proposé', async () => {
   expect(panneau.queryByLabelText('Contexte')).not.toBeInTheDocument()
 })
 
-test('le champ kubeconfig dit ce que kubectl ferait sans lui', async () => {
-  monter()
-  const panneau = await choisirLeType('Kubernetes')
+test('la liste des kubeconfigs porte le repli, les déclarations, puis l’entrée qui déclare', async () => {
+  // **Ce test a changé de forme avec `API-70`, pas de sujet.** Il gardait un placeholder nommant
+  // `$KUBECONFIG` puis `~/.kube/config` : c'était la façon dont un *champ vide* disait que son vide
+  // est une valeur. Le champ est devenu une liste, où la même chose se dit par une **entrée** — et
+  // une entrée vaut mieux qu'un placeholder, puisqu'elle se choisit.
+  monter(undefined, { kubeconfigs: KUBECONFIGS })
+  await choisirLeType('Kubernetes')
 
-  // **Les deux valeurs que `kubectl` emploierait doivent être nommées**, et dans cet ordre :
-  // `$KUBECONFIG` d'abord, `~/.kube/config` en second. Sans elles, un champ vide se lit comme un
-  // champ à remplir — alors que le vide est le cas de presque tout le monde.
-  const placeholder = panneau.getByLabelText('Fichier kubeconfig').getAttribute('placeholder') ?? ''
-  expect(placeholder).toContain('$KUBECONFIG')
-  expect(placeholder).toContain('~/.kube/config')
-  expect(placeholder.indexOf('$KUBECONFIG')).toBeLessThan(placeholder.indexOf('~/.kube/config'))
+  const options = await optionsDeLaListe('Fichier kubeconfig')
+  // Le repli en tête : c'est l'état d'une connexion qui n'a rien choisi, donc celui qu'on quitte.
+  expect(options[0]).toBe('Celui de kubectl')
+  expect(options).toContain('prod')
+  expect(options).toContain('bac à sable')
+  // **L'entrée qui agit est en dernier** : on n'y tombe pas par accident en parcourant la liste au
+  // clavier, à la différence d'une entrée placée entre deux déclarations.
+  expect(options[options.length - 1]).toBe('Autre fichier…')
 })
 
-test('l’aide dit pourquoi le champ kubeconfig existe', async () => {
-  monter()
-  const panneau = await choisirLeType('Kubernetes')
-  const champ = panneau.getByLabelText('Ressource')
-  const aide = document.getElementById(champ.getAttribute('aria-describedby') ?? '')
-
-  // **Le fait qui justifie tout ce champ, et qu'on ne devine pas** : une application n'hérite pas
-  // du `$KUBECONFIG` du terminal. Sans cette phrase, quelqu'un dont les contextes vivent dans
-  // `~/.kube/prod` ne comprend pas pourquoi l'app ne les voit pas alors que `kubectl` les liste.
-  expect(aide?.textContent).toContain('$KUBECONFIG')
-  expect(aide?.textContent).toContain('kubeconfig')
-})
-
-test('saisir un kubeconfig déclare le proxy, comme n’importe quel autre champ', async () => {
-  monter()
+test('choisir un kubeconfig déclare le proxy, comme n’importe quel autre champ', async () => {
+  monter(undefined, { kubeconfigs: KUBECONFIGS })
   const panneau = await choisirLeType('Kubernetes')
   expect(panneau.queryByText('Kubernetes activé')).not.toBeInTheDocument()
 
-  // C'est la saisie qui déclare, et **n'importe laquelle des quatre** : un utilisateur qui commence
-  // par désigner son fichier a déjà dit qu'il voulait un transfert.
-  await userEvent.type(panneau.getByLabelText('Fichier kubeconfig'), '~/.kube/prod')
+  // C'est le geste qui déclare, et **n'importe lequel des trois** : un utilisateur qui commence par
+  // désigner son fichier a déjà dit qu'il voulait un transfert. Une saisie hier, un choix depuis
+  // `API-70` — la règle est la même, le geste a changé.
+  await choisirDansLaListe('Fichier kubeconfig', 'prod')
   expect(panneau.getByText('Kubernetes activé')).toBeInTheDocument()
+})
+
+test('« Autre fichier… » ne désigne rien : il déclare, et la référence rendue est choisie', async () => {
+  // **La décision d'`API-70`** : un fichier choisi ici entre dans la liste globale, de sorte qu'une
+  // référence ne peut jamais désigner une déclaration qui n'existe pas. Le test garde le **câblage**
+  // — que l'entrée appelle bien ce qui déclare, et repose ce qu'elle rend — parce que le sélecteur
+  // natif, lui, ne répond pas hors de la webview.
+  const declarer = vi.fn(async () => 'recette')
+  monter(undefined, { kubeconfigs: KUBECONFIGS, onDeclareKubeconfig: declarer })
+  const panneau = await choisirLeType('Kubernetes')
+
+  await choisirDansLaListe('Fichier kubeconfig', 'Autre fichier…')
+  expect(declarer).toHaveBeenCalledOnce()
+  // Le proxy est déclaré par ce geste comme par les autres.
+  await screen.findByText('Kubernetes activé')
+  expect(panneau.queryByText('Kubernetes activé')).toBeInTheDocument()
 })
 
 test('l’aide du visage Kubernetes décrit la ressource sans la nommer', async () => {

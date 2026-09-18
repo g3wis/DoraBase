@@ -51,6 +51,7 @@ export const transferFr: Dictionnaire = {
     passwordsMissing: (p) => `${p.count} connexion(s) attendent leur mot de passe`,
     passwordsStored: (p) => `${p.count} mot(s) de passe rangés depuis le fichier`,
     localPaths: (p) => `${p.count} chemin(s) à vérifier sur cette machine`,
+    kubeconfigsMissing: (p) => `${p.count} connexion(s) sans kubeconfig déclaré dans le fichier`,
     connectionsRejected: (p) =>
       `${p.count} connexion(s) refusées : leur environnement n'est déclaré nulle part`,
   },
@@ -100,6 +101,8 @@ export const transferEn: Dictionnaire = {
     passwordsMissing: (p) => `${p.count} connection(s) are waiting for their password`,
     passwordsStored: (p) => `${p.count} password(s) stored from the file`,
     localPaths: (p) => `${p.count} path(s) to check on this machine`,
+    kubeconfigsMissing: (p) =>
+      `${p.count} connection(s) whose kubeconfig the file does not declare`,
     connectionsRejected: (p) =>
       `${p.count} connection(s) refused: their environment is declared nowhere`,
   },

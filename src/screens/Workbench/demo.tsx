@@ -5,6 +5,7 @@ import type {
   EnvironmentColor,
   EnvironmentDeclaration,
   EnvironmentId,
+  Kubeconfigs,
   ManagedInstance,
   Preferences,
   Project,
@@ -867,6 +868,24 @@ const REGLAGES_DEMO: ConnectionSettings = {
  * la bande de confirmation ne seraient visibles nulle part dans `?demo` — donc invérifiables autrement
  * qu'à l'œil dans la fenêtre native, que Playwright ne pilote pas.
  */
+/**
+ * Deux kubeconfigs déclarés (`API-70`), et un défaut.
+ *
+ * **Deux, et non un** : avec une seule déclaration, la liste d'`A2` ne distingue pas « la première »
+ * de « celle qui est par défaut », et le retrait d'une entrée ne se lit pas comme un choix. Le décor
+ * porte aussi un libellé **dérivé du répertoire parent** (`prod`, de `~/.kube/prod/config`), qui est
+ * le cas le plus fréquent et celui que la règle de dérivation traite à part.
+ *
+ * Les chemins sont **inventés**, comme tout décor de ce dépôt.
+ */
+const KUBECONFIGS_DEMO: Kubeconfigs = {
+  declarations: [
+    { id: 'prod', label: 'prod', path: '~/.kube/prod/config' },
+    { id: 'bac-a-sable', label: 'bac à sable', path: '~/.kube/bac-a-sable.yaml' },
+  ],
+  default: 'prod',
+}
+
 const INSTANCES_DEMO: ManagedInstance[] = [
   {
     id: 'pg-atelier',
@@ -1242,6 +1261,7 @@ const APERCU_SIMULE: ImportReport = {
       passwordsStored: [],
       passwordsMissing: ['catalogue (prod)'],
       localPaths: [],
+      kubeconfigsMissing: [],
     },
     {
       name: 'Atelier Nord',
@@ -1256,6 +1276,7 @@ const APERCU_SIMULE: ImportReport = {
       passwordsStored: [],
       passwordsMissing: [],
       localPaths: [],
+      kubeconfigsMissing: [],
     },
     {
       name: 'Bancal',
@@ -1273,6 +1294,7 @@ const APERCU_SIMULE: ImportReport = {
       passwordsStored: [],
       passwordsMissing: [],
       localPaths: [],
+      kubeconfigsMissing: [],
     },
   ],
 }
@@ -1303,6 +1325,7 @@ export function WorkbenchDemo() {
    * `15c` invérifiables autrement qu'à l'œil.
    */
   const [preferences, setPreferences] = useState<Preferences>(PREFERENCES_PAR_DEFAUT)
+  const [kubeconfigs, setKubeconfigs] = useState<Kubeconfigs>(KUBECONFIGS_DEMO)
   const [preferencesOuvertes, setPreferencesOuvertes] = useState(false)
   /**
    * La modale de transfert ouverte (`API-30`).
@@ -1510,6 +1533,13 @@ export function WorkbenchDemo() {
     <LanguageProvider preferences={preferences}>
       {edition && (
         <NewConnection
+          kubeconfigs={kubeconfigs}
+          onDeclareKubeconfig={async () => {
+            // La démo ne déclare rien de réel : elle rend la référence d'une déclaration du décor,
+            // au même degré que son `runSql` rend un résultat sans rien exécuter.
+            setKubeconfigs(KUBECONFIGS_DEMO)
+            return 'bac-a-sable'
+          }}
           edition={edition}
           // **Les projets, pour que le groupe d'environnements ne soit pas vide.** Le formulaire y lit
           // les environnements déclarés du projet de la base modifiée ; sans la liste, il n'en trouve
@@ -1534,6 +1564,8 @@ export function WorkbenchDemo() {
             name: projet.name,
             environments: projet.environments,
           }))}
+          kubeconfigs={kubeconfigs}
+          onDeclareKubeconfig={async () => 'bac-a-sable'}
           onClose={() => setCreationOuverte(null)}
           onProjets={setProjets}
           onCreate={async (request) => {
@@ -1570,6 +1602,22 @@ export function WorkbenchDemo() {
           onChange={setPreferences}
           onClose={() => setPreferencesOuvertes(false)}
           version="DoraBase 0.4.2 (arm64)"
+          kubeconfigs={kubeconfigs}
+          onKubeconfigsChange={setKubeconfigs}
+          /* **La démo ne déclare rien**, au même degré que son `runSql` n'exécute rien : le
+             sélecteur natif ne répond pas hors de la webview. Elle pose une déclaration plausible
+             pour que le geste soit visible, et c'est tout ce qu'il y a à en voir. */
+          onDeclarerKubeconfig={async () => {
+            setKubeconfigs((avant) => ({
+              ...avant,
+              declarations: [
+                ...(avant.declarations ?? []),
+                { id: 'recette', label: 'recette', path: '~/.kube/recette.yaml' },
+              ],
+            }))
+          }}
+          projects={projets}
+          instances={INSTANCES_DEMO}
         />
       )}
       <Workbench
@@ -1831,6 +1879,8 @@ export function WorkbenchDemo() {
       />
       {instanceOuverte !== null && (
         <NewInstance
+          kubeconfigs={kubeconfigs}
+          onDeclareKubeconfig={async () => 'bac-a-sable'}
           {...(instanceOuverte.instance === undefined ? {} : { edition: instanceOuverte.instance })}
           onClose={() => setInstanceOuverte(null)}
           onEnregistrer={async () => {}}

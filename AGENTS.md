@@ -2657,7 +2657,8 @@ avant « Retirer… », parce qu'il ne configure rien et n'ouvre rien — il pro
 le geste destructeur reste le dernier de la liste partout dans le produit.
 
 **La case à cocher d'une ligne d'import est un contrôle natif**, et c'est le troisième du produit
-après le curseur des préférences et le calendrier des filtres. La prohibition porte sur les listes
+après le curseur des préférences et le calendrier des filtres — le quatrième étant la case « Par
+défaut » des kubeconfigs déclarés (`API-70`), pour la même raison et avec le même argument. La prohibition porte sur les listes
 déroulantes, dont le maison remplace l'apparence ; une case n'a rien de tel à remplacer — c'est un
 carré et une coche, que le système dessine correctement, au thème près que `color-scheme` lui donne
 déjà. `accent-color` est la seule déclaration qui compte. Un `<button role="checkbox">` aurait redit
@@ -2715,6 +2716,135 @@ C'est le seul geste qui dise que le mot de passe est arrivé sous la référence
 lire — l'équivalent, pour ce chantier, du « renommer, quitter, relancer » du Trousseau. Le rapport de
 l'import de `?demo` est **simulé** au même degré que son `runSql` : il rend trois verdicts plausibles
 pour que l'écran soit visible sans fichier réel.
+
+### Les kubeconfigs se déclarent une fois, les connexions les référencent (18 septembre 2026, `API-70`)
+
+Le chemin d'un kubeconfig était ressaisi **connexion par connexion**, alors qu'un cluster porte
+souvent des dizaines de bases — rapporté à l'usage : « je ne devrais pas avoir à donner un
+kubeconfig par projet, puisqu'une instance kub gère beaucoup de projets et de bases ». Les fichiers
+se déclarent désormais une fois, dans les préférences, et le visage Kubernetes d'`A2` les propose
+dans une liste.
+
+**Une connexion garde une *référence*, pas le chemin**, et c'est la décision qui porte tout le
+reste. Le chemin vit alors en **un** lieu : déplacer un fichier se fait dans les préférences, et
+toutes les connexions suivent sans qu'aucune soit rouverte. C'était l'autre moitié de la demande,
+celle qu'un simple dropdown sur des chemins n'aurait pas tenue — il aurait retiré la ressaisie, pas
+la mise à jour en masse. Ce qu'elle coûte est écrit plus bas, et il n'est pas nul.
+
+**L'identifiant est figé à la déclaration**, dérivé du libellé par la règle d'`EnvironmentId` — la
+troisième fois, après `InstanceId`. Renommer une déclaration change son libellé seul, déplacer le
+fichier change son chemin seul. Si l'identifiant suivait le libellé, renommer « prod » en
+« production » détacherait toutes les connexions qui s'y rattachent, et la suivante ouvrirait le
+kubeconfig **par défaut de `kubectl`** — c'est-à-dire un autre cluster, **avec succès**. C'est le
+mode de défaillance que ce chantier traite partout comme inacceptable : se tromper d'espace de noms
+échoue en le disant, se tromper de cluster réussit.
+
+Onze décisions à ne pas défaire :
+
+- **les déclarations vivent à la racine du fichier, à côté des projets et des instances, et non dans
+  `preferences`.** Une connexion les *référence* : ce sont des objets que le modèle désigne, comme
+  une instance managée, pas un réglage d'affichage. Dans `preferences`, un `save_preferences` serait
+  passé par-dessus des déclarations dont dépendent des connexions ouvertes. Et c'est ce qui permet
+  au **fichier de transfert** de porter la même clé au même endroit : son enveloppe se lit comme un
+  document de configuration, donc la chaîne de migration y traite les kubeconfigs sans rien savoir
+  de qui l'appelle ;
+- **elles paraissent quand même dans les préférences**, section « Connexions » — qui revient quatre
+  jours après avoir été retirée (`API-59`). Ce n'est pas un revirement : ce qui l'avait fait sortir
+  était son **vide**, pas son sujet, et elle porte désormais quelque chose. Les trois réglages
+  qu'elle annonçait autrefois restent chez `API-60` ; les mêler ici les remettrait à l'état de
+  promesse, ce qu'`API-59` a justement retiré ;
+- **un cran de migration, et non un `serde(default)`.** Le champ n'est pas *ajouté*, il **change de
+  sens** : une v5 relue sans cran donnerait des références qui sont en réalité des chemins, donc ne
+  résolvant rien. Le cran v5 → v6 relève chaque chemin écrit dans un proxy Kubernetes, le déclare une
+  fois — deux connexions sur le même fichier partagent donc une déclaration, ce qui est tout l'objet
+  du chantier — et le remplace par son identifiant. Écrit sur du `serde_json::Value` comme les deux
+  crans précédents, et pour la même raison : un proxy Kubernetes apparaît sous une connexion de
+  projet *et* sous une instance managée, et le même document sert de fichier de transfert.
+  **Déterministe** — `serde_json::Map` est une `BTreeMap`, la crate n'active pas `preserve_order` —
+  et **pas idempotent**, ce qui n'est pas un défaut : un second passage prendrait les identifiants
+  pour des chemins, et c'est `depuis < 6` qui le garde, comme `depuis < 3` garde le hissage des
+  tunnels. **Le commentaire de `projets_du_document` avait prévu ce jour** en refusant d'élargir la
+  plage `2..=4` jusqu'à `VERSION_COURANTE` : la séparation a tenu, et c'est elle qui a fait
+  remarquer qu'il y avait un cran à écrire plutôt qu'une borne à pousser ;
+- **la résolution traverse jusqu'au moteur, et c'est le prix de la référence.** `engine::kubernetes`
+  ne peut plus lire un chemin sur le proxy : il lui faut les déclarations. Un champ
+  `#[serde(skip)] kubeconfig_resolu` qu'un appelant remplirait a été **écarté** — l'oubli y serait
+  silencieux et ferait ouvrir le cluster par défaut, c'est-à-dire la leçon de `Reprise`, paramètre
+  obligatoire d'`avec` plutôt que seconde méthode, appliquée à une valeur dont l'absence ne se voit
+  pas. `known_hosts` voyageait déjà seul jusqu'aux cinq adaptateurs ; les deux sont donc groupés dans
+  **`ContexteDeProxy`**, ce qui ne *widen* aucune signature et donne un lieu au troisième ;
+- **une référence qui ne désigne rien est un refus, jamais un repli.** Le cas vient d'un fichier de
+  configuration écrit à la main, ou d'une déclaration retirée hors de l'application ; le message
+  nomme la référence et la manœuvre. Se rabattre sur le défaut de `kubectl` serait exactement le
+  défaut décrit plus haut ;
+- **le contexte de proxy est relu à chaque ouverture, jamais gardé.** C'est ce qui fait qu'un
+  kubeconfig déplacé vaut pour la connexion suivante sans rouvrir quoi que ce soit — la raison d'être
+  de la référence. Le coût est une lecture du fichier de configuration par ouverture, en regard d'une
+  poignée de main réseau. **Exception connue** : la *recette* du registre le fige à l'ouverture
+  réussie, comme le `known_hosts` qu'il remplace, donc une **reconnexion** (`API-37`) rejouerait
+  l'ancien chemin. Le cas est étroit — il faut que la connexion tombe entre-temps — et il échoue
+  bruyamment, `kubectl` ne trouvant pas le fichier ;
+- **« Autre fichier… » déclare**, il ne désigne pas. C'est ce qui rend une référence morte
+  impossible *par construction* : tout fichier employé est dans la liste. `declarer` dédoublonne par
+  le **chemin**, donc choisir deux fois le même fichier ne pose pas deux entrées, et la déclaration
+  est **committée même si l'on annule ensuite la connexion** — elle se retire d'un geste dans les
+  préférences, à la différence du `create schema` d'`API-33` que rien ne défait ;
+- **le libellé se dérive du fichier, et n'est pas demandé** — aucune modale du produit ne nomme un
+  objet à sa création, et le renommage se fait ensuite sur place. `~/.kube/prod.yaml` donne « prod » ;
+  un fichier nommé `config`, le cas le plus courant, prend son **répertoire parent**, parce que
+  « config » ne distingue rien. Une collision prend le parent en renfort puis un rang, et **ce n'est
+  pas la « génération de suffixe » que le dépôt refuse** pour une connexion en double : là-bas le
+  suffixe masquerait une collision que l'utilisateur doit voir, ici personne n'a saisi de nom qu'on
+  pourrait contredire, et refuser interdirait de déclarer deux fichiers que leurs auteurs ont tous
+  deux appelés `config.yaml` ;
+- **retirer une déclaration qu'une connexion emploie est refusé, en nommant ce qui l'emploie** —
+  connexions *et* instances managées, qui portent les mêmes réglages de connexion. Une liste, jamais
+  un compte : un nombre dit qu'il y a un obstacle, une liste dit lequel et où aller. L'écran grise le
+  bouton en `aria-disabled` — la raison vit dans une infobulle qu'un `disabled` rendrait
+  inatteignable (piège n° 3) — **et** le cœur refuse : les deux gardent deux chemins différents, le
+  second valant quand la demande ne vient pas de l'écran ;
+- **le défaut ne prérègle qu'une connexion *neuve*.** L'appliquer à une connexion enregistrée la
+  repointerait en silence vers un autre cluster, ce qu'`update_variant` ferme une connexion pour
+  éviter. Un défaut qui ne désigne plus rien est **ignoré** plutôt que repris : poser une référence
+  morte à la création serait le défaut qu'on passe le reste du chantier à éviter ;
+- **et le fichier de transfert porte les déclarations que ses projets référencent** (`API-30`).
+  Sans cela `API-70` casserait l'import **en silence** : la connexion arriverait en désignant une
+  déclaration que l'autre machine n'a jamais eue. Une clé `kubeconfigs` à la racine, sur le patron
+  de `passwords` — **seulement les référencées**, parce qu'exporter un projet ne doit pas divulguer
+  la liste des clusters de son auteur. L'import **remappe par le chemin** : une déclaration locale
+  qui porte déjà ce fichier est reprise plutôt que doublée, et c'est le même raisonnement que la
+  référence de secret, recalculée sur le triplet d'arrivée. Le chemin importé est **nommé dans le
+  rapport**, comme les autres chemins locaux ; le **défaut**, lui, ne voyage pas — c'est un choix de
+  poste.
+
+**Trois choses apprises en le vérifiant, et les trois par sabotage** (règle n° 1) :
+
+- **le décor ne distinguait pas « remappée » de « reprise du fichier ».** Le fichier exporté et la
+  machine d'arrivée dérivaient le **même** identifiant du même chemin, donc retirer le remappage
+  laissait le test vert. C'est mot pour mot la leçon de la référence de secret d'`API-30`, qu'un
+  décor `Halle/catalogue/prod` des deux côtés ne distinguait pas — et elle s'est reproduite sur
+  l'objet voisin. Le fichier porte donc désormais un identifiant que cette machine ne peut pas
+  produire ;
+- **et ce test-là, une fois rendu mordant, a trouvé un vrai défaut** : `chemins_locaux` cherchait le
+  chemin dans les déclarations **du fichier**, alors que la référence de la connexion venait d'être
+  remise sur la déclaration **locale**. Elle ne trouvait donc rien, et le rapport taisait un chemin
+  qu'il existe précisément pour nommer. L'ordre compte : après versement, c'est la liste d'après
+  qu'il faut lire ;
+- **rien ne gardait la préservation des déclarations à l'écriture.** Retirer leur relecture dans
+  `ecrire_le_reste_intact` laissait les 837 tests verts — et aurait effacé toutes les déclarations au
+  premier renommage de projet, donc coupé **toutes** les connexions Kubernetes du fichier. C'est
+  exactement le défaut que cette fonction existe pour empêcher, arrivé à sa neuvième chose à
+  préserver ; le test qui le garde provoque délibérément la perte, comme celui des instances
+  d'`API-32`.
+
+**Ce qui reste à voir à l'œil** : la section « Connexions » sous WKWebView et en « Nuit », même
+réserve que les dix écrans. Le **sélecteur de fichier** natif ne se clique pas depuis un test —
+même angle mort que « Parcourir… » de la clé privée SSH —, donc « Ajouter un fichier… » et « Autre
+fichier… » demandent d'être faits à la main. Et surtout le geste qui prouve l'ensemble : **déclarer
+un kubeconfig, ouvrir une base derrière, déplacer le fichier dans les préférences, et rouvrir** —
+c'est là, et seulement là, que se voit ce que la référence a acheté. La migration, elle, n'a jamais
+tourné sur un vrai `config.json` d'utilisateur : celui de ce poste est le seul décor, et il n'a pas
+de connexion Kubernetes.
 
 ### Les filtres suivent la colonne (3 septembre 2026)
 
@@ -3213,8 +3343,13 @@ export du shell. Le défaut `~/.kube/config` survit — `HOME`, lui, est transmi
 `export KUBECONFIG=~/.kube/prod:~/.kube/staging`, qui est la façon courante de tenir plusieurs
 clusters, ne parvient jamais jusqu'à nous. Sans ce champ, les contextes de ces fichiers seraient
 **invisibles depuis l'app** alors que `kubectl config get-contexts` les liste dans un terminal, et
-l'échec dirait « context not found » : un message qui accuse une installation correcte. Quatre
-points à ne pas défaire :
+l'échec dirait « context not found » : un message qui accuse une installation correcte.
+
+**Depuis `API-70` (18 septembre 2026), il se déclare *une fois* et les connexions le référencent** —
+voir « Les kubeconfigs se déclarent une fois ». Ce qui suit reste vrai du **fichier** et de ce que
+`kubectl` en reçoit ; ce qui change est que la connexion ne porte plus son chemin mais un
+identifiant, et que « déclarer » a cessé d'être un geste par connexion. Quatre points à ne pas
+défaire :
 
 - **`--kubeconfig` prend un chemin, `$KUBECONFIG` une liste** — le cas de la fusion de plusieurs
   fichiers n'est donc pas couvert, et c'est assumé : une connexion vise **un** cluster, donc le
@@ -4267,12 +4402,14 @@ désormais sur le segment, et `std::path::is_separator` traite `/` et `\` selon 
 
 ### La migration du format de configuration
 
-`VERSION_COURANTE` vaut **5**. Les crans successifs sont des passes sur du
+`VERSION_COURANTE` vaut **6**. Les crans successifs sont des passes sur du
 `serde_json::Value`, sans type d'ancienne forme à maintenir — c'est pourquoi `migrer` et
 les migrations vivent encore dans `config/store.rs` malgré sa taille. **Le déclencheur du
 découpage** : la prochaine migration qui demande un `mod vN` de types dédiés. Ce jour-là,
 deux d'entre eux cohabiteront, et c'est cette cohabitation — pas le compte de lignes — qui
-justifiera le fichier séparé. Deux crans de suite l'ont manqué pour la même raison.
+justifiera le fichier séparé. Trois crans de suite l'ont manqué pour la même raison — le
+dernier, v5 → v6 (`API-70`), étant celui qui s'en rapproche le plus sans y arriver : il
+transforme, mais toujours sans connaître la structure qui entoure ce qu'il change.
 
 **Ne retirez pas `mod v1`** : la migration v1 → v2 s'en sert pour *déduire les
 environnements déclarés*. Un projet dont la seule trace d'un environnement était d'y être
@@ -4281,6 +4418,13 @@ actif perdrait sa déclaration.
 **Un champ ajouté avec `#[serde(default)]` ne demande aucun cran** ; un champ **retiré**
 en demande un. Et un champ conservé puis vidé (plutôt que supprimé du modèle) est la seule
 manière de reprendre des données sans que `serde` les efface en silence.
+
+**Et un champ qui change de *sens* en demande un aussi**, même quand sa forme ne bouge pas
+(`API-70`, v5 → v6). `ProxyKubernetes::kubeconfig` est resté une chaîne : c'était un chemin,
+c'est devenu une référence. `serde` relit les deux sans broncher — donc sans cran, une v5 se
+lirait comme une v6 et rendrait des références qui sont en réalité des chemins, ne résolvant
+rien et faisant ouvrir le kubeconfig par défaut de `kubectl`. **Le type n'est pas le
+critère ; ce que la valeur désigne l'est.**
 
 ---
 
@@ -4952,12 +5096,13 @@ Aucun de ces points ne bloque le code en place.
   design fera mieux qu'un alignement décidé au passage.
 - **Le visage Kubernetes n'a pas été conçu non plus** (31 août 2026) : trois champs, leurs libellés
   et leur cote sont inventés sur le patron du visage SSH — hauteurs de 28 px, espace de noms sur une
-  piste, kubeconfig et ressource sur la rangée entière. Le kubeconfig n'a **pas** de bouton
-  « Parcourir… », à la différence de la clé privée SSH : chacun demande une prop injectée et un test
-  de câblage, le sélecteur natif ne répondant pas hors de la webview, et un chemin de kubeconfig est
-  presque toujours sous `~/.kube/`. À reprendre si l'usage dit le contraire. Ce qui manque le plus à l'œil : un contexte GKE fait
-  rien ne dit **à l'écran** quel contexte sera employé : l'information n'existe que dans l'en-tête du
-  journal, donc seulement en cas d'échec. C'est la réserve qui reste après le retrait du champ, et un
+  piste, kubeconfig et ressource sur la rangée entière. **Le champ de saisie du kubeconfig est
+  devenu une liste avec `API-70`** (18 septembre 2026), et la question du bouton « Parcourir… » s'est
+  déplacée avec lui : il vit désormais dans les préférences, où l'on déclare — donc le visage d'`A2`
+  n'en a toujours pas, et n'en a plus besoin. La cote de la liste est celle des autres `Select` du
+  formulaire, non un dessin nouveau. Ce qui manque le plus à l'œil reste le même : **rien ne dit à
+  l'écran quel contexte sera employé**, l'information n'existant que dans l'en-tête du journal, donc
+  seulement en cas d'échec. C'est la réserve qui reste après le retrait du champ « Contexte », et un
   rappel discret sous le fichier serait la vraie réponse ; l'inventer aurait été inventer un état que
   le handoff ne décrit pas.
 - **`export-types` voyage dans le bundle** — 6,3 Mo d'un outil de développement dans le `.app`

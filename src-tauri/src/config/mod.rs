@@ -35,9 +35,9 @@ pub use instances::{
 };
 pub use model::{
     Accent, ConnectionSettings, Console, Database, Engine, EnvironmentColor,
-    EnvironmentDeclaration, EnvironmentId, Guards, InstanceId, ManagedInstance, ModelError,
-    Preferences, Project, Proxy, ProxyCloudSql, ProxyKubernetes, ProxySsh, SavedQuery, SecretRef,
-    SslMode, Theme, Tunnel,
+    EnvironmentDeclaration, EnvironmentId, Guards, InstanceId, KubeconfigDeclaration, KubeconfigId,
+    Kubeconfigs, ManagedInstance, ModelError, Preferences, Project, Proxy, ProxyCloudSql,
+    ProxyKubernetes, ProxySsh, SavedQuery, SecretRef, SslMode, Theme, Tunnel,
 };
 pub use query::{databases_available, validate};
 pub use store::{load, save, ConfigStore, LoadOutcome, StoreError, VERSION_COURANTE};

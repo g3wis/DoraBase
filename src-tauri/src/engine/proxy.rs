@@ -142,6 +142,52 @@ impl std::fmt::Debug for ProxyOuvert {
     }
 }
 
+/// Ce que la couche proxy a besoin de savoir de son environnement, et que la configuration d'une
+/// connexion ne porte pas.
+///
+/// **Pourquoi un type plutôt qu'un paramètre de plus** (`API-70`). `known_hosts` voyageait déjà seul
+/// jusqu'ici, à travers les cinq adaptateurs — dont les deux qui n'ouvrent aucun proxy et le
+/// reçoivent sous `_known_hosts`. `API-70` a dû y joindre les kubeconfigs déclarés, la connexion ne
+/// gardant plus qu'une **référence** vers l'un d'eux : les passer côte à côte aurait donné deux
+/// paramètres ambiants à toute signature d'ouverture, et le troisième aurait fait trois.
+///
+/// **Et il ne pouvait pas être évité.** La résolution ne peut pas se faire avant, dans un champ que
+/// l'appelant remplirait : un oubli y serait silencieux et ferait ouvrir **le cluster par défaut de
+/// `kubectl`**, avec succès — c'est la leçon de `Reprise`, paramètre obligatoire d'`avec` plutôt que
+/// seconde méthode, appliquée à une valeur dont l'absence ne se voit pas.
+#[derive(Debug, Clone, Default)]
+pub struct ContexteDeProxy {
+    /// Le fichier des clés d'hôte SSH connues. N'intéresse que le tunnel SSH.
+    pub known_hosts: std::path::PathBuf,
+    /// Les kubeconfigs déclarés (`API-70`). N'intéressent que le transfert Kubernetes.
+    pub kubeconfigs: crate::config::Kubeconfigs,
+}
+
+impl ContexteDeProxy {
+    /// Le contexte d'un poste : les clés d'hôte de l'utilisateur, et ce que la configuration déclare.
+    pub fn nouveau(
+        known_hosts: std::path::PathBuf,
+        kubeconfigs: crate::config::Kubeconfigs,
+    ) -> Self {
+        Self {
+            known_hosts,
+            kubeconfigs,
+        }
+    }
+
+    /// Un contexte qui ne peut rien ouvrir : aucune clé d'hôte, aucun kubeconfig déclaré.
+    ///
+    /// Pour les décors qui n'ouvrent pas de proxy — c'est le `/dev/null` que les tests passaient
+    /// déjà, nommé.
+    #[cfg(test)]
+    pub fn pour_les_tests() -> Self {
+        Self::nouveau(
+            std::path::PathBuf::from("/dev/null"),
+            crate::config::Kubeconfigs::default(),
+        )
+    }
+}
+
 impl ProxyOuvert {
     /// Ouvre le proxy décrit par la configuration, quelle que soit sa sorte.
     ///
@@ -158,7 +204,7 @@ impl ProxyOuvert {
         tunnel: &crate::config::Tunnel,
         hote_cible: &str,
         port_cible: u16,
-        known_hosts: &std::path::Path,
+        contexte: &ContexteDeProxy,
     ) -> Result<Self, EngineError> {
         match &tunnel.proxy {
             crate::config::Proxy::Ssh(ssh) => crate::engine::tunnel::SshTunnel::ouvrir(
@@ -166,7 +212,7 @@ impl ProxyOuvert {
                 hote_cible,
                 port_cible,
                 tunnel.local_port,
-                known_hosts,
+                &contexte.known_hosts,
             )
             .await
             .map(Self::Ssh),
@@ -180,6 +226,7 @@ impl ProxyOuvert {
                     kube,
                     tunnel.local_port,
                     port_cible,
+                    &contexte.kubeconfigs,
                 )
                 .await
                 .map(|proxy| Self::Kubernetes(Box::new(proxy)))

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Icon } from '../../design/icons/Icon'
-import type { Engine, ManagedInstance, SslMode } from '../../domain/config'
+import type { Engine, Kubeconfigs, ManagedInstance, SslMode } from '../../domain/config'
 import { useT } from '../../i18n/LanguageContext'
 import { Badge } from '../../ui/Badge/Badge'
 import { Button } from '../../ui/Button/Button'
@@ -39,6 +39,16 @@ export type NewInstanceProps = {
   }) => Promise<void>
   /** Ouvre le sélecteur de clé privée SSH — injecté, comme dans `A2`. */
   onBrowseKey?: () => Promise<string | null>
+  /**
+   * Les kubeconfigs déclarés (`API-70`), pour la liste du visage Kubernetes.
+   *
+   * **Un défaut vide plutôt qu'une prop obligatoire** : la vitrine, la démo et les tests montent cet
+   * écran sans configuration, et ce qu'ils y verraient — une liste qui ne propose que « celui de
+   * kubectl » et « Autre fichier… » — est exactement l'état d'un poste qui n'a rien déclaré.
+   */
+  kubeconfigs?: Kubeconfigs
+  /** Déclare un kubeconfig et rend sa référence. Injectée pour la raison d'`onBrowseKey`. */
+  onDeclareKubeconfig?: () => Promise<string | null>
 }
 
 /**
@@ -65,7 +75,14 @@ export type NewInstanceProps = {
  * d'ensemble ; l'annoncer ici est ce qui fait comprendre pourquoi le formulaire demande un compte
  * d'administration et pas n'importe lequel.
  */
-export function NewInstance({ edition, onClose, onEnregistrer, onBrowseKey }: NewInstanceProps) {
+export function NewInstance({
+  edition,
+  onClose,
+  onEnregistrer,
+  onBrowseKey,
+  kubeconfigs = {},
+  onDeclareKubeconfig = async () => null,
+}: NewInstanceProps) {
   const t = useT()
   const [engine, setEngine] = useState<Engine>(edition?.engine ?? 'postgresql')
   const [libelle, setLibelle] = useState(edition?.label ?? '')
@@ -264,6 +281,8 @@ export function NewInstance({ edition, onClose, onEnregistrer, onBrowseKey }: Ne
           open={proxyOuvert}
           onOpenChange={setProxyOuvert}
           onBrowseKey={onBrowseKey ?? ouvrirSelecteurDeCle}
+          kubeconfigs={kubeconfigs}
+          onDeclareKubeconfig={onDeclareKubeconfig}
         />
 
         <div className={styles.bascules}>

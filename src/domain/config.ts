@@ -29,7 +29,14 @@ preferences: Preferences,
  * même fichier ; deux commandes en feraient deux lectures, donc deux instants, et l'écran
  * aurait à composer deux réponses dont l'une peut échouer sans l'autre.
  */
-instances: Array<ManagedInstance>, } | { "kind": "unreadable", reason: string, 
+instances: Array<ManagedInstance>, 
+/**
+ * Les kubeconfigs déclarés (`API-70`), lus avec les projets, **et pour la raison
+ * ci-dessus, qui vaut ici plus fort encore** : une connexion Kubernetes porte une
+ * référence, donc l'écran ne peut pas nommer le fichier d'une connexion sans eux. Les
+ * demander à part ferait rendre `A2` avant de savoir ce que sa liste contient.
+ */
+kubeconfigs: Kubeconfigs, } | { "kind": "unreadable", reason: string, 
 /**
  * Où l'original a été mis de côté, à montrer pour qu'il soit récupérable.
  */
@@ -390,6 +397,64 @@ projects: Array<Project>, report: ImportReport, };
 export type InstanceId = string;
 
 /**
+ * Un kubeconfig déclaré une fois pour toutes, que les connexions désignent (`API-70`).
+ *
+ * **Pourquoi ce type existe** : un cluster porte souvent des dizaines de bases, donc le même
+ * fichier était ressaisi connexion par connexion. Le déclarer une fois retire la ressaisie, et la
+ * **référence** retire la mise à jour en masse — déplacer le fichier se fait ici, et les connexions
+ * suivent.
+ */
+export type KubeconfigDeclaration = { 
+/**
+ * Figé à la déclaration. Voir [`KubeconfigId`].
+ */
+id: KubeconfigId, 
+/**
+ * Ce que l'écran affiche. Peut diverger de l'identifiant, et c'est voulu.
+ */
+label: string, 
+/**
+ * Le chemin du fichier, tel que l'utilisateur l'a donné.
+ *
+ * **Pas développé ici** : le `~/` de tête l'est par `programme::chemin_utilisateur`, au moment
+ * de lancer `kubectl`, et là seulement. Développer en écrivant persisterait un chemin absolu
+ * que personne n'a saisi, donc une déclaration qui cesse d'être vraie sous un autre compte.
+ */
+path: string, };
+
+/**
+ * L'identifiant **stable** d'un kubeconfig déclaré (`API-70`).
+ *
+ * C'est la raison d'`EnvironmentId` et d'`InstanceId`, pour la troisième fois : une connexion
+ * Kubernetes garde une **référence** vers la déclaration, pas son chemin. Si l'identifiant suivait
+ * le libellé, renommer « prod » en « production » détacherait toutes les connexions qui s'y
+ * rattachent — sans erreur, sans message, et la suivante ouvrirait le kubeconfig **par défaut de
+ * `kubectl`**, c'est-à-dire un autre cluster, avec succès. C'est le mode de défaillance que ce
+ * dossier redoute le plus : se tromper d'espace de noms se voit, se tromper de cluster réussit.
+ *
+ * Il est donc dérivé du libellé **une fois**, à la déclaration, puis figé. Renommer une déclaration
+ * change son libellé seul ; **déplacer le fichier change son chemin seul**, et c'est précisément ce
+ * que la référence achète — toutes les connexions suivent, sans qu'aucune soit rouverte.
+ */
+export type KubeconfigId = string;
+
+/**
+ * Les kubeconfigs déclarés, et celui qui prérègle une connexion neuve (`API-70`).
+ *
+ * **Un type plutôt que deux champs à la racine du fichier** : l'invariant « le défaut nomme une
+ * déclaration qui existe » n'a alors qu'un seul lieu où il peut être faux, et [`Kubeconfigs::valider`]
+ * y répond. Deux champs voisins auraient laissé chaque écrivain le tenir de son côté.
+ */
+export type Kubeconfigs = { declarations?: Array<KubeconfigDeclaration>, 
+/**
+ * Celui qui préremplit une connexion Kubernetes **neuve**, et rien de plus.
+ *
+ * **Jamais appliqué à une connexion déjà enregistrée** : changer le défaut repointerait en
+ * silence des connexions qui marchent, ce qu'`update_variant` ferme une connexion pour éviter.
+ */
+default?: KubeconfigId | null, };
+
+/**
  * La langue de l'interface (26 août 2026).
  *
  * **Le même mécanisme que `Theme`** : une variante `Systeme` que l'écran résout lui-même,
@@ -602,8 +667,8 @@ instanceConnectionName: string, };
  */
 export type ProxyKubernetes = { 
 /**
- * Le fichier kubeconfig. `None` : celui que `kubectl` choisirait — `$KUBECONFIG`, à défaut
- * `~/.kube/config`.
+ * Le kubeconfig à employer, **par référence** à une déclaration de [`Kubeconfigs`] (`API-70`).
+ * `None` : celui que `kubectl` choisirait — `$KUBECONFIG`, à défaut `~/.kube/config`.
  *
  * **Ce champ existe parce qu'une app graphique n'hérite pas de `$KUBECONFIG`** (31 août 2026).
  * C'est le même fait qui a imposé l'enrichissement du `PATH`, appliqué à une autre variable :
@@ -618,12 +683,16 @@ export type ProxyKubernetes = {
  * **Un chemin, pas une liste.** `$KUBECONFIG` accepte plusieurs fichiers séparés par `:`, que
  * `kubectl` fusionne ; `--kubeconfig` n'en prend qu'un. Le cas de la fusion n'est donc pas
  * couvert, et c'est assumé : une connexion vise **un** cluster, donc le fichier qui le déclare
- * suffit à la décrire. Ce qui se perd est la commodité d'un réglage global, pas une capacité.
+ * suffit à la décrire.
  *
- * Le `~/` de tête est développé (`programme::chemin_utilisateur`) : nous passons un argv direct,
- * jamais un shell, donc rien ne le ferait à notre place.
+ * **Une référence et non le chemin, depuis `API-70`.** Un cluster porte souvent des dizaines de
+ * bases : le chemin était ressaisi à chaque connexion, et le déplacer demandait de rouvrir
+ * chacune. La référence met le chemin en **un** lieu. Ce qu'elle coûte est que le chemin n'est
+ * plus lisible ici : il faut les déclarations pour l'obtenir, d'où le `ContexteDeProxy` que
+ * l'ouverture reçoit — et un `#[serde(skip)]` qu'un appelant aurait dû remplir a été écarté
+ * pour cela, l'oubli ouvrant **le cluster par défaut de `kubectl`, avec succès**.
  */
-kubeconfig?: string | null, 
+kubeconfig?: KubeconfigId | null, 
 /**
  * L'espace de noms. `None` : celui que `kubectl` emploierait — celui du contexte s'il en
  * déclare un, `default` sinon.
