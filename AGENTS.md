@@ -2019,6 +2019,81 @@ message long n'a pour juge que les tests unitaires, qui ne mesurent pas les pixe
 fenêtre visible ou le résultat complet ? », qui n'est pas tranché ; `engine::export` est ce sur quoi
 il se construira, et c'est précisément pourquoi le sérialiseur y est déjà.
 
+### Le résultat de la console remplit la place qu'on lui donne (18 septembre 2026, `API-74`)
+
+`ConsoleResult` montait sa grille avec un `viewportHeight={320}` **écrit en dur**. Les 26 px de
+l'en-tête collé vivant dans cette zone, il en restait 294, soit **onze lignes** — quelles que soient
+la fenêtre et la position de la poignée. Rapporté à l'usage : « there is a lot of empty space below
+console results », puis « always 11 rows, does not scale with available space ».
+
+La constante était fausse **dans les deux sens**, et c'est la seconde moitié qui coûte le plus.
+Mesuré dans `?demo` : sur une fenêtre de 860 px, l'emplacement fait 450 px et la grille 320 — 130 px
+de vide entre la dernière ligne et la barre de chiffres. Sur une fenêtre de 520 px, l'emplacement
+tombe à 110 et la grille **déclare toujours 320** : elle se peint sous la barre et 196 px au-delà du
+bord de la fenêtre, où **aucun geste ne va** — ni molette, ni clavier, la racine ne défilant pas. Un
+vide se voit ; des lignes inatteignables ne se voient pas.
+
+Cinq décisions à ne pas défaire :
+
+- **la mesure a quitté `A5` pour `ui/VirtualGrid/hauteurDisponible.ts`.** Elle y était privée, et le
+  second hôte de `VirtualGrid` a mis une constante à sa place plutôt que de la recopier — ce qui est
+  pire qu'un doublon, puisque rien ne relie plus les deux. La question « quelle hauteur la grille
+  a-t-elle ? » n'a qu'une réponse, elle doit n'avoir qu'un lieu : c'est le `HOME` lu à quatre
+  endroits, et `ecrire_le_reste_intact`, appliqués aux hôtes d'une grille. Le troisième écran qui en
+  montera une trouvera la mesure au lieu de l'inventer ;
+- **une ref de rappel, et non une `useRef` + un effet au montage.** C'est l'écart avec la version
+  d'`A5`, et il est nécessaire : `ConsoleResult` rend des racines **différentes** selon son état —
+  attente, erreur, vide, grille —, donc l'emplacement à mesurer n'existe pas au montage. Un effet à
+  dépendances vides serait parti une fois, sur un `ref.current` nul, et n'aurait plus jamais rien
+  observé : la grille serait restée à sa hauteur de repli pour toujours. Vérifié par sabotage — la
+  version d'`A5` posée telle quelle ici rend les quatre tests rouges ;
+- **le retrait est un paramètre, et il vaut zéro ici.** La ref d'`A5` englobe sa toolbar, d'où ses
+  36 px ; celle de la console est posée sur l'emplacement de la grille, qui ne porte rien d'autre —
+  la bande des vues et la barre de chiffres sont ses sœurs, non son contenu. Poser la ref sur
+  l'emplacement plutôt que sur la racine est le cas simple, et celui qu'il vaut mieux viser : un
+  retrait est une cote de plus à tenir en phase avec une feuille de style ;
+- **la hauteur est lue tout de suite, pas seulement au premier tour de l'observateur.** Mesuré
+  plutôt que supposé, en relevant les hauteurs successives de la zone : sans cette lecture elle vaut
+  `400px` **puis** `450px`, la ref de rappel étant appelée pendant le commit quand l'observateur ne
+  rend sa première mesure qu'après la peinture. C'est un saut d'une trame à chaque ouverture de
+  résultat, qu'aucune assertion de géométrie prise après coup ne peut voir ;
+- **et le repli n'est pas zéro** (400 px). Une hauteur nulle ne monterait aucune ligne, et les tests
+  unitaires qui comptent les lignes visibles passeraient pour la mauvaise raison — jsdom ne calcule
+  aucune mise en page, donc `clientHeight` y vaut zéro et c'est le repli qui sert.
+
+**Le test garde la cause, non la conséquence.** La conséquence est « onze lignes », mais la compter
+demanderait un décor qui en rende plus de onze quand `?demo` en rend deux — et un décor écrit pour un
+test mesure le décor (règle n° 5). Ce qui est vrai de tout décor est le mécanisme : la zone défilante
+vaut l'emplacement qu'on lui donne, **au pixel**. C'est une égalité et non un ordre de grandeur
+(règle n° 18) : « plus haute qu'avant » resterait vrai d'une constante de 400, et « elle ne dépasse
+pas » resterait vrai de n'importe quelle valeur trop petite — c'est-à-dire du défaut lui-même.
+
+Quatre sabotages, et **chaque mécanisme n'a qu'un test qui tombe** : la constante remise fait tomber
+les quatre, la lecture immédiate retirée ne fait tomber que celui du premier rendu, l'observateur
+retiré que celui de la poignée, et l'effet au montage les quatre. Le contrôle positif porte sur une
+quantité **que le défaut ne déplace pas** — le bas de la dernière ligne, qui dépend du nombre de
+lignes et du pas, non de la hauteur de la zone : sans lui, un décor dont les lignes rempliraient
+l'emplacement rendrait l'égalité vraie sans rien prouver (le corollaire d'`API-62`, un contrôle qui
+bouge avec le défaut tombe à la place de l'assertion qu'il doit laisser parler).
+
+**Et la poignée se désigne par ce qu'elle sépare**, non par son orientation : la sidebar porte elle
+aussi un partage empilé, donc un second séparateur horizontal, et les deux ensemble rendent la
+résolution ambiguë. Celui qu'on cherche est l'enfant direct du partage qui porte la grille. L'égalité
+qui suit le geste est en `poll` (règle n° 15) : le contrôle positif rend la main dès que
+l'emplacement a rétréci, quand la grille ne suit qu'au rendu que l'observateur déclenche — une
+lecture sèche tombe une fois sur deux, mesuré.
+
+**Ce qui n'est pas de ce chantier et qu'on rencontre en le vérifiant** : la coquille dépasse d'un
+pixel de la fenêtre — `scrollHeight` vaut `clientHeight + 1` jusqu'au `body`, avant ce chantier comme
+après. Le contrôle positif de la fenêtre courte mesure donc le **haut** de la barre de chiffres et
+non son bas, sans quoi il tomberait sur un défaut qui n'est pas le sien.
+
+**Ce qui reste à voir à l'œil** : le résultat sous WKWebView et en « Nuit » — même réserve que les
+dix écrans. Et la seule chose qu'aucun décor de ce dépôt ne peut montrer : un résultat de **plus de
+onze lignes**, `?demo` en rendant deux. Ce que le signalement décrit — onze lignes et du vide
+dessous — n'a donc jamais été *vu* corrigé ici ; c'est l'égalité de la zone et de son emplacement qui
+en tient lieu, et une vraie base qui le dira.
+
 ### Un panneau ne se quitte pas en allant vers lui (9 septembre 2026, `API-35`)
 
 Les menus « … » se refermaient sous la main : « ils sont trop sensibles, et disparaissent parfois

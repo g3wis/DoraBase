@@ -28,6 +28,7 @@ import { cx } from '../../ui/cx'
 import type { EntreeDeMenu } from '../../ui/MenuContextuel/MenuContextuel'
 import { MenuContextuel } from '../../ui/MenuContextuel/MenuContextuel'
 import { largeurAjustee } from '../../ui/VirtualGrid/ajustement'
+import { useHauteurDisponible } from '../../ui/VirtualGrid/hauteurDisponible'
 import { type GridColumn, type PositionDuMenu, VirtualGrid } from '../../ui/VirtualGrid/VirtualGrid'
 import {
   apercuDeLaSaisie,
@@ -388,7 +389,10 @@ export function TableView({
     onArriveeAppliquee?.()
   }, [arrivee, onArriveeAppliquee])
 
-  const hauteur = useHauteurDisponible()
+  // 36 px : la toolbar, que la ref englobe — elle est posée sur la racine de l'écran. La barre
+  // d'état, elle, vit au niveau de l'écran depuis `10f` : la retirer ici laisserait vingt-six
+  // pixels vides sous la grille. Mesuré, pas supposé.
+  const hauteur = useHauteurDisponible(36)
   // La sélection est **pilotée par l'écran** : le panneau de ligne et ses flèches vivent au-dessus
   // de cette vue, et deux copies du même rang divergeraient.
   const choisie = rang === null ? null : String(rang)
@@ -1466,34 +1470,4 @@ function messageVide(
   // Vide **lu** n'est pas vide **non lu** : une table sans ligne est un état normal, et ne rien
   // dire laisserait croire que la lecture n'a pas abouti.
   return t('tableView.grid.noRows', { schema, table })
-}
-
-/**
- * La hauteur du conteneur, mesurée.
- *
- * `VirtualGrid` prend une hauteur en **valeur** — jsdom ne calculant aucune mise en page, une
- * virtualisation qui lit `clientHeight` rendrait zéro ligne sous Vitest. La mesure vit donc ici,
- * dans l'écran, où un test n'en dépend pas.
- */
-function useHauteurDisponible() {
-  const ref = useRef<HTMLDivElement>(null)
-  // 400 px : ce que rend un conteneur non mesuré, sous jsdom notamment. Une valeur nulle ne
-  // monterait aucune ligne et ferait passer les tests pour la mauvaise raison.
-  const [valeur, setValeur] = useState(400)
-
-  useEffect(() => {
-    const element = ref.current
-    if (!element || typeof ResizeObserver === 'undefined') return
-    const observateur = new ResizeObserver(() => {
-      // La grille, c'est le conteneur **moins la toolbar** (36 px). La barre d'état, elle, vit au
-      // niveau de l'écran depuis `10f` : la retirer ici laisserait vingt-six pixels vides sous la
-      // grille. Mesuré, pas supposé.
-      const disponible = element.clientHeight - 36
-      if (disponible > 0) setValeur(disponible)
-    })
-    observateur.observe(element)
-    return () => observateur.disconnect()
-  }, [])
-
-  return { ref, valeur }
 }
