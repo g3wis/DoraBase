@@ -1,4 +1,4 @@
-import { useId } from 'react'
+import { type ReactNode, useId } from 'react'
 import { Icon } from '../../design/icons/Icon'
 import { cx } from '../cx'
 import { ListeDeroulante } from './ListeDeroulante'
@@ -9,6 +9,13 @@ type SelectSize = 'sm' | 'md'
 export type SelectOption<T extends string> = {
   value: T
   label: string
+  /**
+   * Rendu à gauche du libellé — voir `OptionDeListe`.
+   *
+   * Il traverse `Select` sans qu'il en fasse rien : c'est l'appelant qui sait ce que l'entrée
+   * *dit*, et `ListeDeroulante` qui sait comment aligner les libellés quand une liste en porte.
+   */
+  ornement?: ReactNode
 }
 
 type SelectProps<T extends string> = {

@@ -596,6 +596,38 @@ test('avec un catalogue, les deux champs deviennent des listes portant ce que le
   expect(panneau.queryByRole('button', { name: 'Choisir dans la liste' })).not.toBeInTheDocument()
 })
 
+test('la liste des espaces de noms ne propose pas le vide comme un espace de noms', async () => {
+  // **Une négative, et elle est le seul garde de ce retrait** (18 septembre 2026, à la demande :
+  // « remove "vide (default)" namespace »). L'entrée portait la phrase qui décrit ce que *le vide*
+  // vaut — « vide : default, ou celui que le contexte déclare » —, une aide à la saisie qui, au
+  // milieu d'une liste d'espaces de noms, se lisait comme un espace de noms qu'on pourrait choisir.
+  //
+  // Rien d'autre ne la verrait revenir : une assertion positive sur « comptoir » et « atelier »
+  // reste verte avec une troisième entrée au-dessus.
+  const { catalogue } = catalogueQuiRepond()
+  monter(undefined, { catalogueKubernetes: catalogue })
+  await choisirLeType('Kubernetes')
+  await screen.findByRole('combobox', { name: 'Espace de noms' })
+
+  const entrees = await optionsDeLaListe('Espace de noms')
+  expect(entrees.join(' ')).not.toContain('default')
+  // Ce qui reste tant que rien n'est choisi : une entrée sans laquelle la liste n'aurait aucun
+  // libellé à rendre sur un formulaire neuf. C'est la règle de la ressource, à l'identique.
+  expect(entrees).toContain('À choisir')
+})
+
+test('l’entrée « À choisir » disparaît dès qu’un espace de noms est choisi', async () => {
+  // L'autre moitié : la garder offrirait de défaire ce qu'on vient de choisir, dans une liste où
+  // toutes les autres entrées désignent quelque chose.
+  const { catalogue } = catalogueQuiRepond()
+  monter(undefined, { catalogueKubernetes: catalogue })
+  await choisirLeType('Kubernetes')
+  await screen.findByRole('combobox', { name: 'Espace de noms' })
+
+  await choisirDansLaListe('Espace de noms', 'atelier')
+  expect(await optionsDeLaListe('Espace de noms')).not.toContain('À choisir')
+})
+
 test('choisir un espace de noms relit les objets de celui-là, et non du précédent', async () => {
   // **Le défaut que ce test existe pour attraper** : le panneau relit dans le geste même où il pose
   // le nouvel espace de noms, donc avant le rendu suivant. Sans le passer explicitement, la lecture

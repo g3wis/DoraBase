@@ -5,7 +5,7 @@ import { Badge } from '../../ui/Badge/Badge'
 import { CollapsiblePanel } from '../../ui/CollapsiblePanel/CollapsiblePanel'
 import { Field } from '../../ui/Field/Field'
 import { Select } from '../../ui/Select/Select'
-import { ChampCatalogue } from './ChampCatalogue'
+import { ChampCatalogue, orner } from './ChampCatalogue'
 import { emptyProxy, type ProxyDraft, type ProxyKind, type TunnelDraft } from './ConnectionDraft'
 import { AUTRE_FICHIER, optionsDeKubeconfig } from './kubeconfigs'
 import styles from './NewConnection.module.css'
@@ -276,7 +276,7 @@ export function TunnelPanel({
             <Select
               label={t('newConnection.tunnel.kubeconfigLabel')}
               size="sm"
-              options={optionsDeKubeconfig(kubeconfigs, t, proxy.kubeconfig)}
+              options={optionsDeKubeconfig(kubeconfigs, t, proxy.kubeconfig).map(orner)}
               value={proxy.kubeconfig}
               onValueChange={(choix) => {
                 if (choix !== AUTRE_FICHIER) {
@@ -333,10 +333,23 @@ export function TunnelPanel({
                   piste={catalogue.espaces}
                   disponible={disponibleKubernetes}
                   placeholder={t('newConnection.tunnel.namespacePlaceholder')}
-                  /* Le vide **est** une valeur ici — « celui que kubectl emploierait » —, donc la
-                     liste lui donne son entrée, comme la liste des kubeconfigs donne la sienne à
-                     « Celui de kubectl ». */
-                  videLibelle={t('newConnection.tunnel.namespacePlaceholder')}
+                  /* **Aucune entrée « vide » une fois un espace de noms choisi**, et aucune qui
+                     porte la phrase du placeholder (18 septembre 2026, à la demande : « remove
+                     "vide (default)" namespace »). Celle-ci décrivait ce que *le vide* vaut —
+                     « vide : default, ou celui que le contexte déclare » —, ce qui est une aide
+                     à la saisie et non le nom d'un espace de noms : dans une liste d'espaces de
+                     noms, elle se lisait comme une entrée qu'on pourrait choisir. La phrase reste
+                     là où elle a du sens, en placeholder du champ de saisie, qui est le seul
+                     endroit où le vide se tape encore.
+
+                     Ce qui reste est la règle de la ressource, à l'identique : tant que rien n'est
+                     choisi, une entrée « À choisir » — sans quoi `ListeDeroulante` n'aurait aucun
+                     libellé à rendre et la liste paraîtrait vide sur un formulaire neuf. Revenir au
+                     vide passe par « Saisir à la main… » puis un champ vidé, ce qui est un geste
+                     plutôt qu'un choix — et c'en est un. */
+                  videLibelle={
+                    proxy.namespace === '' ? t('newConnection.tunnel.catalogueAChoisir') : null
+                  }
                   videMessage={t('newConnection.tunnel.catalogueAucunEspace')}
                   onChange={(valeur, origine) => {
                     onProxyChange({ ...proxy, namespace: valeur })
@@ -372,7 +385,7 @@ export function TunnelPanel({
                        valeur pour la ressource, c'est son absence — et ce visage n'a rien d'autre
                        d'obligatoire. Tant que rien n'est choisi, l'entrée existe, sans quoi la
                        liste afficherait un libellé vide. */
-                    videLibelle={nom === '' ? t('newConnection.tunnel.resourceAChoisir') : null}
+                    videLibelle={nom === '' ? t('newConnection.tunnel.catalogueAChoisir') : null}
                     videMessage={t('newConnection.tunnel.catalogueAucuneRessource')}
                     aideId={aideId}
                     onChange={(valeur) =>

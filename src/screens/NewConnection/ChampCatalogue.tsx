@@ -16,6 +16,8 @@
  * vouloir qu'on la relise sont le même souhait.
  */
 import { useId } from 'react'
+import { Icon } from '../../design/icons/Icon'
+import type { IconName } from '../../design/icons/names'
 import { useT } from '../../i18n/LanguageContext'
 import { Field } from '../../ui/Field/Field'
 import { Select } from '../../ui/Select/Select'
@@ -47,6 +49,23 @@ type ChampCatalogueProps = {
   aideId?: string
 }
 
+/**
+ * Le seul endroit qui transforme un **nom** d'icône en ornement.
+ *
+ * Les listes sont composées par des fonctions pures, qui ne rendent rien : elles décident *quelle*
+ * entrée porte *quel* glyphe, ce qui se vérifie sans monter un composant. La conversion vit ici et
+ * chez l'appelant de `optionsDeKubeconfig`, aux deux endroits qui rendent déjà.
+ *
+ * 13 px et un trait de 2 : la cote des glyphes de liste du dépôt, et la largeur que
+ * `ListeDeroulante` réserve.
+ */
+export function orner<T extends { icone?: IconName }>(entree: T) {
+  const { icone, ...reste } = entree
+  return icone === undefined
+    ? reste
+    : { ...reste, ornement: <Icon name={icone} size={13} strokeWidth={2} /> }
+}
+
 export function ChampCatalogue({
   label,
   value,
@@ -66,7 +85,7 @@ export function ChampCatalogue({
       <Select
         label={label}
         size="sm"
-        options={optionsDeCatalogue(piste.liste.noms, value, t, videLibelle)}
+        options={optionsDeCatalogue(piste.liste.noms, value, t, videLibelle).map(orner)}
         value={value}
         onValueChange={(choix) => {
           // Les deux entrées qui **agissent** plutôt que de désigner, comme « Autre fichier… » de la

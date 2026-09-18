@@ -2937,6 +2937,46 @@ Onze décisions à ne pas défaire :
   absente des options n'afficherait **rien du tout**, sur une connexion qui porte pourtant
   `svc/postgres` — le cas de toutes celles déclarées avant ce jour. Et la vider ferait changer ce que
   la connexion joindra sans que personne l'ait demandé ;
+- **les entrées qui *agissent* portent un glyphe, celles qui *désignent* n'en portent pas**
+  (18 septembre 2026, à la demande). Leur place en queue de liste ne suffisait pas : d'un coup
+  d'œil, « Rafraîchir la liste » au milieu de dix pods se lit comme un onzième pod, et il faut
+  parcourir la liste en entier pour s'apercevoir du contraire. Trois décisions :
+  - **`refresh` et `kbd`**, et le second n'est pas un crayon. Le crayon aurait été le choix naturel
+    ailleurs ; ici il dit déjà « une ligne est modifiée », dans l'indicateur de sélection et le
+    panneau des modifications, et un même glyphe pour deux choses fait annoncer l'une par le nom de
+    l'autre — la raison qui garde le rouage à la section « Général » d'`A10`. `i-kbd` est un clavier,
+    c'est **littéralement** ce que l'entrée offre, et il vivait dans le sprite **sans appelant**
+    depuis son extraction du handoff : ce bouton est son premier, comme `i-slid` l'a été pour
+    `API-46` ;
+  - **« Autre fichier… » de la liste de kubeconfigs en reçoit un aussi** (`plus`, parce qu'elle
+    *déclare*), bien qu'`API-73` ne la touche pas autrement. C'est le même genre d'entrée, dans le
+    **même panneau**, deux rangées plus haut : la laisser nue pendant que ses voisines sont ornées
+    ferait deux dessins pour un seul genre, ce que ce fichier refuse déjà pour l'export et l'import ;
+  - **dès qu'une entrée porte un ornement, toutes réservent sa place**, et c'est `ListeDeroulante`
+    qui en décide et non chaque appelant — « un menu sans icône aligne ses libellés au bord, un menu
+    qui en a les aligne après le glyphe ». Sans la réserve, les entrées ornées décaleraient leur
+    libellé de treize pixels et la liste se lirait en escalier : or l'ornement existe pour dire
+    **laquelle agit**, et un décalage ne dit pas laquelle fait quoi. Le contrôle négatif compte
+    autant que le positif — réserver toujours donnerait une gouttière aux six listes du produit qui
+    n'ont pas d'icône, que personne n'a demandée.
+
+  Le nom de l'icône voyage dans les entrées, **jamais l'icône** : ces listes sont composées par des
+  fonctions pures, et un `ReactNode` en aurait fait du JSX, donc des assertions portant sur un
+  élément React plutôt que sur la décision. La conversion vit dans `orner`, chez ceux qui rendent
+  déjà. Et les glyphes ont été **regardés à `deviceScaleFactor: 6`** avant d'être retenus, comme les
+  marques du diagramme : à treize pixels, un dessin se juge à la loupe et non dans un fichier SVG ;
+- **aucune des deux listes ne propose le vide une fois quelque chose de choisi**, et celle des
+  espaces de noms ne l'a jamais proposé sous la phrase du placeholder (18 septembre 2026, à la
+  demande : « remove "vide (default)" namespace »). Cette phrase — « vide : `default`, ou celui que
+  le contexte déclare » — décrit ce que *le vide* vaut : c'est une aide à la **saisie**, et au milieu
+  d'une liste d'espaces de noms elle se lisait comme un espace de noms qu'on pourrait choisir. Elle
+  reste donc là où elle a du sens, en placeholder du champ, seul endroit où le vide se tape encore.
+  Ce qui subsiste est une entrée « À choisir » tant que rien n'est choisi, sans laquelle
+  `ListeDeroulante` n'aurait aucun libellé à rendre sur un formulaire neuf — et rien de plus : la
+  garder ensuite offrirait de défaire ce qu'on vient de choisir, dans une liste dont toutes les
+  autres entrées désignent quelque chose. **Trois négatives la gardent**, une par façon de la voir
+  revenir, et elles sont le seul garde de ce retrait : une assertion positive sur les noms d'espaces
+  de noms reste verte avec une entrée de plus au-dessus ;
 - **un nom qui porte déjà sa sorte l'emporte sur la liste.** `svc/postgres` tapé dans le champ du nom
   est ce qu'écrit qui a l'habitude du champ d'avant, ou qui recopie une ligne de terminal : le
   composer donnerait `service/svc/postgres`, que `kubectl` refuse, et l'erreur n'arriverait qu'à

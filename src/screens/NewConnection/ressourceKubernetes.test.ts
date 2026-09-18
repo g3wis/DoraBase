@@ -102,6 +102,24 @@ describe('la liste lue au cluster', () => {
     expect(absente?.label).toBe('newConnection.tunnel.catalogueAbsent:postgres-ancien')
   })
 
+  it('marque d’un glyphe les deux entrées qui agissent, et elles seules', () => {
+    // **Leur place en queue ne suffit pas à les distinguer** : d'un coup d'œil, « Rafraîchir la
+    // liste » au milieu de dix pods se lit comme un onzième pod. Le glyphe le dit avant la lecture.
+    //
+    // Le **nom** de l'icône et non l'icône : ces fonctions ne rendent rien, et c'est la décision —
+    // quelle entrée porte quel glyphe — qui se garde ici.
+    const options = optionsDeCatalogue(['postgres', 'redis'], 'postgres', t, 'le vide')
+
+    const parValeur = new Map(options.map((option) => [option.value, option.icone]))
+    expect(parValeur.get(RAFRAICHIR)).toBe('refresh')
+    expect(parValeur.get(A_LA_MAIN)).toBe('kbd')
+    // L'autre moitié, et c'est elle qui porte l'exigence : une liste où **tout** serait orné ne
+    // distinguerait plus rien.
+    expect(parValeur.get('postgres')).toBeUndefined()
+    expect(parValeur.get('redis')).toBeUndefined()
+    expect(parValeur.get('')).toBeUndefined()
+  })
+
   it('n’ajoute pas d’entrée d’absence pour une valeur que la liste porte', () => {
     // Le contrôle négatif : sans lui, l'assertion d'au-dessus passerait aussi avec une entrée
     // ajoutée à chaque fois, donc chaque nom doublé dans la liste.

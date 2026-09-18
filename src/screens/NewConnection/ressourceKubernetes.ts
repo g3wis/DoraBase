@@ -13,7 +13,19 @@
  * sans rendre quoi que ce soit.
  */
 
+import type { IconName } from '../../design/icons/names'
+
 type Traduire = (cle: string, parametres?: Record<string, string | number>) => string
+
+/**
+ * Une entrée de liste, avec le **nom** de son icône et non l'icône elle-même.
+ *
+ * C'est ce qui laisse ces fonctions rester pures et vérifiables sans rien rendre : un `ReactNode`
+ * ferait de ce fichier du JSX, et l'assertion d'un test porterait sur un élément React plutôt que
+ * sur la décision — quelle entrée porte quel glyphe. `ChampCatalogue` fait la conversion, au seul
+ * endroit qui rende déjà.
+ */
+export type EntreeDeCatalogue = { value: string; label: string; icone?: IconName }
 
 /**
  * Les sortes proposées, dans l'ordre où on les rencontre devant une base.
@@ -110,8 +122,8 @@ export function composerRessource(sorte: string, nom: string): string {
  * `API-73` porte `svc/…`, et `svc` n'est pas dans les quatre — et le seul affichage honnête est de
  * la montrer telle qu'elle est écrite.
  */
-export function optionsDeSorte(sorteChoisie: string): { value: string; label: string }[] {
-  const options: { value: string; label: string }[] = SORTES.map((sorte) => ({
+export function optionsDeSorte(sorteChoisie: string): EntreeDeCatalogue[] {
+  const options: EntreeDeCatalogue[] = SORTES.map((sorte) => ({
     value: sorte.value,
     label: sorte.label,
   }))
@@ -127,18 +139,20 @@ export function optionsDeSorte(sorteChoisie: string): { value: string; label: st
  * L'ordre est celui d'`optionsDeKubeconfig`, et pour la même raison : ce qui désigne d'abord, ce qui
  * agit en dernier — là où l'on ne tombe pas par accident en parcourant la liste au clavier.
  *
- * `videLibelle` est l'entrée du vide quand il en faut une. L'espace de noms en a **toujours** une,
- * son vide étant une valeur — « celui que `kubectl` emploierait » ; le nom d'une ressource n'en a
- * qu'une tant que rien n'est choisi, sans quoi la liste offrirait de défaire la seule valeur
- * obligatoire de ce visage.
+ * `videLibelle` est l'entrée du vide, et les **deux** listes suivent la même règle : elle n'existe
+ * que tant que rien n'est choisi. Sans elle, `ListeDeroulante` n'aurait aucun libellé à rendre sur un
+ * formulaire neuf et la liste paraîtrait vide ; avec elle en permanence, elle offrirait de défaire ce
+ * qu'on vient de choisir — et, pour l'espace de noms, elle aurait porté la phrase qui décrit ce que
+ * *le vide* vaut, laquelle est une aide à la saisie et non le nom d'un espace de noms (18 septembre
+ * 2026, à la demande).
  */
 export function optionsDeCatalogue(
   noms: readonly string[],
   choisi: string,
   t: Traduire,
   videLibelle: string | null,
-): { value: string; label: string }[] {
-  const options: { value: string; label: string }[] = []
+): EntreeDeCatalogue[] {
+  const options: EntreeDeCatalogue[] = []
   if (videLibelle !== null) options.push({ value: '', label: videLibelle })
   options.push(...noms.map((nom) => ({ value: nom, label: nom })))
 
@@ -152,7 +166,28 @@ export function optionsDeCatalogue(
     })
   }
 
-  options.push({ value: RAFRAICHIR, label: t('newConnection.tunnel.catalogueRafraichir') })
-  options.push({ value: A_LA_MAIN, label: t('newConnection.tunnel.catalogueALaMain') })
+  /**
+   * **Les deux entrées qui agissent portent un glyphe, les noms n'en portent pas** (18 septembre
+   * 2026, à la demande). Leur place dans la liste — en queue — dit déjà qu'elles ne sont pas des
+   * noms, mais seulement à qui la parcourt en entier : d'un coup d'œil, « Rafraîchir la liste » au
+   * milieu de dix pods se lit comme un onzième pod. Le glyphe le dit **avant** la lecture.
+   *
+   * `refresh` est celui de la barre d'outils et du témoin du diagramme, donc « relire » dans ce
+   * produit. `kbd` est un clavier, et c'est **littéralement** ce que l'entrée offre : taper soi-même.
+   * Le crayon aurait été le choix naturel ailleurs — ici il dit déjà « une ligne est modifiée »,
+   * dans l'indicateur de sélection et le panneau des modifications, et un même glyphe pour deux
+   * choses fait annoncer l'une par le nom de l'autre. `i-kbd` vivait dans le sprite sans appelant
+   * depuis son extraction du handoff ; c'est son premier.
+   */
+  options.push({
+    value: RAFRAICHIR,
+    label: t('newConnection.tunnel.catalogueRafraichir'),
+    icone: 'refresh',
+  })
+  options.push({
+    value: A_LA_MAIN,
+    label: t('newConnection.tunnel.catalogueALaMain'),
+    icone: 'kbd',
+  })
   return options
 }

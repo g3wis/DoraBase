@@ -73,7 +73,7 @@ export const newConnectionFr: Dictionnaire = {
     resourceKindLabel: 'Sorte',
     resourceLabel: 'Ressource',
     resourcePlaceholder: 'postgres — le nom de l’objet',
-    resourceAChoisir: 'À choisir',
+    catalogueAChoisir: 'À choisir',
     // Les entrées qui **agissent** dans les deux listes lues au cluster (`API-73`), et ce qui se
     // dit d'une lecture qui n'a rien rendu ou qui a échoué.
     catalogueRafraichir: 'Rafraîchir la liste',
@@ -191,7 +191,7 @@ export const newConnectionEn: Dictionnaire = {
     resourceKindLabel: 'Kind',
     resourceLabel: 'Resource',
     resourcePlaceholder: 'postgres — the object’s name',
-    resourceAChoisir: 'Pick one',
+    catalogueAChoisir: 'Pick one',
     catalogueRafraichir: 'Refresh the list',
     catalogueALaMain: 'Type it in…',
     catalogueChoisir: 'Pick from the list',

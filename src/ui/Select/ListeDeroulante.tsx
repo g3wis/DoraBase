@@ -10,7 +10,15 @@ const MARGE = 8
 export type OptionDeListe<T extends string> = {
   value: T
   label: string
-  /** Rendu à gauche du libellé, dans la liste **et** dans le champ fermé. */
+  /**
+   * Rendu à gauche du libellé.
+   *
+   * **Dès qu'une option en porte un, toutes réservent sa place** : « un menu sans icône aligne ses
+   * libellés au bord, un menu qui en a les aligne après le glyphe ». Sans cette réserve, les entrées
+   * ornées décaleraient leur libellé de quelques pixels et la liste se lirait en escalier — or
+   * l'ornement existe précisément pour distinguer une entrée qui **agit** d'une entrée qui désigne,
+   * et un décalage ne dit pas laquelle fait quoi.
+   */
   ornement?: ReactNode
 }
 
@@ -80,6 +88,8 @@ export function ListeDeroulante<T extends string>({
   const panneau = useRef<HTMLUListElement>(null)
 
   const choisie = options.find((option) => option.value === value)
+  // Voir `OptionDeListe.ornement` : c'est la **liste** qui décide d'aligner, pas chaque option.
+  const orneees = options.some((option) => option.ornement !== undefined)
 
   // À l'ouverture, l'option courante est celle qu'on parcourt : `↓` doit partir d'où l'on est, pas du
   // haut de la liste.
@@ -282,7 +292,7 @@ export function ListeDeroulante<T extends string>({
               }}
               onPointerEnter={() => setSurvolee(index)}
             >
-              {option.ornement}
+              {orneees && <span className={styles.ornement}>{option.ornement}</span>}
               <span className={styles.libelle}>{option.label}</span>
               {option.value === value && (
                 <Icon name="check" size={12} strokeWidth={2.4} className={styles.coche} />

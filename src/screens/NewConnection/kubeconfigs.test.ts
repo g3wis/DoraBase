@@ -24,6 +24,19 @@ describe('les entrées de la liste', () => {
     expect(options.slice(1, -1).map((option) => option.value)).toEqual(['prod', 'bac'])
   })
 
+  it('marque d’un glyphe la seule entrée qui agit', () => {
+    // **Le même genre d'entrée que celles d'`API-73` deux rangées plus bas**, donc le même dessin :
+    // la laisser nue pendant que ses voisines sont ornées ferait deux façons de dire une chose dans
+    // le même panneau. `plus` parce qu'elle **déclare** — un fichier choisi ici entre dans la liste.
+    const options = optionsDeKubeconfig(DEUX, t)
+
+    const parValeur = new Map(options.map((option) => [option.value, option.icone]))
+    expect(parValeur.get(AUTRE_FICHIER)).toBe('plus')
+    // Les entrées qui **désignent** n'en portent pas, repli compris.
+    expect(parValeur.get(AUCUN)).toBeUndefined()
+    expect(parValeur.get('prod')).toBeUndefined()
+  })
+
   it('affiche le chemin quand une déclaration n’a pas de libellé', () => {
     // Un libellé vide est représentable — le champ se vide dans les préférences. Rendre une entrée
     // sans texte ferait une ligne qu'on ne peut ni lire ni viser ; le chemin la nomme toujours.
