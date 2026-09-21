@@ -2772,7 +2772,7 @@ fraîchement inspecté a tous ses projets cochés ; une liste de retenus aurait 
 l'arrivée du rapport, donc dans un effet, qui se serait rejoué à chaque rendu de l'hôte — le piège de
 `10d`.
 
-**Dix listes dans le rapport plutôt qu'un compte**, et la modale n'en montre les noms qu'en
+**Douze listes dans le rapport plutôt qu'un compte**, et la modale n'en montre les noms qu'en
 infobulle. Un import amputé en silence se lirait comme un import complet, ce qui est le pire défaut
 que ce geste puisse avoir ; mais un nom par connexion dans une modale serait illisible, et le compte
 dit d'abord s'il y a quelque chose à regarder. Une réserve vide ne paraît pas — « 0 connexion déjà
@@ -3296,6 +3296,124 @@ filtre appliqué. Un booléen montre `is true` d'emblée, faute d'`=` pour comme
 prop `applique` — donc la présence d'un filtre dans `filters` — qui allume la bordure d'accent, et
 elle seule. La déduire de la valeur du champ était impossible dès qu'un prédicat s'applique sans
 valeur.
+
+### Ce que les entiers d'une colonne veulent dire (21 septembre 2026, `API-75`)
+
+Une colonne qui porte un code — `status`, `kind`, `state` — se lisait en chiffres et ne disait rien.
+`3` s'affiche désormais `3 (expédiée)`, d'après une table de correspondance que **l'utilisateur
+déclare**, colonne par colonne, depuis le menu de l'en-tête.
+
+**C'est le jumeau de la lecture en horodatage ci-dessus, et sa raison est la même à la lettre** : un
+`int4` qui porte un code d'état et un `int4` qui compte des articles sont **le même type déclaré**.
+Rien dans le catalogue ne dit ce que `3` veut dire, donc rien n'est deviné. L'écart est que la
+déclaration est **persistée** : ce qu'un code signifie ne change pas d'une session à l'autre.
+
+**La déclaration vit sur le projet**, clé `table` → `colonne` → valeur → libellé. Un projet porte N
+environnements × N connexions et la même table existe en dev et en prod : un code d'état est une
+propriété du **modèle de données de l'application**, pas d'un serveur. La poser sur `Database` —
+comme `visible_schemas`, qui est bien un réglage de connexion — aurait obligé à la redéclarer par
+environnement. Le prix est assumé et connu : **deux tables homonymes dans deux schémas partagent
+leurs libellés**, le nom du schéma ne voulant pas la même chose d'un moteur à l'autre.
+
+Onze décisions à ne pas défaire :
+
+- **`valueLabels` et non `enums`.** PostgreSQL et MySQL ont de *vrais* types énumérés, et une
+  colonne de ce type arrive au contrat en `text` : une clé nommée `enums` aurait décrit autre chose
+  que ce qu'elle porte. Ce qui est déclaré n'est pas un type, c'est ce qu'on **affiche** à la place
+  d'un entier — d'où « libellés de valeurs » partout dans l'interface, un seul vocabulaire ;
+- **l'entier reste devant.** `3 (expédiée)`, jamais `expédiée` : c'est la demande au mot, et c'est
+  ce qui distingue cette lecture d'une réécriture. L'outil montre ce qui est stocké ; le libellé est
+  ce qu'on ajoute ;
+- **des clés en texte, et non des `i64`.** `serde_json` sait sérialiser une clé entière mais
+  **refuse** de désérialiser celle qui n'en est pas une : un `{"pending": "…"}` écrit à la main
+  ferait échouer la lecture de toute la configuration, donc sa **mise en quarantaine** au démarrage
+  suivant. Une clé en texte ne peut que ne correspondre à rien — un libellé qui ne paraît pas au
+  lieu de tous les projets. L'éditeur, lui, n'écrit que des entiers en décimal, et **refuse** le
+  reste : c'est le seul endroit qui voie la liste avant qu'elle devienne une table, donc le seul qui
+  puisse le dire ;
+- **trois `BTreeMap` imbriquées, aucun séparateur à convenir.** `table.colonne` aplati en une clé
+  aurait laissé une table nommée `a.b` désigner la colonne `b` de la table `a` — des libellés sur la
+  mauvaise colonne. Imbriquer rend la question sans objet, rend le **doublon inexprimable**, et
+  garde le fichier déterministe ;
+- **le geste part du menu de l'en-tête**, qui connaît déjà la table et la colonne. La même
+  déclaration faite depuis la modale de projet aurait demandé de taper deux noms à la main sans rien
+  pour les vérifier, et une faute de frappe y aurait produit une déclaration silencieusement inerte.
+  C'est la règle qui a déjà fait partir la création de console du pied de la sidebar et la gestion
+  des schémas vers le menu d'une connexion ;
+- **l'éditeur attend « Enregistrer »**, comme les schémas affichés d'`API-33` : la liste n'a de sens
+  qu'entière, et écrire à la frappe ferait une écriture de configuration par caractère tapé. C'est
+  l'écart avec la modale de projet, dont chaque geste est un **acte** (renommer, recolorier) ;
+- **vider retire la déclaration**, et la table hôte part avec sa dernière colonne. C'est le chemin
+  de retour du geste — un geste sans retour est une impasse — et c'est aussi ce qui empêche un
+  `{"orders": {}}` de rester dans le fichier : une déclaration qui ne dit rien, la famille du
+  `var()` vers un jeton inexistant. **Retirer la dernière ligne de l'éditeur la vide** au lieu de la
+  faire disparaître, sans quoi le bouton de retrait mènerait à un formulaire sans rien où taper ;
+- **l'affichage seul**, exactement comme l'horodatage : la cellule qu'on édite montre l'entier,
+  `row_as_insert` compose l'entier, l'onglet JSON porte l'entier — ce document-là se réécrit. Un
+  libellé parti sur un de ces chemins arriverait en texte dans une colonne numérique. « Copier la
+  valeur » copie `3 (expédiée)`, qui est ce qu'on lit ; les exports restent bruts (`API-29`) ;
+- **le filtre et le tri restent numériques.** `categorieLue` ne détourne rien ici, contrairement à
+  l'horodatage qui donne « avant le » à une colonne de nombres : on tape `3`, et la comparaison part
+  au serveur telle quelle. Filtrer par libellé est hors périmètre ;
+- **les deux lectures s'excluent par construction, non par une règle à retenir.** Le libellé est
+  appliqué **après** `valeurRelue` : quand une échelle est choisie, l'entier est déjà devenu une
+  date, donc il n'y a plus rien à libeller. L'entrée du menu se **désactive avec sa raison** dans ce
+  sens-là — une déclaration qui s'enregistrerait sans se voir est le défaut n° 36 — et l'inverse n'a
+  besoin d'aucune garde : choisir une échelle sur une colonne libellée **change visiblement** la
+  colonne en dates, et « Lire comme un nombre » y ramène les libellés ;
+- **et une colonne libellée s'aligne à gauche**, en-tête comprise, dès qu'un libellé est déclaré et
+  même si la plupart des valeurs n'en ont pas : ce ne sont plus des quantités mais des codes, et
+  `3 (expédiée)` calé à droite donnerait un bord gauche en dents de scie. On n'additionne pas des
+  états.
+- **et l'éditeur porte `i-msg`**, la bulle, qui n'avait jamais servi depuis son extraction du
+  handoff : ce qu'un libellé donne à une valeur est ce qu'elle **dit**. Pas `i-cols`, qui veut déjà
+  dire « colonnes » dans la barre d'outils et dans l'onglet « Champs » du panneau — un même glyphe
+  pour deux choses fait annoncer l'une par le nom de l'autre, la raison qui garde le rouage à la
+  seule section « Général » d'`A10`. Aucune icône n'a été ajoutée au sprite ;
+
+**Ils voyagent avec le projet, et il a fallu le faire pour de bon** (`API-30`). Le fichier de
+transfert porte exactement le `Vec<Project>` de `config.json`, donc les libellés partent avec un
+export sans une ligne de plus — mais un projet **déjà déclaré ici** aurait reçu ses connexions et
+ses consoles en laissant ses libellés dans le fichier, **en silence**, ce qui est le défaut que ce
+geste ne doit jamais avoir. La fusion les verse donc **colonne par colonne** : deux machines peuvent
+avoir étiqueté deux colonnes différentes de la même table, et remplacer la table entière en perdrait
+une. Un libellé déjà déclaré ici est **gardé** — c'est la règle de toute la fusion, et un libellé
+faux est pire qu'un libellé absent, puisque c'est celui-là qu'on croit. Le rapport passe de dix
+listes à douze.
+
+**Un défaut trouvé en écrivant le test d'assemblage, et il aurait touché toute table** : `?? {}`
+rendait un objet **neuf à chaque appel**, donc une identité neuve à chaque rendu. Or `libelles` entre
+dans les dépendances de l'effet qui remonte la lecture au panneau de ligne : l'effet repartait, il
+posait un état, l'écran se rendait à nouveau, et **la boucle ne s'arrêtait jamais** — sur toute table
+qui ne déclare rien, c'est-à-dire le cas courant. C'est le piège de `10d`, et sa signature ici n'a
+pas été une assertion rouge mais un test qui **cesse de finir**. `AUCUN_LIBELLE` est un exemplaire
+unique et gelé ; le test qui le garde compare deux appels par **identité**, ce qui se mesure sans
+qu'aucun écran ne tourne.
+
+**Deux sabotages sur quinze sont restés verts, et les deux fautes étaient dans le test** (règle
+n° 1) — les deux fois pour la raison qu'`API-55` avait déjà écrite, appliquée à deux endroits
+différents :
+
+- **le décor rangeait le bon projet en premier.** Le test qui garde « la déclaration est lue dans le
+  projet de l'onglet, pas chez un voisin » restait vert avec une résolution qui prend *le premier
+  projet qui déclare quelque chose* : les deux étaient indiscernables (règle n° 5). Le voisin est
+  désormais déclaré **avant** ;
+- **et la mesure de troncature portait sur le mauvais élément.** `text-overflow: ellipsis` vit sur
+  le `[role=gridcell]` de `VirtualGrid`, pas sur le `<span>` qu'elle contient — lequel n'a aucune
+  contrainte de largeur, donc son `scrollWidth` vaut toujours son `clientWidth`. Le test mesurait
+  une propriété qui ne peut pas être fausse. **Un test de troncature doit viser l'élément qui
+  découpe**, et c'est ce qu'il faut chercher avant d'écrire l'assertion.
+
+**Ce qui reste hors périmètre** : filtrer ou trier par libellé — c'est une autre requête, et le
+contrat des moteurs n'en sait rien ; la grille de **console**, dont un résultat n'a pas d'identité de
+table (`select status from orders` rend une colonne `status` et rien ne dit d'où elle vient) ; et une
+énumération **nommée** réutilisable entre deux colonnes, que le ticket ne demande pas — deux colonnes
+qui partagent des valeurs les déclarent deux fois.
+
+**Ce qui reste à voir à l'œil** : l'éditeur sous WKWebView et en « Nuit » — même réserve que les dix
+écrans. Et une vraie base : `?demo` n'a aucune colonne de codes, donc la seule chose qu'aucun décor
+de ce dépôt ne montre est ce que la fonction sert vraiment — une colonne `status` à cinq valeurs, sur
+cinq cents lignes, où le libellé se lit ligne après ligne.
 
 ### La règle « ligne liée »
 

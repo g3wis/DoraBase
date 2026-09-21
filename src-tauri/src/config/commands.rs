@@ -5,6 +5,8 @@
 //! appels venant de la webview. Seule la résolution du chemin passe par `core:path:default`,
 //! déjà accordé.
 
+use std::collections::BTreeMap;
+
 use std::sync::Mutex;
 
 use serde::Serialize;
@@ -950,6 +952,44 @@ pub fn save_visible_schemas(
     })
 }
 
+/// Ce que l'éditeur de libellés envoie en enregistrant (`API-75`).
+#[derive(Debug, Clone, serde::Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "config.ts")]
+pub struct ValueLabelsRequest {
+    /// **Le projet, et rien de plus.** Les libellés d'une colonne vivent sur le projet : ni la
+    /// connexion ni l'environnement n'entrent dans leur identité, puisque la même table porte les
+    /// mêmes codes en dev et en prod (voir `Project::value_labels`).
+    pub project: String,
+    pub table: String,
+    pub column: String,
+    /// La valeur entière, **en texte**, vers son libellé. La table vide est un réglage — « aucun
+    /// libellé » —, et c'est ainsi que l'éditeur retire une déclaration.
+    pub labels: BTreeMap<String, String>,
+}
+
+/// Règle ce que les entiers d'une colonne veulent dire, et rend les projets à jour (`API-75`).
+///
+/// **Elle ne ferme pas la connexion**, comme `save_visible_schemas` et pour la même raison : rien de
+/// ce qui décrit le serveur n'a changé. C'est l'affichage d'une colonne, pas une recette de
+/// connexion.
+#[tauri::command]
+pub fn save_value_labels(
+    request: ValueLabelsRequest,
+    state: State<'_, ConfigState>,
+) -> Result<Vec<Project>, String> {
+    ecrire_les_projets(&state, |projects| {
+        super::enregistrer::regler_les_libelles_de_valeurs(
+            projects,
+            &request.project,
+            &request.table,
+            &request.column,
+            request.labels.clone(),
+        )
+        .map_err(|erreur| erreur.to_string())
+    })
+}
+
 /// Ajoute une base et sa variante à un projet, et range son mot de passe.
 ///
 /// **Rend les projets à jour**, et pas seulement `Ok(())` : sans cela l'écran devrait relire la
@@ -1531,6 +1571,7 @@ pub fn import_projects(
 
 #[cfg(test)]
 mod tests_kubeconfigs {
+
     use super::*;
     use crate::config::model::{
         ConnectionSettings, Database, Engine, EnvironmentDeclaration, EnvironmentId, KubeconfigId,
@@ -1565,6 +1606,7 @@ mod tests_kubeconfigs {
             name: "Halle".into(),
             environments: EnvironmentDeclaration::trio_par_defaut(),
             queries: Vec::new(),
+            value_labels: BTreeMap::new(),
             databases: vec![Database {
                 name: "catalogue".into(),
                 label: None,

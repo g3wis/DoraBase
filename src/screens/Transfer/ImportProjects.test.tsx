@@ -21,6 +21,8 @@ function sort(name: string, patch: Partial<ProjectOutcome> = {}): ProjectOutcome
     passwordsMissing: [],
     localPaths: [],
     kubeconfigsMissing: [],
+    valueLabelsAdded: [],
+    valueLabelsKept: [],
     ...patch,
   }
 }
@@ -175,6 +177,8 @@ test('ce qui n’arrivera pas est dit, avec sa liste en infobulle', async () => 
               passwordsMissing: ['catalogue (dev)'],
               localPaths: ['journal (dev) : /Users/alice/journal.db'],
               connectionsRejected: ['fantome (nulle-part)'],
+              valueLabelsAdded: ['orders.kind'],
+              valueLabelsKept: ['orders.status'],
             }),
           ]),
         )
@@ -197,6 +201,17 @@ test('ce qui n’arrivera pas est dit, avec sa liste en infobulle', async () => 
     'journal (dev) : /Users/alice/journal.db',
   )
   expect(screen.getByText(/leur environnement n'est déclaré nulle part/)).toBeVisible()
+  /* Les libellés de valeurs (`API-75`), **et les deux sens**. Ce qui *arrive* se dit en neutre, ce
+     qui est *gardé* en réserve : ce dernier est le seul des deux qui demande de savoir que le
+     fichier portait autre chose. */
+  expect(screen.getByText(/1 colonne\(s\) reçoivent leurs libellés/)).toHaveAttribute(
+    'title',
+    'orders.kind',
+  )
+  expect(screen.getByText(/1 colonne\(s\) déjà libellées/)).toHaveAttribute(
+    'title',
+    'orders.status',
+  )
 })
 
 test('une réserve vide ne paraît pas', async () => {
@@ -208,6 +223,7 @@ test('une réserve vide ne paraît pas', async () => {
   expect(screen.queryByText(/déjà déclarées ici/)).toBeNull()
   expect(screen.queryByText(/mot de passe/)).toBeNull()
   expect(screen.queryByText(/à vérifier/)).toBeNull()
+  expect(screen.queryByText(/libellés/)).toBeNull()
 })
 
 test('un fichier qui porte des mots de passe en clair le dit', async () => {

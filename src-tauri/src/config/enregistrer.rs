@@ -4,6 +4,8 @@
 //! échoue. C'est tout le sujet de ce module, et la raison pour laquelle il est séparé de
 //! `commands.rs` : la logique d'ordonnancement et de rattrapage se teste sans Tauri.
 
+use std::collections::BTreeMap;
+
 use crate::config::model::{
     ConnectionSettings, Console, Database, Engine, EnvironmentId, ModelError, Project, SecretRef,
 };
@@ -758,6 +760,7 @@ pub fn creer_projet(
         environments,
         databases: Vec::new(),
         queries: Vec::new(),
+        value_labels: BTreeMap::new(),
     };
 
     // **Validé avant d'être poussé** : deux libellés identiques donnent deux identifiants identiques,
@@ -1081,6 +1084,54 @@ pub fn regler_les_schemas_affiches(
     Ok(suivants)
 }
 
+/// Règle ce que les entiers d'une colonne veulent dire, sur un projet (`API-75`).
+///
+/// **Une liste vide retire la déclaration**, plutôt que d'écrire une table de correspondance sans
+/// entrée. Et la table hôte s'en va avec sa dernière colonne : `{"orders": {}}` resté dans le
+/// fichier serait une déclaration qui ne dit rien — la famille du `var()` vers un jeton inexistant,
+/// que ce dépôt refuse ailleurs. C'est aussi ce qui donne au geste son chemin de retour : vider
+/// l'éditeur rend la colonne à ses chiffres.
+///
+/// **Aucune validation des clés ici.** L'éditeur n'écrit que des entiers en décimal, et une clé
+/// écrite à la main qui n'en est pas un ne correspondra simplement à aucune valeur — voir
+/// `Project::value_labels` pour la raison de ne pas la refuser : un refus au chargement coûterait la
+/// mise en quarantaine de toute la configuration.
+///
+/// **Elle ne ferme aucune connexion**, comme `regler_les_schemas_affiches` : rien de ce qui décrit
+/// *comment joindre le serveur* n'a changé — c'est un réglage d'affichage.
+pub fn regler_les_libelles_de_valeurs(
+    projects: &[Project],
+    project: &str,
+    table: &str,
+    column: &str,
+    libelles: BTreeMap<String, String>,
+) -> Result<Vec<Project>, ConsoleError> {
+    let mut suivants = projects.to_vec();
+    let projet = suivants
+        .iter_mut()
+        .find(|candidat| candidat.name == project)
+        .ok_or_else(|| ConsoleError::ProjetInconnu {
+            project: project.to_owned(),
+        })?;
+
+    if libelles.is_empty() {
+        if let Some(colonnes) = projet.value_labels.get_mut(table) {
+            colonnes.remove(column);
+            if colonnes.is_empty() {
+                projet.value_labels.remove(table);
+            }
+        }
+    } else {
+        projet
+            .value_labels
+            .entry(table.to_owned())
+            .or_default()
+            .insert(column.to_owned(), libelles);
+    }
+
+    Ok(suivants)
+}
+
 /// Retire une console.
 ///
 /// **Une console absente n'est pas un échec** : le geste a déjà eu son effet — même arbitrage qu'en
@@ -1388,6 +1439,7 @@ mod tests {
             name: "Atelier Nord".into(),
             environments: crate::config::model::EnvironmentDeclaration::trio_par_defaut(),
             queries: Vec::new(),
+            value_labels: BTreeMap::new(),
             databases: Vec::new(),
         }]
     }
@@ -2164,6 +2216,7 @@ mod tests_parcours {
             name: "Atelier".into(),
             environments: crate::config::model::EnvironmentDeclaration::trio_par_defaut(),
             queries: Vec::new(),
+            value_labels: BTreeMap::new(),
             databases: vec![crate::config::model::Database {
                 name: "analytics".to_owned(),
                 label: None,
@@ -2241,6 +2294,7 @@ mod tests_renommage {
                 name: "Halle".into(),
                 environments: crate::config::model::EnvironmentDeclaration::trio_par_defaut(),
                 queries: Vec::new(),
+                value_labels: BTreeMap::new(),
                 // **Trois connexions et trois secrets** depuis `23b` : `analytics` en dev et en prod
                 // sont deux connexions, là où c'était une base à deux variantes. Le décor porte
                 // toujours plus d'un secret, pour qu'une migration arrêtée à mi-parcours se distingue
@@ -2280,6 +2334,7 @@ mod tests_renommage {
                 name: "Outils".into(),
                 environments: crate::config::model::EnvironmentDeclaration::trio_par_defaut(),
                 queries: Vec::new(),
+                value_labels: BTreeMap::new(),
                 databases: Vec::new(),
             },
         ]
@@ -3002,6 +3057,7 @@ mod tests_consoles {
                 connexion("analytics", "prod"),
             ],
             queries: Vec::new(),
+            value_labels: BTreeMap::new(),
         }]
     }
 
@@ -3176,6 +3232,7 @@ mod tests_consoles {
                 name: "CA".into(),
                 sql: "select 1".into(),
             }],
+            value_labels: BTreeMap::new(),
         }];
         migrer_requetes_en_consoles(&mut projets);
         assert_eq!(projets[0].queries.len(), 1);
@@ -3283,6 +3340,178 @@ mod tests_consoles {
             p[0].databases[1].visible_schemas.as_deref(),
             Some(&["b".to_owned()][..])
         );
+    }
+
+    // --- Les libellés de valeurs (`API-75`) ---
+    //
+    // Dans ce module pour la même raison que les schémas affichés : son décor porte deux connexions
+    // homonymes en dev et en prod, ce qui est précisément ce qui rend visible une déclaration posée
+    // sur la connexion plutôt que sur le projet.
+
+    fn libelles(paires: &[(&str, &str)]) -> BTreeMap<String, String> {
+        paires
+            .iter()
+            .map(|(valeur, libelle)| ((*valeur).to_owned(), (*libelle).to_owned()))
+            .collect()
+    }
+
+    /// **La déclaration est posée sur le projet, pas sur une connexion.**
+    ///
+    /// C'est l'arbitrage d'`API-75` : un code d'état est une propriété du modèle de données, donc la
+    /// même table le porte en dev et en prod. Ce test le mesure là où il se voit — le décor déclare
+    /// `analytics` deux fois, et aucune des deux ne reçoit quoi que ce soit.
+    #[test]
+    fn les_libelles_se_posent_sur_le_projet() {
+        let p = regler_les_libelles_de_valeurs(
+            &projets(),
+            "Halle",
+            "orders",
+            "status",
+            libelles(&[("0", "en attente"), ("3", "expédiée")]),
+        )
+        .expect("réglage");
+
+        assert_eq!(
+            p[0].value_labels["orders"]["status"]["3"],
+            "expédiée".to_owned()
+        );
+        assert_eq!(p[0].value_labels["orders"]["status"].len(), 2);
+        // Aucune connexion n'a bougé : c'est ce qui distingue cette déclaration d'un
+        // `visible_schemas`, et le décor homonyme est ce qui le rend mesurable.
+        assert_eq!(p[0].databases[0].visible_schemas, None);
+        assert_eq!(p[0].databases[1].visible_schemas, None);
+    }
+
+    /// Deux colonnes de la même table cohabitent, et une seconde déclaration n'efface pas la
+    /// première : la table hôte est complétée, jamais remplacée.
+    #[test]
+    fn deux_colonnes_de_la_meme_table_cohabitent() {
+        let p = regler_les_libelles_de_valeurs(
+            &projets(),
+            "Halle",
+            "orders",
+            "status",
+            libelles(&[("0", "en attente")]),
+        )
+        .expect("première");
+        let p = regler_les_libelles_de_valeurs(
+            &p,
+            "Halle",
+            "orders",
+            "kind",
+            libelles(&[("1", "web")]),
+        )
+        .expect("seconde");
+
+        assert_eq!(p[0].value_labels["orders"].len(), 2);
+        assert_eq!(p[0].value_labels["orders"]["status"]["0"], "en attente");
+        assert_eq!(p[0].value_labels["orders"]["kind"]["1"], "web");
+    }
+
+    /// Un second réglage de la **même** colonne remplace le premier en entier — c'est ce que
+    /// l'éditeur envoie, l'état complet de sa liste et non un ajout.
+    #[test]
+    fn un_second_reglage_de_la_meme_colonne_remplace_le_premier() {
+        let p = regler_les_libelles_de_valeurs(
+            &projets(),
+            "Halle",
+            "orders",
+            "status",
+            libelles(&[("0", "en attente"), ("3", "expédiée")]),
+        )
+        .expect("premier");
+        let p = regler_les_libelles_de_valeurs(
+            &p,
+            "Halle",
+            "orders",
+            "status",
+            libelles(&[("7", "annulée")]),
+        )
+        .expect("second");
+
+        assert_eq!(p[0].value_labels["orders"]["status"].len(), 1);
+        assert_eq!(p[0].value_labels["orders"]["status"]["7"], "annulée");
+    }
+
+    /// **Vider retire la déclaration, et la table hôte avec sa dernière colonne.**
+    ///
+    /// Une table de correspondance sans entrée, ou une table hôte sans colonne, serait une
+    /// déclaration qui ne dit rien : la famille du `var()` vers un jeton inexistant. C'est aussi le
+    /// chemin de retour du geste — vider l'éditeur rend la colonne à ses chiffres.
+    #[test]
+    fn vider_retire_la_declaration_et_sa_table() {
+        let p = regler_les_libelles_de_valeurs(
+            &projets(),
+            "Halle",
+            "orders",
+            "status",
+            libelles(&[("0", "en attente")]),
+        )
+        .expect("réglage");
+        let p = regler_les_libelles_de_valeurs(&p, "Halle", "orders", "status", BTreeMap::new())
+            .expect("retrait");
+
+        assert!(p[0].value_labels.is_empty());
+    }
+
+    /// Vider une colonne laisse ses voisines : c'est la colonne qui se retire, pas la table.
+    #[test]
+    fn vider_une_colonne_laisse_ses_voisines() {
+        let p = regler_les_libelles_de_valeurs(
+            &projets(),
+            "Halle",
+            "orders",
+            "status",
+            libelles(&[("0", "en attente")]),
+        )
+        .expect("première");
+        let p = regler_les_libelles_de_valeurs(
+            &p,
+            "Halle",
+            "orders",
+            "kind",
+            libelles(&[("1", "web")]),
+        )
+        .expect("seconde");
+        let p = regler_les_libelles_de_valeurs(&p, "Halle", "orders", "status", BTreeMap::new())
+            .expect("retrait");
+
+        assert_eq!(p[0].value_labels["orders"].len(), 1);
+        assert!(p[0].value_labels["orders"].contains_key("kind"));
+    }
+
+    /// Vider une colonne jamais déclarée n'est pas un échec : le geste a déjà eu son effet — même
+    /// arbitrage qu'une console déjà retirée.
+    #[test]
+    fn vider_une_colonne_jamais_declaree_ne_fait_rien() {
+        let p = regler_les_libelles_de_valeurs(
+            &projets(),
+            "Halle",
+            "inconnue",
+            "status",
+            BTreeMap::new(),
+        )
+        .expect("retrait");
+
+        assert!(p[0].value_labels.is_empty());
+    }
+
+    /// **Le nom de la table et celui de la colonne ne sont pas vérifiés**, et c'est voulu : la vue
+    /// déclare la colonne qu'elle affiche, et une table retirée de la base n'a pas à faire échouer
+    /// une écriture de configuration. Seul le **projet** doit exister — lui seul porte la
+    /// déclaration.
+    #[test]
+    fn un_projet_inconnu_est_un_refus_nomme() {
+        assert!(matches!(
+            regler_les_libelles_de_valeurs(
+                &projets(),
+                "Ailleurs",
+                "orders",
+                "status",
+                BTreeMap::new()
+            ),
+            Err(ConsoleError::ProjetInconnu { .. })
+        ));
     }
 }
 
