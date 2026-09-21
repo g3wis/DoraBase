@@ -3,6 +3,8 @@
 //! La logique prend un **chemin** en paramètre : elle se teste donc avec un répertoire
 //! temporaire, et c'est la commande Tauri (`commands.rs`) qui résout le vrai chemin.
 
+use std::collections::BTreeMap;
+
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -759,6 +761,8 @@ fn migration_v1_vers_v2(
                 environments,
                 databases,
                 queries: projet.queries,
+                // Un fichier v1 n'a aucun libellé de valeur à reprendre (`API-75`).
+                value_labels: BTreeMap::new(),
             }
         })
         .collect();
@@ -1079,6 +1083,7 @@ mod tests_preferences {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::config::model::{
         ConnectionSettings, Database, Engine, EnvironmentId, Proxy, ProxyCloudSql, SslMode,
@@ -1105,6 +1110,7 @@ mod tests {
             name: nom.into(),
             environments: crate::config::model::EnvironmentDeclaration::trio_par_defaut(),
             queries: Vec::new(),
+            value_labels: BTreeMap::new(),
             // `analytics` en dev **et** en prod : deux connexions depuis `23b`.
             databases: vec![
                 Database {
@@ -2020,6 +2026,7 @@ mod tests {
             name: "acme".into(),
             environments: crate::config::model::EnvironmentDeclaration::trio_par_defaut(),
             queries: Vec::new(),
+            value_labels: BTreeMap::new(),
             databases: vec![Database {
                 name: "analytics".to_owned(),
                 label: None,
@@ -2068,6 +2075,7 @@ mod tests {
             name: "Atelier Nord".into(),
             environments: crate::config::model::EnvironmentDeclaration::trio_par_defaut(),
             queries: Vec::new(),
+            value_labels: BTreeMap::new(),
             databases: vec![Database {
                 name: "analytics".to_owned(),
                 label: None,
@@ -2589,6 +2597,7 @@ mod tests_instances {
 
 #[cfg(test)]
 mod tests_migration_kubeconfigs {
+
     use super::tests::variante;
     use super::*;
     use crate::config::{Engine, KubeconfigId};
@@ -2633,6 +2642,7 @@ mod tests_migration_kubeconfigs {
             name: "Halle".to_owned(),
             environments: crate::config::model::EnvironmentDeclaration::trio_par_defaut(),
             queries: Vec::new(),
+            value_labels: BTreeMap::new(),
             databases: bases,
         };
 

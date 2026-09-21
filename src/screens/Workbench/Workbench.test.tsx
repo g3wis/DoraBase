@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
@@ -398,6 +398,11 @@ function monter(over: Partial<Parameters<typeof Workbench>[0]> = {}) {
             ),
           )
         }}
+        /* **Les projets reposés, comme `App` le fait** (`onProjets={setProjects}`) : c'est ce
+           changement que l'écran suit pour redessiner, et sans lui aucune écriture de configuration
+           ne serait observable ici. Avant `{...over}`, donc un test peut le remplacer par un
+           espion. */
+        onProjets={setProjets}
         {...over}
       />
     )
@@ -3272,5 +3277,147 @@ describe('« Exporter le projet… » traverse l’écran de travail (`API-30`)'
 
     await utilisateur.click(screen.getByRole('button', { name: 'Actions de Atelier Nord' }))
     expect(screen.getByRole('button', { name: 'Exporter le projet…' })).toBeDisabled()
+  })
+})
+
+/**
+ * Les libellés de valeurs, **depuis l'écran de travail** (`API-75`).
+ *
+ * `libellesDeValeurs.test.tsx` mesure la vue montée seule, avec les libellés qu'on lui donne ; ce
+ * qu'elle ne peut pas prouver est que la vue est **branchée** — que l'écran résout la déclaration
+ * dans la configuration du bon projet, que la commande part avec la bonne table, et que ce qu'elle
+ * rend **redessine la grille**. C'est la règle n° 8 : un composant juste dans sa vitrine ne prouve
+ * rien de l'assemblage, et c'est ainsi que l'engrenage d'`A1` n'ouvrait rien pendant des semaines.
+ */
+describe('les libellés de valeurs (`API-75`)', () => {
+  /**
+   * Une écriture qui **applique** la déclaration aux projets, comme le cœur le fait.
+   *
+   * Un espion qui rendrait `PROJETS` inchangé laisserait le test vert sur la moitié qui compte le
+   * moins : ce qui est mesuré ici est que la grille suit ce que l'écriture rend.
+   */
+  function ecriture() {
+    const vues: { project: string; table: string; column: string; labels: unknown }[] = []
+    return {
+      vues,
+      saveValueLabels: vi.fn(
+        async (requete: {
+          project: string
+          table: string
+          column: string
+          labels: Record<string, string>
+        }) => {
+          vues.push(requete)
+          return PROJETS.map((projet) =>
+            projet.name === requete.project
+              ? {
+                  ...projet,
+                  valueLabels: { [requete.table]: { [requete.column]: requete.labels } },
+                }
+              : projet,
+          )
+        },
+      ) as unknown as Parameters<typeof Workbench>[0]['saveValueLabels'],
+    }
+  }
+
+  /** Ouvre l'onglet de `orders`, puis le menu de l'en-tête de `id`. */
+  async function menuDeLEntete(utilisateur: ReturnType<typeof userEvent.setup>) {
+    await ouvrirLArbreJusquAuSchema(utilisateur)
+    const liste = await screen.findByRole('table')
+    await utilisateur.dblClick(within(liste).getByText('orders'))
+    const entete = await screen.findByRole('columnheader', { name: /^id/ })
+    fireEvent.contextMenu(entete)
+    await screen.findByRole('menu', { name: 'Actions sur la colonne id' })
+  }
+
+  it('déclare depuis le menu d’en-tête, et la grille suit', async () => {
+    const utilisateur = userEvent.setup()
+    const { vues, saveValueLabels } = ecriture()
+    monter({ saveValueLabels })
+    await menuDeLEntete(utilisateur)
+
+    // La cellule montre l'entier nu : c'est le contrôle positif, sans quoi l'assertion finale
+    // passerait sur un décor qui aurait porté le libellé depuis le début.
+    expect(screen.getByText('184 220')).toBeInTheDocument()
+
+    await utilisateur.click(screen.getByRole('menuitem', { name: /Libellés des valeurs/ }))
+    await screen.findByRole('dialog', { name: /Libellés des valeurs de id/ })
+    await utilisateur.type(screen.getByLabelText('Valeur de la ligne 1'), '184220')
+    await utilisateur.type(screen.getByLabelText('Libellé de la ligne 1'), 'commande pilote')
+    await utilisateur.click(screen.getByRole('button', { name: 'Enregistrer' }))
+
+    // **Le projet et la table viennent de l'onglet ouvert**, pas d'un état que l'écran aurait
+    // deviné : c'est la moitié qu'aucun test de la vue seule ne peut voir.
+    expect(vues).toEqual([
+      {
+        project: 'Atelier Nord',
+        table: 'orders',
+        column: 'id',
+        labels: { '184220': 'commande pilote' },
+      },
+    ])
+
+    // Et l'assemblage : les projets reposés font relire la déclaration, sans une seule ligne
+    // relue — la lecture n'a pas changé, seul l'affichage a.
+    expect(await screen.findByText('184 220 (commande pilote)')).toBeInTheDocument()
+  })
+
+  /**
+   * **La déclaration est résolue dans le projet de l'onglet**, et le décor le rend mesurable : un
+   * second projet déclare la *même* table avec un autre libellé, et c'est celui du projet ouvert
+   * qui doit paraître. Sans ce voisin, une résolution qui prendrait le premier projet venu — ou
+   * n'importe lequel — resterait verte (règle n° 5).
+   */
+  it('lit la déclaration du projet de l’onglet, pas celle d’un voisin', async () => {
+    const utilisateur = userEvent.setup()
+    monter({
+      projects: [
+        /* **Le voisin est déclaré en *premier*, et c'est ce qui fait mordre le test.** Avec le bon
+           projet en tête, une résolution qui prendrait « le premier projet qui déclare quelque
+           chose » — ou n'importe lequel — resterait verte : le décor rendait les deux
+           indiscernables (règle n° 5). Vérifié par sabotage, dans les deux ordres. */
+        {
+          name: 'Quai Sud',
+          environments: TRIO_DE_TEST,
+          queries: [],
+          databases: [],
+          valueLabels: { orders: { id: { '184220': 'la mauvaise' } } },
+        } as Project,
+        { ...PROJETS[0], valueLabels: { orders: { id: { '184220': 'la bonne' } } } } as Project,
+      ],
+    })
+    await ouvrirLArbreJusquAuSchema(utilisateur)
+    const liste = await screen.findByRole('table')
+    await utilisateur.dblClick(within(liste).getByText('orders'))
+
+    expect(await screen.findByText('184 220 (la bonne)')).toBeInTheDocument()
+    expect(screen.queryByText('184 220 (la mauvaise)')).not.toBeInTheDocument()
+  })
+
+  /**
+   * Et le panneau de ligne montre **la même cellule** que la grille : deux lectures divergentes du
+   * même entier se liraient comme un défaut d'affichage. C'est la remontée par `onLectureChange`,
+   * que ni la vue ni le panneau ne peuvent prouver seuls — elle traverse l'écran.
+   */
+  it('le panneau de ligne montre la même cellule que la grille', async () => {
+    const utilisateur = userEvent.setup()
+    monter({
+      projects: [
+        {
+          ...PROJETS[0],
+          valueLabels: { orders: { id: { '184220': 'commande pilote' } } },
+        } as Project,
+      ],
+    })
+    await ouvrirLArbreJusquAuSchema(utilisateur)
+    const liste = await screen.findByRole('table')
+    await utilisateur.dblClick(within(liste).getByText('orders'))
+
+    // Choisir la ligne : c'est ce que le panneau affiche.
+    await utilisateur.click(await screen.findByText('184 220 (commande pilote)'))
+
+    const panneau = await screen.findByLabelText(/Détail de la ligne/)
+    expect(panneau).toHaveTextContent('184 220 (commande pilote)')
   })
 })

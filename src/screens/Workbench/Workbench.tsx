@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { rowAsInsert as rowAsInsertTauri } from '../../data/commandes'
+import {
+  rowAsInsert as rowAsInsertTauri,
+  saveValueLabels as saveValueLabelsTauri,
+} from '../../data/commandes'
 import type { Database, EnvironmentId, ManagedInstance, Project } from '../../domain/config'
 import type {
   ConnectionState,
@@ -51,6 +54,7 @@ import { DdlPanel } from '../Structure/DdlPanel'
 import { StructureStatusBar, StructureView } from '../Structure/StructureView'
 import { ApplyConfirm } from '../TableView/ApplyConfirm'
 import type { Echelle } from '../TableView/horodatage'
+import { type LibellesDeTable, libellesDeLaTable } from '../TableView/libelles'
 import { type EnAttente, retirer } from '../TableView/modifications'
 import { PendingPanel } from '../TableView/PendingPanel'
 import { RowPanel } from '../TableView/RowPanel'
@@ -205,6 +209,14 @@ type WorkbenchProps = {
    */
   passerelleSchemas?: PasserelleSchemas
   /**
+   * Règle ce que les entiers d'une colonne veulent dire (`API-75`).
+   *
+   * **Une prop à défaut, comme `rowAsInsert`**, et non un membre d'une passerelle : c'est une
+   * commande seule, et le pont ne répond pas hors de la webview — la démo et les tests la
+   * remplacent par une écriture dans leur propre état.
+   */
+  saveValueLabels?: typeof saveValueLabelsTauri
+  /**
    * Les instances managées déclarées (`API-32`), telles que la seconde zone de la sidebar les liste.
    *
    * **À côté des projets, non dedans** : une instance n'appartient à aucun projet — c'est un serveur
@@ -275,6 +287,7 @@ export function Workbench({
   passerelleStructures = PASSERELLE_STRUCTURES,
   passerelleLignes,
   rowAsInsert = rowAsInsertTauri,
+  saveValueLabels = saveValueLabelsTauri,
   onNewDatabase,
   onNewProject,
   onEditDatabase,
@@ -380,6 +393,9 @@ export function Workbench({
     // La lecture des colonnes d'entiers, pour que le panneau de ligne montre la même cellule que la
     // grille — voir `RowPanel.lectures`.
     lectures: Readonly<Record<string, Echelle>>
+    // Et ce que ses entiers veulent dire (`API-75`), pour la même raison : un entier libellé dans
+    // la grille et nu dans le panneau se lirait comme un défaut d'affichage.
+    libelles: LibellesDeTable
   }>({
     fenetre: null,
     loading: false,
@@ -388,6 +404,7 @@ export function Workbench({
     rang: null,
     total: 0,
     lectures: {},
+    libelles: {},
   })
   const [rangChoisi, setRangChoisi] = useState<number | null>(null)
   /**
@@ -1536,6 +1553,22 @@ export function Workbench({
           attente={attente}
           onAttenteChange={onAttenteChange}
           rowHeight={rowHeight}
+          /* **Résolus ici, une fois** (`API-75`) : la déclaration vit sur le projet, et c'est cet
+             écran qui tient la configuration. `libellesDeLaTable` est le seul endroit qui réponde
+             à « que veulent dire les entiers de cette table ? ». */
+          libelles={libellesDeLaTable(projects, table.key.project, table.table)}
+          onLibelles={async (colonne, valeurs) => {
+            const suivants = await saveValueLabels({
+              project: table.key.project,
+              table: table.table,
+              column: colonne,
+              labels: valeurs,
+            })
+            /* **Reposer les projets est ce qui réaffiche la grille** : les libellés viennent de
+               `projects`, donc la vue les relit au rendu suivant sans relire une seule ligne — la
+               lecture n'a pas changé, seul l'affichage a. */
+            onProjets?.(suivants)
+          }}
         />
       ) : (
         <>
@@ -2249,6 +2282,7 @@ export function Workbench({
                         onSuivreLaReference={suivreLaReference}
                         ligne={lecture.ligne}
                         lectures={lecture.lectures}
+                        libelles={lecture.libelles}
                         rang={lecture.rang}
                         onCopyInsert={
                           lecture.ligne

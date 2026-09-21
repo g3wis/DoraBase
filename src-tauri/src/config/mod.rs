@@ -26,7 +26,7 @@ pub use commands::{
     DeleteResult, ExportProjectsRequest, ImportProjectsRequest, ImportProjectsResult,
     RecolorEnvironmentRequest, RenameDatabaseRequest, RenameEnvironmentRequest,
     RenameProjectRequest, RenameResult, ReorderEnvironmentsRequest, SaveDatabaseRequest,
-    UpdateVariantRequest, VisibleSchemasRequest,
+    UpdateVariantRequest, ValueLabelsRequest, VisibleSchemasRequest,
 };
 pub use enregistrer::{enregistrer, reference_de, NouvelleBase, SaveError};
 pub use instances::{

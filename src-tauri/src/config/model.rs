@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -628,6 +630,44 @@ pub struct Project {
     /// connexion où les verser, en revanche, elles restent dans le fichier et attendent la première.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub queries: Vec<SavedQuery>,
+    /// Ce que les entiers d'une colonne **veulent dire** (`API-75`) : table, colonne, valeur, libellé.
+    ///
+    /// Une colonne qui porte un code — `status`, `kind`, `state` — se lit en chiffres et ne dit rien.
+    /// La déclaration faite ici fait afficher `3 (shipped)` là où la grille montrait `3`.
+    ///
+    /// # Pourquoi elle vit sur le **projet**
+    ///
+    /// Un projet porte N environnements × N connexions, et la même table existe en dev et en prod :
+    /// un code d'état est une propriété du **modèle de données de l'application**, pas d'un serveur.
+    /// La poser sur `Database` — comme `visible_schemas`, qui est bien un réglage de connexion —
+    /// aurait obligé à la redéclarer pour chaque environnement. Le prix est assumé et connu : deux
+    /// tables homonymes dans deux schémas partagent leurs libellés.
+    ///
+    /// # Pourquoi `valueLabels` et non `enums`
+    ///
+    /// PostgreSQL et MySQL ont de **vrais** types énumérés, et une colonne de ce type arrive au
+    /// contrat en `text` : une clé nommée `enums` aurait décrit autre chose que ce qu'elle porte.
+    /// Ce qui est déclaré ici n'est pas un type, c'est ce qu'on **affiche** à la place d'un entier.
+    ///
+    /// # Pourquoi des clés en texte, et non des `i64`
+    ///
+    /// `serde_json` sait sérialiser une clé entière, mais il **refuse** de désérialiser celle qui
+    /// n'en est pas une : un `{"pending": "…"}` écrit à la main dans le fichier ferait alors échouer
+    /// la lecture de toute la configuration, donc sa mise en quarantaine au démarrage suivant. Une
+    /// clé en texte ne peut que **ne correspondre à rien**, ce qui coûte un libellé qui ne paraît pas
+    /// au lieu de coûter tous les projets. L'éditeur, lui, n'écrit que des entiers en décimal.
+    ///
+    /// # Les trois `BTreeMap`
+    ///
+    /// **Aucun séparateur à convenir** : `table.colonne` aplati en une seule clé aurait laissé une
+    /// table nommée `a.b` désigner la colonne `b` de la table `a` — une collision qui ferait
+    /// afficher des libellés sur la mauvaise colonne. Imbriquer rend la question sans objet, rend le
+    /// doublon **inexprimable**, et garde le fichier déterministe comme la table des mots de passe
+    /// d'un export.
+    ///
+    /// **`#[serde(default)]` : aucun cran de migration**, la règle des champs ajoutés de `27a`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub value_labels: BTreeMap<String, BTreeMap<String, BTreeMap<String, String>>>,
 }
 
 impl Project {
@@ -1310,6 +1350,7 @@ mod tests {
             environments: environnements,
             databases: bases,
             queries: Vec::new(),
+            value_labels: BTreeMap::new(),
         }
     }
 

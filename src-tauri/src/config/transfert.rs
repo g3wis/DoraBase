@@ -301,7 +301,7 @@ pub struct ImportReport {
 
 /// Le détail de ce qu'un projet apporte, et de ce qu'il n'apporte pas.
 ///
-/// **Dix listes plutôt qu'un compte**, et c'est délibéré : un import amputé en silence se lirait
+/// **Douze listes plutôt qu'un compte**, et c'est délibéré : un import amputé en silence se lirait
 /// comme un import complet, ce qui est le pire défaut que ce geste puisse avoir. Chacune répond à une
 /// question qu'on se pose vraiment devant le fichier de quelqu'un d'autre — qu'est-ce qui arrive,
 /// qu'est-ce que je garde, qu'est-ce qu'il me reste à faire.
@@ -352,6 +352,15 @@ pub struct ProjectOutcome {
     /// réécrire ou les vider serait pire. Mais ils décrivent une autre machine, donc l'import le
     /// **dit** plutôt que de laisser le découvrir sur un « fichier introuvable ».
     pub local_paths: Vec<String>,
+    /// Les colonnes dont les libellés de valeurs arrivent avec le fichier (`API-75`) —
+    /// `table.colonne`.
+    pub value_labels_added: Vec<String>,
+    /// Les colonnes déjà étiquetées **ici** : la déclaration locale est gardée.
+    ///
+    /// C'est la règle de toute la fusion — on complète, on n'écrase pas. Reprendre le fichier ferait
+    /// dire à une colonne autre chose que ce que quelqu'un avait déclaré sur cette machine, et un
+    /// libellé faux est pire qu'un libellé absent : c'est celui-là qu'on croit.
+    pub value_labels_kept: Vec<String>,
     /// Les connexions dont le kubeconfig référencé **n'est déclaré nulle part dans le fichier**
     /// (`API-70`).
     ///
@@ -374,6 +383,8 @@ impl ProjectOutcome {
             connections_kept: Vec::new(),
             connections_rejected: Vec::new(),
             kubeconfigs_missing: Vec::new(),
+            value_labels_added: Vec::new(),
+            value_labels_kept: Vec::new(),
             consoles_added: Vec::new(),
             consoles_kept: Vec::new(),
             passwords_stored: Vec::new(),
@@ -850,6 +861,7 @@ pub fn fusionner(
                 environments: Vec::new(),
                 databases: Vec::new(),
                 queries: Vec::new(),
+                value_labels: BTreeMap::new(),
             },
         };
 
@@ -959,6 +971,42 @@ pub fn fusionner(
             }
         }
 
+        /*
+         * Les libellés de valeurs (`API-75`).
+         *
+         * **Ils voyagent parce qu'ils vivent sur le `Project`**, dont le fichier de transfert porte
+         * exactement le type. Sans ce versement, un projet **déjà déclaré ici** recevrait ses
+         * connexions et ses consoles mais laisserait ses libellés dans le fichier, en silence — le
+         * défaut que ce geste ne doit jamais avoir.
+         *
+         * **Colonne par colonne, et non table par table** : deux machines peuvent avoir étiqueté
+         * deux colonnes différentes de la même table, et remplacer la table entière en perdrait une.
+         *
+         * **Aucun instantané des clés locales n'est nécessaire ici**, contrairement aux
+         * environnements et aux connexions : les clés d'une `BTreeMap` sont uniques, donc le fichier
+         * ne peut pas déclarer deux fois la même colonne et se faire passer pour une déclaration
+         * locale.
+         */
+        for (table, colonnes) in &entrant.value_labels {
+            for (colonne, libelles) in colonnes {
+                let etiquette = format!("{table}.{colonne}");
+                if candidat
+                    .value_labels
+                    .get(table)
+                    .is_some_and(|locales| locales.contains_key(colonne))
+                {
+                    sort.value_labels_kept.push(etiquette);
+                } else {
+                    sort.value_labels_added.push(etiquette);
+                    candidat
+                        .value_labels
+                        .entry(table.clone())
+                        .or_default()
+                        .insert(colonne.clone(), libelles.clone());
+                }
+            }
+        }
+
         match candidat.valider() {
             Ok(()) => match place {
                 Some(index) => projects[index] = candidat,
@@ -970,7 +1018,7 @@ pub fn fusionner(
             // quarantaine de tout, au prochain démarrage.
             Err(erreur) => {
                 // **Le sort est remis à neuf**, et non amendé champ par champ : un projet refusé
-                // n'apporte rien, donc aucune de ses dix listes ne veut plus rien dire. Les vider
+                // n'apporte rien, donc aucune de ses douze listes ne veut plus rien dire. Les vider
                 // une par une laissait « n connexions attendent leur mot de passe » sur un projet
                 // dont aucune connexion n'arrive — une réserve à propos de rien, et le genre
                 // d'oubli qui revient à chaque liste ajoutée.
@@ -1257,6 +1305,7 @@ mod tests {
             environments: envs.iter().map(|id| declaration(id, false)).collect(),
             databases: bases,
             queries: Vec::new(),
+            value_labels: BTreeMap::new(),
         }
     }
 
@@ -1768,6 +1817,87 @@ mod tests {
         );
     }
 
+    /// **Les libellés de valeurs voyagent** (`API-75`), et vers un projet déjà déclaré aussi.
+    ///
+    /// C'est le cas qui casserait en silence si le versement manquait : le projet existe ici, donc
+    /// il reçoit ses connexions et ses consoles — et laisserait ses libellés dans le fichier sans
+    /// qu'un mot le dise.
+    #[test]
+    fn les_libelles_de_valeurs_arrivent_sur_un_projet_deja_declare() {
+        let locaux = vec![projet(
+            "Halle",
+            &["dev"],
+            vec![connexion("catalogue", "dev")],
+        )];
+
+        let mut entrant = projet("Halle", &["dev"], vec![connexion("catalogue", "dev")]);
+        entrant.value_labels = BTreeMap::from([(
+            "orders".to_owned(),
+            BTreeMap::from([(
+                "status".to_owned(),
+                BTreeMap::from([("3".to_owned(), "expédiée".to_owned())]),
+            )]),
+        )]);
+        let fichier = fichier_de(vec![entrant]);
+
+        let fusion = fusionner(&locaux, &Kubeconfigs::default(), &fichier, None);
+
+        assert_eq!(
+            fusion.projects[0].value_labels["orders"]["status"]["3"],
+            "expédiée"
+        );
+        assert_eq!(
+            fusion.report.projects[0].value_labels_added,
+            vec!["orders.status".to_owned()]
+        );
+        assert!(fusion.report.projects[0].value_labels_kept.is_empty());
+    }
+
+    /// **Une colonne déjà étiquetée ici garde ses libellés**, et le rapport le dit.
+    ///
+    /// C'est la règle de toute la fusion : on complète, on n'écrase pas. Un libellé faux est pire
+    /// qu'un libellé absent — c'est celui-là qu'on croit.
+    #[test]
+    fn une_colonne_deja_etiquetee_garde_ses_libelles() {
+        let mut local = projet("Halle", &["dev"], vec![connexion("catalogue", "dev")]);
+        local.value_labels = BTreeMap::from([(
+            "orders".to_owned(),
+            BTreeMap::from([(
+                "status".to_owned(),
+                BTreeMap::from([("3".to_owned(), "à moi".to_owned())]),
+            )]),
+        )]);
+
+        let mut entrant = projet("Halle", &["dev"], vec![connexion("catalogue", "dev")]);
+        entrant.value_labels = BTreeMap::from([(
+            "orders".to_owned(),
+            BTreeMap::from([
+                (
+                    "status".to_owned(),
+                    BTreeMap::from([("3".to_owned(), "de l'autre".to_owned())]),
+                ),
+                (
+                    "kind".to_owned(),
+                    BTreeMap::from([("1".to_owned(), "web".to_owned())]),
+                ),
+            ]),
+        )]);
+        let fichier = fichier_de(vec![entrant]);
+
+        let fusion = fusionner(&[local], &Kubeconfigs::default(), &fichier, None);
+
+        let libelles = &fusion.projects[0].value_labels["orders"];
+        assert_eq!(libelles["status"]["3"], "à moi", "le local est gardé");
+        // **Colonne par colonne, et non table par table** : la voisine que seul le fichier déclare
+        // arrive quand même. Remplacer la table entière l'aurait perdue ; la refuser en entier
+        // aurait fait d'un libellé local un veto sur toute la table.
+        assert_eq!(libelles["kind"]["1"], "web");
+
+        let sort = &fusion.report.projects[0];
+        assert_eq!(sort.value_labels_kept, vec!["orders.status".to_owned()]);
+        assert_eq!(sort.value_labels_added, vec!["orders.kind".to_owned()]);
+    }
+
     #[test]
     fn une_console_homonyme_est_refusee_et_le_texte_local_garde() {
         let mut locale = connexion("catalogue", "dev");
@@ -2138,7 +2268,7 @@ mod tests {
     #[test]
     fn un_projet_refuse_ne_rapporte_rien_du_tout() {
         // Le sort d'un projet refusé est **remis à neuf**, non amendé champ par champ : aucune de ses
-        // dix listes ne veut plus rien dire, et « n connexions attendent leur mot de passe » sur un
+        // douze listes ne veut plus rien dire, et « n connexions attendent leur mot de passe » sur un
         // projet dont aucune connexion n'arrive serait une réserve à propos de rien.
         let mut fautif = projet("Halle", &[], Vec::new());
         fautif.environments = Vec::new();
@@ -2174,6 +2304,8 @@ mod tests {
                 connections_kept: Vec::new(),
                 connections_rejected: Vec::new(),
                 kubeconfigs_missing: Vec::new(),
+                value_labels_added: Vec::new(),
+                value_labels_kept: Vec::new(),
                 consoles_added: Vec::new(),
                 consoles_kept: Vec::new(),
                 passwords_stored: Vec::new(),

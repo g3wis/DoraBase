@@ -10,6 +10,7 @@ import { rendreValeur, texteDeValeur } from './cellule'
 import { documentJson } from './documentJson'
 import { type Echelle, valeurRelue } from './horodatage'
 import { JsonColore } from './JsonColore'
+import { AUCUN_LIBELLE, type LibellesDeTable, valeurLibellee } from './libelles'
 import { relationDe, valeurDeCle } from './ligneLiee'
 import styles from './RowPanel.module.css'
 import { type CibleDuSaut, cibleDuSaut } from './saut'
@@ -46,6 +47,14 @@ type RowPanelProps = {
    * (`documentJson`), et une date y remplacerait la valeur stockée.
    */
   lectures?: Readonly<Record<string, Echelle>>
+  /**
+   * Ce que les entiers de cette table veulent dire, tel que la grille l'applique (`API-75`).
+   *
+   * **Même raison que `lectures`** : le panneau et la grille montrent la même cellule, et un entier
+   * libellé d'un côté et nu de l'autre se lirait comme un défaut d'affichage. Et **même exception**
+   * — l'onglet JSON n'en tient pas compte, puisqu'il porte le document qui se *réécrit*.
+   */
+  libelles?: LibellesDeTable
   /**
    * Son rang dans la fenêtre, à partir de 1. **Il ne s'affiche plus** — il sert à nommer le panneau
    * pour un lecteur d'écran, et à savoir qu'une ligne est bien sélectionnée.
@@ -96,6 +105,7 @@ export function RowPanel({
   relations,
   ligne,
   lectures = {},
+  libelles = AUCUN_LIBELLE,
   rang,
   onCopyInsert,
   onSuivreLaReference,
@@ -200,9 +210,12 @@ export function RowPanel({
         {onglet === 'champs' && (
           <dl className={styles.champs}>
             {columns.map((colonne, index) => {
-              const valeur = valeurRelue(
-                ligne[index] ?? { kind: 'null' as const },
-                lectures[colonne.name],
+              // Relue **puis** libellée, dans l'ordre exact de la grille : l'horodatage l'emporte
+              // sur le libellé, et l'écart le plus petit entre les deux rendus se lirait comme un
+              // défaut. Une seule composition, deux endroits qui l'appellent.
+              const valeur = valeurLibellee(
+                valeurRelue(ligne[index] ?? { kind: 'null' as const }, lectures[colonne.name]),
+                libelles[colonne.name],
               )
               // Deux formes de la même valeur : l'une pour l'œil — `NULL` y est teinté — l'autre pour
               // l'aperçu et le presse-papiers. `texteDeValeur` est la source des deux (voir `cellule`).

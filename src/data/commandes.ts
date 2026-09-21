@@ -12,6 +12,7 @@ import type {
   ManagedInstance,
   Preferences,
   Project,
+  ValueLabelsRequest,
   VisibleSchemasRequest,
 } from '../domain/config'
 import type {
@@ -352,6 +353,17 @@ export async function createSchema(key: DatabaseKey, name: string): Promise<void
  */
 export async function saveVisibleSchemas(request: VisibleSchemasRequest): Promise<Project[]> {
   return appeler<Project[]>('save_visible_schemas', { request })
+}
+
+/**
+ * Règle ce que les entiers d'une colonne veulent dire (`API-75`).
+ *
+ * Rend les projets à jour, comme les autres écritures de configuration — c'est ce changement que la
+ * vue de table suit pour réafficher ses cellules. **Elle ne ferme pas la connexion** : rien de ce
+ * qui décrit le serveur n'a changé.
+ */
+export async function saveValueLabels(request: ValueLabelsRequest): Promise<Project[]> {
+  return appeler<Project[]>('save_value_labels', { request })
 }
 
 /**

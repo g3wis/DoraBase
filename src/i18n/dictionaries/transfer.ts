@@ -51,6 +51,11 @@ export const transferFr: Dictionnaire = {
     passwordsMissing: (p) => `${p.count} connexion(s) attendent leur mot de passe`,
     passwordsStored: (p) => `${p.count} mot(s) de passe rangés depuis le fichier`,
     localPaths: (p) => `${p.count} chemin(s) à vérifier sur cette machine`,
+    // Les libellés de valeurs (`API-75`). Ils voyagent avec le projet, qui porte leur déclaration :
+    // ce qui arrive est un **détail**, ce qui est gardé est une **réserve**.
+    valueLabelsAdded: (p) => `${p.count} colonne(s) reçoivent leurs libellés de valeurs`,
+    valueLabelsKept: (p) =>
+      `${p.count} colonne(s) déjà libellées : les libellés locaux sont gardés`,
     kubeconfigsMissing: (p) => `${p.count} connexion(s) sans kubeconfig déclaré dans le fichier`,
     connectionsRejected: (p) =>
       `${p.count} connexion(s) refusées : leur environnement n'est déclaré nulle part`,
@@ -101,6 +106,8 @@ export const transferEn: Dictionnaire = {
     passwordsMissing: (p) => `${p.count} connection(s) are waiting for their password`,
     passwordsStored: (p) => `${p.count} password(s) stored from the file`,
     localPaths: (p) => `${p.count} path(s) to check on this machine`,
+    valueLabelsAdded: (p) => `${p.count} column(s) receive their value labels`,
+    valueLabelsKept: (p) => `${p.count} column(s) already labelled: the local labels are kept`,
     kubeconfigsMissing: (p) =>
       `${p.count} connection(s) whose kubeconfig the file does not declare`,
     connectionsRejected: (p) =>

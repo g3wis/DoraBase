@@ -74,6 +74,7 @@ pub fn run() {
             config::commands::delete_project,
             config::commands::update_variant,
             config::commands::save_visible_schemas,
+            config::commands::save_value_labels,
             config::commands::export_projects,
             config::commands::inspect_projects_file,
             config::commands::import_projects,

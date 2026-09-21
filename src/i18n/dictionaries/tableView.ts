@@ -166,6 +166,17 @@ export const tableViewFr: Dictionnaire = {
     },
     deduced: ' (déduit)',
     readingInUse: 'C’est déjà la lecture de cette colonne.',
+    // Les libellés de valeurs (`API-75`). L'entrée dit **ce qu'on va régler**, non l'effet — « 3
+    // (expédiée) » serait un exemple, pas un nom de geste. Le compte, lui, dit s'il y a déjà
+    // quelque chose à relire : il distingue « déclarer » de « corriger » avant d'ouvrir la modale.
+    editLabels: 'Libellés des valeurs…',
+    editLabelsCount: (p) => `Libellés des valeurs (${p.count})…`,
+    // Elle se **désactive avec sa raison** quand la colonne est lue en horodatage : la déclaration
+    // s'enregistrerait bien, et ne se verrait nulle part — une cellule qui affiche une date n'a
+    // plus d'entier à libeller. Un geste sans effet visible se lit comme une panne (défaut n° 36).
+    labelsUnderTimestamp:
+      'Cette colonne est lue comme un horodatage : ses entiers ne s’affichent plus.',
+    labelsUnavailable: 'Cet écran n’est pas relié à l’enregistrement des libellés.',
     nothingToCopy: 'Cette cellule prend le défaut de la base : elle n’a pas encore de valeur.',
     noPrimaryKeyReason:
       'Cette table n’a pas de clé primaire : DoraBase ne saurait pas quelle ligne mettre à jour.',
@@ -192,6 +203,31 @@ export const tableViewFr: Dictionnaire = {
     // `documentJson.ts`, `documentDepuisTexte`.
     invalidJson: (p) => `JSON invalide : ${p.message}`,
     mustBeObject: 'Le document doit être un objet JSON, entre accolades.',
+  },
+  // L'éditeur des libellés de valeurs d'une colonne (`API-75`).
+  labels: {
+    title: (p) => `Libellés des valeurs de ${p.column}`,
+    // La seconde phrase est celle qui compte : sans elle, on croirait qu'enregistrer des libellés
+    // écrit quelque chose dans la base. C'est de l'affichage, et de l'affichage seul.
+    note: 'Ce que chaque entier veut dire. La grille affichera « 3 (expédiée) » ; la valeur enregistrée reste 3, et l’édition, le filtre et le tri continuent de porter sur l’entier.',
+    value: 'Valeur',
+    label: 'Libellé',
+    // Le **rang** et non la valeur saisie : celle-ci change sous les doigts, et un contrôle qui se
+    // renomme à la frappe se chercherait à nouveau à chaque caractère (piège n° 5).
+    valueOfRow: (p) => `Valeur de la ligne ${p.rang}`,
+    labelOfRow: (p) => `Libellé de la ligne ${p.rang}`,
+    removeRow: (p) => `Retirer la ligne ${p.rang}`,
+    add: 'Ajouter une valeur',
+    cancel: 'Annuler',
+    save: 'Enregistrer',
+    saving: 'Enregistrement…',
+    // Les deux refus de `libellesDepuisLesLignes`. Chacun **nomme la valeur** fautive : « une
+    // valeur est invalide » dans une liste de dix lignes laisserait la chercher.
+    refus: {
+      valeurNonEntiere: (p) =>
+        `« ${p.valeur} » n’est pas un entier : aucune cellule ne porterait cette valeur.`,
+      valeurEnDouble: (p) => `La valeur ${p.valeur} est déclarée deux fois.`,
+    },
   },
 }
 
@@ -335,6 +371,11 @@ export const tableViewEn: Dictionnaire = {
     },
     deduced: ' (deduced)',
     readingInUse: 'That is already how this column is read.',
+    editLabels: 'Value labels…',
+    editLabelsCount: (p) => `Value labels (${p.count})…`,
+    labelsUnderTimestamp:
+      'This column is read as a timestamp: its integers are no longer displayed.',
+    labelsUnavailable: 'This screen is not wired to saving value labels.',
     nothingToCopy: 'This cell takes the database default: it has no value yet.',
     noPrimaryKeyReason:
       'This table has no primary key: DoraBase would not know which row to update.',
@@ -357,5 +398,22 @@ export const tableViewEn: Dictionnaire = {
     save: 'Save',
     invalidJson: (p) => `Invalid JSON: ${p.message}`,
     mustBeObject: 'The document must be a JSON object, between curly braces.',
+  },
+  labels: {
+    title: (p) => `Value labels for ${p.column}`,
+    note: 'What each integer means. The grid will show “3 (shipped)”; the stored value stays 3, and editing, filtering and sorting still work on the integer.',
+    value: 'Value',
+    label: 'Label',
+    valueOfRow: (p) => `Value on row ${p.rang}`,
+    labelOfRow: (p) => `Label on row ${p.rang}`,
+    removeRow: (p) => `Remove row ${p.rang}`,
+    add: 'Add a value',
+    cancel: 'Cancel',
+    save: 'Save',
+    saving: 'Saving…',
+    refus: {
+      valeurNonEntiere: (p) => `“${p.valeur}” is not an integer: no cell would hold that value.`,
+      valeurEnDouble: (p) => `The value ${p.valeur} is declared twice.`,
+    },
   },
 }

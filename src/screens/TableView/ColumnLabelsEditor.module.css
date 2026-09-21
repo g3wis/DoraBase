@@ -1,0 +1,157 @@
+/*
+ * L'éditeur des libellés de valeurs d'une colonne (`API-75`).
+ *
+ * Le handoff ne le maquette pas — il n'existait pas. Plutôt que d'inventer une mise en page, il
+ * emprunte celle de ses voisines : la coquille de `Modal`, le remplissage et l'échelle
+ * typographique de `DeleteEnvironmentDialog`, et la hauteur de champ du formulaire de connexion
+ * (`--h-field`). Aucune cote nouvelle, aucune couleur qui ne soit un jeton.
+ */
+
+.corps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  /* Le corps de `Modal` n'a délibérément aucun remplissage (`08a`) : c'est au contenu de poser le
+   * sien. `--space-7` aligne le texte sur le titre de l'en-tête au pixel. */
+  padding: var(--space-7);
+  font-family: var(--font-ui);
+  font-size: var(--text-label);
+  font-weight: var(--weight-medium);
+  color: var(--ink-2);
+}
+
+/* La table, dans la bande d'en-tête. En mono comme partout où le produit nomme un objet de la
+ * base — l'arbre, le fil d'Ariane, les en-têtes de la grille. */
+.cadre {
+  font-family: var(--font-mono);
+  font-size: var(--text-dense);
+  color: var(--ink-3);
+}
+
+.note {
+  margin: 0;
+  line-height: 1.5;
+}
+
+/*
+ * Deux pistes de saisie et la colonne de retrait.
+ *
+ * **La valeur est étroite et le libellé prend le reste** : un code d'état tient en un ou deux
+ * chiffres, un libellé est un mot ou trois. Donner la moitié à chacun aurait laissé le libellé
+ * coupé à l'ellipse pendant qu'une piste de cinq caractères restait aux trois quarts vide — le
+ * défaut que l'ajustement de largeur de la grille corrige par ailleurs.
+ */
+.lignes {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr 22px;
+  gap: var(--space-3) var(--space-4);
+  align-items: center;
+}
+
+.entete {
+  font-size: var(--text-caps);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--ink-4);
+}
+
+/*
+ * Une ligne **s'étale sur la grille** au lieu d'être un conteneur à elle.
+ *
+ * `display: contents` fait de ses trois enfants des enfants de la grille : sans lui, chaque ligne
+ * serait une seule cellule et ses champs ne s'aligneraient sur rien — l'écart avec les en-têtes
+ * ne se verrait qu'au rendu, jamais dans le DOM.
+ */
+.ligne {
+  display: contents;
+}
+
+.valeur,
+.libelle {
+  min-width: 0;
+  height: var(--h-field);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--border-field);
+  border-radius: var(--radius-field);
+  background: var(--field);
+  font: var(--weight-medium) var(--text-dense) / var(--leading-ui) var(--font-mono);
+  color: var(--ink);
+}
+
+/* Le libellé est de la prose, pas un identifiant : c'est la seule saisie de cet écran qui ne soit
+ * pas en mono. L'abréviation `font` ci-dessus repose famille, taille, graisse **et** hauteur de
+ * ligne (la leçon d'`API-55`), donc seule la famille est à reprendre. */
+.libelle {
+  font-family: var(--font-ui);
+}
+
+.valeur:focus-visible,
+.libelle:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--shadow-focus);
+}
+
+/*
+ * Le retrait d'une ligne : une croix nue.
+ *
+ * Elle relève son encre au survol plutôt que de prendre un fond — c'est ce que font déjà les
+ * actions de ligne de la grille et la bande en tête de la sidebar. Une croix qui gagnerait un
+ * carré teinté dans un formulaire de trois lignes se lirait comme un bouton de plus.
+ */
+.retirer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--ink-4);
+  cursor: pointer;
+}
+
+.retirer:hover {
+  color: var(--danger-ink);
+}
+
+.retirer:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+/* « Ajouter une valeur » : un lien d'action, aligné sur le bord gauche de la liste. */
+.ajouter {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: var(--weight-semibold) var(--text-label) / var(--leading-ui) var(--font-ui);
+  color: var(--accent-deep);
+  cursor: pointer;
+}
+
+.ajouter:hover {
+  color: var(--accent-deeper);
+}
+
+.ajouter:focus-visible {
+  outline: none;
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-focus);
+}
+
+.refus {
+  margin: 0;
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-field);
+  background: var(--danger-bg);
+  font-weight: var(--weight-semibold);
+  color: var(--danger-ink);
+}

@@ -257,6 +257,19 @@ function Ligne({
             {t('transfer.import.localPaths', { count: sort.localPaths.length })}
           </span>
         )}
+        {/* **Un détail et une réserve** (`API-75`), et le partage est celui des mots de passe
+            juste au-dessus : ce qui *arrive* se dit en neutre, ce qui est *gardé* en réserve —
+            c'est la seule des deux qui demande de savoir que le fichier portait autre chose. */}
+        {sort.valueLabelsAdded.length > 0 && (
+          <span className={styles.detail} title={sort.valueLabelsAdded.join('\n')}>
+            {t('transfer.import.valueLabelsAdded', { count: sort.valueLabelsAdded.length })}
+          </span>
+        )}
+        {sort.valueLabelsKept.length > 0 && (
+          <span className={styles.reserve} title={sort.valueLabelsKept.join('\n')}>
+            {t('transfer.import.valueLabelsKept', { count: sort.valueLabelsKept.length })}
+          </span>
+        )}
         {/* **En `refus` et non en `reserve`** (`API-70`) : une connexion dont le kubeconfig n'est
             déclaré nulle part dans le fichier **n'ouvrira pas**, là où un chemin local peut très
             bien exister sur cette machine. Un import amputé en silence se lirait comme un import

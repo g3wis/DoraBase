@@ -30,6 +30,7 @@ import { MenuContextuel } from '../../ui/MenuContextuel/MenuContextuel'
 import { largeurAjustee } from '../../ui/VirtualGrid/ajustement'
 import { useHauteurDisponible } from '../../ui/VirtualGrid/hauteurDisponible'
 import { type GridColumn, type PositionDuMenu, VirtualGrid } from '../../ui/VirtualGrid/VirtualGrid'
+import { ColumnLabelsEditor } from './ColumnLabelsEditor'
 import {
   apercuDeLaSaisie,
   estNumerique,
@@ -49,6 +50,7 @@ import {
   echelleDeduite,
   valeurRelue,
 } from './horodatage'
+import { AUCUN_LIBELLE, type LibellesDeTable, valeurLibellee } from './libelles'
 import { relationDe } from './ligneLiee'
 import {
   ajouterUneLigne,
@@ -151,6 +153,12 @@ type TableViewProps = {
      * *afficher*, comme la grille — la conversion n'appartient à aucun chemin d'écriture.
      */
     lectures: Readonly<Record<string, Echelle>>
+    /**
+     * Et ce que ses entiers veulent dire (`API-75`), pour la même raison : deux lectures
+     * divergentes du même entier — libellé dans la grille, nu dans le panneau — se liraient comme
+     * un défaut d'affichage.
+     */
+    libelles: LibellesDeTable
   }) => void
   /** Le rang sélectionné, piloté depuis l'écran pour que les flèches du panneau y répondent. */
   rang?: number | null
@@ -195,6 +203,21 @@ type TableViewProps = {
   structureEnCours?: boolean
   attente?: EnAttente
   onAttenteChange?: (attente: EnAttente) => void
+  /**
+   * Ce que les entiers de cette table veulent dire (`API-75`) : colonne, valeur, libellé.
+   *
+   * **Déjà résolus**, et non la liste des projets à fouiller : c'est `libellesDeLaTable` qui répond
+   * à la question, une fois, chez l'écran qui tient la configuration. Vide, la grille est celle
+   * d'avant — aucune parenthèse, et l'entrée de menu se désactive avec sa raison.
+   */
+  libelles?: LibellesDeTable
+  /**
+   * Enregistre les libellés d'une colonne. Rejette avec le refus à afficher.
+   *
+   * Absent, l'entrée du menu se **désactive avec sa raison** plutôt que de disparaître : c'est le
+   * cas de la galerie, et la cacher ferait croire que le geste n'existe pas.
+   */
+  onLibelles?: (colonne: string, libelles: Record<string, string>) => Promise<void>
 }
 
 /**
@@ -288,6 +311,8 @@ export function TableView({
   structureEnCours = false,
   attente = [],
   onAttenteChange,
+  libelles = AUCUN_LIBELLE,
+  onLibelles,
 }: TableViewProps) {
   const t = useT()
   /**
@@ -320,6 +345,8 @@ export function TableView({
   // qu'elle est. Comme `masquees` et `largeurs`, seul l'écart au défaut est tenu — et pour la même
   // raison, aucun moteur ne pouvant dire si un `bigint` porte une date (voir `horodatage.ts`).
   const [lectures, setLectures] = useState<Readonly<Record<string, Echelle>>>({})
+  /** La colonne dont on édite les libellés (`API-75`), ou `null` — l'éditeur n'est pas monté. */
+  const [libellesAEditer, setLibellesAEditer] = useState<string | null>(null)
   /**
    * Le signal « descends au bas de la grille », incrémenté par le `+` de la barre d'outils.
    *
@@ -467,6 +494,49 @@ export function TableView({
   }
 
   /**
+   * L'entrée « libellés des valeurs » du menu d'en-tête (`API-75`) — **pour toute colonne
+   * numérique**, comme les entrées de lecture juste au-dessus.
+   *
+   * Une colonne de texte n'a pas d'entier à libeller, et une colonne déjà temporelle non plus : la
+   * proposer partout ferait chercher à quoi elle sert, exactement comme un `is null` sur une
+   * colonne `NOT NULL`.
+   *
+   * **Elle se désactive avec sa raison quand la colonne est lue en horodatage.** La déclaration
+   * s'enregistrerait très bien — et ne se verrait nulle part, puisque `valeurRelue` a déjà changé
+   * l'entier en date avant que le libellé ne soit cherché. Un geste dont l'effet est invisible se
+   * lit comme une panne (défaut n° 36). L'inverse n'a pas besoin de garde : choisir une échelle sur
+   * une colonne libellée **change visiblement** la colonne en dates, et « Lire comme un nombre » y
+   * ramène les libellés.
+   *
+   * **Le compte paraît dans le libellé quand il y en a**, et c'est ce qui distingue « déclarer » de
+   * « corriger » avant d'ouvrir : un menu qui dirait la même chose dans les deux cas laisserait
+   * ouvrir la modale pour savoir.
+   */
+  function entreeDeLibelles(nom: string): EntreeDeMenu[] {
+    const colonne = colonnesEffectives.find((candidate) => candidate.name === nom)
+    if (colonne === undefined || colonne.category !== 'number') return []
+
+    const declares = Object.keys(libelles[nom] ?? {}).length
+    const luEnHorodatage = lectures[nom] !== undefined
+    const raison = luEnHorodatage
+      ? t('tableView.grid.labelsUnderTimestamp')
+      : onLibelles === undefined
+        ? t('tableView.grid.labelsUnavailable')
+        : undefined
+
+    return [
+      {
+        libelle:
+          declares === 0
+            ? t('tableView.grid.editLabels')
+            : t('tableView.grid.editLabelsCount', { count: declares }),
+        onClick: raison === undefined ? () => setLibellesAEditer(nom) : undefined,
+        raison,
+      },
+    ]
+  }
+
+  /**
    * La catégorie sous laquelle une colonne se **lit** : celle du catalogue, sauf pour une colonne
    * d'entiers qu'on lit en horodatage.
    *
@@ -590,8 +660,9 @@ export function TableView({
       rang: ligneChoisie?.rang ?? null,
       total: lignes.length,
       lectures,
+      libelles,
     })
-  }, [fenetre, loading, error, ligneChoisie, lignes.length, lectures, onLectureChange])
+  }, [fenetre, loading, error, ligneChoisie, lignes.length, lectures, libelles, onLectureChange])
 
   /**
    * La valeur de la clé primaire d'une ligne, en texte — l'identité d'une modification (`11a`).
@@ -709,10 +780,15 @@ export function TableView({
       parNom[colonne.name] = largeurAjustee(
         colonne.name,
         // **La valeur relue, pas la brute** : une colonne lue en horodatage affiche 19 caractères
-        // là où l'entier en fait 13, et l'ajustement la couperait à l'ellipse.
+        // là où l'entier en fait 13, et l'ajustement la couperait à l'ellipse. Un libellé
+        // (`API-75`) est plus long encore — `3 (expédiée)` contre `3` — et pour la même raison il
+        // doit être mesuré et non deviné.
         echantillon.map((ligne) =>
           texteDeValeur(
-            valeurRelue(ligne.valeurs[rang] ?? { kind: 'null' }, lectures[colonne.name]),
+            valeurLibellee(
+              valeurRelue(ligne.valeurs[rang] ?? { kind: 'null' }, lectures[colonne.name]),
+              libelles[colonne.name],
+            ),
           ),
         ),
         {
@@ -722,7 +798,7 @@ export function TableView({
       )
     }
     return parNom
-  }, [colonnesEffectives, lignes, lectures, relations])
+  }, [colonnesEffectives, lignes, lectures, libelles, relations])
 
   /**
    * Le texte d'une cellule, pour « Copier la valeur » du menu contextuel — `null` quand il n'y a
@@ -748,9 +824,12 @@ export function TableView({
     // déplacement des colonnes ne change pas.
     const rang = colonnesEffectives.findIndex((colonne) => colonne.name === nom)
     const valeur = rang === -1 ? undefined : ligne.valeurs[rang]
-    // Relue, comme la cellule : la règle est de copier **ce qu'on lit**, et une colonne lue en
-    // horodatage n'affiche plus son entier.
-    return valeur === undefined ? null : texteDeValeur(valeurRelue(valeur, lectures[nom]))
+    // Relue et libellée, comme la cellule : la règle est de copier **ce qu'on lit**, et une
+    // colonne lue en horodatage n'affiche plus son entier. Un libellé suit la même règle — on
+    // copie `3 (expédiée)`, ce que l'écran montre (`API-75`).
+    return valeur === undefined
+      ? null
+      : texteDeValeur(valeurLibellee(valeurRelue(valeur, lectures[nom]), libelles[nom]))
   }
 
   const colonnes: GridColumn<Ligne>[] = useMemo(
@@ -939,7 +1018,16 @@ export function TableView({
             // L'alignement suit la **valeur**, pas le nom de la colonne : une colonne numérique
             // dont une cellule est `NULL` garde son `NULL` à gauche, comme le mockup le montre.
             // Lue en horodatage, elle s'aligne comme les autres horodatages — à gauche.
-            numeric: colonne.category === 'number' && lectures[colonne.name] === undefined,
+            //
+            // **Une colonne libellée s'aligne à gauche aussi** (`API-75`), dès qu'un libellé est
+            // déclaré et même si la plupart des valeurs n'en ont pas : ce ne sont plus des
+            // quantités mais des codes, et `3 (expédiée)` calé à droite donnerait un bord gauche
+            // en dents de scie sur des libellés de longueurs différentes. On n'additionne pas des
+            // états.
+            numeric:
+              colonne.category === 'number' &&
+              lectures[colonne.name] === undefined &&
+              libelles[colonne.name] === undefined,
             tint: filtre ? ('filtered' as const) : critere ? ('sorted' as const) : undefined,
             filter: (
               <FilterCell
@@ -1011,7 +1099,15 @@ export function TableView({
               // **La saisie en attente n'est pas relue.** Une modification retenue est du texte qui
               // partira tel quel vers une colonne numérique : l'afficher en date ferait croire
               // qu'une date sera écrite.
-              const relue = valeurRelue(valeur, lectures[colonne.name])
+              // **Le libellé après la relecture**, et l'ordre porte une décision (`API-75`) :
+              // `valeurRelue` a déjà changé l'entier en date quand une échelle est choisie, donc
+              // il n'y a plus d'entier à libeller — la lecture en horodatage l'emporte, et c'est ce
+              // qui rend les deux lectures exclusives **par construction** plutôt que par une
+              // règle à retenir. L'entrée du menu dit ce qu'il en est (`entreeDeLibelles`).
+              const relue = valeurLibellee(
+                valeurRelue(valeur, lectures[colonne.name]),
+                libelles[colonne.name],
+              )
               const affichee = modifiee ? apercuDeLaSaisie(modifiee.apres) : rendreValeur(relue)
               // **La classe de réserve est portée par toute cellule d'une colonne suivie**, même
               // celle qui n'aura pas de bouton : une colonne dont l'indentation varierait d'une
@@ -1105,6 +1201,7 @@ export function TableView({
       categorieLue,
       valeurAffichableDuFiltre,
       lectures,
+      libelles,
       masquees,
       largeurs,
       largeursAjustees,
@@ -1259,6 +1356,21 @@ export function TableView({
           />
         </div>
       </div>
+      {/* L'éditeur des libellés de valeurs (`API-75`), monté **ici** et non chez l'écran de
+          travail : son point d'entrée est le menu d'en-tête de cette vue, et son sujet est une
+          colonne de la table qu'elle montre. C'est le choix de `DocumentJsonModal` juste en
+          dessous ; l'écran, lui, ne fournit que l'écriture, qui est la seule moitié qu'il détient.
+          La garde sur `onLibelles` est doublée par l'entrée du menu, qui ne s'ouvre pas sans
+          gestionnaire — elle est ici pour que le rétrécissement de type tienne. */}
+      {libellesAEditer !== null && onLibelles !== undefined && (
+        <ColumnLabelsEditor
+          table={table}
+          colonne={libellesAEditer}
+          libelles={libelles[libellesAEditer] ?? {}}
+          onClose={() => setLibellesAEditer(null)}
+          onEnregistrer={(valeurs) => onLibelles(libellesAEditer, valeurs)}
+        />
+      )}
       {documentJsonOuvert && onAttenteChange !== undefined && (
         <DocumentJsonModal
           titre={
@@ -1327,6 +1439,7 @@ export function TableView({
                 onClick: () => setMasquees((precedent) => new Set(precedent).add(menu.colonne)),
               },
               ...entreesDeLecture(menu.colonne),
+              ...entreeDeLibelles(menu.colonne),
             ]}
             onFermer={() => setMenu(null)}
           />

@@ -44,7 +44,7 @@ projects: Array<ProjectOutcome>, };
 /**
  * Le détail de ce qu'un projet apporte, et de ce qu'il n'apporte pas.
  *
- * **Dix listes plutôt qu'un compte**, et c'est délibéré : un import amputé en silence se lirait
+ * **Douze listes plutôt qu'un compte**, et c'est délibéré : un import amputé en silence se lirait
  * comme un import complet, ce qui est le pire défaut que ce geste puisse avoir. Chacune répond à une
  * question qu'on se pose vraiment devant le fichier de quelqu'un d'autre — qu'est-ce qui arrive,
  * qu'est-ce que je garde, qu'est-ce qu'il me reste à faire.
@@ -111,6 +111,19 @@ passwordsMissing: Array<string>,
  * **dit** plutôt que de laisser le découvrir sur un « fichier introuvable ».
  */
 localPaths: Array<string>, 
+/**
+ * Les colonnes dont les libellés de valeurs arrivent avec le fichier (`API-75`) —
+ * `table.colonne`.
+ */
+valueLabelsAdded: Array<string>, 
+/**
+ * Les colonnes déjà étiquetées **ici** : la déclaration locale est gardée.
+ *
+ * C'est la règle de toute la fusion — on complète, on n'écrase pas. Reprendre le fichier ferait
+ * dire à une colonne autre chose que ce que quelqu'un avait déclaré sur cette machine, et un
+ * libellé faux est pire qu'un libellé absent : c'est celui-là qu'on croit.
+ */
+valueLabelsKept: Array<string>, 
 /**
  * Les connexions dont le kubeconfig référencé **n'est déclaré nulle part dans le fichier**
  * (`API-70`).

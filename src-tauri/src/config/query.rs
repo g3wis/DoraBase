@@ -27,6 +27,8 @@ pub fn validate(project: &Project) -> Result<(), ModelError> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
     use crate::config::model::{ConnectionSettings, Engine, EnvironmentDeclaration, SslMode};
 
@@ -65,6 +67,7 @@ mod tests {
             name: "Atelier Nord".into(),
             environments: EnvironmentDeclaration::trio_par_defaut(),
             queries: Vec::new(),
+            value_labels: BTreeMap::new(),
             databases: vec![
                 connexion("analytics", "dev"),
                 connexion("analytics", "prod"),
@@ -99,6 +102,7 @@ mod tests {
             name: "Neuf".into(),
             environments: EnvironmentDeclaration::trio_par_defaut(),
             queries: Vec::new(),
+            value_labels: BTreeMap::new(),
             databases: vec![],
         };
         assert!(validate(&projet).is_ok());

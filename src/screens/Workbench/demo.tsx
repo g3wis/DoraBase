@@ -1310,6 +1310,10 @@ const APERCU_SIMULE: ImportReport = {
       passwordsMissing: ['catalogue (prod)'],
       localPaths: [],
       kubeconfigsMissing: [],
+      // Les libellés de valeurs voyagent avec le projet (`API-75`) : un projet créé apporte les
+      // siens, un projet fusionné garde ceux qu'on avait déjà déclarés ici.
+      valueLabelsAdded: ['orders.status'],
+      valueLabelsKept: [],
     },
     {
       name: 'Atelier Nord',
@@ -1325,6 +1329,8 @@ const APERCU_SIMULE: ImportReport = {
       passwordsMissing: [],
       localPaths: [],
       kubeconfigsMissing: [],
+      valueLabelsAdded: ['orders.kind'],
+      valueLabelsKept: ['orders.status'],
     },
     {
       name: 'Bancal',
@@ -1343,6 +1349,8 @@ const APERCU_SIMULE: ImportReport = {
       passwordsMissing: [],
       localPaths: [],
       kubeconfigsMissing: [],
+      valueLabelsAdded: [],
+      valueLabelsKept: [],
     },
   ],
 }
@@ -1918,6 +1926,25 @@ export function WorkbenchDemo() {
           return { missingSecrets: [], leftoverSecrets: [] }
         }}
         onProjets={setProjets}
+        /* Les libellés de valeurs (`API-75`) : la démo écrit **dans son état**, comme
+           `onRenameDatabase` et pour la même raison — le pont ne répond pas en Chromium, et c'est
+           le seul moyen de rendre le geste observable. Elle rejoue la règle du cœur, retrait de la
+           colonne vidée et de sa table hôte compris : sans quoi le chemin de retour — vider
+           l'éditeur pour rendre la colonne à ses chiffres — ne serait vérifiable nulle part. */
+        saveValueLabels={async (requete) => {
+          const suivants = projets.map((projet) => {
+            if (projet.name !== requete.project) return projet
+            const tables = { ...(projet.valueLabels ?? {}) }
+            const colonnes = { ...(tables[requete.table] ?? {}) }
+            if (Object.keys(requete.labels).length === 0) delete colonnes[requete.column]
+            else colonnes[requete.column] = requete.labels
+            if (Object.keys(colonnes).length === 0) delete tables[requete.table]
+            else tables[requete.table] = colonnes
+            return { ...projet, valueLabels: tables }
+          })
+          setProjets(suivants)
+          return suivants
+        }}
         /* L'export d'un projet (`API-30`) : la démo ouvre la **vraie** modale, avec un pont simulé —
            voir `TRANSFERT_SIMULE`. C'est le seul moyen de la rendre mesurable sous Playwright, la
            géométrie étant hors de portée de jsdom (règle n° 9). */

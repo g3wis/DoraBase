@@ -330,6 +330,8 @@ pub fn supprimer(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use std::collections::HashMap;
     use std::sync::Mutex;
 
@@ -437,6 +439,7 @@ mod tests {
                 ),
             ],
             queries: Vec::new(),
+            value_labels: BTreeMap::new(),
         }]
     }
 
