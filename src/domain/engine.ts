@@ -188,17 +188,18 @@ export type Filter = { column: string, operator: FilterOperator,
 value: string | null, };
 
 /**
- * Les onze opérateurs du popover de `A5` : `=`, `≠`, `in`, `~`, `is null`, `is true`, `is false`,
- * et les quatre comparaisons `>`, `>=`, `<=`, `<`.
+ * Les douze opérateurs du popover de `A5` : `=`, `≠`, `in`, `~`, `is null`, `is not null`,
+ * `is true`, `is false`, et les quatre comparaisons `>`, `>=`, `<=`, `<`.
  *
  * **Tous ne valent pas pour toutes les colonnes, et l'écran ne propose que ceux qui valent**
- * (`operateursPour`) : `is null` demande une colonne `nullable`, `is true` / `is false` une colonne
+ * (`operateursPour`) : `is null` et `is not null` demandent une colonne `nullable`, `is true` /
+ * `is false` une colonne
  * booléenne, et les comparaisons une colonne numérique ou temporelle. Chaque adaptateur **refuse**
  * ce qui lui arriverait quand même, pour la raison de `AGENTS.md` sur les modes SSL : l'écran qui
  * cache et le moteur qui refuse gardent deux chemins différents — une requête peut venir d'une
  * configuration écrite à la main.
  */
-export type FilterOperator = "eq" | "ne" | "in" | "matches" | "isNull" | "isTrue" | "isFalse" | "gt" | "gte" | "lte" | "lt";
+export type FilterOperator = "eq" | "ne" | "in" | "matches" | "isNull" | "isNotNull" | "isTrue" | "isFalse" | "gt" | "gte" | "lte" | "lt";
 
 /**
  * Les deux formes d'identité de la norme SQL, que PostgreSQL distingue.

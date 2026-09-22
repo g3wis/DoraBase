@@ -1903,6 +1903,7 @@ function PopoverGallery() {
     { signe: 'in', mot: 'dans la liste…' },
     { signe: '~', mot: 'contient' },
     { signe: '∅', mot: 'is null' },
+    { signe: '≠∅', mot: 'is not null' },
   ]
 
   const contenu = (

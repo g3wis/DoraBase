@@ -45,11 +45,12 @@ impl RowLimit {
     }
 }
 
-/// Les onze opérateurs du popover de `A5` : `=`, `≠`, `in`, `~`, `is null`, `is true`, `is false`,
-/// et les quatre comparaisons `>`, `>=`, `<=`, `<`.
+/// Les douze opérateurs du popover de `A5` : `=`, `≠`, `in`, `~`, `is null`, `is not null`,
+/// `is true`, `is false`, et les quatre comparaisons `>`, `>=`, `<=`, `<`.
 ///
 /// **Tous ne valent pas pour toutes les colonnes, et l'écran ne propose que ceux qui valent**
-/// (`operateursPour`) : `is null` demande une colonne `nullable`, `is true` / `is false` une colonne
+/// (`operateursPour`) : `is null` et `is not null` demandent une colonne `nullable`, `is true` /
+/// `is false` une colonne
 /// booléenne, et les comparaisons une colonne numérique ou temporelle. Chaque adaptateur **refuse**
 /// ce qui lui arriverait quand même, pour la raison de `AGENTS.md` sur les modes SSL : l'écran qui
 /// cache et le moteur qui refuse gardent deux chemins différents — une requête peut venir d'une
@@ -64,6 +65,11 @@ pub enum FilterOperator {
     /// Correspondance de motif — le `~` du mockup.
     Matches,
     IsNull,
+    /// La négation d'`IsNull`, et **pas** un `Ne` contre la chaîne vide : chercher les lignes
+    /// renseignées est aussi courant que chercher les trous, et l'exprimer par `≠` demanderait une
+    /// valeur que la colonne n'a pas forcément. Soumis à la même condition qu'`IsNull` — une colonne
+    /// `NOT NULL` les rend tous deux inutiles, l'un ne trouvant rien et l'autre ne filtrant rien.
+    IsNotNull,
     /// Le prédicat d'une colonne booléenne — `col is true`.
     ///
     /// **Pas un `Eq` sur « true »** : les cinq moteurs n'écrivent pas le vrai de la même façon —
@@ -79,10 +85,14 @@ pub enum FilterOperator {
 }
 
 impl FilterOperator {
-    /// Les trois prédicats — `is null`, `is true`, `is false` — sont les seuls à ne pas prendre de
-    /// valeur. Le savoir ici évite à chaque écran et à chaque adaptateur de le redécouvrir.
+    /// Les quatre prédicats — `is null`, `is not null`, `is true`, `is false` — sont les seuls à ne
+    /// pas prendre de valeur. Le savoir ici évite à chaque écran et à chaque adaptateur de le
+    /// redécouvrir.
     pub fn prend_une_valeur(self) -> bool {
-        !matches!(self, Self::IsNull | Self::IsTrue | Self::IsFalse)
+        !matches!(
+            self,
+            Self::IsNull | Self::IsNotNull | Self::IsTrue | Self::IsFalse
+        )
     }
 
     /// Les quatre comparaisons n'ont de sens que pour une colonne **numérique ou temporelle** — `>`
@@ -98,13 +108,14 @@ impl FilterOperator {
         matches!(self, Self::IsTrue | Self::IsFalse)
     }
 
-    pub fn tous() -> [Self; 11] {
+    pub fn tous() -> [Self; 12] {
         [
             Self::Eq,
             Self::Ne,
             Self::In,
             Self::Matches,
             Self::IsNull,
+            Self::IsNotNull,
             Self::IsTrue,
             Self::IsFalse,
             Self::Gt,
@@ -481,16 +492,19 @@ mod tests {
     }
 
     #[test]
-    fn les_onze_operateurs_de_a5_existent() {
-        assert_eq!(FilterOperator::tous().len(), 11);
+    fn les_douze_operateurs_de_a5_existent() {
+        assert_eq!(FilterOperator::tous().len(), 12);
     }
 
     #[test]
-    fn seuls_les_trois_predicats_ne_prennent_pas_de_valeur() {
+    fn seuls_les_quatre_predicats_ne_prennent_pas_de_valeur() {
         for operateur in FilterOperator::tous() {
             let sans_valeur = matches!(
                 operateur,
-                FilterOperator::IsNull | FilterOperator::IsTrue | FilterOperator::IsFalse
+                FilterOperator::IsNull
+                    | FilterOperator::IsNotNull
+                    | FilterOperator::IsTrue
+                    | FilterOperator::IsFalse
             );
             assert_eq!(operateur.prend_une_valeur(), !sans_valeur, "{operateur:?}");
         }

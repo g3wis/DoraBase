@@ -195,6 +195,7 @@ fn condition_de(
             format!("lower({colonne}) like lower(@{nom}) escape '\\\\'")
         }
         FilterOperator::IsNull => format!("{} is null", citer(&filtre.column)),
+        FilterOperator::IsNotNull => format!("{} is not null", citer(&filtre.column)),
         // `is true` / `is false` : BigQuery a un vrai type `BOOL`, donc le prédicat est direct et
         // ne transtype rien. Le refus d'une colonne non booléenne est celui de `condition_de` chez
         // PostgreSQL ; ici il n'y a rien à refuser, `cast(x as string) is true` étant une erreur de
@@ -442,6 +443,26 @@ mod tests {
                 parametres[0].parameter_type.as_ref().unwrap().r#type,
                 "BIGNUMERIC"
             );
+        }
+    }
+
+    #[test]
+    fn les_deux_predicats_de_nullite_sont_sans_parametre() {
+        for (operateur, attendu) in [
+            (FilterOperator::IsNull, "is null"),
+            (FilterOperator::IsNotNull, "is not null"),
+        ] {
+            let mut r = requete();
+            r.filters = vec![Filter {
+                column: "actif".into(),
+                operator: operateur,
+                value: None,
+            }];
+            let (sql, parametres) = requete_de("p", "jeu", &r, &colonnes());
+            assert!(sql.contains(attendu), "{sql}");
+            // Aucun paramètre nommé : un `@p1` déclaré sans valeur ferait refuser la requête par
+            // l'API avant même de joindre la table.
+            assert!(parametres.is_empty());
         }
     }
 

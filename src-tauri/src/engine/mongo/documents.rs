@@ -43,6 +43,12 @@ pub fn critere(filtres: &[Filter], colonnes: &[ColumnInfo]) -> Result<Document, 
             // la grille affiche la même cellule vide pour les deux (`18e`). Un filtre qui n'en
             // trouverait que la moitié se lirait comme un défaut de lecture.
             FilterOperator::IsNull => Bson::Document(doc! { "$in": [Bson::Null] }),
+            // **Et `isNotNull` exclut les deux**, par symétrie : `$nin: [null]` ne garde que les
+            // documents où le champ est là *et* renseigné. Un `$ne: null` seul aurait le même
+            // effet, mais la paire `$in`/`$nin` dit que les deux filtres partagent une seule
+            // définition du vide — sans quoi un document où le champ manque pourrait passer d'un
+            // côté sans être écarté de l'autre.
+            FilterOperator::IsNotNull => Bson::Document(doc! { "$nin": [Bson::Null] }),
             // **Un booléen BSON, pas la chaîne « true ».** MongoDB est typé nativement : un champ
             // `Bson::Boolean` comparé à `"true"` ne correspondrait jamais, et le filtre se lirait
             // comme une collection vide. Le champ doit donc être `TypeCategory::Boolean` — même
@@ -476,6 +482,25 @@ mod tests {
         let condition = critere.get_document("remise").unwrap();
         assert_eq!(
             condition.get_array("$in").unwrap(),
+            &vec![Bson::Null],
+            "{condition:?}"
+        );
+    }
+
+    #[test]
+    fn is_not_null_ecarte_le_champ_nul_et_le_champ_absent() {
+        // La symétrie exacte du test précédent, et c'est ce qui compte : un `$ne: null` aurait le
+        // même effet, mais la paire `$in`/`$nin` garde aux deux filtres une seule définition du
+        // vide — sans quoi un document où le champ manque pourrait passer d'un côté sans être
+        // écarté de l'autre, et la grille montrerait la même cellule vide des deux côtés.
+        let critere = critere(
+            &[filtre("remise", FilterOperator::IsNotNull, None)],
+            &colonnes(),
+        )
+        .unwrap();
+        let condition = critere.get_document("remise").unwrap();
+        assert_eq!(
+            condition.get_array("$nin").unwrap(),
             &vec![Bson::Null],
             "{condition:?}"
         );
