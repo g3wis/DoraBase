@@ -105,6 +105,7 @@ fn condition_de(filtre: &Filter, parametres: &mut Vec<String>) -> String {
             format!("{colonne} like ? escape '\\\\'")
         }
         FilterOperator::IsNull => format!("{colonne} is null"),
+        FilterOperator::IsNotNull => format!("{colonne} is not null"),
         // **`is true` / `is false`, pas `= 1` / `= 0`.** MySQL n'a pas de type booléen : `bool` est
         // un alias de `tinyint(1)`, et c'est `TypeCategory::Boolean` par la déclaration seule
         // (`introspect::categorie`). `is true` y vaut « différent de zéro », donc il couvre le `1`
@@ -543,6 +544,27 @@ mod tests {
         let (sql, parametres) = requete_de(&r);
         assert!(sql.contains("0 = 1"), "{sql}");
         assert!(parametres.is_empty());
+    }
+
+    #[test]
+    fn les_deux_predicats_de_nullite_sont_sans_parametre() {
+        // Un joker posé sans valeur ferait échouer la préparation : les prédicats sont les seuls à
+        // ne rien lier. Et `is not null` doit être la négation d'`is null`, pas un `<> ''` — une
+        // colonne vide n'est pas une colonne nulle.
+        for (operateur, attendu) in [
+            (FilterOperator::IsNull, "`expedie le` is null"),
+            (FilterOperator::IsNotNull, "`expedie le` is not null"),
+        ] {
+            let mut r = requete();
+            r.filters = vec![Filter {
+                column: "expedie le".into(),
+                operator: operateur,
+                value: None,
+            }];
+            let (sql, parametres) = requete_de(&r);
+            assert!(sql.contains(attendu), "{sql}");
+            assert!(parametres.is_empty(), "{parametres:?}");
+        }
     }
 
     #[test]

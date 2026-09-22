@@ -3145,7 +3145,18 @@ liste (`operateursPour`), plus deux opérateurs de plus dans le contrat.
 - **`is null` demande une colonne `nullable`.** Sur une colonne `NOT NULL`, il promettait un filtre
   qui rend toujours zéro ligne — ce qui se lit comme une **table vide**, pas comme un filtre vide.
   C'est le seul des trois qui ne dépend pas du type.
-- **Une colonne booléenne n'a que `is true`, `is false` et `is null`.** Un champ de saisie n'a rien à
+- **`is not null` a rejoint le contrat, sous exactement la même porte** (22 septembre 2026). Chercher
+  les lignes renseignées est aussi courant que chercher les trous, et rien ne permettait de le
+  demander : un `≠` exige une valeur que la colonne n'a pas forcément, et `<> ''` confondrait la
+  chaîne vide avec le nul. La condition `nullable` est la **raison symétrique** de celle d'`is null` :
+  sur une colonne `NOT NULL` il ne rend pas zéro ligne mais **toutes**, donc un filtre qui ne filtre
+  rien — les deux faces du même fait, d'où `NULLITE` plutôt que deux entrées indépendantes. En
+  MongoDB c'est `$nin: [null]`, l'exact miroir du `$in: [null]` d'`is null` : la paire garde aux deux
+  filtres **une seule définition du vide**, sans quoi un document où le champ manque passerait d'un
+  côté sans être écarté de l'autre — alors que la grille montre la même cellule vide des deux côtés.
+  Le signe est `≠∅`, aucun caractère Unicode ne disant « ensemble non vide » et un `∃` disant « il
+  existe », ce qui est vrai d'une colonne nulle aussi.
+- **Une colonne booléenne n'a que `is true`, `is false` et les deux prédicats de nullité.** Un champ de saisie n'a rien à
   recevoir d'une colonne à deux valeurs, et surtout **il n'y avait aucune valeur juste à y taper** :
   le vrai s'écrit `true` en PostgreSQL, `1` pour le `tinyint(1)` de MySQL et l'affinité de SQLite, et
   `Bson::Boolean` en MongoDB. Un `= true` aurait donc marché sur un moteur et serait resté **muet sur

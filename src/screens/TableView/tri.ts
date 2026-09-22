@@ -39,8 +39,8 @@ export function rangDeTri(sort: readonly SortKey[], column: string): number | nu
 /**
  * Un filtre saisi, prêt à partir au serveur — ou `null` quand il n'y a rien à envoyer.
  *
- * **Les trois prédicats n'ont pas de valeur** — `is null`, `is true`, `is false` — et `Filter.value`
- * est `None` pour eux (`06a`). Pour les autres, une valeur vide signifie « pas de filtre » plutôt
+ * **Les quatre prédicats n'ont pas de valeur** — `is null`, `is not null`, `is true`, `is false` —
+ * et `Filter.value` est `None` pour eux (`06a`). Pour les autres, une valeur vide signifie « pas de filtre » plutôt
  * que « égal à la chaîne vide » — cette dernière se demande explicitement par `= ''`, et confondre
  * les deux rendrait impossible de vider un filtre.
  */
@@ -52,14 +52,19 @@ export function filtreDe(column: string, operator: FilterOperator, saisie: strin
 }
 
 /**
- * Faux pour les trois prédicats, qui s'appliquent sans saisie.
+ * Faux pour les quatre prédicats, qui s'appliquent sans saisie.
  *
  * **Le pendant de `FilterOperator::prend_une_valeur` côté Rust**, et la même raison de l'écrire une
  * fois : le champ à désactiver, la valeur à ne pas envoyer et le filtre appliqué sans frappe sont
  * trois conséquences du même fait.
  */
 export function prendUneValeur(operator: FilterOperator): boolean {
-  return operator !== 'isNull' && operator !== 'isTrue' && operator !== 'isFalse'
+  return (
+    operator !== 'isNull' &&
+    operator !== 'isNotNull' &&
+    operator !== 'isTrue' &&
+    operator !== 'isFalse'
+  )
 }
 
 /**
@@ -89,11 +94,12 @@ export function poserFiltre(
 /**
  * Le libellé d'un filtre dans les chips de la toolbar : `status = paid`, `total_cents > 5000`.
  *
- * Les trois prédicats s'écrivent en mots — `shipped_at is null`, `actif is true` — et non par leur
+ * Les quatre prédicats s'écrivent en mots — `shipped_at is null`, `actif is true` — et non par leur
  * signe : un chip est la **phrase** du filtre, et « actif T » ne se lit pas.
  */
 export function libelleDeFiltre(filtre: Filter): string {
   if (filtre.operator === 'isNull') return `${filtre.column} is null`
+  if (filtre.operator === 'isNotNull') return `${filtre.column} is not null`
   if (filtre.operator === 'isTrue') return `${filtre.column} is true`
   if (filtre.operator === 'isFalse') return `${filtre.column} is false`
   return `${filtre.column} ${SIGNES[filtre.operator]} ${filtre.value ?? ''}`
@@ -123,6 +129,22 @@ export const OPERATEURS: Operateur[] = [
  * toujours zéro ligne, ce qui se lit comme une table vide plutôt que comme un filtre vide.
  */
 export const NUL: Operateur = { valeur: 'isNull', signe: '∅', cle: 'isNull' }
+
+/**
+ * `is not null`, **sous la même condition, et pour la raison symétrique**.
+ *
+ * Sur une colonne `NOT NULL` il ne rend pas zéro ligne mais **toutes** — un filtre qui ne filtre
+ * rien, ce qui se lit comme un filtre inopérant. Les deux faces du même fait, donc la même porte :
+ * `nullable`.
+ *
+ * **Le signe est `≠∅`**, le signe du vide nié par celui que `ne` porte déjà. Aucun caractère
+ * Unicode ne dit « ensemble non vide », et un `∃` dirait « il existe », ce qui est vrai d'une
+ * colonne nulle aussi.
+ */
+export const NON_NUL: Operateur = { valeur: 'isNotNull', signe: '≠∅', cle: 'isNotNull' }
+
+/** Les deux prédicats de nullité, qui ne valent que pour une colonne `nullable`. */
+export const NULLITE: Operateur[] = [NUL, NON_NUL]
 
 /**
  * Les quatre comparaisons, réservées aux colonnes numériques.
@@ -165,15 +187,15 @@ export const BOOLEENS: Operateur[] = [
 
 /**
  * Les opérateurs que le popover propose pour une colonne — sa **catégorie** décide des
- * suppléments, sa **nullité** de la présence d'`is null`.
+ * suppléments, sa **nullité** de la présence des deux prédicats de nullité.
  *
- * L'ordre est celui du mockup : les quatre de base, `is null`, puis ce que la catégorie ajoute.
- * Un booléen sort de ce moule et n'a que ses trois entrées.
+ * L'ordre est celui du mockup : les quatre de base, `is null` et `is not null`, puis ce que la
+ * catégorie ajoute. Un booléen sort de ce moule et n'a que ses propres entrées.
  */
 export function operateursPour(category: TypeCategory, nullable: boolean): Operateur[] {
-  if (category === 'boolean') return nullable ? [...BOOLEENS, NUL] : BOOLEENS
+  if (category === 'boolean') return nullable ? [...BOOLEENS, ...NULLITE] : BOOLEENS
   const supplements = category === 'number' ? COMPARAISONS : category === 'timestamp' ? DATES : []
-  return [...OPERATEURS, ...(nullable ? [NUL] : []), ...supplements]
+  return [...OPERATEURS, ...(nullable ? NULLITE : []), ...supplements]
 }
 
 /**
@@ -204,6 +226,7 @@ const SIGNES: Record<FilterOperator, string> = {
   in: 'in',
   matches: '~',
   isNull: '∅',
+  isNotNull: '≠∅',
   isTrue: 'T',
   isFalse: 'F',
   gt: '>',

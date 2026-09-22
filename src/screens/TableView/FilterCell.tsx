@@ -24,7 +24,7 @@ type FilterCellProps = {
   onApply: (operator: FilterOperator, value: string) => void
   /** La catégorie de la colonne : elle décide des opérateurs offerts, et du sélecteur de date. */
   category: TypeCategory
-  /** `is null` n'est proposé que pour une colonne qui peut en porter. */
+  /** `is null` et `is not null` ne sont proposés que pour une colonne qui peut porter un nul. */
   nullable: boolean
 }
 

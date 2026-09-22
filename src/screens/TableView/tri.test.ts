@@ -53,8 +53,8 @@ describe('filtres', () => {
     expect(filtreDe('status', 'eq', '   ')).toBeNull()
   })
 
-  it('les trois prédicats n’ont pas de valeur, et s’appliquent sans saisie', () => {
-    for (const operator of ['isNull', 'isTrue', 'isFalse'] as const) {
+  it('les quatre prédicats n’ont pas de valeur, et s’appliquent sans saisie', () => {
+    for (const operator of ['isNull', 'isNotNull', 'isTrue', 'isFalse'] as const) {
       expect(filtreDe('shipped_at', operator, '')).toEqual({
         column: 'shipped_at',
         operator,
@@ -113,6 +113,9 @@ describe('filtres', () => {
     expect(libelleDeFiltre({ column: 'shipped_at', operator: 'isNull', value: null })).toBe(
       'shipped_at is null',
     )
+    expect(libelleDeFiltre({ column: 'shipped_at', operator: 'isNotNull', value: null })).toBe(
+      'shipped_at is not null',
+    )
     expect(libelleDeFiltre({ column: 'total_cents', operator: 'gt', value: '5000' })).toBe(
       'total_cents > 5000',
     )
@@ -125,6 +128,7 @@ describe('filtres', () => {
       'in',
       'matches',
       'isNull',
+      'isNotNull',
     ])
     expect(operateursPour('number', true).map((o) => o.valeur)).toEqual([
       'eq',
@@ -132,6 +136,7 @@ describe('filtres', () => {
       'in',
       'matches',
       'isNull',
+      'isNotNull',
       'gt',
       'gte',
       'lte',
@@ -139,12 +144,17 @@ describe('filtres', () => {
     ])
   })
 
-  it('`is null` n’est proposé que pour une colonne qui peut en porter', () => {
-    // Sur une colonne `NOT NULL`, le filtre rendrait toujours zéro ligne — ce qui se lit comme une
-    // table vide plutôt que comme un filtre vide.
+  it('les deux prédicats de nullité ne sont proposés que pour une colonne qui peut en porter', () => {
+    // Sur une colonne `NOT NULL`, `is null` rendrait toujours zéro ligne — ce qui se lit comme une
+    // table vide plutôt que comme un filtre vide — et `is not null` rendrait **toutes** les lignes,
+    // ce qui se lit comme un filtre inopérant. Les deux faces du même fait, donc la même porte.
     for (const category of ['text', 'number', 'timestamp', 'boolean'] as const) {
-      expect(operateursPour(category, false).map((o) => o.valeur)).not.toContain('isNull')
-      expect(operateursPour(category, true).map((o) => o.valeur)).toContain('isNull')
+      const sans = operateursPour(category, false).map((o) => o.valeur)
+      const avec = operateursPour(category, true).map((o) => o.valeur)
+      expect(sans).not.toContain('isNull')
+      expect(sans).not.toContain('isNotNull')
+      expect(avec).toContain('isNull')
+      expect(avec).toContain('isNotNull')
     }
   })
 
@@ -156,6 +166,7 @@ describe('filtres', () => {
       'in',
       'matches',
       'isNull',
+      'isNotNull',
       'before',
       'after',
     ])
@@ -167,13 +178,14 @@ describe('filtres', () => {
     expect(dates.map((o) => o.valeur)).not.toContain('lte')
   })
 
-  it('une colonne booléenne n’a que ses trois prédicats', () => {
+  it('une colonne booléenne n’a que ses prédicats', () => {
     // Un champ de saisie n'a rien à recevoir d'une colonne à deux valeurs, et `= true` / `= 1`
     // dépendent du moteur.
     expect(operateursPour('boolean', true).map((o) => o.valeur)).toEqual([
       'isTrue',
       'isFalse',
       'isNull',
+      'isNotNull',
     ])
     expect(operateursPour('boolean', false).map((o) => o.valeur)).toEqual(['isTrue', 'isFalse'])
   })
@@ -196,13 +208,15 @@ describe('filtres', () => {
     expect(signeDe('lt')).toBe('<')
     expect(signeDe('isTrue')).toBe('T')
     expect(signeDe('isFalse')).toBe('F')
+    expect(signeDe('isNull')).toBe('∅')
+    expect(signeDe('isNotNull')).toBe('≠∅')
   })
 
-  it('seuls les trois prédicats se passent d’une valeur', () => {
+  it('seuls les quatre prédicats se passent d’une valeur', () => {
     for (const operator of ['eq', 'ne', 'in', 'matches', 'gt', 'gte', 'lte', 'lt'] as const) {
       expect(prendUneValeur(operator)).toBe(true)
     }
-    for (const operator of ['isNull', 'isTrue', 'isFalse'] as const) {
+    for (const operator of ['isNull', 'isNotNull', 'isTrue', 'isFalse'] as const) {
       expect(prendUneValeur(operator)).toBe(false)
     }
   })

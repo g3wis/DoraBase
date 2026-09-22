@@ -149,6 +149,10 @@ fn condition_de(
         return Ok(format!("{nom} is null"));
     }
 
+    if filtre.operator == FilterOperator::IsNotNull {
+        return Ok(format!("{nom} is not null"));
+    }
+
     if filtre.operator.est_un_predicat_booleen() {
         // **Refusé hors d'une colonne booléenne**, comme les comparaisons hors d'une colonne
         // numérique : `text is true` est une erreur de type que PostgreSQL rendrait telle quelle,
@@ -272,7 +276,10 @@ fn condition_de(
                 ))),
             }
         }
-        FilterOperator::IsNull | FilterOperator::IsTrue | FilterOperator::IsFalse => {
+        FilterOperator::IsNull
+        | FilterOperator::IsNotNull
+        | FilterOperator::IsTrue
+        | FilterOperator::IsFalse => {
             unreachable!("traités plus haut")
         }
     }
@@ -1008,6 +1015,20 @@ mod tests {
 
         let (sql, valeurs) = construire_sql(&r, &colonnes()).unwrap();
         assert!(sql.contains("is null"), "{sql}");
+        assert!(valeurs.is_empty());
+    }
+
+    #[test]
+    fn is_not_null_ne_consomme_pas_de_parametre_non_plus() {
+        let mut r = requete();
+        r.filters = vec![Filter {
+            column: "statut".into(),
+            operator: FilterOperator::IsNotNull,
+            value: None,
+        }];
+
+        let (sql, valeurs) = construire_sql(&r, &colonnes()).unwrap();
+        assert!(sql.contains("is not null"), "{sql}");
         assert!(valeurs.is_empty());
     }
 

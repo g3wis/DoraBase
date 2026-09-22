@@ -150,7 +150,10 @@ describe('filtres par en-tête', () => {
     await waitFor(() => expect(readRows).toHaveBeenCalledTimes(1))
 
     await utilisateur.click(screen.getByRole('button', { name: 'Opérateur de created_at' }))
-    await utilisateur.click(await screen.findByRole('button', { name: /is null/ }))
+    // **Ancré.** `/is null/` ne décrit plus une seule entrée depuis que « is not null » existe —
+    // il ne l'attrape pas par sous-chaîne, mais un libellé qui bougerait le rendrait ambigu sans
+    // que rien le dise. C'est la règle du nom accessible ancré d'`AGENTS.md`.
+    await utilisateur.click(await screen.findByRole('button', { name: /^∅ is null$/ }))
 
     await waitFor(() =>
       expect(derniereRequete(readRows).filters).toEqual([
@@ -160,28 +163,46 @@ describe('filtres par en-tête', () => {
     expect(screen.getByLabelText('Filtrer created_at')).toBeDisabled()
   })
 
-  it('le popover propose les cinq opérateurs de `FilterOperator` sur une colonne texte', async () => {
+  it('« is not null » s’applique sans saisie et désactive le champ, comme « is null »', async () => {
+    const utilisateur = userEvent.setup()
+    const { readRows } = monter()
+    await waitFor(() => expect(readRows).toHaveBeenCalledTimes(1))
+
+    await utilisateur.click(screen.getByRole('button', { name: 'Opérateur de created_at' }))
+    await utilisateur.click(await screen.findByRole('button', { name: /^≠∅ is not null$/ }))
+
+    await waitFor(() =>
+      expect(derniereRequete(readRows).filters).toEqual([
+        { column: 'created_at', operator: 'isNotNull', value: null },
+      ]),
+    )
+    expect(screen.getByLabelText('Filtrer created_at')).toBeDisabled()
+  })
+
+  it('le popover propose les six opérateurs de `FilterOperator` sur une colonne texte', async () => {
     const utilisateur = userEvent.setup()
     monter()
     await utilisateur.click(await screen.findByRole('button', { name: 'Opérateur de status' }))
 
     const panneau = await screen.findByRole('dialog', { name: 'Opérateur · status' })
-    expect(panneau.querySelectorAll('li')).toHaveLength(5)
+    expect(panneau.querySelectorAll('li')).toHaveLength(6)
   })
 
-  it('« is null » ne paraît pas sur une colonne NOT NULL', async () => {
-    // Le filtre y rendrait toujours zéro ligne, ce qui se lit comme une table vide plutôt que
-    // comme un filtre vide.
+  it('ni « is null » ni « is not null » ne paraissent sur une colonne NOT NULL', async () => {
+    // `is null` y rendrait toujours zéro ligne — ce qui se lit comme une table vide plutôt que
+    // comme un filtre vide — et `is not null` rendrait toutes les lignes, ce qui se lit comme un
+    // filtre inopérant. Les deux faces du même fait, donc la même porte.
     const utilisateur = userEvent.setup()
     monter()
     await utilisateur.click(await screen.findByRole('button', { name: 'Opérateur de currency' }))
 
     const panneau = await screen.findByRole('dialog', { name: 'Opérateur · currency' })
     expect(panneau.querySelectorAll('li')).toHaveLength(4)
-    expect(screen.queryByRole('button', { name: /is null/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^∅ is null$/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^≠∅ is not null$/ })).toBeNull()
   })
 
-  it('une colonne booléenne n’offre que « is true », « is false » et « is null »', async () => {
+  it('une colonne booléenne n’offre que ses prédicats', async () => {
     const utilisateur = userEvent.setup()
     monter()
     await utilisateur.click(await screen.findByRole('button', { name: 'Opérateur de paye' }))
@@ -189,7 +210,7 @@ describe('filtres par en-tête', () => {
     const panneau = await screen.findByRole('dialog', { name: 'Opérateur · paye' })
     // Les noms accessibles portent leur espace : « Tis true » serait le piège n° 1.
     const libelles = [...panneau.querySelectorAll('li')].map((li) => li.textContent)
-    expect(libelles).toEqual(['T is true', 'F is false', '∅ is null'])
+    expect(libelles).toEqual(['T is true', 'F is false', '∅ is null', '≠∅ is not null'])
     // Ni `=`, ni `~`, ni `in` : un champ de saisie n'a rien à recevoir d'une colonne à deux
     // valeurs, et `= true` / `= 1` dépendent du moteur.
     expect(screen.queryByRole('button', { name: 'égal' })).toBeNull()
@@ -346,8 +367,8 @@ describe('filtres par en-tête', () => {
     await utilisateur.click(await screen.findByRole('button', { name: 'Opérateur de total_cents' }))
 
     const panneau = await screen.findByRole('dialog', { name: 'Opérateur · total_cents' })
-    // Les cinq de base, plus `>`, `≥`, `≤`, `<` — réservées aux colonnes numériques.
-    expect(panneau.querySelectorAll('li')).toHaveLength(9)
+    // Les six de base, plus `>`, `≥`, `≤`, `<` — réservées aux colonnes numériques.
+    expect(panneau.querySelectorAll('li')).toHaveLength(10)
   })
 
   it('une comparaison numérique part au serveur', async () => {

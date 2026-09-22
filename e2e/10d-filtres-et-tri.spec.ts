@@ -138,6 +138,36 @@ test('le popover d’opérateur s’ouvre sous son champ et se ferme sur Échap'
   await expect(panneau).toBeHidden()
 })
 
+test('toutes les entrées du popover sont atteignables, la liste ayant grandi', async ({ page }) => {
+  // **Le défaut n° 35, guetté là où la liste est la plus longue.** `Popover` est ancré dans le flux
+  // (`position: absolute`), donc rogné par le premier ancêtre en `overflow: hidden`. `shipped_at`
+  // est la colonne du décor qui en porte le plus : temporelle **et** nullable, donc les quatre de
+  // base, les deux prédicats de nullité — dont `is not null`, la ligne ajoutée — puis « avant » et
+  // « après ». Ce sont les dernières qui tombent le plus bas. Le DOM serait juste et Playwright les
+  // dirait « visibles » ; seul `elementFromPoint` distingue « présente dans la mise en page » de
+  // « réellement sous le pointeur ».
+  await page.getByRole('button', { name: 'Opérateur de shipped_at' }).click()
+  const options = page.getByRole('dialog', { name: 'Opérateur · shipped_at' }).getByRole('button')
+  await expect(options).toHaveCount(8)
+  await expect(options.filter({ hasText: 'is not null' })).toHaveCount(1)
+
+  for (const option of await options.all()) {
+    const cadre = await option.boundingBox()
+    expect(cadre).not.toBeNull()
+    const atteignable = await page.evaluate(
+      // `!= null` et non `!== null` : hors de la fenêtre, `elementFromPoint` rend `null`, et le
+      // chaînage optionnel rendrait alors `undefined` — donc « vrai » pour un point qu'on ne peut
+      // pas viser du tout.
+      ({ x, y }) => document.elementFromPoint(x, y)?.closest('button') != null,
+      {
+        x: (cadre?.x ?? 0) + (cadre?.width ?? 0) / 2,
+        y: (cadre?.y ?? 0) + (cadre?.height ?? 0) / 2,
+      },
+    )
+    expect(atteignable, `opérateur « ${await option.textContent()} » sous le pointeur`).toBe(true)
+  }
+})
+
 /** La couleur de fond de l'en-tête d'une colonne, telle que le navigateur la calcule. */
 async function fondDeColonne(page: import('@playwright/test').Page, colonne: string) {
   return page
