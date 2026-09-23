@@ -3649,6 +3649,54 @@ Quatre points à ne pas défaire :
   fermer la nôtre. La reconnexion crée cette fenêtre : avant elle, deux lectures concurrentes ne
   pouvaient que retirer deux fois la même entrée, ce qui est sans effet.
 
+**Et cet étage du bas ne se déclenchait jamais sur une connexion morte *présente* au registre**
+(22 septembre 2026, `API-81`, rapporté à l'usage : « this should never ever happen. if the connexion
+is closed, reopen it when i launch a query »). La phrase ci-dessus était vraie d'une entrée
+**absente**, et c'est tout ce qu'`assurer_l_ouverture` regardait — or une entrée n'est retirée
+qu'**après** une opération qui a échoué. Une session coupée pendant que personne ne regardait —
+serveur redémarré, Mac en veille, réseau changé, proxy tombé — était donc encore là à la requête
+suivante : elle partait sur un socket mort, échouait, et comme `run_sql` porte `Reprise::Unique` —
+à juste titre — **rien n'était rejoué**. L'utilisateur lisait « la connexion au serveur PostgreSQL a
+été fermée », et c'est la requête *d'après* qui rouvrait. Une erreur visible par coupure, sur un
+geste dont il n'était pour rien.
+
+C'est la règle n° 20 appliquée à ce fichier lui-même : la phrase promettait le comportement, le code
+ne l'assurait que pour la moitié des cas, et personne ne pouvait le voir en relisant l'un ou l'autre.
+`avec` demande donc `retirer_si_perdue` **avant** `assurer_l_ouverture`. Quatre points à ne pas
+défaire :
+
+- **c'est ce qui permet d'en faire profiter les écritures, et c'est toute la raison de le faire
+  avant.** Rien n'a été envoyé, donc rien ne peut partir deux fois : `Reprise` n'a pas à être
+  consulté, et `Unique` y gagne la réparation qu'une reprise après coup ne pourra jamais lui donner.
+  L'inverse reste vrai et ne bouge pas — ce qui tombe **pendant** l'opération garde son erreur ;
+- **la question reste locale.** `connexion_perdue` lit l'état du pilote et du proxy sans aller-retour
+  réseau : le coût d'une entrée vivante est une comparaison, là où une sonde coûterait une requête
+  par clic et ne distinguerait pas « le lien est rompu » de « le serveur est occupé » ;
+- **le verrou tenu au retrait décide du propriétaire**, exactement comme dans `tenter` : celui qui
+  sort l'entrée de la table est le seul à tenir l'adaptateur, donc le seul à le fermer. Deux lectures
+  concurrentes sur la même connexion morte ne peuvent ni la fermer deux fois, ni l'une fermer la
+  connexion neuve que l'autre vient de rouvrir ;
+- **et les deux retraits ne sont pas fondus**, malgré l'apparence. `tenter` doit retirer sous le
+  verrou *qui a porté l'opération*, sans le relâcher entre les deux ; ici il n'y a pas d'opération, et
+  prendre le verrou est le premier geste. Les fondre demanderait de passer une garde déjà prise,
+  c'est-à-dire d'exposer l'invariant au lieu de le tenir. Ce qu'ils partagent — *ce que fermer une
+  connexion perdue entraîne*, les sessions de console comprises — vit dans `evacuer`, et c'est la
+  part qu'un oubli rendrait fausse.
+
+**Le décor est ce qui a demandé le plus de soin, et c'est la règle n° 5** : couper la session par
+`avec` ne reproduit **rien**, `tenter` retirant l'entrée au passage — la requête suivante retombe
+alors sur l'étage du bas, celui qui marchait déjà, et le test est vert sans rien mesurer. Il faut que
+l'entrée reste **au registre et morte**, ce qu'une mort survenue pendant l'inactivité est justement :
+la coupure vient donc d'une **seconde connexion**, qui termine la session de la première. Et ce qui
+prouve la réouverture est `pg_backend_pid`, comme en `API-37` — compter les entrées du registre ne
+dirait rien, une réouverture en laissant une exactement comme n'en pas faire.
+
+**Le contrôle négatif compte autant, et il a montré pourquoi** : rouvrir une connexion **vivante**
+paierait une poignée de main — voire un tunnel SSH ou un proxy Cloud SQL — à chaque clic dans
+l'arbre, et surtout annulerait en silence une transaction manuelle, qui est un état de **session**
+(`API-38`). Le sabotage qui rouvre toujours fait tomber trois tests, dont deux de transaction : c'est
+la mesure qui dit que la garde est porteuse et non décorative.
+
 **Un défaut antérieur trouvé en route, et corrigé** : la garde d'entrée d'`ouvrir` est relâchée
 pendant la connexion, donc deux ouvertures concurrentes de la même base la franchissaient toutes les
 deux, et la seconde `insert` **remplaçait** la première sans la fermer — un tunnel SSH et son port
