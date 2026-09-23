@@ -379,6 +379,20 @@ impl ConnectionRegistry {
             Box<dyn std::future::Future<Output = Result<T, EngineError>> + Send + 'a>,
         >,
     {
+        // **Une connexion morte est constatée avant l'envoi, et pas seulement après un échec**
+        // (`API-81`).
+        // Sans cette ligne, la reconnexion ne rattrapait que les opérations `Rejouable` : une
+        // session coupée pendant que l'application était inactive — un serveur redémarré, une
+        // machine réveillée d'une veille, un proxy tombé — faisait **échouer la première requête**
+        // de la console, qui est `Unique` donc jamais rejouée. L'utilisateur lisait « la connexion
+        // au serveur a été fermée » sur un arbre qui affichait « connecté », et devait relancer sa
+        // requête pour que l'étage du bas la rouvre.
+        //
+        // Ici rien n'a été envoyé, donc rien ne peut partir deux fois : c'est ce qui permet d'en
+        // faire profiter les écritures, ce qu'une reprise après coup ne pourra jamais faire.
+        if self.retirer_si_perdue(cle).await {
+            log::info!("connexion perdue ← {cle}, constatée avant l'envoi : réouverture");
+        }
         self.assurer_l_ouverture(cle).await?;
 
         let perte = match self.tenter(cle, &operation).await {
@@ -406,6 +420,60 @@ impl ConnectionRegistry {
                 Err(perte)
             }
         }
+    }
+
+    /// Retire une connexion que son pilote donne pour **perdue**, et l'évacue. Rend `true` si
+    /// c'était le cas (`API-81`).
+    ///
+    /// **Une question locale, posée avant chaque opération.** `connexion_perdue` lit l'état du
+    /// pilote et celui du proxy sans aller-retour réseau : une sonde coûterait une requête par
+    /// clic, et une sonde qui échoue ne distingue pas « le lien est rompu » de « le serveur est
+    /// occupé ». Le coût d'une entrée vivante est donc une comparaison.
+    ///
+    /// **Le verrou tenu au moment du retrait est ce qui décide du propriétaire.** Celui qui sort
+    /// l'entrée de la table est le seul à tenir l'adaptateur, donc le seul à le fermer : deux
+    /// lectures concurrentes sur la même connexion morte ne peuvent pas la fermer deux fois, ni
+    /// l'une fermer la connexion neuve que l'autre vient de rouvrir. C'est l'invariant que `tenter`
+    /// énonce pour le même geste après un échec.
+    ///
+    /// **Et ce n'est pas le même geste que `tenter`, malgré l'apparence** — d'où deux appelants
+    /// plutôt qu'un. `tenter` doit retirer sous le verrou *qui a porté l'opération*, sans le
+    /// relâcher entre les deux ; ici il n'y a pas d'opération, et prendre le verrou est le premier
+    /// geste. Les fondre demanderait de passer une garde déjà prise, c'est-à-dire d'exposer
+    /// l'invariant au lieu de le tenir. Ce qu'ils partagent — *ce que fermer une connexion perdue
+    /// entraîne* — est dans `evacuer`, et c'est la partie qu'un oubli rendrait fausse.
+    async fn retirer_si_perdue(&self, cle: &str) -> bool {
+        let morte = {
+            let mut garde = self.ouvertes.lock().await;
+            match garde.get(cle) {
+                Some(adaptateur) if adaptateur.connexion_perdue() => garde.remove(cle),
+                // Vivante, ou absente : dans les deux cas il n'y a rien à évacuer, et
+                // `assurer_l_ouverture` sait déjà quoi faire du second.
+                _ => None,
+            }
+        };
+
+        match morte {
+            Some(adaptateur) => {
+                self.evacuer(cle, adaptateur).await;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Ce que fermer une connexion **perdue** entraîne, verrou rendu.
+    ///
+    /// **Les sessions de console partent avec l'entrée** (`API-38`) : la leur passe par le proxy de
+    /// celle-ci, donc elle ne lui survit pas — et laisser leurs instructions au panneau offrirait
+    /// un « Valider » qui n'a plus rien à valider, sur une session qui n'existe plus. C'est ce que
+    /// `fermer` fait déjà pour une fermeture demandée.
+    ///
+    /// La fermeture se fait **verrou rendu** : elle attend que le port du proxy soit rendu, et le
+    /// tenir pendant ce temps bloquerait toute autre base.
+    async fn evacuer(&self, cle: &str, adaptateur: AnyEngine) {
+        self.fermer_les_sessions_de_console(cle).await;
+        adaptateur.close().await;
     }
 
     /// Ouvre la connexion si le registre ne la tient plus mais sait la rouvrir.
@@ -471,13 +539,7 @@ impl ConnectionRegistry {
             // La fermeture, elle, se fait verrou rendu : elle attend que le port du proxy soit
             // rendu, et le tenir pendant ce temps bloquerait toute autre base.
             Some(adaptateur) => {
-                // **Les sessions de console partent avec l'entrée** (`API-38`) : la leur passe
-                // par le proxy de celle-ci, donc elle ne lui survit pas — et laisser leurs
-                // instructions au panneau offrirait un « Valider » qui n'a plus rien à valider,
-                // sur une session qui n'existe plus. C'est ce que `fermer` fait déjà pour une
-                // fermeture demandée.
-                self.fermer_les_sessions_de_console(cle).await;
-                adaptateur.close().await;
+                self.evacuer(cle, adaptateur).await;
                 match resultat {
                     Err(perte) => Issue::ConnexionPerdue(perte),
                     // Inatteignable : `perdue` exige un échec. Rendu plutôt que paniqué — un
@@ -2218,6 +2280,158 @@ mod tests_db {
             ConnectionState::Offline { reason } => assert!(!reason.is_empty(), "une raison"),
             autre => panic!("attendu hors ligne, obtenu {autre:?}"),
         }
+    }
+
+    /// **Le pid du serveur dit si le registre a rouvert**, et rien d'autre ne le dit.
+    ///
+    /// `pg_backend_pid()` nomme le processus qui répond : inchangé, c'est la même session ; changé,
+    /// c'est une neuve. Compter les entrées du registre ne suffirait pas — une réouverture en
+    /// laisse une, exactement comme n'en pas faire.
+    ///
+    /// Passe par `Reprise::Unique`, qui est ce que portent `run_sql` et `apply_changes` : c'est le
+    /// chemin de la console qu'on mesure, pas celui d'une lecture rejouable.
+    async fn pid(registre: &ConnectionRegistry, cle: &str) -> Result<i64, EngineError> {
+        registre
+            .avec(cle, Reprise::Unique, |adaptateur| {
+                Box::pin(async move {
+                    let issue = adaptateur
+                        .run_sql(
+                            "select pg_backend_pid()",
+                            crate::engine::RowLimit::OneHundred,
+                        )
+                        .await?;
+                    match issue.rows.first().and_then(|ligne| ligne.first()) {
+                        Some(crate::engine::Value::Int { value }) => Ok(*value),
+                        autre => Err(EngineError::local(format!("pid illisible : {autre:?}"))),
+                    }
+                })
+            })
+            .await
+    }
+
+    /// Attend que le pilote ait **constaté** la coupure, plutôt qu'un délai.
+    ///
+    /// La rupture est asynchrone : le serveur ferme, et la boucle d'entrées-sorties du pilote le
+    /// voit au tour suivant. Lire `connexion_perdue` dans la foulée daterait la mesure du mauvais
+    /// instant — la règle n° 15, transposée de Playwright à `tokio`. La borne est là pour qu'un
+    /// échec soit un échec et non un test suspendu ; ce n'est pas elle qu'on mesure.
+    async fn attendre_le_constat(registre: &ConnectionRegistry, cle: &str) {
+        for _ in 0..200 {
+            let constatee = registre
+                .ouvertes
+                .lock()
+                .await
+                .get(cle)
+                .is_some_and(AnyEngine::connexion_perdue);
+            if constatee {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("le pilote n'a pas constaté la coupure au bout de deux secondes");
+    }
+
+    /// **Le défaut qu'`API-81` corrige.** Une session coupée pendant l'inactivité, puis une requête
+    /// de console : elle doit aboutir, et non échouer une fois avant de marcher.
+    ///
+    /// `Reprise::Unique` est tout le point. C'est ce que portent `run_sql` et `apply_changes`, et un
+    /// `Unique` n'est **jamais** rejoué — à juste titre. La reconnexion d'après-échec ne pouvait
+    /// donc rien pour lui : elle retirait l'entrée morte et rendait l'erreur, laissant la
+    /// réouverture à la requête *suivante*. Or c'est l'ordinaire de l'utilisateur — DoraBase reste
+    /// ouvert, le serveur redémarre ou la machine dort — et il lisait « la connexion au serveur a
+    /// été fermée » sur un arbre qui affichait « connecté ». Ce qui est constaté **avant l'envoi**
+    /// n'a pas besoin d'être rejoué.
+    ///
+    /// **La coupure vient d'une *autre* session, et c'est ce qui rend le décor juste.** Couper par
+    /// `avec` ne reproduirait rien : `tenter` retire l'entrée morte au passage, et la requête
+    /// suivante retomberait sur l'ouverture d'en dessous — celle qui marchait déjà. Il faut que
+    /// l'entrée reste **au registre et morte**, ce qu'une mort survenue pendant l'inactivité est
+    /// précisément. D'où le voisin qui coupe.
+    ///
+    /// L'attente du constat, elle, choisit le chemin mesuré : sans elle la requête passerait
+    /// parfois par l'ancien, et un vert ne dirait pas lequel des deux marche.
+    #[tokio::test]
+    async fn une_requete_unique_survit_a_une_session_coupee_pendant_l_inactivite() {
+        let registre = ConnectionRegistry::new();
+        let cle = "Halle/analytics/dev";
+        let voisin = "Halle/analytics/voisin";
+        for chacune in [cle, voisin] {
+            registre
+                .ouvrir(
+                    chacune,
+                    crate::config::Engine::PostgreSql,
+                    &variante(),
+                    secret().as_ref(),
+                    &contexte(),
+                )
+                .await
+                .expect("ouverture");
+        }
+
+        let avant = pid(&registre, cle).await.expect("une première session");
+
+        // Le voisin coupe la session de `cle` sans que `cle` ait rien demandé : son entrée reste au
+        // registre, et elle est morte. C'est l'état dans lequel une veille ou un redémarrage laisse
+        // l'application.
+        registre
+            .avec(voisin, Reprise::Unique, move |adaptateur| {
+                Box::pin(async move {
+                    adaptateur
+                        .run_sql(
+                            &format!("select pg_terminate_backend({avant})"),
+                            crate::engine::RowLimit::OneHundred,
+                        )
+                        .await
+                })
+            })
+            .await
+            .expect("le voisin coupe la session de l'autre");
+        attendre_le_constat(&registre, cle).await;
+
+        let apres = pid(&registre, cle)
+            .await
+            .expect("la requête doit aboutir sur la connexion rouverte");
+
+        assert_ne!(avant, apres, "la session n'a pas été rouverte");
+        match registre.etat(cle).await {
+            ConnectionState::Connected { .. } => {}
+            autre => panic!("attendu connectée après réouverture, obtenu {autre:?}"),
+        }
+
+        registre.fermer(voisin).await;
+        registre.fermer(cle).await;
+    }
+
+    /// **Le contrôle négatif de la constatation** : une connexion vivante n'est pas rouverte.
+    ///
+    /// Sans lui, un registre qui rouvrirait à chaque appel passerait le test précédent — et paierait
+    /// une poignée de main SSH, voire un proxy Cloud SQL, à chaque clic dans l'arbre. Pire,
+    /// `API-38` : une transaction manuelle est un état de **session**, donc une réouverture
+    /// silencieuse l'annulerait sans rien dire.
+    #[tokio::test]
+    async fn une_connexion_vivante_garde_sa_session() {
+        let registre = ConnectionRegistry::new();
+        let cle = "Halle/analytics/dev";
+        registre
+            .ouvrir(
+                cle,
+                crate::config::Engine::PostgreSql,
+                &variante(),
+                secret().as_ref(),
+                &contexte(),
+            )
+            .await
+            .expect("ouverture");
+
+        let premier = pid(&registre, cle).await.expect("une session");
+        let second = pid(&registre, cle).await.expect("la même session");
+
+        assert_eq!(
+            premier, second,
+            "la connexion vivante a été rouverte pour rien"
+        );
+
+        registre.fermer(cle).await;
     }
 
     /// **Une reprise, et une seule** : deux essais, jamais trois.
