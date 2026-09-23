@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactElement } from 'react'
 import { expect, test, vi } from 'vitest'
@@ -847,6 +847,174 @@ test('les extrémités du zoom se désactivent, elles ne bouclent pas', async ()
   // trop, sans que rien l'annonce.
   expect(screen.getByRole('button', { name: 'Réduire le diagramme' })).toBeDisabled()
   expect(screen.getByRole('button', { name: 'Agrandir le diagramme' })).toBeEnabled()
+})
+
+/**
+ * La toile, par son repère plutôt que par sa classe : celle d'un module CSS est un nom engendré, et
+ * s'y accrocher mesurerait l'outil de construction.
+ */
+function laToile(container: HTMLElement): HTMLElement {
+  const toile = container.querySelector('[data-toile]')
+  if (!(toile instanceof HTMLElement)) throw new Error('la toile du diagramme est absente')
+  return toile
+}
+
+test('`⌘` / `Ctrl` + molette zoome, la molette nue ne zoome pas', () => {
+  const { container } = monter(<DiagramView schema="public" tables={DEUX} total={2} />)
+  const toile = laToile(container)
+
+  fireEvent.wheel(toile, { deltaY: -100, ctrlKey: true })
+  expect(screen.getByRole('button', { name: /^Échelle 125 %/ })).toBeInTheDocument()
+  // `metaKey` est le `⌘` d'une souris sur macOS ; `ctrlKey`, le pincement du trackpad des deux
+  // moteurs et le `Ctrl` + molette de Windows.
+  fireEvent.wheel(toile, { deltaY: 100, metaKey: true })
+  expect(screen.getByRole('button', { name: /^Échelle 100 %/ })).toBeInTheDocument()
+
+  // **Le contrôle négatif, et c'est la moitié de l'arbitrage d'`API-82`** : la molette nue défile
+  // la toile. La reprendre retirerait le seul défilement vertical confortable d'un schéma haut.
+  fireEvent.wheel(toile, { deltaY: -100 })
+  fireEvent.wheel(toile, { deltaY: -100 })
+  expect(screen.getByRole('button', { name: /^Échelle 100 %/ })).toBeInTheDocument()
+})
+
+test('le geste et les boutons règlent la même échelle', () => {
+  const { container } = monter(<DiagramView schema="public" tables={DEUX} total={2} />)
+  const toile = laToile(container)
+
+  // Les deux voies passent par `reglerLePalier` (règle n° 17). Ce que ce test garde est que le
+  // palier tenu en ref pour le geste et celui rendu par l'état **ne divergent pas** : s'ils le
+  // faisaient, un bouton après un geste repartirait d'une valeur que l'écran n'affiche pas.
+  fireEvent.wheel(toile, { deltaY: -100, ctrlKey: true })
+  fireEvent.click(screen.getByRole('button', { name: 'Agrandir le diagramme' }))
+  expect(screen.getByRole('button', { name: /^Échelle 150 %/ })).toBeInTheDocument()
+
+  fireEvent.wheel(toile, { deltaY: 100, ctrlKey: true })
+  expect(screen.getByRole('button', { name: /^Échelle 125 %/ })).toBeInTheDocument()
+})
+
+test('le geste s’arrête aux extrémités, il ne boucle pas', () => {
+  const { container } = monter(<DiagramView schema="public" tables={DEUX} total={2} />)
+  const toile = laToile(container)
+
+  // Huit crans pour six paliers : les deux derniers ne doivent rien faire. Boucler du plafond au
+  // plancher ferait sauter le dessin d'un extrême à l'autre sur un cran de trop, comme pour les
+  // boutons — et c'est la même borne, puisque c'est la même fonction.
+  for (let i = 0; i < 8; i++) fireEvent.wheel(toile, { deltaY: -100, ctrlKey: true })
+  expect(screen.getByRole('button', { name: /^Échelle 150 %/ })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Agrandir le diagramme' })).toBeDisabled()
+})
+
+test('le geste répond même quand la toile arrive après le premier rendu', () => {
+  // **La raison pour laquelle la toile est un nœud d'état et non une `useRef`.** Les structures
+  // arrivent une par une : le premier rendu d'un diagramme est une phrase de lecture, sans zone
+  // défilante. Un effet accroché au montage serait parti sur un `ref.current` nul et n'aurait plus
+  // rien observé — le geste n'aurait jamais répondu, en silence. C'est la leçon d'`API-74`.
+  const { container, rerender } = monter(
+    <DiagramView schema="public" tables={[]} total={2} loading />,
+  )
+  expect(container.querySelector('[data-toile]')).toBeNull()
+
+  rerender(
+    <LanguageProvider preferences={{ language: 'fr' }}>
+      <Sprite />
+      <DiagramView schema="public" tables={DEUX} total={2} />
+    </LanguageProvider>,
+  )
+
+  fireEvent.wheel(laToile(container), { deltaY: -100, ctrlKey: true })
+  expect(screen.getByRole('button', { name: /^Échelle 125 %/ })).toBeInTheDocument()
+})
+
+/**
+ * Rendre la toile défilante **pour jsdom**, qui ne calcule aucune mise en page : `scrollLeft` y est
+ * un zéro perpétuel, donc un ancrage appliqué ne se verrait nulle part.
+ *
+ * Ce que le double remplace est la seule chose qui manque — un défilement qui retient ce qu'on lui
+ * écrit. Il ne simule aucune géométrie : les coordonnées du pointeur sont passées à la main, et
+ * c'est l'arithmétique de `zoomALaSouris.test.ts` qui juge le calcul lui-même.
+ */
+function rendreDefilante(toile: HTMLElement): { valeur: () => number; poser: (n: number) => void } {
+  let gauche = 0
+  Object.defineProperty(toile, 'scrollLeft', {
+    configurable: true,
+    get: () => gauche,
+    set: (n: number) => {
+      gauche = n
+    },
+  })
+  return { valeur: () => gauche, poser: (n) => (gauche = n) }
+}
+
+test('un geste qui ne change rien ne laisse pas d’ancrage derrière lui', () => {
+  const { container } = monter(<DiagramView schema="public" tables={DEUX} total={2} />)
+  const toile = laToile(container)
+  const defilement = rendreDefilante(toile)
+
+  // Jusqu'au plafond : deux crans suffisent, de 100 % à 150 %.
+  fireEvent.wheel(toile, { deltaY: -100, ctrlKey: true, clientX: 300, clientY: 200 })
+  fireEvent.wheel(toile, { deltaY: -100, ctrlKey: true, clientX: 300, clientY: 200 })
+  expect(screen.getByRole('button', { name: /^Échelle 150 %/ })).toBeInTheDocument()
+
+  // **Le cran de trop** : au plafond, il ne change pas l'échelle, donc il n'a rien à ancrer.
+  fireEvent.wheel(toile, { deltaY: -100, ctrlKey: true, clientX: 300, clientY: 200 })
+
+  // L'utilisateur défile ensuite ailleurs, puis réduit par le bouton. Un ancrage retenu par le cran
+  // de trop serait consommé **ici**, avec le défilement d'avant : la vue sauterait à un endroit que
+  // plus rien ne désigne, sur un clic qui n'a rien à voir avec le geste précédent.
+  defilement.poser(0)
+  fireEvent.click(screen.getByRole('button', { name: 'Réduire le diagramme' }))
+
+  expect(screen.getByRole('button', { name: /^Échelle 125 %/ })).toBeInTheDocument()
+  expect(defilement.valeur()).toBe(0)
+})
+
+test('le geste garde sous le pointeur le point qui y était', () => {
+  const { container } = monter(<DiagramView schema="public" tables={DEUX} total={2} />)
+  const toile = laToile(container)
+  const defilement = rendreDefilante(toile)
+  defilement.poser(400)
+
+  // **Le contrôle positif** : sans lui, un ancrage qui ne s'appliquerait jamais rendrait le test
+  // d'au-dessus vert pour la mauvaise raison — « rien n'a bougé » est justement ce qu'il attend.
+  fireEvent.wheel(toile, { deltaY: -100, ctrlKey: true, clientX: 300, clientY: 200 })
+
+  expect(screen.getByRole('button', { name: /^Échelle 125 %/ })).toBeInTheDocument()
+  // (400 + 300) / 1 × 1,25 − 300. L'arithmétique est celle de `defilementAncre`, vérifiée chez elle.
+  expect(defilement.valeur()).toBe(575)
+
+  // **Un second cran part de l'échelle *rendue*, non de celle du départ.** C'est le cas courant —
+  // on zoome deux fois de suite — et le seul qui distingue une échelle suivie d'une échelle figée
+  // au montage : à 1 au lieu de 1,25, le calcul rendrait 1012,5 et le dessin glisserait.
+  fireEvent.wheel(toile, { deltaY: -100, ctrlKey: true, clientX: 300, clientY: 200 })
+  expect(screen.getByRole('button', { name: /^Échelle 150 %/ })).toBeInTheDocument()
+  expect(defilement.valeur()).toBe(750)
+  // Et c'est bien **le même point** qui est resté sous le pointeur d'un bout à l'autre du geste.
+  expect((575 + 300) / 1.25).toBe(700)
+  expect((750 + 300) / 1.5).toBe(700)
+
+  // **Et un ancrage ne sert qu'une fois.** Laissé derrière lui, il serait consommé au prochain
+  // changement d'échelle — un bouton, dix minutes plus tard — avec un défilement devenu faux
+  // entre-temps : la vue sauterait sans que rien ne l'explique.
+  // **Deux crans, et c'est le décor qui l'exige** (règle n° 5) : réduire une fois ramènerait à
+  // 125 %, c'est-à-dire exactement l'échelle qu'un des ancrages avait relevée — un ancrage survivant
+  // y serait écarté pour la bonne valeur au mauvais motif, et le sabotage resterait vert.
+  defilement.poser(0)
+  fireEvent.click(screen.getByRole('button', { name: 'Réduire le diagramme' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Réduire le diagramme' }))
+  expect(screen.getByRole('button', { name: /^Échelle 100 %/ })).toBeInTheDocument()
+  expect(defilement.valeur()).toBe(0)
+})
+
+test('le pourcentage annonce le geste, sans cesser de nommer son acte', () => {
+  monter(<DiagramView schema="public" tables={DEUX} total={2} />)
+
+  // Un geste qu'on ne peut pas deviner n'existe pas — la règle payée au `⌘E` du mode édition et au
+  // `⇧`-clic de cette vue. Il est posé sur le pourcentage, seul des trois boutons à n'être jamais
+  // désactivé : une infobulle sur un bouton mort est inatteignable (piège n° 3).
+  const pourcentage = screen.getByRole('button', { name: /^Échelle 100 %/ })
+  expect(pourcentage).toHaveAttribute('title', expect.stringMatching(/molette/))
+  // Et l'infobulle **décrit**, elle ne nomme pas (piège n° 4) : le nom reste l'acte du bouton.
+  expect(pourcentage).toHaveAccessibleName('Échelle 100 % — revenir à 100 %')
 })
 
 test('un schéma sans table le dit ; une lecture en cours dit où elle en est', () => {

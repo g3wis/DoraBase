@@ -224,6 +224,72 @@ test('le zoom agrandit le dessin, sans le déformer', async ({ page }) => {
   expect(apres.hauteur / avant.hauteur).toBeCloseTo(1.25, 2)
 })
 
+/**
+ * Le zoom à la souris (`API-82`).
+ *
+ * **Une fenêtre courte, et c'est le décor qui l'exige** (règle n° 5). Le dessin de `?demo` fait
+ * 1000 × 485 : dans la fenêtre par défaut il tient tout entier dans la toile, donc il n'y a **rien
+ * à faire défiler** — le navigateur borne alors le défilement à zéro, aucun ancrage ne peut tenir,
+ * et la propriété serait fausse sans que le code y soit pour rien. Mesuré avant de l'écrire :
+ * `scrollHeight - clientHeight` valait 0 même à 125 %.
+ */
+test.describe('le zoom à la souris', () => {
+  test.use({ viewport: { width: 900, height: 560 } })
+
+  test('`Ctrl` + molette zoome sous le pointeur, sans déplacer ce qu’on regarde', async ({
+    page,
+  }) => {
+    // **Ce que ce niveau garde et qu'aucun autre ne peut garder.** L'ancrage est de l'arithmétique
+    // chez `zoomALaSouris.test.ts` ; que le **rendu** tombe là où le calcul le met demande un vrai
+    // défilement et une vraie mise en page, dont jsdom n'a ni l'un ni l'autre (règle n° 9).
+    //
+    // **`shipment_batches` et pas `users`** : le point visé doit garder du défilement devant lui
+    // dans les deux sens, sinon le navigateur borne et c'est la borne qu'on mesure. `users` est
+    // contre le bord droit du dessin (x = 840 sur 1000), celle-ci est au milieu.
+    const cible = page.locator('[data-boite="shipment_batches"]')
+    const boite = () => cible.boundingBox()
+    await cible.hover()
+    const avant = await boite()
+    if (!avant) throw new Error('la boîte `shipment_batches` est absente du dessin')
+    const vise = { x: avant.x + avant.width / 2, y: avant.y + avant.height / 2 }
+
+    await page.keyboard.down('Control')
+    await page.mouse.wheel(0, -100)
+    await page.keyboard.up('Control')
+
+    await expect(page.getByRole('button', { name: /^Échelle 125 %/ })).toBeVisible()
+    // **Le contrôle positif, et il ne bouge pas avec le défaut** (règle n° 1) : un geste qui ne
+    // zoomerait pas laisserait la boîte exactement où elle est, donc l'immobilité vérifiée ensuite
+    // serait verte pour la raison contraire à celle qu'on mesure. Ce qui l'atteste est que le
+    // dessin a **grandi**.
+    await expect
+      .poll(async () => {
+        const apres = await boite()
+        return apres ? Math.round((apres.width / avant.width) * 100) : 0
+      })
+      .toBe(125)
+
+    // Et le point visé n'a pas bougé de l'écran : toute la différence entre un zoom ancré sous le
+    // pointeur et un zoom accroché au coin haut-gauche, où la table qu'on regardait file au
+    // deuxième cran.
+    const apres = await boite()
+    if (!apres) throw new Error('la boîte `shipment_batches` a disparu du dessin')
+    expect(Math.abs(apres.x + apres.width / 2 - vise.x)).toBeLessThan(2)
+    expect(Math.abs(apres.y + apres.height / 2 - vise.y)).toBeLessThan(2)
+  })
+
+  test('la molette nue défile la toile, elle ne la zoome pas', async ({ page }) => {
+    // L'autre moitié de l'arbitrage d'`API-82`, et celle qui se casserait sans qu'on la regarde :
+    // le défilement est le seul geste confortable sur un schéma plus haut que la fenêtre.
+    const toile = page.locator('[data-toile]')
+    await toile.hover()
+    await page.mouse.wheel(0, 200)
+
+    await expect.poll(() => toile.evaluate((n) => n.scrollTop)).toBeGreaterThan(0)
+    await expect(page.getByRole('button', { name: /^Échelle 100 %/ })).toBeVisible()
+  })
+})
+
 test('l’interrupteur « Toutes les colonnes » ouvre ce que l’aperçu résume', async ({ page }) => {
   // `audit_events` porte cinq colonnes dont trois clés : l'aperçu les montre toutes, ce qui ne
   // prouverait rien. `orders` en porte neuf dans le décor, donc elle résume.
