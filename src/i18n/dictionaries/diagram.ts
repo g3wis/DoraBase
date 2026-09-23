@@ -68,6 +68,12 @@ export const diagramFr: Dictionnaire = {
     moins: 'Réduire le diagramme',
     plus: 'Agrandir le diagramme',
     reinitialiser: (p) => `Échelle ${p.pourcentage} % — revenir à 100 %`,
+    // **Le geste s'annonce, sinon il n'existe pas.** C'est la règle que ce dépôt a déjà payée au
+    // `⌘E` du mode édition et au `⇧`-clic de cette vue : un chemin qu'on ne voit pas est un chemin
+    // que personne ne trouve. Il est posé sur le pourcentage, seul des trois boutons à n'être
+    // jamais désactivé — une infobulle sur un bouton mort est inatteignable (piège n° 3), et elle
+    // partirait justement aux deux extrémités de l'échelle.
+    geste: (p) => `${p.touche} + molette, ou pincement du trackpad`,
   },
   vide: {
     aucuneTable: (p) => `Le schéma ${p.schema} ne contient aucune table.`,
@@ -133,6 +139,7 @@ export const diagramEn: Dictionnaire = {
     moins: 'Zoom the diagram out',
     plus: 'Zoom the diagram in',
     reinitialiser: (p) => `Scale ${p.pourcentage} % — back to 100 %`,
+    geste: (p) => `${p.touche} + scroll, or trackpad pinch`,
   },
   vide: {
     aucuneTable: (p) => `Schema ${p.schema} contains no table.`,

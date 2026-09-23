@@ -241,9 +241,11 @@ qu'il portait et que le rendu ne dit pas.
     défaut que le refus du pincement existait pour corriger. Un zoom qu'on ne peut offrir sans le
     déclencher par accident n'est pas offert, il est subi ;
   - **le zoom qui reste est celui d'une *vue*, et c'est une autre chose.** Les paliers du diagramme
-    de schéma grossissent un **dessin**, à boutons, sans toucher l'écran qui l'entoure. Le zoom
-    global, lui, changeait la densité que ce fichier décide par ailleurs au pixel — 11 px de grille,
-    une échelle d'espacement sans 8 px ;
+    de schéma grossissent un **dessin**, sans toucher l'écran qui l'entoure. Le zoom global, lui,
+    changeait la densité que ce fichier décide par ailleurs au pixel — 11 px de grille, une échelle
+    d'espacement sans 8 px. C'est cette distinction, et elle seule, qui a permis à `API-82` de rendre
+    `⌘` / `Ctrl` + molette et le pincement **à la toile du diagramme** sans rouvrir quoi que ce soit
+    ici : le refus tient entier, ce qui a changé est qu'une vue en fait quelque chose ;
   - **le refus n'a plus d'exception de plateforme.** Il en avait une : sous Windows, `Ctrl` + molette
     **est** le geste de zoom volontaire de tous les logiciels, et le refuser aurait retiré le zoom au
     lieu de l'adoucir. L'argument tombe avec le pas fin qu'il servait — il n'y a plus rien à offrir en
@@ -689,12 +691,10 @@ qu'il portait et que le rendu ne dit pas.
     seraient le plus rapide au chronomètre : le verrou serait tenu le temps du schéma entier — donc
     la table qu'on clique pendant le dessin attendrait derrière lui — et le dessin arriverait d'un
     bloc après une attente muette, là où les lots le remplissent par paliers visibles.
-  - **la molette défile, elle ne zoome pas** — et depuis `API-57`, aucun geste ne zoome :
-    `⌘` / `Ctrl` + molette comme le pincement du trackpad sont refusés par `useRefusDuZoom`,
-    l'application n'ayant plus de zoom global. Les paliers d'ici sont donc les seuls du produit, et
-    c'est ce qu'un zoom de **vue** a de différent — il grossit un dessin, non l'écran qui l'entoure.
-    Qu'ils soient des boutons reste juste pour la raison d'origine : un second zoom sur les mêmes
-    gestes ferait dépendre l'échelle de qui écoute l'événement le premier. Le glissement du fond
+  - **la molette défile ; c'est `⌘` / `Ctrl` + molette qui zoome**, et le pincement du trackpad
+    (`API-82`, 23 septembre 2026 — voir « Zoomer le diagramme à la souris »). Les paliers d'ici sont
+    les seuls du produit, et c'est ce qu'un zoom de **vue** a de différent : il grossit un dessin,
+    non l'écran qui l'entoure — `useRefusDuZoom` continue de refuser celui-là. Le glissement du fond
     déplace la vue.
   - **et deux tables choisies disent ce qui les relie** (3 septembre 2026, à la demande).
     Sélectionner **une** table éclaire ses voisines immédiates : « qu'est-ce qui touche `orders` ? ».
@@ -3134,6 +3134,126 @@ sous WKWebView et en « Nuit », même réserve que les dix écrans.
 la raison écrite plus haut ; et rien ne propose le **port** de la base d'après le service choisi,
 alors que `kubectl` le connaît — ce serait un troisième appel, sur un champ que le formulaire porte
 déjà et que l'utilisateur sait remplir.
+
+### Zoomer le diagramme à la souris (23 septembre 2026, `API-82`)
+
+Le diagramme avait sept paliers et **trois boutons** pour les parcourir, et c'était le seul chemin —
+rapporté à l'usage : « in the schema diagram view, i should be able to zoom in or out using the
+mouse ». `⌘` / `Ctrl` + molette et le pincement du trackpad les appliquent désormais, ancrés sous le
+pointeur.
+
+**Ce n'est pas un revirement d'`API-57`, c'est son autre moitié.** L'argument qui a retiré le zoom
+global portait sur la **webview** : un geste qui change l'échelle de l'écran change la densité que ce
+fichier décide par ailleurs au pixel, et sur un trackpad il se déclenche tout seul. Ce qui est offert
+ici grossit un **dessin** dans une zone défilante, ce qu'`API-57` nommait déjà comme une autre chose
+en gardant ces paliers-là. Le refus tient donc **entier** : `useRefusDuZoom` ne bouge pas, et
+`core:webview:allow-set-webview-zoom` reste hors des capacités.
+
+Dix décisions à ne pas défaire :
+
+- **l'ordre des deux écouteurs est décidé, non subi**, et c'était la réserve écrite d'`API-57` — « un
+  second zoom sur les mêmes gestes ferait dépendre l'échelle de qui écoute l'événement le premier ».
+  Le refus global écoute sur `document` en **capture** : il passe donc toujours le premier et tue le
+  zoom natif, puis laisse l'événement descendre jusqu'à la toile. **Ce qui tient l'ensemble est qu'il
+  ne coupe pas la propagation** — y ajouter un `stopPropagation` retirerait le zoom du diagramme sans
+  que rien n'échoue, et c'est écrit des deux côtés ;
+- **le crochet refuse aussi de son côté.** Une vitrine peut monter la toile sans monter `App`, donc
+  sans le refus global : un geste qui zoomerait la webview parce qu'un crochet distant manque serait
+  exactement le défaut qu'`API-57` a corrigé. C'est « désarmer à la source » plutôt que de s'en
+  remettre à la discipline des appelants (la leçon de `10d`) ;
+- **la molette nue continue de défiler**, et c'est l'arbitrage tranché par le demandeur contre deux
+  autres formes. La molette nue qui zoome retirerait le seul défilement vertical confortable d'un
+  schéma plus haut que la fenêtre ; `⇧` + molette pour défiler à côté a été écartée parce que
+  **`⇧` + clic veut déjà dire « adjoindre une seconde table »** dans cette vue, et un modificateur
+  qui dit deux choses selon l'événement qui le porte ne s'apprend pas ;
+- **le zoom est ancré sous le pointeur.** Accroché au coin haut-gauche — ce que fait un `scale` dont
+  personne ne corrige le défilement —, la table qu'on regardait sort de l'écran au deuxième cran, et
+  sur une toile de plusieurs milliers de pixels on ne la retrouve pas. C'est la même raison qui fait
+  que la recherche **emmène** à sa correspondance ;
+- **l'ancrage est relevé au geste et appliqué en `useLayoutEffect`**, et les deux moitiés sont
+  nécessaires. Poser le défilement dans le gestionnaire le ferait **borner par l'ancien cadre**, que
+  React n'a pas encore agrandi ; et relire le défilement après le rendu ne servirait à rien, puisque
+  à la réduction le navigateur l'a déjà ramené dans les bornes du cadre rétréci — la position
+  d'origine est perdue. C'est aussi ce qui rend le pincement juste : plusieurs événements tombent
+  entre deux rendus, chacun réécrit l'ancrage avec le même défilement de départ, que rien n'a encore
+  changé, et seul le dernier pointeur compte ;
+- **un ancrage n'est retenu que si l'échelle bouge, et il ne sert qu'une fois.** Au plancher comme au
+  plafond, un cran ne change rien : un ancrage gardé là serait consommé au **prochain** changement
+  d'échelle — un bouton, dix minutes plus tard — avec un défilement devenu faux entre-temps, et la
+  vue sauterait sans que rien ne l'explique ;
+- **une seule voie, `reglerLePalier`**, pour les trois boutons comme pour le geste (règle n° 17). Le
+  dépôt l'a déjà payé au `⌘E` du mode édition, dont le bouton est arrivé un mois après : deux
+  mécaniques qui posent le même état en laissent une en arrière, et ici la seconde est arrivée trois
+  semaines après la première. Le **déplacement relatif** a en plus son propre passage,
+  `deplacerLePalier`, et il part de la ref : `−`, `+` et le geste demandent tous « un cran depuis où
+  j'en suis », et leur faire lire deux valeurs différentes — l'état du dernier rendu pour les uns, la
+  ref pour l'autre — serait exactement la divergence que la ref existe pour éviter. Le pourcentage,
+  lui, ne se déplace pas : il pose une valeur absolue ;
+- **le palier courant est aussi tenu en ref**, et c'est le seul endroit qui l'écrive avec l'état. Un
+  pincement envoie des dizaines d'événements, dont plusieurs tombent entre deux rendus : sans la ref,
+  chacun lirait le palier du dernier rendu et viserait la même valeur, donc les crans du milieu
+  seraient perdus et le zoom avancerait par à-coups **selon la charge de la machine** ;
+- **la toile est un nœud d'état, non une `useRef`.** `DiagramView` rend des racines différentes selon
+  son état, et les structures arrivent une par une : au premier rendu il n'y a **pas** de zone
+  défilante. Un effet accroché au montage serait parti sur un `ref.current` nul et n'aurait plus rien
+  observé — le geste n'aurait jamais répondu, en silence. C'est la leçon d'`API-74`, où la même faute
+  avait laissé la grille de la console à sa hauteur de repli pour toujours ;
+- **et le geste s'annonce, sur le pourcentage.** Un geste qu'on ne peut pas deviner n'existe pas —
+  la règle payée au `⌘E`, au `⇧`-clic de cette vue et au renommage des consoles. L'infobulle est
+  posée sur le pourcentage parce que c'est le seul des trois boutons à n'être **jamais désactivé** :
+  sur `−` ou `+` elle disparaîtrait justement aux deux extrémités de l'échelle, un `disabled` ne
+  recevant ni survol ni focus (piège n° 3). Elle **décrit**, elle ne nomme pas : le nom accessible
+  reste l'acte du bouton (piège n° 4). `toucheModificateur` écrit `⌘` ou `Ctrl` — le pendant de
+  `toucheMajuscule`, et pour la même raison : ce n'est pas un raccourci de l'application, c'est la
+  moitié d'un geste de souris, dont l'autre moitié n'est pas une touche.
+
+**Le rythme du geste est une conversion, pas un réglage.** Un cran de souris vaut 100 px de `deltaY`
+chez les deux moteurs, donc un cran vaut un palier — la seule correspondance qu'un utilisateur puisse
+prévoir. Un pincement arrive par dizaines d'événements de quelques pixels, et c'est l'accumulation
+qui les rassemble ; un changement de sens la remet à zéro, sans quoi inverser le geste devrait
+d'abord « rembourser » ce que le sens précédent avait accumulé, et le premier cran du retour
+arriverait avec un crantage de retard — au moment précis où l'on corrige sa visée. Et `deltaMode` est
+converti : Firefox rend des **lignes**, où un crantage vaut 3, donc sans conversion le seuil n'y
+serait jamais franchi — un zoom qui ne répond pas, sans que rien échoue.
+
+**Quatre choses apprises en le vérifiant, et les quatre par sabotage** (règle n° 1) :
+
+- **deux gardes sont restées vertes, et les deux fautes étaient dans le décor** (règle n° 5). Un
+  ancrage qui survit à son usage était indiscernable parce que **réduire depuis 150 % retombe
+  exactement sur 125 %**, c'est-à-dire sur l'échelle qu'un des ancrages avait relevée : il était donc
+  écarté pour la bonne valeur au mauvais motif. Et l'échelle **rendue**, que le crochet suit pour
+  calculer l'ancrage, n'était exercée par aucun test parce que tous partaient de 100 % — il a fallu
+  **deux crans de suite** pour que la différence entre « l'échelle d'où l'on vient » et « celle du
+  montage » se voie ;
+- **le test de bout en bout mesurait une borne, pas un ancrage.** Le dessin de `?demo` fait
+  1000 × 485 : dans la fenêtre par défaut il tient **entier** dans la toile, donc
+  `scrollHeight - clientHeight` vaut zéro et le navigateur borne tout défilement à zéro — la
+  propriété « le point reste sous le pointeur » y est fausse quoi qu'on écrive. Mesuré : 119 px de
+  débord horizontal et **zéro** vertical, même à 125 %. Le test prend donc une **fenêtre courte**,
+  comme `API-62` l'a fait pour l'arbre, et vise une boîte du **milieu** du dessin — `users` est
+  contre le bord droit (x = 840 sur 1000), donc l'ancrage y bute sur la borne ;
+- **et il visait une boîte que le pointeur n'atteignait pas.** `users` est hors de la zone visible au
+  premier rendu : viser sa boîte sans l'y amener plaçait le pointeur ailleurs, et le test mesurait
+  l'ancrage d'un point qu'il ne regardait pas — il échouait de 108 px, ce qui ressemble trait pour
+  trait à une arithmétique fausse. `hover()` fait défiler la boîte dans la vue **et** pose le
+  pointeur en son centre ;
+- **le contrôle positif ne doit pas bouger avec le défaut.** « Le point n'a pas bougé » est vrai d'un
+  geste qui **ne zoome pas du tout** : sans une seconde assertion, le test serait vert pour la raison
+  contraire à celle qu'on mesure. Ce qui l'atteste est que le dessin a grandi de 25 %.
+
+**Une garde n'est exercée par rien, et le dire vaut mieux que de le laisser croire** : le crochet
+rafraîchit à chaque rendu la référence vers `parCrans`, or celui d'aujourd'hui ne touche que des refs
+et `setPalier`, tous stables — la fermeture du premier rendu resterait juste, et retirer le
+rafraîchissement laisse la suite verte, vérifié. C'est une **précondition écrite**, comme l'`arrivee`
+d'`API-55` : le jour où `parCrans` lira une valeur de rendu, son absence ne se dénoncerait que par un
+zoom qui répond à côté.
+
+**Ce qui reste à voir à l'œil** : le **pincement du trackpad**, qui est la moitié du geste que rien de
+cet outillage ne peut exercer. Chromium n'émet pas les `gesture*` de WebKit — c'est déjà la réserve
+que `useRefusDuZoom` porte sur les mêmes trois événements —, donc la branche qui les lit n'a jamais
+tourné. Et il faut la regarder **dans la fenêtre native** : c'est là qu'un pincement arrive, et c'est
+aussi là qu'on verra si `⌘` + molette et le pincement se disputent le geste, les deux pouvant arriver
+sous les deux formes selon le moteur. Le reste — la molette, l'ancrage, les bornes — est mesuré.
 
 ### Les filtres suivent la colonne (3 septembre 2026)
 

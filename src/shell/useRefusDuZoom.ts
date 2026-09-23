@@ -24,8 +24,16 @@ const PINCEMENTS = ['gesturestart', 'gesturechange', 'gestureend'] as const
  *
  * Un explorateur de bases de données est un outil de bureau dont la densité est *décidée* — 11 px de
  * grille, une échelle d'espacement sans 8 px. Le zoom qui a du sens ici est celui d'une **vue** : les
- * paliers du diagramme de schéma, qui sont des boutons et ne bougent pas le reste de l'écran. Le zoom
- * **global**, lui, n'a plus de position allumée.
+ * paliers du diagramme de schéma, qui grossissent un dessin sans toucher à l'écran qui l'entoure. Le
+ * zoom **global**, lui, n'a plus de position allumée.
+ *
+ * # Ce refus empêche le zoom natif, il n'interdit pas à une vue d'agir
+ *
+ * Depuis `API-82`, la toile du diagramme zoome sur `⌘` / `Ctrl` + molette et sur le pincement. Les
+ * deux moitiés tiennent ensemble **parce que ce crochet ne coupe pas la propagation** : il écoute au
+ * plus tôt, refuse ce que le moteur de rendu en ferait, et laisse l'événement descendre. Y ajouter un
+ * `stopPropagation` retirerait le zoom du diagramme **en silence** — rien n'échouerait, le geste
+ * cesserait simplement de répondre.
  *
  * # Le refus est actif, et sans exception de plateforme
  *

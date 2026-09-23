@@ -137,3 +137,16 @@ export function raccourci(
 export function toucheMajuscule(sur: Plateforme = plateforme()): string {
   return estWindows(sur) ? 'Shift' : '⇧'
 }
+
+/**
+ * Le nom du modificateur de l'application, pour un **geste de souris**.
+ *
+ * Même partage que `toucheMajuscule`, et pour la même raison : `raccourci` écrit les raccourcis de
+ * l'*application*, donc toujours une touche au bout — `⌘E`, `Ctrl+Shift+E`. Ce qu'on nomme ici
+ * n'est pas un raccourci mais la moitié d'un geste, « ⌘ + molette », dont l'autre moitié n'est pas
+ * une touche. En passer par `raccourci` demanderait de lui donner une touche vide, et sa règle
+ * d'ordre — le modificateur en tête sous Windows, en queue sur macOS — n'aurait plus rien à ordonner.
+ */
+export function toucheModificateur(sur: Plateforme = plateforme()): string {
+  return estWindows(sur) ? 'Ctrl' : '⌘'
+}

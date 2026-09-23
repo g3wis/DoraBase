@@ -1,7 +1,7 @@
 import { type PointerEvent as PointerEventReact, useMemo, useRef, useState } from 'react'
 import { Icon } from '../../design/icons/Icon'
 import { useT } from '../../i18n/LanguageContext'
-import { toucheMajuscule } from '../../shell/plateforme'
+import { toucheMajuscule, toucheModificateur } from '../../shell/plateforme'
 import { cx } from '../../ui/cx'
 import { SANS_CORRECTION } from '../../ui/Field/Field'
 import { Toggle } from '../../ui/Toggle/Toggle'
@@ -18,6 +18,7 @@ import {
   idDeTable,
   type Lien,
 } from './disposition'
+import { useZoomALaSouris } from './zoomALaSouris'
 
 /**
  * Les paliers de zoom.
@@ -79,14 +80,18 @@ export type DiagramViewProps = {
  * de clés entre les deux — l'autre question, celle qu'on se pose avant d'écrire une jointure, et que
  * rien dans le produit ne savait poser. Voir `BandeDeRelation`, qui porte les arbitrages.
  *
- * # Le zoom est à boutons, et c'est délibéré
+ * # Le zoom : trois boutons, et un geste de souris
  *
- * La molette **défile**, elle ne zoome pas, et il n'y a plus de geste qui zoome : `⌘` / `Ctrl` +
- * molette comme le pincement du trackpad sont refusés par `useRefusDuZoom` (`API-57`), l'application
- * n'ayant plus aucun zoom global. Les paliers d'ici sont donc les seuls du produit — et c'est ce que
- * le zoom d'une **vue** a de différent : il grossit un dessin, non l'écran qui l'entoure. Les rendre
- * explicites reste juste pour la raison d'origine : un second zoom sur les mêmes gestes ferait
- * dépendre l'échelle de qui écoute l'événement le premier.
+ * La molette **défile**, elle ne zoome pas. Ce qui zoome est `⌘` / `Ctrl` + molette, et le pincement
+ * du trackpad (`API-82`) : les deux passent par `useZoomALaSouris`, qui applique les mêmes paliers
+ * que les boutons — une seule voie, `reglerLePalier` — et ancre le dessin sous le pointeur.
+ *
+ * **Ce n'est pas le zoom global qu'`API-57` a retiré.** La distinction est celle qu'`API-57` écrivait
+ * déjà en gardant ces paliers : ce zoom-ci grossit un **dessin**, non l'écran qui l'entoure, dont la
+ * densité reste décidée au pixel. Le refus global tient donc entier, et c'est lui qui passe le
+ * premier — `document`, en capture — pour tuer le zoom natif avant que la vue ne lise le même
+ * événement. C'est la réponse à la réserve qu'`API-57` avait laissée : l'ordre des deux écouteurs est
+ * **décidé**, non abandonné à qui s'abonne le premier.
  */
 export function DiagramView({
   schema,
@@ -140,7 +145,16 @@ export function DiagramView({
   const visee = useRef(0)
   /** Le champ lui-même : le vider par le bouton doit lui **rendre** le focus, non le lui prendre. */
   const champ = useRef<HTMLInputElement>(null)
-  const toile = useRef<HTMLDivElement>(null)
+  /*
+   * **La toile est un nœud d'état, non une `useRef`**, parce qu'un crochet doit s'y accrocher.
+   *
+   * `DiagramView` rend des racines différentes selon son état — erreur, schéma vide, lecture en
+   * cours, dessin —, donc la zone défilante **n'existe pas au montage** : un effet à dépendances
+   * vides serait parti une fois sur un `ref.current` nul, et le zoom à la souris n'aurait jamais
+   * été branché. C'est la leçon d'`API-74`, où une `useRef` posée là avait laissé la grille de la
+   * console à sa hauteur de repli pour toujours.
+   */
+  const [toile, setToile] = useState<HTMLDivElement | null>(null)
 
   const vue = useMemo(
     () =>
@@ -152,6 +166,50 @@ export function DiagramView({
   )
 
   const echelle = PALIERS_DE_ZOOM[palier] ?? 1
+
+  /*
+   * **Le palier courant, en ref, et c'est le seul endroit qui l'écrive avec l'état.**
+   *
+   * Un pincement envoie des dizaines d'événements, dont plusieurs peuvent tomber entre deux rendus.
+   * Sans cette ref, chacun lirait le `palier` du dernier rendu et calculerait la même cible : les
+   * crans du milieu seraient perdus, et le zoom avancerait par à-coups selon la charge de la
+   * machine. La ref est écrite dans le geste même, donc le suivant part de la bonne valeur.
+   */
+  const palierCourant = useRef(palier)
+
+  /**
+   * Régler l'échelle — **la seule voie**, pour les trois boutons comme pour la molette.
+   *
+   * Deux mécaniques qui poseraient le même état en laisseraient une en arrière (règle n° 17), et le
+   * dépôt l'a déjà payé : c'est l'arbitrage du `⌘E` et de son bouton (`API-28`), et celui de la
+   * croix d'un chip et du champ qu'elle vide. Ici la seconde est arrivée trois semaines après la
+   * première.
+   *
+   * Elle **borne** plutôt que de boucler — un clic de trop ne doit pas faire sauter le dessin d'un
+   * extrême à l'autre — et rend `true` quand l'échelle a bougé, ce dont l'ancrage du zoom à la
+   * souris a besoin pour ne pas retenir un geste qui n'a rien changé.
+   */
+  function reglerLePalier(suivant: number): boolean {
+    const borne = Math.min(PALIERS_DE_ZOOM.length - 1, Math.max(0, suivant))
+    if (borne === palierCourant.current) return false
+    palierCourant.current = borne
+    setPalier(borne)
+    return true
+  }
+
+  /**
+   * Avancer de `crans` paliers — **les deux boutons de pas comme le geste passent par ici**.
+   *
+   * Un déplacement relatif doit partir de la ref et non de `palier`, qui est l'état du **dernier
+   * rendu** : les faire lire deux valeurs différentes pour la même question serait la divergence que
+   * la ref existe justement à éviter. Le pourcentage, lui, ne se déplace pas — il pose une valeur
+   * absolue, donc il appelle `reglerLePalier` directement.
+   */
+  function deplacerLePalier(crans: number): boolean {
+    return reglerLePalier(palierCourant.current + crans)
+  }
+
+  useZoomALaSouris({ zone: toile, echelle, parCrans: deplacerLePalier })
 
   /**
    * Ce que la recherche désigne : des tables, et les colonnes qui l'ont fait correspondre.
@@ -216,8 +274,7 @@ export function DiagramView({
     // garder la comparaison en cours ferait afficher un chemin dont un bout n'est plus celui qu'on
     // regarde.
     setSelection([boite.id])
-    const zone = toile.current
-    const element = zone?.querySelector(`[data-boite="${CSS.escape(boite.table)}"]`)
+    const element = toile?.querySelector(`[data-boite="${CSS.escape(boite.table)}"]`)
     element?.scrollIntoView({ block: 'center', inline: 'center' })
   }
 
@@ -375,7 +432,7 @@ export function DiagramView({
    * de construction la compose.
    */
   function auPointeur(evenement: PointerEventReact<HTMLDivElement>) {
-    const zone = toile.current
+    const zone = toile
     if (!zone) return
     if (evenement.target instanceof Element && evenement.target.closest('[data-boite]')) return
     const depart = {
@@ -536,7 +593,7 @@ export function DiagramView({
             className={styles.bouton}
             aria-label={t('diagram.zoom.moins')}
             disabled={palier === 0}
-            onClick={() => setPalier((rang) => Math.max(0, rang - 1))}
+            onClick={() => deplacerLePalier(-1)}
           >
             <span aria-hidden="true">−</span>
           </button>
@@ -546,7 +603,10 @@ export function DiagramView({
             type="button"
             className={styles.echelle}
             aria-label={t('diagram.zoom.reinitialiser', { pourcentage: Math.round(echelle * 100) })}
-            onClick={() => setPalier(ZOOM_NEUTRE)}
+            // Une infobulle **décrit**, elle ne nomme pas (piège n° 4) : le nom reste l'acte du
+            // bouton, et le geste vient en description.
+            title={t('diagram.zoom.geste', { touche: toucheModificateur() })}
+            onClick={() => reglerLePalier(ZOOM_NEUTRE)}
           >
             {Math.round(echelle * 100)} %
           </button>
@@ -555,7 +615,7 @@ export function DiagramView({
             className={styles.bouton}
             aria-label={t('diagram.zoom.plus')}
             disabled={palier === PALIERS_DE_ZOOM.length - 1}
-            onClick={() => setPalier((rang) => Math.min(PALIERS_DE_ZOOM.length - 1, rang + 1))}
+            onClick={() => deplacerLePalier(1)}
           >
             <span aria-hidden="true">+</span>
           </button>
@@ -585,7 +645,7 @@ export function DiagramView({
           **double** le défilement plutôt que de le remplacer : la zone est atteignable par sa barre
           de défilement et les flèches l'y déplacent, donc rien n'est réservé à la souris. Un
           `role="application"` avalerait au contraire les touches du navigateur. */}
-      <div className={styles.toile} data-toile="" ref={toile} onPointerDown={auPointeur}>
+      <div className={styles.toile} data-toile="" ref={setToile} onPointerDown={auPointeur}>
         {/* Deux cadres, et il en faut deux : `transform` ne change pas la place qu'un élément
             occupe dans la mise en page, donc la zone défilante ne verrait rien du zoom. Celui de
             l'extérieur porte la taille mise à l'échelle, celui de l'intérieur les coordonnées du
