@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { type DragEvent, useState } from 'react'
 import { Icon } from '../../design/icons/Icon'
 import type { IconName } from '../../design/icons/names'
+import { useApercuTronque } from '../ApercuTronque/useApercuTronque'
 import { ChampDeRenommage } from '../ChampDeRenommage/ChampDeRenommage'
 import { cx } from '../cx'
 import styles from './TabStrip.module.css'
@@ -22,14 +23,23 @@ export type Tab = {
    * et il vient du serveur.
    */
   renommable?: boolean
+  /**
+   * Le texte entier que le survol prolongé montre quand le libellé est coupé à l'ellipse (#156).
+   *
+   * Absent, c'est le libellé lui-même. Un onglet de résultat de console le porte à part : son
+   * libellé est la requête **sur une ligne**, l'aperçu la rend avec ses retours à la ligne.
+   */
+  titre?: string
 }
 
 type TabStripProps = {
   tabs: Tab[]
   activeId: string
   onSelect: (id: string) => void
-  onClose: (id: string) => void
-  onReorder: (tabs: Tab[]) => void
+  /** Absent, les onglets ne se ferment pas : aucune croix n'est rendue (#156). */
+  onClose?: (id: string) => void
+  /** Absent, les onglets ne se déplacent pas : rien n'est glissable. */
+  onReorder?: (tabs: Tab[]) => void
   /**
    * Renomme l'onglet — appelé avec le nouveau nom, déjà nettoyé.
    *
@@ -37,6 +47,13 @@ type TabStripProps = {
    * endroits, et n'être renommable qu'à l'un des deux obligerait à se souvenir lequel.
    */
   onRename?: (id: string, nouveau: string) => void
+  /**
+   * La largeur au-delà de laquelle un onglet coupe son libellé à l'ellipse (#156).
+   *
+   * Absente, un onglet prend la largeur de son libellé, comme les onglets de table et de console :
+   * leurs noms sont courts. Un onglet qui porte une requête entière en a besoin.
+   */
+  largeurMax?: number
 }
 
 // `iconColor` et `accentColor` sont deux valeurs distinctes, relevées sur les cinq onglets
@@ -55,7 +72,10 @@ export function TabStrip({
   onClose,
   onReorder,
   onRename,
+  largeurMax,
 }: TabStripProps) {
+  // Le libellé coupé se lit au survol prolongé — la mécanique du panneau de ligne (#156).
+  const { armer, desarmer, apercu } = useApercuTronque()
   /**
    * L'onglet en cours de renommage.
    *
@@ -69,7 +89,7 @@ export function TabStrip({
     if (draggedId === targetId) return
     const from = tabs.findIndex((tab) => tab.id === draggedId)
     const to = tabs.findIndex((tab) => tab.id === targetId)
-    if (from === -1 || to === -1) return
+    if (from === -1 || to === -1 || onReorder === undefined) return
 
     const next = [...tabs]
     const [moved] = next.splice(from, 1)
@@ -90,7 +110,10 @@ export function TabStrip({
           <div
             key={tab.id}
             className={cx(styles.tab, active && styles.active)}
-            style={active ? { borderTopColor: tab.accentColor } : undefined}
+            style={{
+              ...(active ? { borderTopColor: tab.accentColor } : {}),
+              ...(largeurMax !== undefined ? { maxWidth: largeurMax } : {}),
+            }}
             data-active={active}
             role="presentation"
           >
@@ -128,15 +151,26 @@ export function TabStrip({
                 aria-selected={active}
                 className={styles.select}
                 onClick={() => onSelect(tab.id)}
+                // **Le survol est écouté sur le bouton, la coupure mesurée sur son libellé** : c'est
+                // le libellé qui porte l'ellipse, et le bouton l'élément interactif (#156).
+                onMouseEnter={(event) => {
+                  const libelle = event.currentTarget.querySelector<HTMLElement>('[data-libelle]')
+                  if (libelle !== null) armer(libelle, tab.titre ?? tab.label)
+                }}
+                onMouseLeave={desarmer}
                 onDoubleClick={
                   tab.renommable === true && onRename !== undefined
                     ? () => setEnRenommage(tab.id)
                     : undefined
                 }
-                draggable
-                onDragStart={(event) => event.dataTransfer.setData('text/plain', tab.id)}
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={(event) => handleDrop(tab.id, event.dataTransfer.getData('text/plain'))}
+                {...(onReorder !== undefined && {
+                  draggable: true,
+                  onDragStart: (event: DragEvent) =>
+                    event.dataTransfer.setData('text/plain', tab.id),
+                  onDragOver: (event: DragEvent) => event.preventDefault(),
+                  onDrop: (event: DragEvent) =>
+                    handleDrop(tab.id, event.dataTransfer.getData('text/plain')),
+                })}
               >
                 <Icon
                   name={tab.icon}
@@ -144,11 +178,16 @@ export function TabStrip({
                   strokeWidth={active ? 2 : 1.9}
                   style={{ color: tab.iconColor }}
                 />
-                <span>{tab.label}</span>
+                <span className={styles.libelle} data-libelle>
+                  {tab.label}
+                </span>
+                {/* L'espace est **explicite** : sans elle, le nom accessible colle le libellé et
+                    son suffixe — « select 1échec » (piège n° 1). */}
+                {tab.meta !== undefined && ' '}
                 {tab.meta !== undefined && <span className={styles.meta}>{tab.meta}</span>}
               </button>
             )}
-            {active && (
+            {active && onClose !== undefined && (
               <button
                 type="button"
                 aria-label={`Fermer ${tab.label}`}
@@ -161,6 +200,7 @@ export function TabStrip({
           </div>
         )
       })}
+      {apercu}
     </div>
   )
 }

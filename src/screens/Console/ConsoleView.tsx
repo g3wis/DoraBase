@@ -8,6 +8,7 @@ import { SplitPane } from '../../ui/SplitPane/SplitPane'
 import { Toggle } from '../../ui/Toggle/Toggle'
 import { MenuDesColonnes, StepperDeLimite } from '../TableView/Toolbar'
 import type { Dialecte } from '../Workbench/onglets'
+import { BandeDesInstructions } from './BandeDesInstructions'
 import { ConsoleResult, ordonner, type VueResultat } from './ConsoleResult'
 import styles from './ConsoleView.module.css'
 import type { Catalogue } from './completion'
@@ -15,6 +16,7 @@ import type { IssueDExport } from './exportResultat'
 import { limiteDe, poserLaLimite } from './limite'
 import { reordonnerLaProjection } from './projection'
 import { type CommandesEditeur, SqlEditor } from './SqlEditor'
+import type { Etape } from './useExecution'
 
 /** Ce que le moteur applique quand la requête ne porte pas de `limit` — l'« auto-LIMIT 1000 ». */
 const LIMITE_AUTOMATIQUE = 1000
@@ -35,6 +37,13 @@ type ConsoleViewProps = {
   enCours?: boolean
   resultat?: QueryResult | null
   erreur?: string | null
+  /**
+   * Les instructions de la dernière exécution (#156), et celle qu'on regarde. Un onglet chacune dès
+   * qu'il y en a deux ; `resultat` et `erreur` sont ceux de l'onglet regardé.
+   */
+  etapes?: readonly Etape[]
+  etapeChoisie?: number
+  onChoisirEtape?: (index: number) => void
   /** Ce que l'autocomplétion propose (`12d`), lu au moment de la frappe. */
   catalogue?: () => Catalogue
   vue?: VueResultat
@@ -105,6 +114,9 @@ export function ConsoleView({
   enCours = false,
   resultat = null,
   erreur = null,
+  etapes = [],
+  etapeChoisie = 0,
+  onChoisirEtape,
   catalogue,
   vue,
   onVueChange,
@@ -353,28 +365,37 @@ export function ConsoleView({
             </div>
           }
           end={
-            <ConsoleResult
-              resultat={resultat}
-              erreur={erreur}
-              enCours={enCours}
-              vue={vue}
-              onVueChange={onVueChange}
-              dialecte={dialecte}
-              rowHeight={rowHeight}
-              masquees={masquees}
-              ordre={ordre}
-              onBasculerColonne={basculerLaColonne}
-              onReafficher={reafficherTout}
-              onOrdreChange={poserLOrdre}
-              onExporter={
-                onExporter === undefined
-                  ? undefined
-                  : (format) => {
-                      const { colonnes, lignes } = projectionExportee()
-                      return onExporter(format, colonnes, lignes)
-                    }
-              }
-            />
+            <div className={styles.reponses}>
+              {onChoisirEtape !== undefined && (
+                <BandeDesInstructions
+                  etapes={etapes}
+                  choisie={etapeChoisie}
+                  onChoisir={onChoisirEtape}
+                />
+              )}
+              <ConsoleResult
+                resultat={resultat}
+                erreur={erreur}
+                enCours={enCours}
+                vue={vue}
+                onVueChange={onVueChange}
+                dialecte={dialecte}
+                rowHeight={rowHeight}
+                masquees={masquees}
+                ordre={ordre}
+                onBasculerColonne={basculerLaColonne}
+                onReafficher={reafficherTout}
+                onOrdreChange={poserLOrdre}
+                onExporter={
+                  onExporter === undefined
+                    ? undefined
+                    : (format) => {
+                        const { colonnes, lignes } = projectionExportee()
+                        return onExporter(format, colonnes, lignes)
+                      }
+                }
+              />
+            </div>
           }
         />
       </div>

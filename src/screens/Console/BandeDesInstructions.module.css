@@ -1,0 +1,27 @@
+/*
+ * La bande des instructions d'une suite (#156) : `TabStrip`, posé comme celui de l'écran de travail
+ * (`WorkbenchTabs.module.css`, `.strip`) — il défile à sa place au lieu de pousser la colonne.
+ */
+
+.bande {
+  display: flex;
+  flex: none;
+  min-width: 0;
+  overflow-x: auto;
+  /* Un axe en `auto` force l'autre à quitter `visible` : sans ce garde-fou, le pixel de filet que
+   * `TabStrip` rend en plus de sa hauteur déclarée ferait dessiner une barre verticale — le défaut
+   * du 18 août 2026 de la bande de l'écran de travail. */
+  overflow-y: hidden;
+  overscroll-behavior: none;
+  scrollbar-width: none;
+}
+
+.bande::-webkit-scrollbar {
+  display: none;
+}
+
+/* **Le filet bas de `TabStrip` est retiré ici** : la racine du résultat, juste dessous, dessine le
+ * sien au même endroit, et deux traits superposés en font un de deux pixels. */
+.bande > * {
+  border-bottom: none;
+}

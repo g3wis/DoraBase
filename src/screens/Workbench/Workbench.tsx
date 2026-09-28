@@ -702,24 +702,6 @@ export function Workbench({
     consoleActive === null || cleConsole === null
       ? null
       : { cle: cleConsole, id: idOnglet(consoleActive) }
-  const transaction = useTransaction(passerelleTransaction, consoleDeTransaction, projects)
-  const execution = useExecution(
-    cleConsole,
-    passerelleExecution ?? PASSERELLE_EXECUTION,
-    idConsoleActive,
-    transaction.mode(consoleDeTransaction),
-    transaction.jeton(consoleDeTransaction),
-    transaction.apresExecution,
-  )
-
-  /**
-   * Le moteur de la base ouverte, pour l'édition de document en JSON (`18g`) — **dérivé de la
-   * déclaration**, comme `dialecteDe`, jamais deviné depuis le contenu de l'écran.
-   */
-  const moteurActuel = contexte
-    ? moteurDe(contexte.project, contexte.database, contexte.environment)
-    : undefined
-
   /**
    * Le moteur de la connexion de la **console active** — celui qui décide si elle peut tenir une
    * transaction manuelle (`API-38`).
@@ -727,6 +709,8 @@ export function Workbench({
    * `moteurActuel` ne suffisait pas : il dérive de `contexte`, qui exige un schéma sélectionné dans
    * l'arbre, alors qu'une console n'en a pas. C'est le même écart que `cleConsole` a comblé pour
    * l'exécution, et la même réponse — une console sait sur quoi elle porte.
+   *
+   * Déclaré avant `useExecution`, qui en tire le découpage d'une suite d'instructions (#156).
    */
   const moteurConsole =
     consoleActive === null
@@ -736,6 +720,24 @@ export function Workbench({
           consoleActive.key.database,
           consoleActive.key.environment,
         )
+  const transaction = useTransaction(passerelleTransaction, consoleDeTransaction, projects)
+  const execution = useExecution(
+    cleConsole,
+    passerelleExecution ?? PASSERELLE_EXECUTION,
+    idConsoleActive,
+    transaction.mode(consoleDeTransaction),
+    transaction.jeton(consoleDeTransaction),
+    transaction.apresExecution,
+    moteurConsole,
+  )
+
+  /**
+   * Le moteur de la base ouverte, pour l'édition de document en JSON (`18g`) — **dérivé de la
+   * déclaration**, comme `dialecteDe`, jamais deviné depuis le contenu de l'écran.
+   */
+  const moteurActuel = contexte
+    ? moteurDe(contexte.project, contexte.database, contexte.environment)
+    : undefined
 
   /**
    * Pourquoi la bascule « Transaction manuelle » ne peut pas bouger, quand elle ne peut pas
@@ -1414,6 +1416,9 @@ export function Workbench({
           enCours={execution.enCours}
           resultat={execution.resultat}
           erreur={execution.erreur}
+          etapes={execution.etapes}
+          etapeChoisie={execution.choisie}
+          onChoisirEtape={execution.choisir}
           // **Une fonction, pas une valeur** : elle est lue au moment de la frappe, donc une
           // table ouverte après le montage de la console voit ses colonnes proposées.
           catalogue={catalogue}
@@ -1741,6 +1746,8 @@ export function Workbench({
         <RunConfirm
           nature={execution.aConfirmer.nature}
           sansRestriction={execution.aConfirmer.sansWhere}
+          ecritures={execution.aConfirmer.ecritures}
+          instructions={execution.aConfirmer.suite.length}
           /* **Le rappel de la modale change de sens en mode manuel** (`API-38`) : « sans
              transaction » y serait faux, et c'est la seule phrase de cet écran qui promette quelque
              chose. La requête part dans la transaction en cours, donc rien n'est écrit avant sa

@@ -2094,6 +2094,97 @@ onze lignes**, `?demo` en rendant deux. Ce que le signalement décrit — onze l
 dessous — n'a donc jamais été *vu* corrigé ici ; c'est l'égalité de la zone et de son emplacement qui
 en tient lieu, et une vraie base qui le dira.
 
+### Un texte à plusieurs instructions s'exécute une par une (28 septembre 2026, #156)
+
+La console envoyait tout son texte en **une** requête `run_sql`. PostgreSQL la refusait — `prepare`
+n'accepte qu'une instruction —, et **SQLite n'exécutait que la première, sans rien dire**, ce qui est
+le pire des deux : trois instructions écrites, une jouée, et un résultat qui a l'air complet. Le
+texte est désormais découpé, et chaque instruction part à son tour — « Exécuter » comme « Exécuter
+la sélection », en mode automatique comme en transaction manuelle.
+
+Huit décisions à ne pas défaire :
+
+- **le découpage vit à l'écran** (`Console/instructions.ts`), **et le contrat de moteur n'a pas
+  bougé** : `run_sql` reçoit toujours une instruction. C'est ce qui garde intact tout ce qui s'y
+  appuie — l'auto-`LIMIT` lu sur la fin du texte, le compte de lignes touchées d'un seul
+  `CommandComplete`, et surtout le journal d'une transaction manuelle, où **chaque instruction entre
+  séparément** sans qu'une ligne de Rust ait changé. Et c'est l'écran qui doit connaître la suite
+  avant qu'elle parte : la confirmation la récapitule entière. Ce n'est pas composer du SQL, ce que
+  le front ne fait pas — c'est **couper** un texte, chaque morceau partant tel qu'il est écrit ;
+- **un texte à une seule instruction part tel qu'il est écrit**, point-virgule et commentaire
+  compris : c'est le chemin d'avant, et rien n'y change pour qui n'écrit qu'une requête. Découper
+  n'intervient qu'à partir de deux ;
+- **le découpeur connaît trois dialectes, et leurs écarts sont exactement ceux qui mordent.** Un `;`
+  ne coupe ni dans une chaîne, ni dans un identifiant cité, ni dans un commentaire, ni dans un corps
+  en dollars de PostgreSQL, ni dans le corps `begin … end` d'un trigger SQLite, d'une routine MySQL
+  ou d'un `begin atomic`. **L'antislash n'échappe que chez MySQL** : `'a\'` est une chaîne complète
+  chez PostgreSQL et SQLite, et le traiter partout ferait avaler le reste du texte dans une chaîne.
+  `#` n'est un commentaire que chez MySQL. Dans un corps, `case` s'ouvre et `end` ferme, mais `end if`
+  / `end loop` / `end while` / `end repeat` ne ferment rien — `if` étant aussi une fonction, leurs
+  ouvertures ne sont pas comptées non plus. **Pas de `DELIMITER`** : c'est une commande du client
+  `mysql`, pas du SQL, et le protocole reçoit déjà le corps d'une procédure comme une instruction ;
+- **MongoDB et BigQuery ne sont pas découpés** (`decoupeLesSuites`). La première parle un autre
+  dialecte ; le second exécute un script en **un seul job**, nativement — le découper en ferait autant
+  de jobs facturés, et casserait les variables qu'un script déclare pour les instructions suivantes ;
+- **une par une, chacune attendant la précédente**, et **arrêt à la première erreur**, dans les deux
+  modes. La suite a été écrite en supposant que ce qui précède a réussi ; et en manuel, PostgreSQL
+  refuserait de toute façon tout ce qui suit dans une transaction abandonnée. Ce qui ne part pas est
+  **dit** — « non exécutée » n'est pas « en attente », la première annonçant une suite interrompue ;
+- **une seule confirmation, récapitulative**, avant que rien ne parte : les verbes des écritures dans
+  l'ordre et le compte d'instructions, le `where` manquant de **n'importe laquelle** en premier. Une
+  confirmation par écriture interromprait la suite au milieu, donc laisserait la base dans l'état
+  d'une suite à moitié jouée le temps qu'on réponde. La dispense du mode manuel s'applique
+  instruction par instruction, par le même `dispenseeParLaTransaction` : une suite d'écritures n'y
+  demande rien, une modification de structure y garde sa question ;
+- **un onglet par instruction, et c'est `TabStrip`, la bande des tables et des consoles** (à la
+  demande, après un premier jet en contrôle segmenté). Elle n'y ferme ni ne déplace rien — un résultat
+  n'est pas un objet qu'on range —, donc `onClose` et `onReorder` sont devenus facultatifs : absents,
+  ni croix ni glisser-déposer. **Chaque onglet est nommé par sa requête**, sur une ligne, coupée à
+  l'ellipse au-delà de 240 px (`largeurMax`, une cote que le handoff ne pouvait pas donner, aucun de
+  ses onglets ne portant une requête) ; **le survol prolongé la rend entière**, retours à la ligne
+  compris (`Tab.titre`). Le rang n'y est pas, l'ordre de la bande le dit. Le **statut a deux signes,
+  jamais la couleur seule** : une icône, et un suffixe écrit pour ce qui n'a pas réussi — « échec »,
+  « non exécutée », « en cours » —, qui entre dans le nom accessible par une espace **explicite**
+  (piège n° 1). L'onglet regardé **suit la progression** jusqu'à ce qu'on en choisisse un à la main —
+  la réponse qu'on lit ne doit pas changer sous les yeux —, et un échec se montre toujours, lui qui
+  dit pourquoi la suite s'est arrêtée ;
+- **l'aperçu au survol prolongé n'a qu'une mécanique**, `ui/ApercuTronque/useApercuTronque` : il est
+  sorti du panneau de ligne plutôt que recopié, délai, mesure de la coupure et cote comprises. Il ne
+  paraît **que si le libellé est coupé** — mesuré sur le rendu, `scrollWidth` contre `clientWidth`.
+  Dans `TabStrip`, le survol est écouté sur le **bouton** et la coupure mesurée sur son libellé ; les
+  onglets de table et de console en profitent sans l'avoir demandé, mais leurs noms ne sont jamais
+  coupés faute de largeur maximale ;
+- **désigner une instruction du panneau de transaction remplace les onglets** par sa seule réponse
+  (`poserLeResultat`) : elle vient du journal, pas de la dernière exécution, et la laisser sous
+  l'onglet d'une autre instruction ferait lire l'une pour l'autre.
+
+**Trois choses apprises en le vérifiant, et les trois par la mesure.**
+
+- **Un descendant absolu n'est pas rogné par un `overflow` qui n'est pas son bloc conteneur.** Le
+  premier jet employait le contrôle segmenté, dont les radios sont en `position: absolute` : sans
+  ancêtre positionné, vingt onglets élargissaient la **page** de 800 px pendant que la bande
+  défilait sagement — `scrollWidth` 1698 pour une fenêtre de 900. Le contrôle segmenté n'avait jamais
+  débordé nulle part, donc jamais montré ce piège ; à connaître avant de le poser dans un conteneur
+  qui défile ;
+- **trois déclarations étaient inertes, et ont été retirées** : un `min-height: 0` et un `flex: 1` de
+  l'enveloppe des réponses, que le panneau souple de `SplitPane` (`API-62`) et la racine de
+  `ConsoleResult` portaient déjà, et le `min-width: 0` du libellé d'onglet, qu'`overflow: hidden`
+  rend nul de lui-même. Chaque sabotage les a laissées vertes, là où le `min-width: 0` du **bouton**
+  fait tomber le test de coupure. C'est la famille du `grid-column` inerte ;
+- **l'aperçu se prouve par un compte, pas par une présence.** Le libellé coupé porte déjà le texte
+  entier dans le DOM : « le texte est visible » serait vrai sans aucun aperçu. Le test e2e compte une
+  occurrence avant le survol et deux après, la seconde hors de l'onglet.
+
+**Ce qui reste hors périmètre** : exécuter « l'instruction sous le curseur », et une instruction
+`begin` / `commit` écrite dans une suite **en mode automatique** — elle part sur la session partagée de
+la connexion, comme elle le faisait déjà seule, et chez MySQL, dont le pool rend la connexion après
+chaque appel, elle ne tient rien. C'est le rôle de la transaction manuelle, et le découpage ne l'a ni
+créé ni aggravé.
+
+**Ce qui reste à voir à l'œil** : la bande sous WKWebView et en « Nuit » — même réserve que les dix
+écrans. Et une vraie base : le décor de `?demo` rend une réponse plausible à tout SQL, donc une
+procédure MySQL ou un trigger SQLite n'ont été découpés **que** par les tests purs, jamais exécutés.
+
 ### Un panneau ne se quitte pas en allant vers lui (9 septembre 2026, `API-35`)
 
 Les menus « … » se refermaient sous la main : « ils sont trop sensibles, et disparaissent parfois

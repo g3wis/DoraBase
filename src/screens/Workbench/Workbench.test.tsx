@@ -1111,6 +1111,140 @@ describe('la console SQL (`12a`)', () => {
     expect(texteDeLEditeur()).toBe('drop table orders')
   })
 
+  /**
+   * **Un texte à plusieurs instructions les exécute une par une** (#156).
+   *
+   * Le décor rend en colonne le SQL reçu : c'est ce qui permet de lire, sous chaque onglet, la
+   * réponse de **son** instruction — un décor qui rendrait toujours la même chose laisserait passer
+   * des onglets qui montrent tous la dernière (règle n° 5).
+   */
+  it('trois instructions partent une par une, dans l’ordre, et donnent trois onglets', async () => {
+    const utilisateur = userEvent.setup()
+    const executer = vi.fn(async (_cle: DatabaseKey, sql: string) => ({
+      ...RESULTAT,
+      columns: [sql],
+      sql,
+    }))
+    monter({ passerelleExecution: { runSql: executer } })
+    await ouvrirUneConsole(utilisateur)
+    await saisir(utilisateur, "select 1; select ';' ; select 3")
+    await utilisateur.click(screen.getByRole('button', { name: /Exécuter/ }))
+
+    await waitFor(() => expect(executer).toHaveBeenCalledTimes(3))
+    // Sans leur `;` terminal, et sans couper dans la chaîne.
+    expect(executer.mock.calls.map((appel) => appel[1])).toEqual([
+      'select 1',
+      "select ';'",
+      'select 3',
+    ])
+    const bande = await screen.findByRole('region', { name: 'Instructions exécutées' })
+    // **Chaque onglet est nommé par sa requête**, sur une ligne — la bande des tables et des
+    // consoles, réemployée.
+    expect(
+      within(bande)
+        .getAllByRole('tab')
+        .map((onglet) => onglet.textContent?.trim()),
+    ).toEqual(['select 1', "select ';'", 'select 3'])
+    // **La dernière est regardée par défaut**, et sa réponse est dans la grille.
+    expect(within(bande).getByRole('tab', { name: 'select 3' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    expect(await screen.findByRole('columnheader', { name: /^select 3/ })).toBeInTheDocument()
+    // Un résultat ne se ferme ni ne se range : pas de croix, rien de glissable.
+    expect(within(bande).queryByRole('button', { name: /^Fermer/ })).toBeNull()
+    expect(within(bande).getByRole('tab', { name: 'select 1' })).not.toHaveAttribute('draggable')
+
+    await utilisateur.click(within(bande).getByRole('tab', { name: 'select 1' }))
+    expect(await screen.findByRole('columnheader', { name: /^select 1/ })).toBeInTheDocument()
+  })
+
+  it('chaque instruction attend la réponse de la précédente', async () => {
+    const utilisateur = userEvent.setup()
+    // **Le double tient ses réponses à la main** : un double qui répond tout de suite laisserait
+    // passer des appels lancés en parallèle, la suite finissant avant qu'on ait rien pu compter.
+    const enAttente: (() => void)[] = []
+    const executer = vi.fn(
+      (_cle: DatabaseKey, sql: string) =>
+        new Promise<QueryResult>((resoudre) => {
+          enAttente.push(() => resoudre({ ...RESULTAT, sql }))
+        }),
+    )
+    monter({ passerelleExecution: { runSql: executer } })
+    await ouvrirUneConsole(utilisateur)
+    await saisir(utilisateur, 'select 1; select 2')
+    await utilisateur.click(screen.getByRole('button', { name: /Exécuter/ }))
+
+    await waitFor(() => expect(executer).toHaveBeenCalledOnce())
+    await act(async () => {})
+    expect(executer).toHaveBeenCalledOnce()
+    await act(async () => enAttente[0]?.())
+    await waitFor(() => expect(executer).toHaveBeenCalledTimes(2))
+    await act(async () => enAttente[1]?.())
+  })
+
+  it('un échec arrête la suite, et les onglets disent ce qui n’est pas parti', async () => {
+    const utilisateur = userEvent.setup()
+    const executer = vi.fn(async (_cle: DatabaseKey, sql: string) => {
+      if (sql === 'select 2') throw new Error('relation « b » inexistante')
+      return { ...RESULTAT, sql }
+    })
+    monter({ passerelleExecution: { runSql: executer } })
+    await ouvrirUneConsole(utilisateur)
+    await saisir(utilisateur, 'select 1; select 2; select 3')
+    await utilisateur.click(screen.getByRole('button', { name: /Exécuter/ }))
+
+    const bande = await screen.findByRole('region', { name: 'Instructions exécutées' })
+    // Le statut est **écrit**, et fait partie du nom — jamais la couleur seule de l'icône.
+    await waitFor(() =>
+      expect(within(bande).getByRole('tab', { name: 'select 2 échec' })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      ),
+    )
+    expect(within(bande).getByRole('tab', { name: 'select 3 non exécutée' })).toBeInTheDocument()
+    expect(executer).toHaveBeenCalledTimes(2)
+    expect(screen.getByRole('alert')).toHaveTextContent('relation « b » inexistante')
+  })
+
+  it('une seule confirmation récapitule les écritures de la suite', async () => {
+    const utilisateur = userEvent.setup()
+    const executer = vi.fn(async () => RESULTAT)
+    monter({ passerelleExecution: { runSql: executer } })
+    await ouvrirUneConsole(utilisateur)
+    await saisir(utilisateur, 'update a set x = 1 where id = 2; select 1; delete from b')
+    await utilisateur.click(screen.getByRole('button', { name: /Exécuter/ }))
+
+    // **Rien n'est parti**, pas même la première : confirmer au milieu laisserait la base dans
+    // l'état d'une suite à moitié jouée le temps qu'on réponde.
+    expect(executer).not.toHaveBeenCalled()
+    const confirmation = screen.getByRole('dialog', { name: 'Écrire dans la base' })
+    const recap = confirmation.querySelector('dl')
+    expect(recap).toHaveTextContent('UPDATE, DELETE')
+    expect(recap).toHaveTextContent('3')
+    // Le `delete` sans `where` est nommé, bien que le premier verbe en ait un.
+    expect(confirmation).toHaveTextContent('toutes les lignes')
+
+    await utilisateur.click(screen.getByRole('button', { name: 'Exécuter les 3 instructions' }))
+    await waitFor(() => expect(executer).toHaveBeenCalledTimes(3))
+  })
+
+  it('une instruction seule part telle qu’elle est écrite, sans bande d’onglets', async () => {
+    const utilisateur = userEvent.setup()
+    const executer = vi.fn(async () => RESULTAT)
+    monter({ passerelleExecution: { runSql: executer } })
+    await ouvrirUneConsole(utilisateur)
+    await saisir(utilisateur, 'select 1; -- fin')
+    await utilisateur.click(screen.getByRole('button', { name: /Exécuter/ }))
+
+    await waitFor(() => expect(executer).toHaveBeenCalledOnce())
+    // Le texte d'origine, point-virgule et commentaire compris : c'est le chemin d'avant le
+    // découpage, et rien n'y change pour qui n'écrit qu'une requête.
+    expect((executer.mock.calls[0] as unknown as [unknown, string])[1]).toBe('select 1; -- fin')
+    await screen.findByRole('grid', { name: /Résultat de la requête/ })
+    expect(screen.queryByRole('region', { name: 'Instructions exécutées' })).toBeNull()
+  })
+
   it('un échec efface le résultat précédent', async () => {
     const utilisateur = userEvent.setup()
     let echoue = false
@@ -2792,6 +2926,25 @@ describe('la transaction manuelle de la console', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
     await waitFor(() => expect(modes).toEqual(['manual']))
     await waitFor(() => expect(panneau).toHaveTextContent('3 lignes touchées'))
+  })
+
+  it('en mode manuel, chaque instruction d’une suite entre séparément dans la transaction', async () => {
+    const utilisateur = userEvent.setup()
+    const { modes, vus } = await ouvrirUneConsoleAvecTransaction(utilisateur)
+    await utilisateur.click(screen.getByRole('switch', { name: 'Transaction manuelle' }))
+    const panneau = await screen.findByRole('complementary', { name: 'Transaction en cours' })
+
+    await saisir(utilisateur, 'update commandes set statut = 1; delete from lignes where id = 3')
+    await utilisateur.click(screen.getByRole('button', { name: /Exécuter/ }))
+
+    // Aucune confirmation : les écritures entrent dans la transaction, la validation porte la
+    // question (`API-38`) — et c'est vrai de la suite comme d'une requête seule.
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await waitFor(() => expect(modes).toEqual(['manual', 'manual']))
+    // Les deux sous le même jeton de console : une suite ne change pas de session en chemin.
+    expect(new Set(vus.jetons).size).toBe(1)
+    await waitFor(() => expect(panneau).toHaveTextContent('update commandes set statut = 1'))
+    expect(panneau).toHaveTextContent('delete from lignes where id = 3')
   })
 
   it('une modification de structure garde sa confirmation, et le rappel dit pourquoi', async () => {

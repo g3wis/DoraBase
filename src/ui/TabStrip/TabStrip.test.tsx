@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { type Tab, TabStrip } from './TabStrip'
 
@@ -140,4 +140,74 @@ test('déposer un onglet sur lui-même ne réordonne pas', () => {
   fireEvent.dragStart(tabs[0] as HTMLElement, { dataTransfer })
   fireEvent.drop(tabs[0] as HTMLElement, { dataTransfer })
   expect(onReorder).not.toHaveBeenCalled()
+})
+
+/**
+ * **Le libellé coupé se lit au survol prolongé** (#156).
+ *
+ * jsdom ne calcule aucune mise en page : la coupure est donc **posée** sur le libellé, comme la
+ * mesure qu'`useApercuTronque` lit. La cote qui la produit — `largeurMax` — n'a pour juge que
+ * Playwright (`e2e/156-suite-d-instructions.spec.ts`).
+ */
+describe('un libellé coupé', () => {
+  const requete: Tab = {
+    id: '0',
+    icon: 'check',
+    iconColor: 'var(--success)',
+    accentColor: 'var(--accent)',
+    label: 'select id, total from orders where total > 100',
+    titre: 'select id, total\nfrom orders\nwhere total > 100',
+  }
+
+  function couper(element: HTMLElement, coupe: boolean) {
+    Object.defineProperty(element, 'scrollWidth', { configurable: true, value: coupe ? 400 : 100 })
+    Object.defineProperty(element, 'clientWidth', { configurable: true, value: 100 })
+  }
+
+  afterEach(() => vi.useRealTimers())
+
+  test('montre son texte entier au survol prolongé, retours à la ligne compris', () => {
+    vi.useFakeTimers()
+    render(<TabStrip tabs={[requete]} activeId="0" onSelect={vi.fn()} largeurMax={240} />)
+    const libelle = screen.getByText(requete.label)
+    couper(libelle, true)
+
+    fireEvent.mouseEnter(screen.getByRole('tab'))
+    // **Prolongé** : rien avant le délai, sans quoi traverser la bande ferait clignoter des bulles.
+    act(() => vi.advanceTimersByTime(400))
+    expect(screen.queryByText((_, e) => e?.textContent === requete.titre)).toBeNull()
+    act(() => vi.advanceTimersByTime(200))
+    const apercu = screen.getByText((_, e) => e?.textContent === requete.titre)
+    expect(apercu).toBeInTheDocument()
+
+    fireEvent.mouseLeave(screen.getByRole('tab'))
+    expect(screen.queryByText((_, e) => e?.textContent === requete.titre)).toBeNull()
+  })
+
+  test("ne montre rien quand le libellé n'est pas coupé", () => {
+    vi.useFakeTimers()
+    render(<TabStrip tabs={[requete]} activeId="0" onSelect={vi.fn()} largeurMax={240} />)
+    const libelle = screen.getByText(requete.label)
+    couper(libelle, false)
+
+    fireEvent.mouseEnter(screen.getByRole('tab'))
+    act(() => vi.advanceTimersByTime(1000))
+    expect(screen.queryByText((_, e) => e?.textContent === requete.titre)).toBeNull()
+  })
+
+  test('pose la largeur maximale sur chaque onglet, et seulement si on la demande', () => {
+    const { unmount } = render(
+      <TabStrip tabs={[requete]} activeId="0" onSelect={vi.fn()} largeurMax={240} />,
+    )
+    expect(screen.getByRole('tab').parentElement).toHaveStyle({ maxWidth: '240px' })
+    unmount()
+    render(<TabStrip tabs={[requete]} activeId="0" onSelect={vi.fn()} />)
+    expect(screen.getByRole('tab').parentElement?.style.maxWidth).toBe('')
+  })
+
+  test('sans `onClose` ni `onReorder`, ni croix ni glisser-déposer', () => {
+    render(<TabStrip tabs={[requete]} activeId="0" onSelect={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: /^Fermer/ })).toBeNull()
+    expect(screen.getByRole('tab')).not.toHaveAttribute('draggable')
+  })
 })
