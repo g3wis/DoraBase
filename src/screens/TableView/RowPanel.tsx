@@ -1,7 +1,8 @@
-import { type MouseEvent as MouseEventReact, useEffect, useRef, useState } from 'react'
+import { type MouseEvent as MouseEventReact, useState } from 'react'
 import { Icon } from '../../design/icons/Icon'
 import type { ColumnInfo, DatabaseKey, Relation, Value } from '../../domain/engine'
 import { useT } from '../../i18n/LanguageContext'
+import { useApercuTronque } from '../../ui/ApercuTronque/useApercuTronque'
 import { cx } from '../../ui/cx'
 import { glypheDeType } from '../../ui/glypheDeType'
 import { MenuContextuel } from '../../ui/MenuContextuel/MenuContextuel'
@@ -25,11 +26,6 @@ type Onglet = 'champs' | 'json'
  * Un demi-seconde : assez pour que traverser la liste à la souris n'allume rien, assez peu pour que
  * s'arrêter sur une valeur coupée la révèle sans qu'on ait à y penser.
  */
-const SURVOL_MS = 500
-
-/** Ce que le survol prolongé montre : un texte, et où le poser. */
-type Apercu = { texte: string; haut: number; gauche: number }
-
 type RowPanelProps = {
   cle: DatabaseKey
   columns: readonly ColumnInfo[]
@@ -114,7 +110,8 @@ export function RowPanel({
 }: RowPanelProps) {
   const t = useT()
   const [onglet, setOnglet] = useState<Onglet>('champs')
-  const [revelation, setRevelation] = useState<Apercu | null>(null)
+  // Le survol prolongé d'un nom ou d'une valeur coupés — la mécanique partagée de `ui/` (#156).
+  const { armer, desarmer, apercu: revelation } = useApercuTronque()
   const [menu, setMenu] = useState<{
     x: number
     y: number
@@ -123,31 +120,6 @@ export function RowPanel({
     colonne: string
     texte: string
   } | null>(null)
-  const minuteur = useRef<number | undefined>(undefined)
-
-  // Le minuteur ne doit pas survivre au démontage : changer de ligne pendant l'attente ferait
-  // apparaître l'aperçu d'une valeur qui n'est plus affichée.
-  useEffect(() => () => window.clearTimeout(minuteur.current), [])
-
-  function armer(partie: HTMLElement, texte: string) {
-    window.clearTimeout(minuteur.current)
-    // **Seulement si c'est coupé.** Un aperçu qui répète un texte entièrement lisible n'apprend rien
-    // et masque ses voisins. La coupure se mesure sur le rendu — `scrollWidth` contre `clientWidth` —
-    // plutôt que sur la longueur du texte : c'est la police, la largeur de la colonne et le zoom qui
-    // décident, et aucun seuil de caractères ne les connaît.
-    if (partie.scrollWidth <= partie.clientWidth + 1) {
-      setRevelation(null)
-      return
-    }
-    // **La boîte est mesurée maintenant, pas à l'échéance.** Dans un demi-seconde, la souris peut
-    // avoir fait défiler le panneau ; mesurer au départ garantit que l'aperçu désigne le champ qu'on
-    // survolait — et le défilement, lui, referme (voir `desarmer` sur `mouseleave`).
-    const boite = partie.getBoundingClientRect()
-    minuteur.current = window.setTimeout(() => {
-      setRevelation({ texte, haut: boite.bottom + 4, gauche: boite.left })
-    }, SURVOL_MS)
-  }
-
   function ouvrirLeMenu(evenement: MouseEventReact, quoi: string, colonne: string, texte: string) {
     evenement.preventDefault()
     // **Et la propagation s'arrête ici** : sans cela, le menu du parent — s'il en vient un — s'ouvrirait
@@ -155,11 +127,6 @@ export function RowPanel({
     evenement.stopPropagation()
     desarmer()
     setMenu({ x: evenement.clientX, y: evenement.clientY, quoi, colonne, texte })
-  }
-
-  function desarmer() {
-    window.clearTimeout(minuteur.current)
-    setRevelation(null)
   }
 
   // La première clé étrangère de la ligne, et sa valeur. Le mockup n'en montre qu'une, et rien
@@ -413,11 +380,7 @@ export function RowPanel({
 
       {/* **Rendus en fin de panneau, pas dans le champ.** Tous deux sont en `position: fixed` : les
           poser dans la liste les ferait rogner par le corps qui défile — défaut n° 35. */}
-      {revelation && onglet === 'champs' && (
-        <div className={styles.apercu} style={{ top: revelation.haut, left: revelation.gauche }}>
-          {revelation.texte}
-        </div>
-      )}
+      {onglet === 'champs' && revelation}
       {menu && (
         <MenuContextuel
           x={menu.x}

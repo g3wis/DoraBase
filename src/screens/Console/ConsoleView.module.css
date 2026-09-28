@@ -71,6 +71,18 @@
   opacity: 0.75;
 }
 
+/* Le panneau des réponses : la bande des instructions d'une suite (#156), puis le résultat.
+ *
+ * **La hauteur seule est porteuse**, mesurée par sabotage : sans elle la grille passe sous la barre
+ * de chiffres. Le `min-height: 0` qu'on attendrait ici n'y fait rien — le panneau souple de
+ * `SplitPane` le porte depuis `API-62`, et la racine de `ConsoleResult` le sien : le résultat cède
+ * donc de lui-même la hauteur de la bande. Les écrire aurait ajouté deux déclarations inertes. */
+.reponses {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
 .espace {
   flex: 1;
 }

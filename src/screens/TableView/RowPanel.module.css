@@ -229,27 +229,6 @@
  * `pointer-events: none` : un aperçu qui intercepte le pointeur disparaît au moment où le curseur
  * l'atteint, et le survol clignote. Même raison que l'infobulle de `Tooltip`.
  */
-.apercu {
-  position: fixed;
-  z-index: 310;
-  max-width: 320px;
-  /* Douze lignes : au-delà, ce n'est plus un aperçu mais un document, et l'onglet JSON est fait pour
-   * ça. La coupure se voit, elle ne se devine pas. */
-  max-height: calc(12 * 1.45em);
-  overflow: hidden;
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-control);
-  background: var(--dark);
-  color: var(--on-dark);
-  font-family: var(--font-mono);
-  font-size: var(--text-label);
-  line-height: 1.45;
-  box-shadow: var(--shadow-popover);
-  pointer-events: none;
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-}
-
 .cle {
   flex: none;
   color: var(--gold);

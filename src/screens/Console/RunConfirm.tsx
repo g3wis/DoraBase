@@ -20,6 +20,16 @@ type RunConfirmProps = {
    * chose. Un rappel qui ment est pire qu'un rappel absent.
    */
   dansUneTransaction?: boolean
+  /**
+   * Le nombre d'instructions de la suite qui partira, et les verbes de celles qui demandent la
+   * confirmation (#156).
+   *
+   * **Une seule confirmation pour la suite**, qui récapitule ses écritures dans l'ordre : une par
+   * écriture interromprait l'exécution au milieu du texte, donc laisserait la base dans l'état d'une
+   * suite à moitié jouée le temps qu'on réponde. À une instruction, la modale est celle d'avant.
+   */
+  instructions?: number
+  ecritures?: readonly string[]
   onClose: () => void
   onConfirmer: () => void
   enCours?: boolean
@@ -42,6 +52,8 @@ export function RunConfirm({
   cible,
   production,
   dansUneTransaction = false,
+  instructions = 1,
+  ecritures = [],
   onClose,
   onConfirmer,
   enCours = false,
@@ -49,6 +61,7 @@ export function RunConfirm({
   const t = useT()
   const schema = nature.kind === 'schema'
   const instruction = nature.kind === 'lecture' ? '' : nature.instruction
+  const suite = instructions > 1
 
   return (
     <Modal
@@ -72,10 +85,26 @@ export function RunConfirm({
         )}
         {schema && <p className={styles.alerte}>{t('console.runConfirm.alerteSchema')}</p>}
         <dl className={styles.recap}>
-          <div className={styles.entree}>
-            <dt>{t('console.runConfirm.instruction')}</dt>
-            <dd className={styles.mono}>{instruction}</dd>
-          </div>
+          {suite ? (
+            <>
+              {/* Les verbes dans l'ordre où ils partiront — « UPDATE, DELETE » et non « 2
+                  écritures », comme la validation d'une transaction : c'est ce qui distingue deux
+                  corrections d'une suppression. */}
+              <div className={styles.entree}>
+                <dt>{t('console.runConfirm.ecritures')}</dt>
+                <dd className={styles.mono}>{ecritures.join(', ')}</dd>
+              </div>
+              <div className={styles.entree}>
+                <dt>{t('console.runConfirm.instructions')}</dt>
+                <dd>{instructions}</dd>
+              </div>
+            </>
+          ) : (
+            <div className={styles.entree}>
+              <dt>{t('console.runConfirm.instruction')}</dt>
+              <dd className={styles.mono}>{instruction}</dd>
+            </div>
+          )}
           <div className={styles.entree}>
             <dt>{t('console.runConfirm.base')}</dt>
             <dd className={styles.mono}>{cible}</dd>
@@ -109,7 +138,9 @@ export function RunConfirm({
         <Button variant="dark" size="md" onClick={onConfirmer} disabled={enCours}>
           {enCours
             ? t('console.runConfirm.enCours')
-            : t('console.runConfirm.confirmer', { instruction })}
+            : suite
+              ? t('console.runConfirm.confirmerLaSuite', { n: instructions })
+              : t('console.runConfirm.confirmer', { instruction })}
         </Button>
       </div>
     </Modal>

@@ -63,6 +63,7 @@
    * renommée « 1 » — le cas que la largeur minimale existe justement pour tenir.
    */
   flex: 1;
+  min-width: 0;
   gap: 7px;
   padding: 0 12px;
   border: none;
@@ -85,7 +86,19 @@
   padding-right: 7px;
 }
 
+/* **Le libellé cède, l'icône et le suffixe non** (#156). C'est le `min-width: 0` de `.select` qui
+ * porte la coupure — sans lui, le bouton refuse de descendre sous la largeur de son texte et
+ * `largeurMax` n'a rien à couper. Le libellé n'a pas besoin du sien : un élément flexible en
+ * `overflow: hidden` a déjà un minimum automatique nul, et le sabotage l'a laissé vert. Sans effet
+ * sur un onglet sans largeur maximale : il prend celle de son texte, qui n'est donc jamais coupé. */
+.libelle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .meta {
+  flex: none;
   font: 500 10px var(--font-mono);
   color: var(--ink-4);
 }

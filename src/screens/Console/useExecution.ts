@@ -1,8 +1,10 @@
 import { useCallback, useState } from 'react'
 import { runSql } from '../../data/commandes'
+import type { Engine } from '../../domain/config'
 import type { DatabaseKey, QueryResult, RowLimit, TransactionMode } from '../../domain/engine'
 import type { VueResultat } from './ConsoleResult'
-import { demandeConfirmation, natureDe, sansRestriction } from './nature'
+import { decoupeLesSuites, decouper } from './instructions'
+import { demandeConfirmation, type Nature, natureDe, sansRestriction } from './nature'
 
 /** Ce qui appelle la commande. Injectable : le pont ne répond pas hors de la webview. */
 export type PasserelleExecution = {
@@ -20,12 +22,49 @@ export const PASSERELLE_EXECUTION: PasserelleExecution = { runSql }
 /** La limite par défaut de la console, celle du mockup. */
 export const LIMITE_CONSOLE: RowLimit = 'oneThousand'
 
-/** Ce qu'une console garde de sa dernière requête. */
-type EtatConsole = {
-  aConfirmer: { sql: string; nature: ReturnType<typeof natureDe>; sansWhere: boolean } | null
-  enCours: boolean
+/**
+ * Où en est une instruction d'une suite (#156).
+ *
+ * **« Non exécutée » n'est pas « en attente »** : la première dit que la suite s'est arrêtée avant
+ * elle, sur un échec, et qu'elle ne partira pas ; la seconde qu'elle va partir. Les confondre ferait
+ * lire une suite interrompue comme une suite encore en cours.
+ */
+export type StatutEtape = 'attente' | 'enCours' | 'ok' | 'erreur' | 'nonExecutee'
+
+/** Une instruction d'une suite, et sa réponse. */
+export type Etape = {
+  sql: string
+  statut: StatutEtape
   resultat: QueryResult | null
   erreur: string | null
+}
+
+/** Ce qui attend la confirmation : la suite entière, et le récapitulatif de ses écritures. */
+type AConfirmer = {
+  /** Les instructions qui partiront, dans l'ordre — une seule quand le texte n'en porte qu'une. */
+  suite: readonly string[]
+  /** La plus coûteuse des natures de la suite : la structure l'emporte sur l'écriture. */
+  nature: Nature
+  /** Vrai quand **une** des écritures n'a pas de `where`. */
+  sansWhere: boolean
+  /** Les verbes des instructions à confirmer, dans l'ordre — « UPDATE, DELETE ». */
+  ecritures: readonly string[]
+}
+
+/** Ce qu'une console garde de sa dernière exécution. */
+type EtatConsole = {
+  aConfirmer: AConfirmer | null
+  enCours: boolean
+  /** Les instructions de la dernière exécution, une seule le plus souvent. */
+  etapes: readonly Etape[]
+  /** L'onglet de réponse regardé. */
+  choisie: number
+  /**
+   * Vrai tant que l'onglet regardé **suit** la progression de la suite. Choisir un onglet à la main
+   * l'éteint : la réponse qu'on lit ne doit pas changer sous les yeux parce qu'une instruction
+   * suivante vient de finir.
+   */
+  suivre: boolean
   vue: VueResultat
 }
 
@@ -33,8 +72,9 @@ type EtatConsole = {
 const AU_REPOS: EtatConsole = {
   aConfirmer: null,
   enCours: false,
-  resultat: null,
-  erreur: null,
+  etapes: [],
+  choisie: 0,
+  suivre: true,
   vue: 'resultat',
 }
 
@@ -47,8 +87,14 @@ export type Execution = {
   /** La requête en attente de confirmation, s'il y en a une. */
   aConfirmer: EtatConsole['aConfirmer']
   enCours: boolean
+  /** La réponse de l'onglet regardé. */
   resultat: QueryResult | null
   erreur: string | null
+  /** Les instructions de la dernière exécution (#156) — un onglet chacune dès qu'il y en a deux. */
+  etapes: readonly Etape[]
+  choisie: number
+  /** Regarde la réponse d'une autre instruction de la suite. */
+  choisir: (index: number) => void
   vue: VueResultat
   setVue: (vue: VueResultat) => void
   /**
@@ -117,6 +163,11 @@ export function useExecution(
    * étant abandonnée jusqu'à son annulation.
    */
   apresExecution?: (console: { cle: DatabaseKey; id: string }) => void,
+  /**
+   * Le moteur de la connexion, qui décide si le texte se découpe en instructions et comment
+   * (`instructions.ts`, #156). Absent, rien n'est découpé : le texte part tel quel, comme avant.
+   */
+  moteur?: Engine,
 ): Execution {
   const [parConsole, setParConsole] = useState<Readonly<Record<string, EtatConsole>>>({})
   const etat = (idConsole === null ? undefined : parConsole[idConsole]) ?? AU_REPOS
@@ -126,60 +177,103 @@ export function useExecution(
   }, [])
 
   const lancer = useCallback(
-    (sql: string) => {
-      if (cle === null || idConsole === null || sql.trim() === '') return
+    (suite: readonly string[]) => {
+      if (cle === null || idConsole === null || suite.length === 0) return
       // **L'identité est capturée ici**, et non relue à la réponse : la requête peut revenir alors
       // qu'un autre onglet est actif, et son résultat appartient à la console qui l'a demandée.
       const id = idConsole
-      poser(id, (precedent) => ({ ...precedent, enCours: true, erreur: null }))
       // La clé est capturée comme l'identité, et pour la même raison : `apresExecution` relit le
       // journal de la connexion qui a exécuté, non de celle que l'arbre montre au retour — et il
       // porte **les deux**, le régime étant réglé par console (`API-38`).
       const console = { cle, id }
-      passerelle
-        .runSql(cle, sql, LIMITE_CONSOLE, mode, jeton)
-        .then((issue) => {
-          poser(id, (precedent) => ({
-            ...precedent,
-            enCours: false,
-            aConfirmer: null,
-            resultat: issue,
-          }))
-        })
-        .catch((raison: unknown) => {
-          // Le résultat précédent n'est **pas** effacé ici : `ConsoleResult` donne la priorité à
-          // l'erreur, donc la grille disparaît de toute façon. Un `setResultat(null)` avait été
-          // ajouté par prudence ; le retirer ne changeait aucune mesure, et la garantie — ne pas
-          // laisser un ancien résultat à côté d'une erreur, qu'on lirait comme le sien — est portée
-          // par l'ordre d'affichage.
-          poser(id, (precedent) => ({
-            ...precedent,
-            enCours: false,
-            aConfirmer: null,
-            erreur: messageDe(raison),
-          }))
-        })
-        // **Dans les deux cas** : un refus fait partie de la transaction, et c'est la seule chose
-        // que le panneau ait à montrer quand la suite sera refusée jusqu'à l'annulation.
-        .finally(() => apresExecution?.(console))
+      poser(id, (precedent) => ({
+        ...precedent,
+        enCours: true,
+        aConfirmer: null,
+        etapes: suite.map((sql) => ({ sql, statut: 'attente', resultat: null, erreur: null })),
+        choisie: 0,
+        suivre: true,
+      }))
+
+      const poserLEtape = (index: number, etape: Partial<Etape>, fin = false) =>
+        poser(id, (precedent) => ({
+          ...precedent,
+          enCours: !fin,
+          etapes: precedent.etapes.map((e, i) => (i === index ? { ...e, ...etape } : e)),
+          choisie: precedent.suivre ? index : precedent.choisie,
+        }))
+
+      // **Une par une, et chacune attend la précédente** (#156) : la seconde instruction peut lire ce
+      // que la première a écrit, et c'est l'ordre du texte qui le décide. En transaction manuelle,
+      // chacune entre ainsi séparément dans le journal — le cœur n'a rien eu à apprendre.
+      const executer = async () => {
+        for (const [index, instruction] of suite.entries()) {
+          poserLEtape(index, { statut: 'enCours' })
+          const derniere = index === suite.length - 1
+          try {
+            const resultat = await passerelle.runSql(cle, instruction, LIMITE_CONSOLE, mode, jeton)
+            poserLEtape(index, { statut: 'ok', resultat }, derniere)
+          } catch (raison) {
+            // **Arrêt à la première erreur**, en automatique comme en manuel : la suite a été écrite
+            // en supposant que ce qui précède a réussi, et PostgreSQL refuserait de toute façon tout
+            // ce qui suit dans une transaction abandonnée. Ce qui ne part pas le **dit**.
+            poser(id, (precedent) => ({
+              ...precedent,
+              enCours: false,
+              etapes: precedent.etapes.map((e, i) =>
+                i === index
+                  ? { ...e, statut: 'erreur', erreur: messageDe(raison) }
+                  : i > index
+                    ? { ...e, statut: 'nonExecutee' }
+                    : e,
+              ),
+              // L'échec se montre, même si l'on regardait un onglet précédent : c'est lui qui dit
+              // pourquoi la suite s'est arrêtée.
+              choisie: index,
+            }))
+            return
+          }
+        }
+      }
+      // **Dans les deux cas** : un refus fait partie de la transaction, et c'est la seule chose
+      // que le panneau ait à montrer quand la suite sera refusée jusqu'à l'annulation.
+      void executer().finally(() => apresExecution?.(console))
     },
     [cle, idConsole, passerelle, poser, mode, jeton, apresExecution],
   )
 
   const demander = useCallback(
     (sql: string) => {
-      if (idConsole === null) return
-      const nature = natureDe(sql)
-      if (demandeConfirmation(nature) && !dispenseeParLaTransaction(nature, mode)) {
+      if (idConsole === null || sql.trim() === '') return
+      // **Un texte à une seule instruction part tel qu'il est écrit**, point-virgule compris : c'est
+      // le chemin d'avant le découpage, et rien n'y change pour qui n'écrit qu'une requête.
+      const coupees = decoupeLesSuites(moteur) ? decouper(sql, moteur) : []
+      const suite = coupees.length > 1 ? coupees.map((instruction) => instruction.sql) : [sql]
+
+      const aConfirmer = suite
+        .map((instruction) => ({ instruction, nature: natureDe(instruction) }))
+        .filter(
+          ({ nature }) => demandeConfirmation(nature) && !dispenseeParLaTransaction(nature, mode),
+        )
+      const premiere = aConfirmer[0]
+      if (premiere !== undefined) {
+        const structure = aConfirmer.find(({ nature }) => nature.kind === 'schema')
         poser(idConsole, (precedent) => ({
           ...precedent,
-          aConfirmer: { sql, nature, sansWhere: sansRestriction(sql) },
+          aConfirmer: {
+            suite,
+            nature: (structure ?? premiere).nature,
+            sansWhere: aConfirmer.some(({ instruction }) => sansRestriction(instruction)),
+            ecritures: aConfirmer.map(({ nature }) =>
+              nature.kind === 'lecture' ? '' : nature.instruction,
+            ),
+          },
         }))
         return
       }
-      lancer(sql)
+      lancer(suite)
     },
-    [idConsole, lancer, poser, mode],
+    [idConsole, lancer, poser, mode, moteur],
   )
 
   const reindexer = useCallback((nouvelId: (id: string) => string) => {
@@ -187,6 +281,8 @@ export function useExecution(
       Object.fromEntries(Object.entries(precedent).map(([id, etat]) => [nouvelId(id), etat])),
     )
   }, [])
+
+  const courante = etat.etapes[etat.choisie]
 
   return {
     demander,
@@ -197,7 +293,7 @@ export function useExecution(
       poser(idConsole, (precedent) => ({ ...precedent, vue }))
     },
     executer: () => {
-      if (etat.aConfirmer) lancer(etat.aConfirmer.sql)
+      if (etat.aConfirmer) lancer(etat.aConfirmer.suite)
     },
     annulerLaConfirmation: () => {
       if (idConsole === null) return
@@ -205,14 +301,33 @@ export function useExecution(
     },
     aConfirmer: etat.aConfirmer,
     enCours: etat.enCours,
-    resultat: etat.resultat,
-    erreur: etat.erreur,
+    // **La réponse regardée, et rien d'autre.** Une instruction encore en attente n'a ni résultat ni
+    // erreur : la grille dit alors « Exécution… », ce qui est vrai de la suite.
+    resultat: courante?.resultat ?? null,
+    erreur: courante?.erreur ?? null,
+    etapes: etat.etapes,
+    choisie: etat.choisie,
+    choisir: (index) => {
+      if (idConsole === null) return
+      poser(idConsole, (precedent) =>
+        index < 0 || index >= precedent.etapes.length
+          ? precedent
+          : { ...precedent, choisie: index, suivre: false },
+      )
+    },
     poserLeResultat: (resultat) => {
       if (idConsole === null) return
       // **L'erreur part avec** : la grille montre désormais une réponse qui a réussi, et laisser le
       // refus d'avant au-dessus d'elle ferait lire l'un pour l'autre — `ConsoleResult` donne la
-      // priorité à l'erreur.
-      poser(idConsole, (precedent) => ({ ...precedent, resultat, erreur: null }))
+      // priorité à l'erreur. **Les onglets d'une suite partent aussi** (#156) : la réponse posée
+      // vient du journal de la transaction, pas de la dernière exécution, et la laisser sous l'onglet
+      // d'une autre instruction ferait lire l'une pour l'autre.
+      poser(idConsole, (precedent) => ({
+        ...precedent,
+        etapes: [{ sql: resultat.sql, statut: 'ok', resultat, erreur: null }],
+        choisie: 0,
+        suivre: true,
+      }))
     },
   }
 }

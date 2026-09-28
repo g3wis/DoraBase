@@ -156,6 +156,13 @@ export const consoleFr: Dictionnaire = {
     enCours: 'Validation…',
     confirmer: (p) => `Valider ${p.n} écriture${Number(p.n) > 1 ? 's' : ''}`,
   },
+  // La bande des instructions d'une suite (#156).
+  suite: {
+    label: 'Instructions exécutées',
+    echec: 'échec',
+    nonExecutee: 'non exécutée',
+    enCours: 'en cours',
+  },
   runConfirm: {
     titreSchema: 'Modifier la structure',
     titreEcriture: 'Écrire dans la base',
@@ -165,6 +172,9 @@ export const consoleFr: Dictionnaire = {
     sansRestrictionApres: ' de la table.',
     alerteSchema: 'Une modification de structure ne se défait pas par une autre requête.',
     instruction: 'Instruction',
+    // Une suite de plusieurs instructions (#156) : les verbes de ses écritures, et son compte.
+    ecritures: 'Écritures',
+    instructions: 'Instructions',
     base: 'Base',
     environnement: 'Environnement',
     production: 'production',
@@ -180,6 +190,7 @@ export const consoleFr: Dictionnaire = {
     annuler: 'Annuler',
     enCours: 'Exécution…',
     confirmer: (p) => `Exécuter ce ${p.instruction}`,
+    confirmerLaSuite: (p) => `Exécuter les ${p.n} instructions`,
   },
   sqlEditor: {
     ariaLabelSql: 'Requête SQL',
@@ -334,6 +345,12 @@ export const consoleEn: Dictionnaire = {
     enCours: 'Committing…',
     confirmer: (p) => `Commit ${p.n} write${Number(p.n) > 1 ? 's' : ''}`,
   },
+  suite: {
+    label: 'Executed statements',
+    echec: 'failed',
+    nonExecutee: 'not run',
+    enCours: 'running',
+  },
   runConfirm: {
     titreSchema: 'Modify the structure',
     titreEcriture: 'Write to the database',
@@ -343,6 +360,8 @@ export const consoleEn: Dictionnaire = {
     sansRestrictionApres: ' of the table.',
     alerteSchema: 'A structural change cannot be undone by another query.',
     instruction: 'Instruction',
+    ecritures: 'Writes',
+    instructions: 'Statements',
     base: 'Database',
     environnement: 'Environment',
     production: 'production',
@@ -353,6 +372,7 @@ export const consoleEn: Dictionnaire = {
     annuler: 'Cancel',
     enCours: 'Running…',
     confirmer: (p) => `Run this ${p.instruction}`,
+    confirmerLaSuite: (p) => `Run the ${p.n} statements`,
   },
   sqlEditor: {
     ariaLabelSql: 'SQL query',
