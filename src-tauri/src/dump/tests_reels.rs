@@ -84,6 +84,8 @@ pub fn cible_de(variante: &ConnectionSettings) -> Cible {
         port: variante.port,
         base: variante.default_database.clone(),
         utilisateur: variante.username.clone(),
+        ssl_mode: variante.ssl_mode,
+        ca_certificate: variante.ca_certificate.clone(),
     }
 }
 

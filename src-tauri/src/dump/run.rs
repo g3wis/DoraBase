@@ -290,6 +290,8 @@ mod tests {
             port: 55432,
             base: "dorabase_test".into(),
             utilisateur: "dorabase".into(),
+            ssl_mode: crate::config::SslMode::Disable,
+            ca_certificate: None,
         }
     }
 
@@ -345,9 +347,15 @@ mod tests {
         // ou `trust` joindrait la base par défaut de libpq — le nom de l'utilisateur.
         let env = PostgresDumpTool.child_env(&cible, None);
         assert_eq!(
-            env,
-            vec![("PGDATABASE".to_string(), cible.base.clone())],
-            "l'environnement du fils doit porter la base, et rien d'autre sans secret"
+            env.iter()
+                .find(|(cle, _)| cle == "PGDATABASE")
+                .map(|(_, valeur)| valeur.as_str()),
+            Some(cible.base.as_str()),
+            "l'environnement du fils doit porter la base, même sans secret"
+        );
+        assert!(
+            env.iter().all(|(cle, _)| cle != "PGPASSWORD"),
+            "aucun `PGPASSWORD` sans secret : {env:?}"
         );
     }
 
@@ -379,7 +387,7 @@ mod tests {
             // Le serveur déclaré : un port fermé, refus immédiat et sans réseau.
             port: 1,
             base: format!("host=127.0.0.1 port={port_du_piege} dbname=piege"),
-            utilisateur: "dorabase".into(),
+            ..cible_de_test()
         };
         let erreur = exporter(
             &PostgresDumpTool,
@@ -423,6 +431,8 @@ mod tests {
             port: 1,
             base: "dorabase_test".into(),
             utilisateur: "dorabase".into(),
+            ssl_mode: crate::config::SslMode::Disable,
+            ca_certificate: None,
         };
 
         let erreur = exporter(
@@ -445,6 +455,109 @@ mod tests {
         assert!(format!("{erreur}").contains("pg_dump"), "{erreur}");
         // Et le fichier partiel n'a pas survécu.
         assert!(!fichier.exists(), "un fichier est resté après l'échec");
+    }
+
+    /// Ce qu'un intermédiaire voit : un faux serveur qui **refuse TLS** puis note si le client
+    /// poursuit en clair. Rend `true` si un `StartupMessage` — nom d'utilisateur et base en clair,
+    /// et juste après, le mot de passe si le serveur le demande — lui est parvenu.
+    fn intermediaire_qui_refuse_tls() -> (u16, std::thread::JoinHandle<bool>) {
+        use std::io::{Read, Write};
+        let ecoute = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = ecoute.local_addr().unwrap().port();
+        let fil = std::thread::spawn(move || {
+            let Ok((mut flux, _)) = ecoute.accept() else {
+                return false;
+            };
+            flux.set_read_timeout(Some(std::time::Duration::from_secs(10)))
+                .unwrap();
+            loop {
+                let mut entete = [0u8; 8];
+                if flux.read_exact(&mut entete).is_err() {
+                    // Le client a raccroché sans rien envoyer de plus.
+                    return false;
+                }
+                let code = u32::from_be_bytes([entete[4], entete[5], entete[6], entete[7]]);
+                match code {
+                    // `SSLRequest` et `GSSENCRequest` : refusés, comme le ferait un intermédiaire.
+                    80_877_103 | 80_877_104 => {
+                        if flux.write_all(b"N").is_err() {
+                            return false;
+                        }
+                    }
+                    // Tout le reste est un `StartupMessage` : le client a poursuivi en clair.
+                    _ => return true,
+                }
+            }
+        });
+        (port, fil)
+    }
+
+    fn pg_dump_de_la_machine() -> PathBuf {
+        match crate::dump::discover::decouvrir("pg_dump", Version::new(0, 0)) {
+            crate::dump::DumpAvailability::Ready { tool, .. } => tool,
+            autre => panic!("pg_dump introuvable sur cette machine : {autre:?}"),
+        }
+    }
+
+    async fn exporter_vers(port: u16, ssl_mode: crate::config::SslMode, secret: Option<&Secret>) {
+        let dossier = tempfile::tempdir().unwrap();
+        let cible = Cible {
+            hote: "127.0.0.1".into(),
+            port,
+            ssl_mode,
+            ..cible_de_test()
+        };
+        let _ = exporter(
+            &PostgresDumpTool,
+            &pg_dump_de_la_machine(),
+            &cible,
+            secret,
+            &dossier.path().join("x.sql"),
+            |_| {},
+            &Annulation::nouvelle(),
+        )
+        .await;
+    }
+
+    /// #82, rejoué contre le vrai `pg_dump` : dans un mode qui exige TLS, il doit raccrocher
+    /// quand l'intermédiaire le refuse, **avant** d'avoir rien dit de la connexion en clair.
+    ///
+    /// **`require` autant que `verify-full`**, et ce n'est pas une redondance : en `verify-full`
+    /// sans autorité, c'est `PGSSLROOTCERT=system` qui part, et libpq ≥ 16 en déduit **seul**
+    /// `verify-full` — retirer `PGSSLMODE` y laissait le test vert (vérifié par sabotage).
+    /// `require` ne pose aucune racine : c'est `PGSSLMODE` seul qui l'y fait refuser.
+    ///
+    /// **Avec et sans mot de passe** : l'environnement du fils n'était posé que s'il y en avait
+    /// un, et c'est ce chemin-là que seul ce test exerce de bout en bout.
+    #[tokio::test]
+    async fn un_intermediaire_qui_refuse_tls_ne_recoit_rien_quand_tls_est_exige() {
+        let secret = Secret::new(SENTINELLE_MOT_DE_PASSE);
+        for mode in [
+            crate::config::SslMode::Require,
+            crate::config::SslMode::VerifyFull,
+        ] {
+            for mot_de_passe in [Some(&secret), None] {
+                let (port, fil) = intermediaire_qui_refuse_tls();
+                exporter_vers(port, mode, mot_de_passe).await;
+                assert!(
+                    !fil.join().unwrap(),
+                    "pg_dump a poursuivi en clair devant un serveur qui refusait TLS \
+                     ({mode:?}, mot de passe : {})",
+                    mot_de_passe.is_some()
+                );
+            }
+        }
+    }
+
+    /// Le contrôle positif : sans lui, le test précédent passerait aussi sur un faux serveur
+    /// incapable de voir un `StartupMessage`. En `prefer`, le repli en clair est le comportement
+    /// voulu — et c'était celui de **tous** les dumps avant #82.
+    #[tokio::test]
+    async fn l_intermediaire_voit_bien_le_repli_en_clair_de_prefer() {
+        let (port, fil) = intermediaire_qui_refuse_tls();
+        let secret = Secret::new(SENTINELLE_MOT_DE_PASSE);
+        exporter_vers(port, crate::config::SslMode::Prefer, Some(&secret)).await;
+        assert!(fil.join().unwrap(), "le faux serveur n'a rien vu arriver");
     }
 
     use crate::dump::Version;

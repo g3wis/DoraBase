@@ -4849,6 +4849,48 @@ pas « simplifier » en revenant à `--dbname`** : un test pose une base piégé
 le proposait en défense en profondeur, n'a pas été retenu : PostgreSQL accepte ces noms, et la
 cause est fermée à la source.
 
+**Et le transport suit la variante, comme pour le pilote Rust** (29 septembre 2026, #82, relevé
+par un audit de sécurité). `Cible` ne portait ni le mode SSL ni l'autorité : `pg_dump` et `psql`
+tombaient sur le défaut de libpq, `prefer`, donc une connexion réglée en `verify-full` exportait
+toute sa base — et remettait son mot de passe — en clair au premier intermédiaire qui refusait
+TLS, sans que rien le signale. Le mode et l'autorité voyagent désormais dans `Cible`, et
+`PGSSLMODE` / `PGSSLROOTCERT` dans l'environnement du fils. Six points à ne pas défaire :
+
+- **`PGSSLMODE` est posé toujours**, `disable` compris, et **avec ou sans mot de passe** :
+  l'environnement n'était posé que s'il y avait un secret, ce qui aurait laissé une connexion
+  sans mot de passe sur le défaut de libpq. Toujours le poser écarte aussi un `PGSSLMODE`
+  hérité du shell ;
+- **`allow` part en `prefer`**, la décision de `traduire_mode_ssl` : libpq tente le clair
+  d'abord en `allow`, le pilote TLS d'abord, et le dump ne doit pas tenter plus faible que la
+  connexion qu'on a vue marcher ;
+- **l'autorité ne part que si le mode vérifie.** libpq passe `require` en `verify-ca` dès qu'il
+  trouve une racine : la transmettre ferait refuser au dump un serveur que la connexion accepte ;
+- **`verify-full` sans autorité déclarée part avec `PGSSLROOTCERT=system`**, l'équivalent des
+  racines publiques que le pilote prend dans `webpki-roots` — sans quoi une base gérée jointe en
+  `verify-full` serait refusée faute de `~/.postgresql/root.crt`. libpq n'accepte `system`
+  qu'en `verify-full` (mesuré : « verify-ca pourrait ne pas être utilisé avec
+  sslrootcert=system »), d'où rien en `verify-ca`. Tous les écarts restants avec le pilote sont
+  **du côté strict** : un refus possible, jamais un repli ;
+- **la modale dit le transport réellement employé**, sur une ligne sous la cible — « Transport :
+  TLS, certificat et nom d'hôte vérifiés par les autorités du système (verify-full) » —, et c'est
+  le **cœur** qui le calcule : `dump_availability` rend un `DumpVerdict` qui porte le
+  `DumpTransport` de `transport_de`, la fonction dont `child_env` dérive lui-même ses variables.
+  Le recalculer à l'écran depuis la variante aurait fait une seconde vérité, qui aurait dit
+  `verify-full` au moment précis où l'outil partait en autre chose — le défaut que la ligne
+  existe pour rendre visible. Le nom libpq termine la phrase, parce que c'est le seul mot qui se
+  compare sans ambiguïté au réglage d'`A2`. Aucune maquette ne décrit cette ligne : elle reprend
+  le style `.explication` de la modale, et rien d'autre n'est dessiné ;
+- **`child_env` déstructure `Cible` sans `..`** : un champ ajouté ne compile pas tant qu'elle ne
+  l'a pas nommé. C'est ce que rien ne forçait quand le chemin `dump/` a été ajouté à côté d'un
+  `engine/tls.rs` qui traitait déjà le sujet avec soin.
+
+**Et le test du faux serveur a été vert pour une autre raison que la sienne** (règle n° 1). Il
+rejoue la preuve de l'audit — un serveur qui répond `N` à `SSLRequest` et note si un
+`StartupMessage` suit —, et en `verify-full` il restait vert **sans `PGSSLMODE`** : libpq ≥ 16
+déduit seul `verify-full` de `PGSSLROOTCERT=system`. Il tourne donc aussi en `require`, qui ne
+pose aucune racine, et c'est là que le sabotage mord. Son contrôle positif est `prefer`, où le
+repli en clair est voulu — et c'était celui de **tous** les dumps avant ce correctif.
+
 **La progression est un nombre d'octets, sans total ni pourcentage.** `pg_dump --format=plain`
 n'émet aucune progression exploitable et la taille finale est inconnaissable avant la fin :
 afficher un pourcentage présenterait une estimation comme un fait.

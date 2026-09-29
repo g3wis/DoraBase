@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { open, save } from '@tauri-apps/plugin-dialog'
-import type { DumpAvailability, DumpRequest, Inspection } from '../../domain/dump'
+import type { DumpRequest, DumpVerdict, Inspection } from '../../domain/dump'
 import type { DatabaseKey } from '../../domain/engine'
 
 /**
@@ -21,8 +21,8 @@ export const EVENEMENT_PROGRESSION = 'dump://progression'
 export function dumpAvailability(
   request: Omit<DumpRequest, 'file'>,
   sens: 'export' | 'import',
-): Promise<DumpAvailability> {
-  return invoke<DumpAvailability>('dump_availability', {
+): Promise<DumpVerdict> {
+  return invoke<DumpVerdict>('dump_availability', {
     request: { ...request, file: '' },
     import: sens === 'import',
   })
