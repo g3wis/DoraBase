@@ -24,7 +24,10 @@ const BASE: Database = {
     // `SecretRef` est un type **nominal** (`05a`) : une chaîne ne s'y affecte pas, ce qui empêche
     // d'y mettre une valeur de secret par erreur. Le cast est donc explicite, et cantonné au test.
     password: 'Atelier/analytics/prod' as SecretRef,
-    sslMode: 'prefer',
+    // **`verify-full`, et pas pour ce qu'il chiffre** : la base est en `prod`, et un mode qui
+    // n'authentifie pas y fait passer l'enregistrement par un rappel (#87) — que ces tests, qui
+    // parlent de mise à jour et de secret, n'ont pas à traverser. Le rappel a les siens.
+    sslMode: 'verify-full',
     caCertificate: null,
     authDatabase: null,
     readOnly: true,

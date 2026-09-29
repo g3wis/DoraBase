@@ -15,6 +15,7 @@ import { modificateurActif, raccourci } from '../../shell/plateforme'
 import { Button } from '../../ui/Button/Button'
 import { Modal } from '../../ui/Modal/Modal'
 import { Stepper } from '../../ui/Stepper/Stepper'
+import { ConfirmationTls } from './ConfirmationTls'
 import {
   type ConnectionDraft,
   draftDepuisLaVariante,
@@ -27,7 +28,13 @@ import { ConnectionFailure } from './ConnectionFailure'
 import { ConnectionForm } from './ConnectionForm'
 import { draftToRequest } from './draftToRequest'
 import { EngineSelector } from './EngineSelector'
-import { ENGINES, IMPLEMENTED_ENGINES, modeSslPourLeMoteur, portSuivant } from './engines'
+import {
+  confirmationTlsRequise,
+  ENGINES,
+  IMPLEMENTED_ENGINES,
+  modeSslPourLeMoteur,
+  portSuivant,
+} from './engines'
 import {
   draftToSaveRequest,
   draftToUpdateRequest,
@@ -226,6 +233,9 @@ export function NewConnection({
   // La sous-modale de `A3` se ferme sans effacer l'échec : le pied garde son message et
   // « Retester », ce que le handoff montre explicitement.
   const [echecOuvert, setEchecOuvert] = useState(false)
+  // Le rappel d'un mode SSL non authentifiant en production (#87) : ouvert par un enregistrement qui
+  // le demande, fermé par « Revenir » ou par la confirmation, qui enregistre.
+  const [confirmationTlsOuverte, setConfirmationTlsOuverte] = useState(false)
   const [enregistrement, setEnregistrement] = useState<
     { phase: 'jamais' } | { phase: 'en-cours' } | { phase: 'refuse'; message: string }
   >({ phase: 'jamais' })
@@ -349,8 +359,29 @@ export function NewConnection({
   const enregistrementBloque =
     test.phase === 'echoue' || sansProjet || enregistrement.phase === 'en-cours'
 
-  async function enregistrer() {
+  /**
+   * L'environnement de la connexion, **par son identifiant** : c'est ce que porte le brouillon, et le
+   * libellé peut en diverger (voir « Une seule identité pour une connexion »).
+   */
+  const environnementCible = environnementsDuProjet.find(
+    (declaration) => declaration.id === draft.environment,
+  )
+
+  /**
+   * Enregistre — après le rappel de #87 quand la cible est marquée production et que le mode ne
+   * vérifie pas le serveur. `confirme` n'est passé que par ce rappel : le bouton du pied et `⌘↩`
+   * passent toujours par la question, y compris en édition, puisque c'est bien ce mode-là qui partira.
+   */
+  async function enregistrer(confirme = false) {
     if (enregistrementBloque) return
+    if (
+      !confirme &&
+      confirmationTlsRequise(draft.engine, draft.sslMode, environnementCible?.production ?? false)
+    ) {
+      setConfirmationTlsOuverte(true)
+      return
+    }
+    setConfirmationTlsOuverte(false)
     setEnregistrement({ phase: 'en-cours' })
     try {
       if (edition) {
@@ -561,6 +592,19 @@ export function NewConnection({
         environnements={environnementsDuProjet}
         verrouille={!!edition}
       />
+
+      {confirmationTlsOuverte &&
+        draft.sslMode !== 'verify-ca' &&
+        draft.sslMode !== 'verify-full' && (
+          <ConfirmationTls
+            mode={draft.sslMode}
+            rappel={t('newConnection.tlsConfirm.environment', {
+              name: environnementCible?.label ?? draft.environment,
+            })}
+            onConfirmer={() => void enregistrer(true)}
+            onClose={() => setConfirmationTlsOuverte(false)}
+          />
+        )}
 
       {echecOuvert && test.phase === 'echoue' && (
         <ConnectionFailure
