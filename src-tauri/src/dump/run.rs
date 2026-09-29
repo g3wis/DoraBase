@@ -121,6 +121,7 @@ pub async fn exporter(
     let issue = executer(
         outil,
         binaire,
+        cible,
         &argv,
         mot_de_passe,
         Some((fichier, &progression as &(dyn Fn(u64) + Send + Sync))),
@@ -156,13 +157,14 @@ pub async fn importer(
     annulation: &Annulation,
 ) -> Result<(), DumpError> {
     let argv = outil.import_argv(cible, fichier);
-    executer(outil, binaire, &argv, mot_de_passe, None, annulation).await
+    executer(outil, binaire, cible, &argv, mot_de_passe, None, annulation).await
 }
 
 /// Le lancement commun. `surveille` est le fichier dont la taille sert de progression.
 async fn executer(
     outil: &(dyn DumpTool + Send + Sync),
     binaire: &Path,
+    cible: &Cible,
     argv: &[std::ffi::OsString],
     mot_de_passe: Option<&Secret>,
     surveille: Option<(&Path, &(dyn Fn(u64) + Send + Sync))>,
@@ -170,9 +172,7 @@ async fn executer(
 ) -> Result<(), DumpError> {
     let mut commande = programme::commande(binaire);
     commande.args(argv);
-    if let Some(secret) = mot_de_passe {
-        commande.envs(outil.child_env(secret.expose()));
-    }
+    commande.envs(outil.child_env(cible, mot_de_passe.map(Secret::expose)));
     // `stdin` fermé : aucun outil ne doit pouvoir attendre une saisie sur un terminal qui
     // n'existe pas. `--no-password` le dit déjà à `pg_dump`, ceci le rend structurel.
     commande.stdin(Stdio::null());
@@ -308,7 +308,7 @@ mod tests {
         );
         // Contrôle positif : l'argv porte bien de quoi se connecter, sinon l'assertion
         // ci-dessus passerait sur un argv vide.
-        assert!(rendu.contains("--dbname"), "{rendu}");
+        assert!(rendu.contains("--username"), "{rendu}");
         assert!(rendu.contains("--format=plain"), "{rendu}");
     }
 
@@ -316,13 +316,92 @@ mod tests {
     fn le_mot_de_passe_est_bien_dans_l_environnement_du_fils() {
         // Contrôle positif : sans lui, le test précédent passerait aussi si le mot de
         // passe n'était transmis nulle part et que le dump ne marchait pas du tout.
-        let env = PostgresDumpTool.child_env(SENTINELLE_MOT_DE_PASSE);
+        let env = PostgresDumpTool.child_env(&cible_de_test(), Some(SENTINELLE_MOT_DE_PASSE));
         assert_eq!(
             env.iter()
                 .find(|(cle, _)| cle == "PGPASSWORD")
                 .map(|(_, valeur)| valeur.as_str()),
             Some(SENTINELLE_MOT_DE_PASSE)
         );
+    }
+
+    #[test]
+    fn la_base_passe_par_l_environnement_et_jamais_par_l_argv() {
+        // #84 : `--dbname` est relu comme une conninfo par libpq. Une base qui en est une ne
+        // doit donc apparaître nulle part dans l'argv, sous aucune forme.
+        let cible = Cible {
+            base: "host=127.0.0.1 port=15432 dbname=piege".into(),
+            ..cible_de_test()
+        };
+        for argv in [
+            PostgresDumpTool.export_argv(&cible, Path::new("/tmp/x.sql")),
+            PostgresDumpTool.import_argv(&cible, Path::new("/tmp/x.sql")),
+        ] {
+            let rendu = rendu(&argv);
+            assert!(!rendu.contains("--dbname"), "{rendu}");
+            assert!(!rendu.contains("port=15432"), "{rendu}");
+        }
+        // Et elle part **même sans mot de passe** : sans cela, une connexion par `.pgpass`
+        // ou `trust` joindrait la base par défaut de libpq — le nom de l'utilisateur.
+        let env = PostgresDumpTool.child_env(&cible, None);
+        assert_eq!(
+            env,
+            vec![("PGDATABASE".to_string(), cible.base.clone())],
+            "l'environnement du fils doit porter la base, et rien d'autre sans secret"
+        );
+    }
+
+    #[tokio::test]
+    async fn une_base_qui_ressemble_a_une_conninfo_ne_detourne_pas_le_dump() {
+        // Le chemin, pas seulement l'argv (règle n° 2) : un vrai `pg_dump`, un hôte déclaré
+        // sans rien derrière, et une base dont la conninfo vise un piège qui compte ce qui
+        // l'atteint. Avant #84, le piège recevait la connexion — et `PGPASSWORD` avec elle.
+        let binaire = match crate::dump::discover::decouvrir("pg_dump", Version::new(0, 0)) {
+            crate::dump::DumpAvailability::Ready { tool, .. } => tool,
+            autre => panic!("pg_dump introuvable sur cette machine : {autre:?}"),
+        };
+        let piege = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port_du_piege = piege.local_addr().unwrap().port();
+        let atteint = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let compteur = atteint.clone();
+        // Chaque connexion est comptée puis fermée aussitôt : un `pg_dump` détourné échoue
+        // alors vite, au lieu d'attendre une réponse à son `SSLRequest`.
+        let ecoute = tokio::spawn(async move {
+            while let Ok((flux, _)) = piege.accept().await {
+                compteur.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                drop(flux);
+            }
+        });
+
+        let dossier = tempfile::tempdir().unwrap();
+        let cible = Cible {
+            hote: "127.0.0.1".into(),
+            // Le serveur déclaré : un port fermé, refus immédiat et sans réseau.
+            port: 1,
+            base: format!("host=127.0.0.1 port={port_du_piege} dbname=piege"),
+            utilisateur: "dorabase".into(),
+        };
+        let erreur = exporter(
+            &PostgresDumpTool,
+            &binaire,
+            &cible,
+            Some(&Secret::new(SENTINELLE_MOT_DE_PASSE)),
+            &dossier.path().join("x.sql"),
+            |_| {},
+            &Annulation::nouvelle(),
+        )
+        .await
+        .expect_err("le serveur déclaré est fermé : l'export doit échouer");
+        ecoute.abort();
+
+        assert_eq!(
+            atteint.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "pg_dump a joint le serveur désigné par le nom de base : {erreur}"
+        );
+        // Contrôle positif : l'échec est bien celui du serveur **déclaré**, sans quoi un
+        // `pg_dump` qui ne se lancerait pas du tout laisserait le piège vide aussi.
+        assert!(format!("{erreur}").contains("port 1 "), "{erreur}");
     }
 
     #[tokio::test]
@@ -397,8 +476,8 @@ mod tests {
         fn import_argv(&self, _cible: &Cible, fichier: &Path) -> Vec<std::ffi::OsString> {
             vec![fichier.into()]
         }
-        fn child_env(&self, mot_de_passe: &str) -> Vec<(String, String)> {
-            vec![("PGPASSWORD".to_string(), mot_de_passe.to_string())]
+        fn child_env(&self, cible: &Cible, mot_de_passe: Option<&str>) -> Vec<(String, String)> {
+            PostgresDumpTool.child_env(cible, mot_de_passe)
         }
     }
 

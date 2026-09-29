@@ -67,8 +67,9 @@ pub trait DumpTool: Send + Sync {
 
     fn import_argv(&self, cible: &Cible, fichier: &Path) -> Vec<OsString>;
 
-    /// Les variables d'environnement du fils qui portent le secret. **Jamais l'argv.**
-    fn child_env(&self, mot_de_passe: &str) -> Vec<(String, String)>;
+    /// Les variables d'environnement du fils : le secret — **jamais l'argv** — et ce que
+    /// l'outil ne doit pas recevoir en argument (voir `PostgresDumpTool::child_env`).
+    fn child_env(&self, cible: &Cible, mot_de_passe: Option<&str>) -> Vec<(String, String)>;
 }
 
 /// Une version de moteur ou d'outil, réduite à ce dont les règles ont besoin.
