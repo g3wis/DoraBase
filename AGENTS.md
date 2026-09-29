@@ -5165,6 +5165,15 @@ critère ; ce que la valeur désigne l'est.**
   passage, accusait tout autre chose : un `--version` qui ne part pas est indiscernable d'un outil
   absent, donc l'écran aurait dit « `pg_dump` est introuvable, voilà comment l'installer » à
   quelqu'un qui l'a installé.
+- **Un fichier sensible se crée restreint, il ne se restreint pas après coup** (29 septembre 2026,
+  #86). `File::create` puis `set_permissions` laisse le fichier au umask — `0644` — le temps de
+  l'écriture, et un `sync_all` qui attend le disque allonge la fenêtre assez pour qu'un autre compte
+  de la machine la gagne au premier tour : c'est ainsi que `secrets.key`, donc tous les mots de passe
+  du magasin chiffré, était lisible. `OpenOptions::mode(0o600)` avec `create_new` pose les droits à la
+  création même ; `config::transfert` le faisait déjà, `secrets::file` non — deux modules en désaccord
+  sur la même question, et c'était celui qui garde la clé maîtresse qui avait tort. **Un test du mode
+  final ne peut pas voir la fenêtre** : celui qui le garde mesure le mode *depuis la fermeture
+  d'écriture*, donc au seul instant où elle existait, sans course à gagner (règle n° 3).
 - **Un sous-processus dont personne ne lit la sortie se bloque en écriture** : le tampon du
   système se remplit et l'enfant s'arrête au milieu d'un `write`. Une tâche de drain n'est
   pas un raffinement, c'est une condition de fonctionnement.
