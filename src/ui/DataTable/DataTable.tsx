@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { MouseEvent, ReactNode } from 'react'
 import { cx } from '../cx'
 import styles from './DataTable.module.css'
 
@@ -47,6 +47,18 @@ type DataTableProps<Row> = {
   onOpen?: (row: Row) => void
   /** Rendu quand `rows` est vide. Absent, aucune ligne n'est rendue. */
   empty?: ReactNode
+  /**
+   * Le clic droit sur une ligne (#162).
+   *
+   * **L'événement voyage avec la ligne** : un menu contextuel s'ouvre au pointeur, donc l'appelant a
+   * besoin des coordonnées, et les relire ailleurs qu'ici demanderait de les capter deux fois.
+   *
+   * `DataTable` **n'ouvre rien lui-même** : il ne connaît ni les actions d'une ligne ni leurs
+   * libellés. C'est la même répartition que `TreeRow`, qui reçoit ses `actions` toutes faites — un
+   * menu câblé ici obligerait chaque appelant à passer par la forme d'entrées qu'on aurait choisie
+   * pour le premier.
+   */
+  onContextMenu?: (row: Row, evenement: MouseEvent<HTMLTableRowElement>) => void
 }
 
 /**
@@ -71,6 +83,7 @@ export function DataTable<Row>({
   onSelect,
   onOpen,
   empty,
+  onContextMenu,
 }: DataTableProps<Row>) {
   if (rows.length === 0 && empty) {
     return <div className={styles.empty}>{empty}</div>
@@ -140,6 +153,18 @@ export function DataTable<Row>({
                     : undefined
                 }
                 tabIndex={onOpen ? 0 : undefined}
+                // **`preventDefault` ici plutôt que de compter sur `useClicDroitDesactive`** : ce
+                // gestionnaire-là est la raison pour laquelle le menu du système ne doit pas
+                // s'ouvrir, et l'écrire au même endroit que l'ouverture garde les deux ensemble.
+                // C'est ce que fait déjà la ligne d'arbre, pour la même raison.
+                onContextMenu={
+                  onContextMenu
+                    ? (evenement) => {
+                        evenement.preventDefault()
+                        onContextMenu(row, evenement)
+                      }
+                    : undefined
+                }
               >
                 {columns.map((colonne, rang) => {
                   const contenu = colonne.cell(row)

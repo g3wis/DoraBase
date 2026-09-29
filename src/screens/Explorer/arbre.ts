@@ -125,6 +125,23 @@ export type Noeud = {
   /** Le nom de la console, pour un nœud `console` — distinct de `label`, qui peut être décoré. */
   console?: string
   /**
+   * Le nom de l'objet, pour un nœud `object` (#162).
+   *
+   * **Il vaut `label` aujourd'hui, et c'est précisément pourquoi il existe.** « Copier le nom »
+   * rend une chaîne que l'utilisateur va coller dans une requête : elle doit être le nom que le
+   * serveur connaît, pas ce que la ligne donne à lire. Les nœuds `console` et `database` portent
+   * déjà cette distinction — le second l'a apprise en faisant voyager `label` comme identité vers
+   * les commandes IPC (`27a`), vrai tant que `label === name` et faux au premier libellé libre.
+   *
+   * **Ce que les tests gardent, et ce qu'ils ne gardent pas.** `arbre.test.ts` garde que ce champ
+   * vient de `objet.name`. Personne ne garde qu'`entreesDe` le lise **lui** plutôt que `label` :
+   * mesuré par sabotage, l'échange reste vert, et il le restera tant que les deux valeurs seront
+   * égales par construction — aucun décor honnête ne peut les distinguer. C'est une précaution de
+   * nommage, pas une garantie : le jour où un libellé d'objet se décore, c'est ce champ qu'il faut
+   * vérifier, et un test devient alors possible.
+   */
+  object?: string
+  /**
    * Le moteur, sur un nœud `database` (`API-33`).
    *
    * **Le nœud le portait déjà, mais seulement en couleur et en glyphe** — `iconColor` et `icon` en
@@ -437,6 +454,7 @@ function noeudsDeSchema(
         kind: 'object' as const,
         depth: 4 as const,
         label: objet.name,
+        object: objet.name,
         icon: objet.kind === 'view' ? 'view' : 'table',
         iconColor: objet.kind === 'view' ? 'var(--violet)' : 'var(--success)',
         // `RowCount` distingue `estimated` de `exact` **au niveau du type** (`06c`) : le mockup

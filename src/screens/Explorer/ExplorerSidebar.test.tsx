@@ -601,31 +601,57 @@ test('sans commande reliée, l’entrée est désactivée et dit pourquoi', asyn
 })
 
 /**
- * **Une table n'a pas de menu ; un schéma en a un depuis le 3 septembre 2026.**
+ * **Une table a un menu depuis #162 ; elle n'en avait aucun jusque-là.**
  *
- * Ce test disait « un schéma et une table n'en portent pas ». La raison qu'il gardait — il n'y a
- * rien à *configurer* sur ces lignes — reste vraie, et c'est justement pourquoi le schéma fait
- * exception plutôt que de l'invalider : son unique entrée n'est pas de la configuration, c'est
- * l'ouverture d'un diagramme, et sa ligne est le seul endroit du produit qui nomme un schéma à tout
- * moment (voir `entreesDe`). Ce qui n'a pas changé est le point que ce test protège : le menu ne
- * s'ajoute pas *par défaut* à toute ligne de l'arbre — la table n'en a toujours pas, et ce qu'un
- * menu y offrirait double le clic.
+ * Ce test a dit successivement « un schéma et une table n'en portent pas », puis « une table n'en
+ * porte pas — un menu y doublerait le clic ». La raison qu'il gardait — il n'y a rien à
+ * *configurer* sur ces lignes — reste vraie, et les deux exceptions qui l'ont érodée la confirment
+ * plutôt qu'elles ne l'invalident : le diagramme d'un schéma n'est pas de la configuration, et
+ * copier un nom non plus. Ce qui est **tombé**, en revanche, est l'invariant que ce test gardait
+ * vraiment : il n'y a plus de sorte de ligne d'arbre sans menu. L'écrire encore serait garder un
+ * test vert qui ne mesure plus rien — d'où le remplacement par ce que le menu d'une table fait.
  */
-test('une table n’en porte pas — un menu y doublerait le clic', () => {
+function avecUneTable() {
   const charge: Charge = {
     schemas: { [ID_ANALYTICS]: [schema('public')] },
     objets: { [ID_PUBLIC]: [table('orders')] },
     enCours: new Set(),
     echecs: {},
   }
-  render(<Piloté initial={TOUT_DEPLIE} charge={charge} />)
-  // Le décor doit bien contenir ces deux lignes, sinon le test ne mesure que leur absence.
-  expect(screen.getByRole('treeitem', { name: /public/ })).toBeInTheDocument()
+  return render(<Piloté initial={TOUT_DEPLIE} charge={charge} />)
+}
+
+/**
+ * L'espion du presse-papiers.
+ *
+ * `navigator.clipboard` n'a qu'un accesseur sous jsdom : `Object.assign` échoue, il faut redéfinir
+ * la propriété. Même geste que `panneau.test.tsx` et `edition.test.tsx`.
+ */
+function espionnerLePressePapiers() {
+  const writeText = vi.fn(async (_texte: string) => {})
+  Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+  return writeText
+}
+
+test('une table porte un menu, dont l’unique entrée copie son nom', async () => {
+  const writeText = espionnerLePressePapiers()
+  avecUneTable()
+  // Le décor doit bien contenir la ligne, sinon le test ne mesure que son absence.
   expect(screen.getByRole('treeitem', { name: /orders/ })).toBeInTheDocument()
-  expect(screen.queryByRole('button', { name: 'Actions de orders' })).not.toBeInTheDocument()
-  // Le contrôle positif du même décor : la ligne voisine, elle, en a un — sans quoi ce test
-  // passerait aussi sur un arbre où plus aucune ligne ne porterait d'actions.
-  expect(screen.getByRole('button', { name: 'Actions de public' })).toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: 'Actions de orders' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Copier le nom' }))
+  // **Le nom nu**, jamais `public.orders` : le schéma est le palier au-dessus.
+  expect(writeText).toHaveBeenCalledWith('orders')
+})
+
+test('au clic droit sur une table, le même menu', () => {
+  avecUneTable()
+  fireEvent.contextMenu(ligne('orders', '5'))
+  // Une seule construction pour les deux ouvertures : deux listes d'entrées auraient divergé d'une
+  // action au premier ajout.
+  expect(screen.getByRole('menu', { name: 'Actions de orders' }).textContent).toContain(
+    'Copier le nom',
+  )
 })
 
 test('le menu d’un schéma ouvre son diagramme, avec les coordonnées de son nœud', async () => {
@@ -1202,21 +1228,40 @@ describe('le clic droit ouvre le même menu, au pointeur (`26`)', () => {
     expect(screen.getByRole('menuitem', { name: 'Renommer…' })).toBeDisabled()
   })
 
-  test('les lignes sans actions n’ouvrent aucun menu, et gardent celui du système', () => {
+  /**
+   * **La ligne visée a été un schéma, puis une table, et c'est maintenant une ligne de message.**
+   *
+   * Les deux premières ont gagné un menu — le diagramme le 3 septembre 2026, « Copier le nom » avec
+   * #162 —, et il n'existe plus de **sorte de nœud** sans actions. Ce qui reste, et qui est le vrai
+   * sujet du test, est la ligne de message : « Aucun objet », « Chargement… », un échec de dépliage.
+   * Ce n'est pas un nœud de l'arbre mais un état de son chargement — elle n'est délibérément pas un
+   * `treeitem` —, et `preventDefault` sur un clic droit sans menu y retirerait le geste natif pour
+   * rien.
+   */
+  test('une ligne de message n’ouvre aucun menu, et garde celui du système', () => {
     const charge: Charge = {
       schemas: { [ID_ANALYTICS]: [schema('public')] },
-      objets: { [ID_PUBLIC]: [table('orders')] },
+      // Un schéma déplié et vide : `enfantsDe` rend la ligne « Aucun objet » à la place des objets.
+      objets: { [ID_PUBLIC]: [] },
       enCours: new Set(),
       echecs: {},
     }
     render(<Piloté initial={TOUT_DEPLIE} charge={charge} />)
 
-    // **La ligne visée est une table**, et non plus un schéma : celui-ci porte un menu depuis le
-    // 3 septembre 2026. Une table n'a rien à proposer, et `preventDefault` sur un clic droit sans
-    // menu retirerait le geste natif pour rien.
-    const evenement = fireEvent.contextMenu(screen.getByRole('treeitem', { name: /^orders/ }))
+    const message = screen.getByText('Aucun objet')
+    // Le contrôle positif : la ligne est bien là et n'est pas un `treeitem`, sinon le test ne
+    // mesurerait que l'absence de quelque chose qu'il n'a pas trouvé.
+    expect(message).not.toHaveAttribute('role', 'treeitem')
+    const evenement = fireEvent.contextMenu(message)
     expect(evenement).toBe(true)
     expect(screen.queryByRole('menu')).toBeNull()
+  })
+
+  // Le pendant : une ligne **qui** a des actions retire bien le menu du système, sans quoi le test
+  // ci-dessus passerait aussi sur un arbre où plus aucun clic droit ne serait câblé.
+  test('une ligne qui a des actions, elle, retire celui du système', () => {
+    render(<Piloté initial={TOUT_DEPLIE} />)
+    expect(fireEvent.contextMenu(ligne('analytics', '3'))).toBe(false)
   })
 
   test('le clic droit sur un schéma ouvre le menu du diagramme', () => {

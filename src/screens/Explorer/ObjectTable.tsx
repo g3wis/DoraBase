@@ -1,7 +1,9 @@
+import { useState } from 'react'
 import type { TableSummary } from '../../domain/engine'
 import { useT } from '../../i18n/LanguageContext'
 import { type Column, DataTable } from '../../ui/DataTable/DataTable'
 import { ABSENT, formatBytes, formatRowCount } from '../../ui/format'
+import { MenuContextuel } from '../../ui/MenuContextuel/MenuContextuel'
 import type { TypeObjet } from './BreadcrumbBar'
 
 type ObjectTableProps = {
@@ -38,20 +40,52 @@ export function ObjectTable({
   error = null,
 }: ObjectTableProps) {
   const t = useT()
+  /**
+   * La ligne visée par le clic droit, et où le menu s'ouvre (#162).
+   *
+   * **Le nom est capturé, pas l'objet** : le menu survit à un rechargement de `objects` — un
+   * rafraîchissement de l'arbre pendant qu'il est ouvert —, et une référence gardée pointerait alors
+   * sur une ligne qui n'est plus dans la liste. Ce qu'on copie est une chaîne ; c'est elle qu'on
+   * garde.
+   */
+  const [menu, setMenu] = useState<{ x: number; y: number; nom: string } | null>(null)
   return (
-    <DataTable
-      label={t('explorer.objectTable.label', { schema })}
-      columns={colonnes(t)}
-      rows={objects}
-      rowId={(objet) => objet.name}
-      selectedId={selectedName}
-      onSelect={onSelect}
-      onOpen={onOpen}
-      // **Vide, chargement et échec se distinguent, et aucun ne ressemble aux deux autres.** Le
-      // handoff n'en maquette aucun des trois ; le minimum défendable est une ligne de texte,
-      // sans illustration inventée.
-      empty={<span>{messageVide(t, type, schema, loading, error)}</span>}
-    />
+    <>
+      {menu !== null && (
+        <MenuContextuel
+          x={menu.x}
+          y={menu.y}
+          label={t('explorer.objectTable.actionsFor', { cible: menu.nom })}
+          entrees={[
+            {
+              libelle: t('explorer.sidebar.menu.copyName'),
+              icone: 'copy',
+              // **Le même libellé que dans l'arbre**, et il vient du même endroit : c'est le même
+              // geste sur le même objet, et deux chaînes pour une action auraient divergé à la
+              // première reformulation. Muet, comme les autres copies du produit.
+              onClick: () => void navigator.clipboard?.writeText(menu.nom),
+            },
+          ]}
+          onFermer={() => setMenu(null)}
+        />
+      )}
+      <DataTable
+        label={t('explorer.objectTable.label', { schema })}
+        columns={colonnes(t)}
+        rows={objects}
+        rowId={(objet) => objet.name}
+        selectedId={selectedName}
+        onSelect={onSelect}
+        onOpen={onOpen}
+        onContextMenu={(objet, evenement) =>
+          setMenu({ x: evenement.clientX, y: evenement.clientY, nom: objet.name })
+        }
+        // **Vide, chargement et échec se distinguent, et aucun ne ressemble aux deux autres.** Le
+        // handoff n'en maquette aucun des trois ; le minimum défendable est une ligne de texte,
+        // sans illustration inventée.
+        empty={<span>{messageVide(t, type, schema, loading, error)}</span>}
+      />
+    </>
   )
 }
 

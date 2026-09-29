@@ -48,12 +48,29 @@ export async function deplierUnEnvironnement(
  * `visibility: hidden` hors survol (`TreeRow.module.css`) : la boîte garde sa place pour que le méta
  * de la ligne ne bouge pas d'un pixel, mais Playwright refuse de cliquer un élément invisible. Sans
  * ce `hover`, l'attente expire au bout de trente secondes sans rien dire d'utile.
+ *
+ * **Le « … » est visé dans l'enveloppe de *sa* ligne, et le palier est nommé** (#162). Deux raisons,
+ * et la seconde est arrivée par surprise :
+ *
+ * - le « … » est rendu **frère** du `treeitem`, pas dedans (voir `TreeRow`) : le chercher dans la
+ *   page entière était donc la seule voie tant qu'un seul bouton portait ce nom ;
+ * - depuis que les lignes d'objet ont un menu, **deux boutons peuvent porter le même nom** — le
+ *   décor de démo nomme `evenements` à la fois une connexion et une collection, et les sept specs
+ *   mongo sont tombées d'un coup sur une violation de mode strict. Un `.first()` sur le bouton
+ *   aurait suffi à les faire repasser en pariant sur l'ordre du DOM ; nommer le palier dit ce qu'on
+ *   vise. Une connexion est à `aria-level` 3 — projet 1, environnement 2, connexion 3.
  */
 export async function ouvrirUneConsole(page: Page, connexion: string): Promise<void> {
-  await page
+  const ligne = page
     .getByRole('treeitem', { name: new RegExp(connexion) })
+    .and(page.locator('[aria-level="3"]'))
     .first()
-    .hover()
-  await page.getByRole('button', { name: `Actions de ${connexion}` }).click()
+  await ligne.hover()
+  // `xpath=..` remonte à l'enveloppe `presentation` que `TreeRow` pose autour du couple
+  // ligne + gouttière : c'est la plus petite portée qui contienne les deux.
+  await ligne
+    .locator('xpath=..')
+    .getByRole('button', { name: `Actions de ${connexion}` })
+    .click()
   await page.getByRole('button', { name: /Nouvelle console/ }).click()
 }
