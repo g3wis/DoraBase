@@ -9,8 +9,9 @@ import { Modal } from '../../ui/Modal/Modal'
 import { RadioGroup } from '../../ui/RadioGroup/RadioGroup'
 import { Select } from '../../ui/Select/Select'
 import { Toggle } from '../../ui/Toggle/Toggle'
+import { ConfirmationTls } from '../NewConnection/ConfirmationTls'
 import { emptyProxy, type ProxyKind, type TunnelDraft } from '../NewConnection/ConnectionDraft'
-import { ENGINES, modesSslDisponibles } from '../NewConnection/engines'
+import { confirmationTlsRequise, ENGINES, modesSslDisponibles } from '../NewConnection/engines'
 import { ouvrirSelecteurDeCle } from '../NewConnection/ouvrirSelecteurDeCle'
 import { TunnelPanel } from '../NewConnection/TunnelPanel'
 import { tunnelDraftToTunnel } from '../NewConnection/tunnelDraftToTunnel'
@@ -99,7 +100,10 @@ export function NewInstance({
   const [utilisateur, setUtilisateur] = useState(edition?.connection.username ?? 'postgres')
   const [motDePasse, setMotDePasse] = useState('')
   const [motDePasseVisible, setMotDePasseVisible] = useState(false)
-  const [ssl, setSsl] = useState<SslMode>(edition?.connection.sslMode ?? 'prefer')
+  // `verify-full` par défaut, pour la raison d'`emptyDraft` (#87) — et davantage ici : cette
+  // surface pose des mots de passe et crée des rôles, donc un intermédiaire y aurait un canal
+  // d'écriture privilégié.
+  const [ssl, setSsl] = useState<SslMode>(edition?.connection.sslMode ?? 'verify-full')
   const [production, setProduction] = useState(edition?.production ?? false)
   const [confirmer, setConfirmer] = useState(edition?.confirmWrites ?? true)
   const [reconnecter, setReconnecter] = useState(edition?.connection.reconnectOnStartup ?? false)
@@ -108,11 +112,21 @@ export function NewInstance({
   const [proxyOuvert, setProxyOuvert] = useState(false)
   const [enCours, setEnCours] = useState(false)
   const [erreur, setErreur] = useState<string | null>(null)
+  const [confirmationTlsOuverte, setConfirmationTlsOuverte] = useState(false)
 
   const nomManquant = libelle.trim() === ''
 
-  async function enregistrer() {
+  /**
+   * Enregistre — après le rappel de #87 quand l'instance est marquée production et que le mode ne
+   * vérifie pas le serveur. `confirme` n'est passé que par ce rappel.
+   */
+  async function enregistrer(confirme = false) {
     if (nomManquant) return
+    if (!confirme && confirmationTlsRequise(engine, ssl, production)) {
+      setConfirmationTlsOuverte(true)
+      return
+    }
+    setConfirmationTlsOuverte(false)
     setEnCours(true)
     setErreur(null)
     try {
@@ -165,7 +179,9 @@ export function NewInstance({
           <Button
             variant="accent"
             size="md"
-            onClick={enregistrer}
+            // Une flèche et non `onClick={enregistrer}` : l'événement arriverait en `confirme`, et
+            // sauterait le rappel de #87.
+            onClick={() => void enregistrer()}
             disabled={enCours || nomManquant}
             title={nomManquant ? t('instances.form.labelRequired') : undefined}
           >
@@ -317,6 +333,14 @@ export function NewInstance({
           </p>
         )}
       </div>
+      {confirmationTlsOuverte && ssl !== 'verify-ca' && ssl !== 'verify-full' && (
+        <ConfirmationTls
+          mode={ssl}
+          rappel={t('newConnection.tlsConfirm.instance')}
+          onConfirmer={() => void enregistrer(true)}
+          onClose={() => setConfirmationTlsOuverte(false)}
+        />
+      )}
     </Modal>
   )
 }

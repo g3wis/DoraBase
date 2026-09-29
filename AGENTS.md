@@ -4170,7 +4170,7 @@ sans rien saisir ; un secret enregistré gagne toujours.
 quand même.** Les six modes étaient proposés pour les sept moteurs, et les adaptateurs ne
 testaient que « le chiffrement est-il demandé » : `allow` et `prefer` — « TLS si le serveur
 l'offre, clair en repli » — devenaient donc `require` pour MongoDB et MySQL, sans que rien le
-dise. Or `prefer` est la valeur **par défaut** du formulaire : contre un `mongod` local sans TLS,
+dise. Or `prefer` était la valeur **par défaut** du formulaire : contre un `mongod` local sans TLS,
 le test échouait après cinq secondes sur « vérifiez l'hôte, le port », qui accuse ce qui va bien
 (mesuré le 26 août 2026). La négociation est une propriété du **protocole**, et seul PostgreSQL
 l'a — `tokio-postgres` porte un `PgSslMode::Prefer` qui replie vraiment ; les deux autres pilotes
@@ -4187,6 +4187,34 @@ ne reçoivent qu'un drapeau. Deux conséquences à ne pas défaire :
 Et le refus côté Rust est ce qui tient quand la configuration ne vient pas de l'écran — un
 fichier écrit à la main, ou enregistré par une version antérieure. **L'écran qui cache et le
 moteur qui refuse ne sont pas une redondance** : ils gardent deux chemins différents.
+
+**Le mode SSL d'un brouillon neuf est `verify-full`, et non plus `prefer`** (29 septembre 2026,
+#87, relevé par un audit de sécurité). `prefer` est le défaut de `libpq` et celui qui marche le plus
+souvent — précisément parce qu'il **replie en clair sans le dire** et ne vérifie jamais le
+certificat : toute connexion ou instance déclarée sans toucher à la liste était exposée à un
+intermédiaire actif, et l'instance managée pose des mots de passe et crée des rôles. Le défaut est
+désormais le seul mode qui authentifie le serveur, et **desserrer devient un geste**. Quatre points
+à ne pas défaire :
+
+- **le prix est connu et a été choisi**, contre une variante plus douce. `verify-full` échoue au
+  test contre un PostgreSQL local sans TLS (l'image Docker officielle), contre un certificat signé
+  par une autorité privée non déclarée — **RDS et Cloud SQL en font partie**, leurs autorités ne
+  sont pas dans `webpki-roots` —, et **derrière tout tunnel SSH ou transfert Kubernetes** : le
+  `host` passé au pilote y vaut `127.0.0.1`, et `tokio-postgres-rustls` vérifie le certificat contre
+  ce nom-là. Vérifier contre l'hôte déclaré (`hostaddr` pour la socket, `host` pour le nom) lèverait
+  le troisième cas ; c'est un chantier à part, pas un détail de ce défaut ;
+- **un défaut de brouillon, pas une migration** : les connexions et instances enregistrées gardent
+  leur mode. `verify-full` étant offert par tous les moteurs à serveur, `modeSslPourLeMoteur` n'a
+  rien à reporter en changeant de moteur ;
+- **sur une cible marquée production, un mode non authentifiant passe par un rappel qui le nomme**
+  (`ConfirmationTls`) — `disable`, `allow`, `prefer` **et `require`**, qui chiffre sans authentifier.
+  Le drapeau `production`, jamais le libellé ; pour une connexion d'`A2` c'est celui de
+  l'environnement, pour une instance le sien. Le rappel vaut aussi en **édition** : c'est bien ce
+  mode-là qui partira. Ce n'est pas un refus — un serveur interne sans autorité publique est un cas
+  légitime —, c'est un geste qu'on fait en le nommant, sur le patron du rappel de production de
+  `SqlConfirm` et du gestionnaire de schémas ;
+- **`onClick={enregistrer}` est interdit sur ces deux boutons** : `enregistrer` prend désormais un
+  `confirme`, et l'événement de clic, qui est vrai, y sauterait le rappel. Un sabotage le garde.
 
 **MongoDB s'authentifie contre la base déclarée, et un champ existe pour dire laquelle.** La
 décision d'origine — « la base déclarée, jamais `admin` » — était juste et le reste : un

@@ -144,7 +144,9 @@ test.each([
 
 test('changer de moteur emmène le mode SSL vers le plus proche **offert**', async () => {
   monter()
-  // Le brouillon part sur `prefer`, que MongoDB n'exprime pas.
+  // `prefer`, que MongoDB n'exprime pas — choisi à la main depuis que le brouillon part sur
+  // `verify-full` (#87), que tous les moteurs à serveur expriment.
+  await choisirDansLaListe('Mode SSL', 'prefer')
   expect(screen.getByRole('combobox', { name: 'Mode SSL' })).toHaveTextContent('prefer')
 
   await choisirLeMoteur('MongoDB')
@@ -244,6 +246,9 @@ test('un seul clic de moteur emmène le port **et** le mode SSL', async () => {
   //
   // Ce test tient ce que ni l'un ni l'autre ne tient : les deux effets du même clic.
   monter([{ id: 'print', name: 'Atelier Nord', environments: TRIO_DE_TEST }])
+  // Un mode que MongoDB n'exprime pas, sans quoi le report n'aurait rien à faire (#87 : le défaut,
+  // `verify-full`, est offert partout).
+  await choisirDansLaListe('Mode SSL', 'prefer')
   await userEvent.click(screen.getByRole('radio', { name: 'MongoDB' }))
   expect(screen.getByLabelText('Port')).toHaveValue('27017')
   expect(screen.getByRole('combobox', { name: 'Mode SSL' })).toHaveTextContent('require')
@@ -272,7 +277,11 @@ test('les valeurs préremplies sont celles qui sont vraies dans presque tous les
   expect(screen.getByRole('radio', { name: 'dev' })).toBeChecked()
   // **Le contenu du champ, et non `toHaveValue`.** Le champ n'est plus un `<select>` : il n'a pas de
   // `value`, il affiche le libellé de l'option choisie. Ce qui compte est ce que l'utilisateur lit.
-  expect(screen.getByRole('combobox', { name: 'Mode SSL' })).toHaveTextContent('prefer')
+  //
+  // **`verify-full`, et c'est l'exception au titre de ce test** (#87) : `prefer` était vrai dans
+  // presque tous les cas parce qu'il replie en clair sans le dire. Le défaut est désormais le seul
+  // mode qui authentifie le serveur ; desserrer est un geste.
+  expect(screen.getByRole('combobox', { name: 'Mode SSL' })).toHaveTextContent('verify-full')
 })
 
 test('« Ouvrir en lecture seule » est actif, « Se reconnecter » non', () => {
@@ -559,7 +568,11 @@ test('un moteur sans adaptateur reste sélectionnable et le dit', async () => {
 
 test('le champ d’autorité n’apparaît que pour les modes qui authentifient', async () => {
   monter()
-  // `prefer`, le mode par défaut : il chiffre si le serveur l'offre, sans authentifier.
+  // `verify-full`, le mode par défaut depuis #87 : il authentifie, donc le champ est là d'emblée.
+  expect(screen.getByLabelText('Certificat d’autorité')).toBeInTheDocument()
+
+  // `prefer` chiffre si le serveur l'offre, sans authentifier.
+  await choisirDansLaListe('Mode SSL', 'prefer')
   expect(screen.queryByLabelText('Certificat d’autorité')).toBeNull()
 
   // Le mode SSL est un `Select`, pas un groupe de radios.

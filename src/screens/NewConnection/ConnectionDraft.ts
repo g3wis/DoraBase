@@ -220,9 +220,18 @@ export function emptyTunnel(kind: ProxyKind): TunnelDraft {
  *
  * Ce qui est prérempli, en revanche, l'est parce que c'est vrai pour la quasi-totalité des
  * cas : `postgresql` est le premier moteur de l'ordre du handoff, `dev` est l'environnement le moins
- * risqué, le port est celui du moteur choisi — lu dans `PORT_PAR_DEFAUT`, jamais recopié ici — et
- * `prefer` est le mode SSL par défaut de `libpq`. Ouvrir sur `prod` serait une invitation à
- * l'accident.
+ * risqué, et le port est celui du moteur choisi — lu dans `PORT_PAR_DEFAUT`, jamais recopié ici.
+ * Ouvrir sur `prod` serait une invitation à l'accident.
+ *
+ * **Le mode SSL fait exception à ce critère, et c'est délibéré** (#87). Il valait `prefer`, le
+ * défaut de `libpq` — celui qui marche le plus souvent, parce qu'il **replie en clair** sans le
+ * dire et ne vérifie jamais le certificat : un intermédiaire actif lit et modifie le trafic de
+ * toute connexion déclarée sans toucher à la liste. Il vaut désormais `verify-full`, le seul mode
+ * qui authentifie le serveur, et desserrer devient un geste. Le prix est connu et accepté : un
+ * serveur local sans TLS, un certificat signé par une autorité privée (RDS, Cloud SQL) non
+ * déclarée, et toute connexion derrière un tunnel — le certificat y est vérifié contre
+ * `127.0.0.1` — échouent au test jusqu'à ce qu'on descende. Les connexions déjà enregistrées ne
+ * bougent pas : c'est le défaut d'un brouillon neuf, pas une migration.
  */
 export function emptyDraft(): ConnectionDraft {
   return {
@@ -238,7 +247,7 @@ export function emptyDraft(): ConnectionDraft {
     defaultDatabase: '',
     username: '',
     password: '',
-    sslMode: 'prefer',
+    sslMode: 'verify-full',
     caCertificate: '',
     // **`admin` d'emblée, et c'est le seul champ préremplié avec le port SSH du bastion.** Le
     // critère du projet pour préremplir est « vrai pour la quasi-totalité des cas » : l'utilisateur

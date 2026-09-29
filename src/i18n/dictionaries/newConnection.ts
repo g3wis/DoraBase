@@ -117,6 +117,23 @@ export const newConnectionFr: Dictionnaire = {
     project: 'PROJET',
     connection: 'CONNEXION',
   },
+  tlsConfirm: {
+    title: 'Mode SSL non vérifié en production',
+    badge: 'PROD',
+    environment: (p) => `L’environnement « ${p.name} » est marqué production.`,
+    instance: 'Cette instance est marquée production.',
+    body: (p) =>
+      `Le mode « ${p.mode} » ne vérifie pas l’identité du serveur : un intermédiaire sur le réseau peut lire et modifier ce qui passe, mots de passe compris.`,
+    consequence: {
+      disable: 'Rien n’est chiffré.',
+      allow: 'Le trafic repasse en clair, sans le dire, si le serveur refuse TLS.',
+      prefer: 'Le trafic repasse en clair, sans le dire, si le serveur refuse TLS.',
+      require: 'Le trafic est chiffré, mais rien ne garantit qu’il parte vers le bon serveur.',
+    },
+    note: 'verify-full vérifie la chaîne de certificats et le nom du serveur ; verify-ca, la chaîne seule.',
+    back: 'Revenir au formulaire',
+    confirm: (p) => `Enregistrer en ${p.mode}`,
+  },
 }
 
 export const newConnectionEn: Dictionnaire = {
@@ -232,5 +249,22 @@ export const newConnectionEn: Dictionnaire = {
   stepper: {
     project: 'PROJECT',
     connection: 'CONNECTION',
+  },
+  tlsConfirm: {
+    title: 'Unverified SSL mode in production',
+    badge: 'PROD',
+    environment: (p) => `The “${p.name}” environment is marked production.`,
+    instance: 'This instance is marked production.',
+    body: (p) =>
+      `The “${p.mode}” mode does not verify the server’s identity: anyone on the network path can read and alter the traffic, passwords included.`,
+    consequence: {
+      disable: 'Nothing is encrypted.',
+      allow: 'Traffic silently falls back to plaintext if the server refuses TLS.',
+      prefer: 'Traffic silently falls back to plaintext if the server refuses TLS.',
+      require: 'Traffic is encrypted, but nothing guarantees it reaches the right server.',
+    },
+    note: 'verify-full checks the certificate chain and the server name; verify-ca, the chain only.',
+    back: 'Back to the form',
+    confirm: (p) => `Save with ${p.mode}`,
   },
 }

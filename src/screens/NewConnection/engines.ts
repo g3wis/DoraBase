@@ -1,6 +1,6 @@
 import type { IconName } from '../../design/icons/names'
 import type { Engine, SslMode } from '../../domain/config'
-import { SSL_MODE_ORDER } from './environments'
+import { authentifie, SSL_MODE_ORDER } from './environments'
 
 /**
  * Le sélecteur de moteur de `A2` : libellé, monogramme, couleur.
@@ -237,6 +237,30 @@ export function modeSslPourLeMoteur(engine: Engine, actuel: SslMode): SslMode {
 
   const rang = SSL_MODE_ORDER.indexOf(actuel)
   return offerts.find((mode) => SSL_MODE_ORDER.indexOf(mode) > rang) ?? offerts.at(-1) ?? actuel
+}
+
+/**
+ * L'enregistrement doit-il demander de confirmer un mode SSL **non authentifiant** (#87) ?
+ *
+ * Oui quand trois choses tiennent ensemble : la cible est marquée production, le moteur a un
+ * transport à chiffrer, et le mode retenu ne vérifie pas l'identité du serveur — `disable`,
+ * `allow`, `prefer` et `require`. `require` en est, et c'est le point : il chiffre sans
+ * authentifier, donc il n'empêche pas plus un intermédiaire que le clair.
+ *
+ * **Le drapeau `production`, jamais le libellé** — la règle de `23g`, celle du rappel de production
+ * du gestionnaire de schémas. Et **un moteur sans mode offert n'est jamais concerné** : SQLite et
+ * BigQuery n'ont pas de champ SSL, donc rien à confirmer qu'on puisse changer.
+ *
+ * Ce n'est pas un refus : descendre peut être juste — un serveur interne sans autorité publique, une
+ * base derrière un tunnel. C'est un geste qu'on fait **en le nommant**, au lieu de le laisser passer
+ * au détour d'un formulaire.
+ */
+export function confirmationTlsRequise(
+  engine: Engine,
+  mode: SslMode,
+  production: boolean,
+): boolean {
+  return production && modesSslDisponibles(engine).length > 0 && !authentifie(mode)
 }
 
 /**
