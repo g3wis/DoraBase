@@ -87,6 +87,7 @@ export const explorerFr: Dictionnaire = {
   },
   objectTable: {
     label: (p) => `Objets du schéma ${p.schema}`,
+    actionsFor: (p) => `Actions de ${p.cible}`,
     loading: 'Chargement des objets…',
     empty: (p) => `Le schéma ${p.schema} ne contient aucune ${p.quoi}.`,
     kind: {
@@ -162,6 +163,7 @@ export const explorerFr: Dictionnaire = {
       edit: 'Modifier…',
       openDiagram: 'Diagramme du schéma',
       manageSchemas: 'Gérer les schémas…',
+      copyName: 'Copier le nom',
     },
     raisons: {
       renameUnavailable: 'Cet écran n’est pas relié à la commande de renommage.',
@@ -283,6 +285,7 @@ export const explorerEn: Dictionnaire = {
   },
   objectTable: {
     label: (p) => `Objects in schema ${p.schema}`,
+    actionsFor: (p) => `Actions for ${p.cible}`,
     loading: 'Loading objects…',
     empty: (p) => `Schema ${p.schema} contains no ${p.quoi}.`,
     kind: {
@@ -358,6 +361,7 @@ export const explorerEn: Dictionnaire = {
       edit: 'Edit…',
       openDiagram: 'Schema diagram',
       manageSchemas: 'Manage schemas…',
+      copyName: 'Copy name',
     },
     raisons: {
       renameUnavailable: 'This screen is not wired to the rename command.',

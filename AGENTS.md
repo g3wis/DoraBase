@@ -225,6 +225,30 @@ qu'il portait et que le rendu ne dit pas.
   Le pied de la sidebar est parti pour la même raison : il devait deviner, et se trompait dès que
   deux projets étaient dépliés. Ce qu'il portait encore, « Nouveau projet », est monté dans une
   bande d'icônes en tête, où 35 px remplacent ses 78 px pris sur la hauteur de l'arbre.
+- **« Copier le nom » est dans les deux listes qui nomment un objet** (#162). L'arbre et la liste du
+  centre nomment tous deux une table, et ni l'un ni l'autre ne laissait en reprendre le nom : la
+  ligne n'est pas du texte sélectionnable, donc le nom se retapait. Quatre décisions à ne pas
+  défaire :
+  - **le nom nu, jamais qualifié.** `orders`, pas `public.orders` — le schéma est le palier
+    au-dessus dans l'arbre et le fil d'Ariane du centre le nomme déjà. Une seconde entrée pour la
+    forme qualifiée est un autre ticket, pas un détail de celui-ci ;
+  - **toute ligne listée la porte**, pas seulement une table : les vues dans l'arbre, et les quatre
+    segments du centre. L'entrée copie le nom de ce qui est sur la ligne ; en excepter les index
+    ferait chercher pourquoi ;
+  - **muette, comme les quatre autres copies du produit.** Il n'y a pas de composant de notification
+    dans `src/ui/`, et en inventer un pour cette entrée serait inventer un pixel ;
+  - **la ligne d'objet gagne son premier menu.** `entreesDe` rendait `undefined` pour elle, donc ni
+    « … » ni clic droit. Conséquence à connaître : **il n'existe plus de sorte de ligne d'arbre sans
+    menu**, et le test qui gardait cet invariant — érodé une première fois par le diagramme d'un
+    schéma — vise désormais la **ligne de message**, qui n'est pas un nœud de l'arbre et n'en aura
+    jamais.
+
+  **Et un point où le sabotage reste vert, dit plutôt que taise.** `Noeud.object` porte le nom que
+  le serveur connaît, à côté de `label` qui porte ce qui s'affiche — la distinction que `console` a
+  déjà et que `database` a apprise à ses dépens (`27a`). Les deux valeurs sont **égales par
+  construction** aujourd'hui, donc échanger l'une pour l'autre dans `entreesDe` ne fait tomber aucun
+  test, et aucun décor honnête ne peut les distinguer. Ce qui est gardé est la **provenance** du
+  champ (`arbre.test.ts`) ; le reste est une précaution de nommage, pas une garantie.
 - **Le port prérempli appartient au moteur, pas au formulaire** — voir le tableau des quatre
   moteurs. Un port **saisi à la main** survit au changement de moteur, le défaut de l'autre
   moteur non : le champ est saisissable parce qu'un serveur peut n'être pas sur le port usuel.

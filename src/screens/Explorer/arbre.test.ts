@@ -117,6 +117,9 @@ test('un schéma déplié produit ses objets', () => {
   const noeuds = aplatir([projet()], deplies, charge, JAMAIS)
   const objets = noeuds.filter((n) => n.kind === 'object')
   expect(objets.map((o) => o.label)).toEqual(['orders', 'orders_by_day'])
+  // **Et le nom que le serveur connaît, à côté du libellé** (#162) : c'est lui que « Copier le nom »
+  // rend, et il vient de `objet.name`, jamais d'un libellé qu'un décor pourrait un jour toucher.
+  expect(objets.map((o) => o.object)).toEqual(['orders', 'orders_by_day'])
   // Les vues portent l'icône et la teinte violette du handoff, les tables la verte.
   expect(objets[0]?.iconColor).toContain('success')
   expect(objets[1]?.iconColor).toContain('violet')

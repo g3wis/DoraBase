@@ -856,6 +856,34 @@ function entreesDe(
     ]
   }
 
+  /*
+   * **Le menu d'un objet** : copier son nom, et rien d'autre (#162).
+   *
+   * Ces lignes n'avaient aucun menu — `entreesDe` rendait `undefined` pour elles, donc ni « … » ni
+   * clic droit. Elles en gagnent un pour le geste qu'on vient chercher dans un explorateur de bases :
+   * reprendre un nom de table pour l'écrire dans une requête, sans le retaper ni le sélectionner à la
+   * main dans une ligne qui n'est pas du texte sélectionnable.
+   *
+   * **Le nom, pas le libellé**, et c'est `noeud.object` qui le porte : voir la note de ce champ dans
+   * `arbre.ts`. **Le nom nu**, aussi — `orders` et non `public.orders` : le schéma est le palier
+   * au-dessus, il se lit à l'écran, et le coller dans une requête qui l'a déjà le dirait deux fois.
+   *
+   * **Aucune confirmation après la copie**, comme partout ailleurs dans le produit — les quatre
+   * autres copies sont muettes. Il n'y a pas de composant de notification dans `src/ui/`, et en
+   * inventer un pour cette entrée serait inventer un pixel que le handoff ne porte pas.
+   */
+  if (noeud.kind === 'object') {
+    const nom = noeud.object
+    if (nom === undefined) return undefined
+    return [
+      {
+        libelle: t('explorer.sidebar.menu.copyName'),
+        icone: 'copy',
+        onClick: () => void navigator.clipboard?.writeText(nom),
+      },
+    ]
+  }
+
   if (noeud.kind !== 'database') return undefined
 
   // Les coordonnées viennent du **nœud**, jamais d'une déduction sur son libellé : deux bases

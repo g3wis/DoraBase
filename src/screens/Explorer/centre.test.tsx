@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { Sprite } from '../../design/icons/Sprite'
@@ -188,4 +188,66 @@ test('une ligne sélectionnée s’annonce comme telle', async () => {
 test('la ligne choisie porte aria-selected', () => {
   monterTableau({ selectedName: 'orders' })
   expect(screen.getAllByRole('row')[1]).toHaveAttribute('aria-selected', 'true')
+})
+
+// --- Le clic droit (#162) ---
+
+/**
+ * L'espion du presse-papiers. `navigator.clipboard` n'a qu'un accesseur sous jsdom : `Object.assign`
+ * échoue, il faut redéfinir la propriété.
+ */
+function espionnerLePressePapiers() {
+  const writeText = vi.fn(async (_texte: string) => {})
+  Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+  return writeText
+}
+
+test('le clic droit sur une ligne ouvre un menu qui copie son nom', async () => {
+  const writeText = espionnerLePressePapiers()
+  monterTableau()
+  fireEvent.contextMenu(screen.getByRole('rowheader', { name: 'orders' }))
+  await userEvent.click(screen.getByRole('menuitem', { name: 'Copier le nom' }))
+  // **Le nom nu**, jamais `public.orders` : le schéma est le palier au-dessus, et le fil d'Ariane le
+  // nomme déjà à l'écran.
+  expect(writeText).toHaveBeenCalledWith('orders')
+})
+
+/**
+ * **Le menu vise la ligne cliquée, pas la ligne sélectionnée.**
+ *
+ * Les deux coïncident dès qu'on clique — le clic droit sélectionne aussi —, et c'est ce qui rend ce
+ * contrôle nécessaire : un menu câblé sur `selectedName` passerait le test précédent et copierait la
+ * mauvaise ligne ici. Règle n° 5 : rendre les deux distinguables.
+ */
+test('le nom copié est celui de la ligne visée, pas celui de la sélection', async () => {
+  const writeText = espionnerLePressePapiers()
+  monterTableau({
+    objects: [objet(), objet({ name: 'customers' })],
+    selectedName: 'orders',
+  })
+  fireEvent.contextMenu(screen.getByRole('rowheader', { name: 'customers' }))
+  await userEvent.click(screen.getByRole('menuitem', { name: 'Copier le nom' }))
+  expect(writeText).toHaveBeenCalledWith('customers')
+})
+
+/**
+ * **Toute ligne listée le porte, pas seulement une table** (#162). L'entrée copie le nom de ce qui
+ * est sur la ligne ; un index n'y ferait pas exception, et le segment actif ne change rien au geste.
+ */
+test('une vue et un index le portent aussi', async () => {
+  const writeText = espionnerLePressePapiers()
+  monterTableau({ objects: [objet({ name: 'orders_by_day', kind: 'view' })], type: 'views' })
+  fireEvent.contextMenu(screen.getByRole('rowheader', { name: /^orders_by_day$/ }))
+  await userEvent.click(screen.getByRole('menuitem', { name: 'Copier le nom' }))
+  expect(writeText).toHaveBeenCalledWith('orders_by_day')
+})
+
+// **Le menu du système ne doit pas s'ouvrir par-dessus le nôtre.** `useClicDroitDesactive` le
+// refuse globalement, mais ce gestionnaire-là est la raison pour laquelle il ne doit pas paraître :
+// l'écrire au même endroit que l'ouverture garde les deux ensemble.
+test('le clic droit empêche le menu du système', () => {
+  monterTableau()
+  const evenement = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+  screen.getByRole('rowheader', { name: 'orders' }).dispatchEvent(evenement)
+  expect(evenement.defaultPrevented).toBe(true)
 })
