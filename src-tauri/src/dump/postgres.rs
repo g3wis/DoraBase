@@ -59,13 +59,28 @@ impl DumpTool for PostgresDumpTool {
     ///
     /// Et jamais journalisé : le plugin de log cible `Webview` en développement, donc une
     /// trace égarée imprimerait le mot de passe dans la sortie de `pnpm tauri dev`.
-    fn child_env(&self, mot_de_passe: &str) -> Vec<(String, String)> {
-        vec![("PGPASSWORD".to_string(), mot_de_passe.to_string())]
+    ///
+    /// **La base passe par `PGDATABASE`, jamais par `--dbname`** (#84). `pg_dump` et `psql`
+    /// remettent `--dbname` à libpq avec `expand_dbname` : une valeur qui contient un `=` ou
+    /// commence par `postgresql://` y est relue comme une **chaîne de connexion**, dont le
+    /// `host` et le `port` écrasent ceux posés avant elle. `default_database` venant d'un
+    /// formulaire ou d'un fichier de projet importé, un nom de base suffisait à envoyer le
+    /// dump — et `PGPASSWORD` avec lui — vers un serveur que personne n'a déclaré, pendant
+    /// que la modale nommait le bon. Une variable d'environnement n'est jamais relue ainsi :
+    /// la valeur y reste un nom de base, quel qu'il soit. Refuser `=` à la saisie n'aurait
+    /// pas suffi, et aurait refusé des noms que PostgreSQL accepte.
+    fn child_env(&self, cible: &Cible, mot_de_passe: Option<&str>) -> Vec<(String, String)> {
+        let mut env = vec![("PGDATABASE".to_string(), cible.base.clone())];
+        if let Some(mot_de_passe) = mot_de_passe {
+            env.push(("PGPASSWORD".to_string(), mot_de_passe.to_string()));
+        }
+        env
     }
 }
 
 impl PostgresDumpTool {
-    /// La partie commune aux deux argv : où se connecter, et sous quel nom.
+    /// La partie commune aux deux argv : où se connecter, et sous quel nom. **La base n'y
+    /// est pas** : voir `child_env`.
     fn connexion_argv(&self, cible: &Cible) -> Vec<OsString> {
         vec![
             "--host".into(),
@@ -74,8 +89,6 @@ impl PostgresDumpTool {
             cible.port.to_string().into(),
             "--username".into(),
             cible.utilisateur.clone().into(),
-            "--dbname".into(),
-            cible.base.clone().into(),
             // Sans lui, un mot de passe manquant fait attendre un terminal absent : le
             // processus reste bloqué et l'export paraît figé au lieu d'échouer.
             "--no-password".into(),

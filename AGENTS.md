@@ -4810,6 +4810,17 @@ l'exposerait à tout utilisateur de la machine — et jamais journalisé, le plu
 la webview en développement. Le processus est lancé par `std::process::Command` avec un argv
 direct, **jamais par un shell** : aucune surface de citation ni d'injection.
 
+**Et la base passe par `PGDATABASE`, jamais par `--dbname`** (29 septembre 2026, #84). L'argv
+direct ne protège pas de tout : `pg_dump` et `psql` remettent `--dbname` à libpq avec
+`expand_dbname`, qui relit une valeur contenant `=` ou un préfixe `postgresql://` comme une
+**chaîne de connexion** — et son `host` / `port` écrasent ceux posés avant elle. Un nom de base
+venu d'un fichier de projet importé suffisait donc à envoyer le dump, `PGPASSWORD` compris, vers un
+serveur que la modale ne nommait pas. Une variable d'environnement n'est jamais relue ainsi. **Ne
+pas « simplifier » en revenant à `--dbname`** : un test pose une base piégée devant un vrai
+`pg_dump` et compte ce qui atteint le piège. Refuser `=` ou les espaces à la saisie, comme l'audit
+le proposait en défense en profondeur, n'a pas été retenu : PostgreSQL accepte ces noms, et la
+cause est fermée à la source.
+
 **La progression est un nombre d'octets, sans total ni pourcentage.** `pg_dump --format=plain`
 n'émet aucune progression exploitable et la taille finale est inconnaissable avant la fin :
 afficher un pourcentage présenterait une estimation comme un fait.
