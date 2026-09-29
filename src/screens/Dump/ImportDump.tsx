@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { DumpAvailability, Inspection } from '../../domain/dump'
+import type { DumpAvailability, DumpTransport, Inspection } from '../../domain/dump'
 import { useT } from '../../i18n/LanguageContext'
 import { raccourci } from '../../shell/plateforme'
 import { Button } from '../../ui/Button/Button'
@@ -7,7 +7,7 @@ import { Modal } from '../../ui/Modal/Modal'
 import type { CibleDeDump } from './cible'
 import styles from './Dump.module.css'
 import { messageDe } from './ExportDump'
-import { explicationDuVerdict, titreDuVerdict, versionLisible } from './verdict'
+import { explicationDuVerdict, phraseDuTransport, titreDuVerdict, versionLisible } from './verdict'
 
 /**
  * Le titre — donc le **nom accessible** — pour chaque issue d'inspection.
@@ -78,6 +78,11 @@ type ImportDumpProps = {
   availability: DumpAvailability | null
   /** Le résultat d'`inspect_dump`, ou `null` tant qu'aucun fichier n'est choisi. */
   inspection?: Inspection | null
+  /**
+   * Le transport **réellement employé** par l'outil, tel que le cœur l'a calculé (#82) — `null`
+   * tant qu'il n'est pas connu, ou quand le moteur n'a rien à lancer.
+   */
+  transport?: DumpTransport | null
   cible: CibleDeDump
   /** Le chemin du fichier choisi. La modale le **nomme** : c'est la moitié du garde-fou. */
   fichier?: string
@@ -99,6 +104,7 @@ type ImportDumpProps = {
  */
 export function ImportDump({
   availability,
+  transport = null,
   inspection = null,
   cible,
   fichier,
@@ -168,6 +174,11 @@ export function ImportDump({
           <span aria-hidden="true">·</span> {cible.environnement}
         </p>
         {fichier && <p className={styles.chemin}>{fichier}</p>}
+        {/* Le transport est dit avant qu'on s'engage (#82) : un dump parti en clair ne se
+            voyait nulle part. Seulement quand l'outil est prêt — sans lui, rien ne partira. */}
+        {pret && transport && (
+          <p className={styles.explication}>{phraseDuTransport(transport, t)}</p>
+        )}
 
         {inspection ? (
           <p className={styles.explication}>{explicationDeLInspection(inspection, t)}</p>

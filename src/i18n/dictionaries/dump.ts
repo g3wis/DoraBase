@@ -32,6 +32,21 @@ export const dumpFr: Dictionnaire = {
     noLocalDump: (p) =>
       `${p.engine} n'a pas d'outil local : ses sauvegardes passent par un stockage cloud, ce que DoraBase ne fait pas.`,
   },
+  // Le transport **réellement employé** par pg_dump et psql (#82). Le nom libpq du mode finit
+  // la phrase entre parenthèses : c'est celui qu'on retrouverait dans PGSSLMODE, et le seul mot
+  // qui se compare sans ambiguïté au réglage choisi dans A2.
+  transport: {
+    disable: 'Transport : en clair, sans TLS (disable)',
+    prefer: "Transport : TLS si le serveur l'offre, en clair sinon (prefer)",
+    require: 'Transport : TLS, certificat du serveur non vérifié (require)',
+    verifyCaFile: (p) => `Transport : TLS, certificat vérifié par l'autorité ${p.path} (verify-ca)`,
+    verifyCaDefault:
+      "Transport : TLS, certificat vérifié par l'autorité de ~/.postgresql/root.crt (verify-ca)",
+    verifyFullFile: (p) =>
+      `Transport : TLS, certificat et nom d'hôte vérifiés par l'autorité ${p.path} (verify-full)`,
+    verifyFullSystem:
+      "Transport : TLS, certificat et nom d'hôte vérifiés par les autorités du système (verify-full)",
+  },
   export: {
     close: 'Fermer',
     cancel: 'Annuler l’export',
@@ -98,6 +113,18 @@ export const dumpEn: Dictionnaire = {
       `Import delegates to the engine's native tool, and ${p.engine}'s is not wired yet.`,
     noLocalDump: (p) =>
       `${p.engine} has no local tool: its backups go through cloud storage, which DoraBase does not do.`,
+  },
+  transport: {
+    disable: 'Transport: cleartext, no TLS (disable)',
+    prefer: 'Transport: TLS if the server offers it, cleartext otherwise (prefer)',
+    require: 'Transport: TLS, server certificate not verified (require)',
+    verifyCaFile: (p) => `Transport: TLS, certificate verified against ${p.path} (verify-ca)`,
+    verifyCaDefault:
+      'Transport: TLS, certificate verified against ~/.postgresql/root.crt (verify-ca)',
+    verifyFullFile: (p) =>
+      `Transport: TLS, certificate and host name verified against ${p.path} (verify-full)`,
+    verifyFullSystem:
+      "Transport: TLS, certificate and host name verified against the system's authorities (verify-full)",
   },
   export: {
     close: 'Close',

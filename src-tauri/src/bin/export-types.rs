@@ -23,7 +23,7 @@ use dorabase_lib::config::{
     RenameProjectRequest, RenameResult, ReorderEnvironmentsRequest, SaveDatabaseRequest,
     SavedQuery, UpdateVariantRequest, ValueLabelsRequest, VisibleSchemasRequest,
 };
-use dorabase_lib::dump::commands::{DumpFailure, DumpRequest};
+use dorabase_lib::dump::commands::{DumpFailure, DumpRequest, DumpVerdict};
 use dorabase_lib::dump::inspect::Inspection;
 use dorabase_lib::dump::DumpAvailability;
 use dorabase_lib::engine::commands::{
@@ -140,6 +140,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // `EnvironmentVariant` avec lui ; `DumpAvailability` et `Inspection` sont les deux
     // verdicts que les modales rendent.
     DumpAvailability::export_all(&config)?;
+    // Le verdict entraîne `DumpTransport` et `RootCert` avec lui (#82).
+    DumpVerdict::export_all(&config)?;
     Inspection::export_all(&config)?;
     DumpRequest::export_all(&config)?;
     DumpFailure::export_all(&config)?;

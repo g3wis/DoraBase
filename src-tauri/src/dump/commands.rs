@@ -134,8 +134,17 @@ pub async fn cible_et_version(
     let identite = cle(&key.project, &key.database, &key.environment);
     let etat = registre.etat(&identite).await;
 
-    let base = variante.default_database.clone();
-    let utilisateur = variante.username.clone();
+    // Tout ce qui ne dépend pas du chemin — direct ou tunnelé — est pris une fois ici. Le
+    // transport en fait partie (#82) : le mode SSL et l'autorité sont ceux de la variante dans
+    // les deux cas, comme pour le pilote Rust, qui les applique aussi au bout local d'un tunnel.
+    let cible = |hote: String, port: u16| Cible {
+        hote,
+        port,
+        base: variante.default_database.clone(),
+        utilisateur: variante.username.clone(),
+        ssl_mode: variante.ssl_mode,
+        ca_certificate: variante.ca_certificate.clone(),
+    };
 
     match (&etat, variante.tunnel.is_some()) {
         // Ouverte, tunnelée : l'hôte et le port sont ceux du **tunnel**, jamais ceux de la
@@ -153,25 +162,12 @@ pub async fn cible_et_version(
                      ouvrir la base",
                 )
             })?;
-            Ok((
-                Cible {
-                    hote: "127.0.0.1".into(),
-                    port,
-                    base,
-                    utilisateur,
-                },
-                version_de(server_version)?,
-            ))
+            Ok((cible("127.0.0.1".into(), port), version_de(server_version)?))
         }
         // Ouverte, directe : les réglages de la variante suffisent, et la version est déjà
         // connue — inutile de sonder une deuxième fois.
         (ConnectionState::Connected { server_version, .. }, false) => Ok((
-            Cible {
-                hote: variante.host.clone(),
-                port: variante.port,
-                base,
-                utilisateur,
-            },
+            cible(variante.host.clone(), variante.port),
             version_de(server_version)?,
         )),
         // Fermée, tunnelée : refus explicite, **avant** de lancer quoi que ce soit.
@@ -194,12 +190,7 @@ pub async fn cible_et_version(
                 sonde.map_err(|erreur| DumpFailure::locale(erreur.message))?
             };
             Ok((
-                Cible {
-                    hote: variante.host.clone(),
-                    port: variante.port,
-                    base,
-                    utilisateur,
-                },
+                cible(variante.host.clone(), variante.port),
                 version_de(&sonde.server_version)?,
             ))
         }
@@ -215,6 +206,20 @@ fn version_de(annonce: &str) -> Result<Version, DumpFailure> {
     })
 }
 
+/// Ce que la modale reçoit à l'ouverture : le verdict, et le transport **réellement employé**.
+///
+/// **Le transport est dit dans la modale** (#82) : l'audit avait trouvé des dumps partis en
+/// clair sans que rien ne le signale, et une connexion testée dans `A2` porte déjà sa mention
+/// « TLS non vérifié ». `None` quand le moteur n'a pas d'outil local — il n'y a rien à lancer,
+/// donc aucun transport à décrire.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "dump.ts")]
+pub struct DumpVerdict {
+    pub availability: DumpAvailability,
+    pub transport: Option<super::postgres::DumpTransport>,
+}
+
 /// Le verdict de disponibilité, pour l'export ou pour l'import.
 ///
 /// **L'entrée de menu reste active dans les cinq cas.** Un item de menu natif désactivé ne
@@ -226,7 +231,7 @@ pub async fn dump_availability(
     import: bool,
     app: tauri::AppHandle,
     registry: tauri::State<'_, ConnectionRegistry>,
-) -> Result<DumpAvailability, DumpFailure> {
+) -> Result<DumpVerdict, DumpFailure> {
     log::info!(
         "dump_availability ← {} ({}) {}",
         request.key.database,
@@ -238,11 +243,14 @@ pub async fn dump_availability(
     // local, et le sonder pour l'apprendre serait absurde.
     if let Some(verdict) = DumpAvailability::pour_moteur(request.engine) {
         log::info!("dump_availability → {verdict:?}");
-        return Ok(verdict);
+        return Ok(DumpVerdict {
+            availability: verdict,
+            transport: None,
+        });
     }
 
     let secret = relire_le_secret(&app, &request.variant)?;
-    let (_cible, version) =
+    let (cible, version) =
         cible_et_version(&registry, &request.key, &request.variant, secret.as_ref()).await?;
 
     let outil = PostgresDumpTool;
@@ -253,7 +261,15 @@ pub async fn dump_availability(
     };
     let verdict = decouvrir(binaire, version);
     log::info!("dump_availability → {verdict:?}");
-    Ok(verdict)
+    Ok(DumpVerdict {
+        availability: verdict,
+        // La cible qu'`start_export` et `start_import` recalculeront est la même : la variante
+        // et l'état du registre, que rien ne change entre l'ouverture de la modale et le clic.
+        transport: Some(super::postgres::transport_de(
+            cible.ssl_mode,
+            cible.ca_certificate.as_deref(),
+        )),
+    })
 }
 
 /// Lance l'export et **attend** sa fin. La progression part par événement.

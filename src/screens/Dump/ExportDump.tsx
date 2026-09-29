@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { DumpAvailability } from '../../domain/dump'
+import type { DumpAvailability, DumpTransport } from '../../domain/dump'
 import { useT } from '../../i18n/LanguageContext'
 import { raccourci } from '../../shell/plateforme'
 import { Button } from '../../ui/Button/Button'
@@ -7,7 +7,7 @@ import { formatBytes } from '../../ui/format'
 import { Modal } from '../../ui/Modal/Modal'
 import type { CibleDeDump } from './cible'
 import styles from './Dump.module.css'
-import { explicationDuVerdict, titreDuVerdict } from './verdict'
+import { explicationDuVerdict, phraseDuTransport, titreDuVerdict } from './verdict'
 
 /** L'avancement de l'export, tel que la modale l'affiche. */
 type Avancement =
@@ -19,6 +19,11 @@ type Avancement =
 type ExportDumpProps = {
   /** Le verdict, ou `null` tant qu'il est en cours de calcul. */
   availability: DumpAvailability | null
+  /**
+   * Le transport **réellement employé** par l'outil, tel que le cœur l'a calculé (#82) — `null`
+   * tant qu'il n'est pas connu, ou quand le moteur n'a rien à lancer.
+   */
+  transport?: DumpTransport | null
   cible: CibleDeDump
   onClose: () => void
   /**
@@ -49,6 +54,7 @@ type ExportDumpProps = {
  */
 export function ExportDump({
   availability,
+  transport = null,
   cible,
   onClose,
   onChoisirFichier,
@@ -117,6 +123,11 @@ export function ExportDump({
 
         {availability && (
           <p className={styles.explication}>{explicationDuVerdict(availability, 'export', t)}</p>
+        )}
+        {/* Le transport est dit avant qu'on s'engage (#82) : un dump parti en clair ne se
+            voyait nulle part. Seulement quand l'outil est prêt — sans lui, rien ne partira. */}
+        {pret && transport && (
+          <p className={styles.explication}>{phraseDuTransport(transport, t)}</p>
         )}
 
         {enCours && (

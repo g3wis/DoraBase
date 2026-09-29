@@ -40,9 +40,12 @@ function commandes(surcharges: Partial<typeof pont> = {}): typeof pont {
   return {
     EVENEMENT_PROGRESSION: 'dump://progression',
     dumpAvailability: vi.fn(async () => ({
-      kind: 'ready' as const,
-      tool: '/usr/bin/pg_dump',
-      version: { majeure: 17, mineure: 4 },
+      availability: {
+        kind: 'ready' as const,
+        tool: '/usr/bin/pg_dump',
+        version: { majeure: 17, mineure: 4 },
+      },
+      transport: { mode: 'verify-full' as const, root: { kind: 'system' as const } },
     })),
     startExport: vi.fn(async () => 1024),
     cancelExport: vi.fn(async () => true),
@@ -160,4 +163,40 @@ test('un verdict qui échoue est rendu, et non tu', async () => {
   )
 
   expect(await screen.findByText(/tunnel SSH/)).toBeInTheDocument()
+})
+
+test('le transport rendu par le cœur est dit dans la modale, à l’export comme à l’import', async () => {
+  // #82 : la modale dit ce que l'outil emploiera. Ce qui est gardé ici est le **câblage** — la
+  // phrase vient du verdict, pas de la variante, que ce décor règle sur autre chose.
+  for (const sens of ['export', 'import'] as const) {
+    const { unmount } = monter(
+      <DumpDialogs
+        sens={sens}
+        projects={PROJET_UNIQUE}
+        onClose={() => {}}
+        commandes={commandes()}
+      />,
+    )
+    expect(await screen.findByText(/autorités du système \(verify-full\)/)).toBeInTheDocument()
+    unmount()
+  }
+})
+
+test('sans transport — un moteur sans outil — la modale ne dit rien du transport', async () => {
+  const pontSimule = commandes({
+    dumpAvailability: vi.fn(async () => ({
+      availability: { kind: 'noLocalDump' as const, engine: 'bigquery' as const },
+      transport: null,
+    })),
+  })
+  monter(
+    <DumpDialogs
+      sens="export"
+      projects={PROJET_UNIQUE}
+      onClose={() => {}}
+      commandes={pontSimule}
+    />,
+  )
+  await screen.findByText(/pas d'outil local/)
+  expect(screen.queryByText(/^Transport/)).not.toBeInTheDocument()
 })

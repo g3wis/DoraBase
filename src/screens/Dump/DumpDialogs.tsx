@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Project } from '../../domain/config'
-import type { DumpAvailability, Inspection } from '../../domain/dump'
+import type { DumpAvailability, DumpTransport, Inspection } from '../../domain/dump'
 import { useT } from '../../i18n/LanguageContext'
 import { Button } from '../../ui/Button/Button'
 import { Modal } from '../../ui/Modal/Modal'
@@ -35,6 +35,7 @@ export function DumpDialogs({ sens, projects, onClose, commandes = pont }: DumpD
   // et la recalculer à chaque rendu relancerait la demande de verdict en boucle.
   const cible = useMemo(() => cibleUnique(projects), [projects])
   const [availability, setAvailability] = useState<DumpAvailability | null>(null)
+  const [transport, setTransport] = useState<DumpTransport | null>(null)
   const [erreur, setErreur] = useState<string | null>(null)
   const [octets, setOctets] = useState(0)
   const [fichier, setFichier] = useState<string | undefined>(undefined)
@@ -48,7 +49,9 @@ export function DumpDialogs({ sens, projects, onClose, commandes = pont }: DumpD
     commandes
       .dumpAvailability(cible.request, sens)
       .then((verdict) => {
-        if (vivant) setAvailability(verdict)
+        if (!vivant) return
+        setAvailability(verdict.availability)
+        setTransport(verdict.transport)
       })
       .catch((cause) => {
         if (vivant) setErreur(messageDe(cause))
@@ -116,6 +119,7 @@ export function DumpDialogs({ sens, projects, onClose, commandes = pont }: DumpD
     return (
       <ExportDump
         availability={availability}
+        transport={transport}
         cible={nommee}
         octetsEcrits={octets}
         onClose={onClose}
@@ -131,6 +135,7 @@ export function DumpDialogs({ sens, projects, onClose, commandes = pont }: DumpD
   return (
     <ImportDump
       availability={availability}
+      transport={transport}
       inspection={inspection}
       cible={nommee}
       fichier={fichier}

@@ -1,4 +1,4 @@
-import type { DumpAvailability } from '../../domain/dump'
+import type { DumpAvailability, DumpTransport } from '../../domain/dump'
 import { ENGINES } from '../NewConnection/engines'
 
 /**
@@ -75,5 +75,37 @@ export function explicationDuVerdict(
       })
     case 'noLocalDump':
       return t('dump.explanation.noLocalDump', { engine: ENGINES[availability.engine].label })
+  }
+}
+
+/**
+ * La phrase qui dit le transport **réellement employé** par l'outil (#82).
+ *
+ * Elle ne décide de rien : le mode et l'autorité viennent du cœur, de la fonction même qui pose
+ * `PGSSLMODE` et `PGSSLROOTCERT` (`dump/postgres.rs`, `transport_de`). Recalculer ici depuis la
+ * variante ferait une seconde vérité — celle de l'écran — qui peut dire `verify-full` pendant que
+ * l'outil part en autre chose, c'est-à-dire exactement le défaut que cette ligne existe pour
+ * rendre visible.
+ */
+export function phraseDuTransport(transport: DumpTransport, t: Traduire): string {
+  const { mode, root } = transport
+  switch (mode) {
+    case 'disable':
+      return t('dump.transport.disable')
+    // `allow` n'arrive pas — le cœur l'a déjà changé en `prefer` —, mais s'il arrivait, le dire
+    // comme `prefer` est vrai de l'un comme de l'autre : TLS possible, clair accepté.
+    case 'allow':
+    case 'prefer':
+      return t('dump.transport.prefer')
+    case 'require':
+      return t('dump.transport.require')
+    case 'verify-ca':
+      return root.kind === 'file'
+        ? t('dump.transport.verifyCaFile', { path: root.path })
+        : t('dump.transport.verifyCaDefault')
+    case 'verify-full':
+      return root.kind === 'file'
+        ? t('dump.transport.verifyFullFile', { path: root.path })
+        : t('dump.transport.verifyFullSystem')
   }
 }

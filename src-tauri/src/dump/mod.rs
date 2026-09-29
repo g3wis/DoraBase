@@ -30,7 +30,7 @@ mod tests_reels;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use crate::config::Engine;
+use crate::config::{Engine, SslMode};
 
 /// Où le dump doit se connecter, et sous quel nom. **Jamais le mot de passe.**
 ///
@@ -38,12 +38,23 @@ use crate::config::Engine;
 /// pas ceux de la variante mais `127.0.0.1` et le port local du tunnel rendu par
 /// `connection_states`. Les confondre ferait sortir `pg_dump` du tunnel, c'est-à-dire
 /// échouer, ou pire, atteindre une autre base.
+///
+/// **Le transport voyage avec l'adresse** (#82). Le mode SSL et l'autorité déclarés dans `A2`
+/// étaient restés dans la variante : `pg_dump` et `psql` tombaient donc sur le défaut de libpq,
+/// `prefer` — TLS tenté, repli en clair accepté, certificat jamais vérifié —, et une connexion
+/// réglée en `verify-full` exportait toute sa base, mot de passe compris, en clair devant le
+/// premier intermédiaire qui refusait TLS. Les porter ici fait de leur oubli une erreur de
+/// compilation chez qui construit une `Cible`, et `PostgresDumpTool::child_env` les lit par une
+/// déstructuration **sans `..`** : un champ ajouté ici ne compile pas tant qu'elle ne l'a pas nommé.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cible {
     pub hote: String,
     pub port: u16,
     pub base: String,
     pub utilisateur: String,
+    pub ssl_mode: SslMode,
+    /// Le chemin tel que saisi dans `A2`, `~` compris : c'est `child_env` qui l'expanse.
+    pub ca_certificate: Option<String>,
 }
 
 /// **Le seul point de variation par moteur.**
@@ -67,8 +78,12 @@ pub trait DumpTool: Send + Sync {
 
     fn import_argv(&self, cible: &Cible, fichier: &Path) -> Vec<OsString>;
 
-    /// Les variables d'environnement du fils : le secret — **jamais l'argv** — et ce que
-    /// l'outil ne doit pas recevoir en argument (voir `PostgresDumpTool::child_env`).
+    /// Les variables d'environnement du fils : le secret — **jamais l'argv** —, ce que l'outil ne
+    /// doit pas recevoir en argument, et le transport (voir `PostgresDumpTool::child_env`).
+    ///
+    /// **Appelée avec ou sans mot de passe.** Ni la base ni le transport ne dépendent d'un
+    /// secret : un environnement posé seulement quand il y a un mot de passe laisserait une
+    /// connexion sans mot de passe retomber sur les défauts de l'outil (#82, #84).
     fn child_env(&self, cible: &Cible, mot_de_passe: Option<&str>) -> Vec<(String, String)>;
 }
 
