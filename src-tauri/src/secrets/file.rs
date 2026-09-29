@@ -9,8 +9,8 @@
 //! release — d'où la détection de signature qui choisit le Trousseau quand elle peut.
 
 use std::collections::BTreeMap;
-use std::fs::{self, File};
-use std::io::Write;
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use chacha20poly1305::aead::{Aead, Generate, KeyInit};
@@ -34,7 +34,7 @@ impl EncryptedFileStore {
     /// Ouvre le magasin dans `repertoire`, en créant la clé si elle n'existe pas encore.
     pub fn new(repertoire: impl AsRef<Path>) -> Result<Self, SecretError> {
         let repertoire = repertoire.as_ref();
-        fs::create_dir_all(repertoire)?;
+        creer_le_repertoire(repertoire)?;
 
         let magasin = Self {
             chemin_cle: repertoire.join(NOM_FICHIER_CLE),
@@ -43,28 +43,18 @@ impl EncryptedFileStore {
 
         // La clé est créée **une seule fois** : la régénérer à chaque ouverture rendrait
         // tous les secrets illisibles au redémarrage suivant, sans le moindre message.
-        if !magasin.chemin_cle.exists() {
-            magasin.ecrire_cle(&Key::generate())?;
+        // `create_new` en fait une garantie atomique plutôt qu'un `exists()` suivi d'une
+        // création : une clé déjà là fait échouer l'ouverture, et c'est elle qu'on garde.
+        let cle = Key::generate();
+        match creer_et_ecrire(&magasin.chemin_cle, |fichier| {
+            fichier.write_all(cle.as_slice())
+        }) {
+            Ok(()) => {}
+            Err(erreur) if erreur.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(erreur) => return Err(SecretError::Io(erreur)),
         }
 
         Ok(magasin)
-    }
-
-    fn ecrire_cle(&self, cle: &Key) -> Result<(), SecretError> {
-        let mut fichier = File::create(&self.chemin_cle)?;
-        fichier.write_all(cle.as_slice())?;
-        fichier.sync_all()?;
-
-        // `0600` : lisible par son seul propriétaire. Sans ça, la clé serait exposée à
-        // tout compte de la machine, ce qui viderait de son sens le chiffrement du
-        // fichier voisin.
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&self.chemin_cle, fs::Permissions::from_mode(0o600))?;
-        }
-
-        Ok(())
     }
 
     fn lire_cle(&self) -> Result<Key, SecretError> {
@@ -129,20 +119,72 @@ impl EncryptedFileStore {
         // Même séquence atomique que `05b` : temporaire frère, synchronisation, renommage.
         // Perdre le magasin de secrets sur une écriture interrompue coûterait à
         // l'utilisateur de resaisir tous ses mots de passe.
+        //
+        // Le temporaire est créé déjà restreint, et le renommage emporte ses droits : le
+        // fichier chiffré n'a donc jamais été lisible hors de son propriétaire, à aucun
+        // instant. Un temporaire resté d'une écriture interrompue est retiré d'abord —
+        // `create_new` refuserait sinon toute écriture suivante, et ses droits sont ceux
+        // d'une version antérieure, que `mode` ne corrigerait pas.
         let temporaire = self.chemin_secrets.with_extension("enc.tmp");
-        let mut fichier = File::create(&temporaire)?;
-        fichier.write_all(&octets)?;
-        fichier.sync_all()?;
-        fs::rename(&temporaire, &self.chemin_secrets)?;
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&self.chemin_secrets, fs::Permissions::from_mode(0o600))?;
+        match fs::remove_file(&temporaire) {
+            Ok(()) => {}
+            Err(erreur) if erreur.kind() == io::ErrorKind::NotFound => {}
+            Err(erreur) => return Err(SecretError::Io(erreur)),
         }
+        creer_et_ecrire(&temporaire, |fichier| fichier.write_all(&octets))?;
+        fs::rename(&temporaire, &self.chemin_secrets)?;
 
         Ok(())
     }
+}
+
+/// Crée `chemin` **déjà restreint** à son propriétaire, puis y écrit et synchronise (#86).
+///
+/// `File::create` suivi d'un `set_permissions` laissait le fichier au umask — `0644` — le
+/// temps d'un `write_all` et d'un `sync_all`, et ce dernier attend le disque : assez long
+/// pour qu'un autre compte de la machine lise la clé, donc tous les mots de passe du fichier
+/// voisin. `mode(0o600)` s'applique à la création même, avant qu'un octet n'existe.
+/// C'est la séquence que `config::transfert::restreindre_au_proprietaire` tient déjà.
+///
+/// `create_new` refuse un fichier déjà là — y compris un lien symbolique posé à sa place —
+/// donc le fichier écrit est toujours celui qu'on vient de créer. C'est ce qui rend sûr de
+/// le **retirer** si l'écriture échoue : une clé tronquée rendrait le magasin illisible à
+/// l'ouverture suivante (« clé de n octets au lieu de 32 »), et plus aucun secret ne
+/// s'ouvrirait. Windows n'a pas de `mode` : ses ACL s'héritent du répertoire.
+fn creer_et_ecrire(
+    chemin: &Path,
+    ecrire: impl FnOnce(&mut File) -> io::Result<()>,
+) -> io::Result<()> {
+    let mut ouverture = OpenOptions::new();
+    ouverture.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        ouverture.mode(0o600);
+    }
+    let mut fichier = ouverture.open(chemin)?;
+
+    let issue = ecrire(&mut fichier).and_then(|()| fichier.sync_all());
+    if issue.is_err() {
+        drop(fichier);
+        let _ = fs::remove_file(chemin);
+    }
+    issue
+}
+
+/// Crée le répertoire du magasin en `0700` (#86) — les répertoires qu'on crée seulement :
+/// un répertoire déjà là appartient à qui l'a créé, et le resserrer changerait les droits de
+/// ce qu'il contient d'autre. Ce n'est qu'une seconde ligne : les deux fichiers sont
+/// restreints eux-mêmes.
+fn creer_le_repertoire(repertoire: &Path) -> io::Result<()> {
+    let mut construction = fs::DirBuilder::new();
+    construction.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        construction.mode(0o700);
+    }
+    construction.create(repertoire)
 }
 
 impl SecretStore for EncryptedFileStore {
@@ -252,6 +294,112 @@ mod tests {
             .permissions()
             .mode();
         assert_eq!(mode & 0o777, 0o600, "mode = {:o}", mode & 0o777);
+    }
+
+    /// Le mode d'un fichier, lu sur le disque.
+    #[cfg(unix)]
+    fn mode_de(chemin: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        fs::metadata(chemin).unwrap().permissions().mode() & 0o777
+    }
+
+    /// Ce que le test de mode final ne pouvait pas voir (#86) : le fichier est restreint
+    /// **pendant** qu'on y écrit, pas seulement après. La fermeture d'écriture est le seul
+    /// instant où la fenêtre existait, donc c'est là qu'on mesure — sans course à gagner.
+    #[cfg(unix)]
+    #[test]
+    fn le_fichier_est_restreint_avant_qu_un_octet_y_soit_ecrit() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // Contrôle positif : le umask de ce processus crée bien des fichiers plus larges
+        // que `0600`. Sans lui, un umask `077` rendrait l'assertion vraie de toute façon.
+        let temoin = dir.path().join("temoin");
+        File::create(&temoin).unwrap();
+        assert_ne!(
+            mode_de(&temoin),
+            0o600,
+            "umask trop strict pour mesurer quoi que ce soit"
+        );
+
+        let chemin = dir.path().join("sensible");
+        let mut pendant = None;
+        creer_et_ecrire(&chemin, |fichier| {
+            pendant = Some(mode_de(&chemin));
+            fichier.write_all(b"secret")
+        })
+        .unwrap();
+        assert_eq!(
+            pendant,
+            Some(0o600),
+            "mode pendant l'écriture = {pendant:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn le_fichier_chiffre_n_est_lisible_que_par_son_proprietaire() {
+        let dir = tempfile::tempdir().unwrap();
+        let magasin = EncryptedFileStore::new(dir.path()).unwrap();
+        magasin
+            .store(&SecretRef::new("r"), &Secret::new("s3cr3t"))
+            .unwrap();
+        assert_eq!(mode_de(&dir.path().join(NOM_FICHIER_SECRETS)), 0o600);
+    }
+
+    /// Un temporaire resté d'une écriture interrompue — et d'une version qui le créait au
+    /// umask — ne bloque pas l'écriture suivante, et ne lui lègue pas ses droits.
+    #[cfg(unix)]
+    #[test]
+    fn un_temporaire_abandonne_est_remplace_et_non_repris() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let magasin = EncryptedFileStore::new(dir.path()).unwrap();
+        let temporaire = dir
+            .path()
+            .join(NOM_FICHIER_SECRETS)
+            .with_extension("enc.tmp");
+        fs::write(&temporaire, b"reste").unwrap();
+        fs::set_permissions(&temporaire, fs::Permissions::from_mode(0o644)).unwrap();
+
+        magasin
+            .store(&SecretRef::new("r"), &Secret::new("s3cr3t"))
+            .unwrap();
+        assert_eq!(mode_de(&dir.path().join(NOM_FICHIER_SECRETS)), 0o600);
+        assert!(!temporaire.exists());
+    }
+
+    #[test]
+    fn une_ecriture_qui_echoue_ne_laisse_pas_de_fichier_tronque() {
+        let dir = tempfile::tempdir().unwrap();
+        let chemin = dir.path().join("cle");
+        let issue = creer_et_ecrire(&chemin, |fichier| {
+            fichier.write_all(b"moitie")?;
+            Err(io::Error::other("disque plein"))
+        });
+        assert!(issue.is_err());
+        assert!(
+            !chemin.exists(),
+            "une clé tronquée rendrait le magasin illisible"
+        );
+    }
+
+    #[test]
+    fn une_cle_deja_la_n_est_pas_remplacee() {
+        let dir = tempfile::tempdir().unwrap();
+        EncryptedFileStore::new(dir.path()).unwrap();
+        let avant = fs::read(dir.path().join(NOM_FICHIER_CLE)).unwrap();
+        EncryptedFileStore::new(dir.path()).unwrap();
+        assert_eq!(fs::read(dir.path().join(NOM_FICHIER_CLE)).unwrap(), avant);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn le_repertoire_cree_n_est_ouvert_qu_a_son_proprietaire() {
+        let dir = tempfile::tempdir().unwrap();
+        let repertoire = dir.path().join("dorabase");
+        EncryptedFileStore::new(&repertoire).unwrap();
+        assert_eq!(mode_de(&repertoire), 0o700);
     }
 
     #[test]
