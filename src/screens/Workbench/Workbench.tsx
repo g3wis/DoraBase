@@ -55,7 +55,7 @@ import {
 } from '../Console/useTransaction'
 import { DiagramStatusBar, DiagramView } from '../Diagram/DiagramView'
 import { useDiagramme } from '../Diagram/useDiagramme'
-import { idBase, idSchema, type Noeud } from '../Explorer/arbre'
+import { aplatir, idBase, idDossier, idSchema, type Noeud } from '../Explorer/arbre'
 import { BreadcrumbBar, type TypeObjet } from '../Explorer/BreadcrumbBar'
 import type { CibleDeSuppression } from '../Explorer/DeleteConnectionDialog'
 import { DetailPanel } from '../Explorer/DetailPanel'
@@ -141,6 +141,14 @@ type WorkbenchProps = {
   onNewFolder?: (parent: FolderId | null) => Promise<FolderId>
   /** La ligne à passer en renommage — le dossier que l'accueil ou `⌘N` vient de créer. */
   renommageInitial?: string
+  /**
+   * La connexion à **révéler** — celle qu'« Enregistrer & ouvrir » vient de créer (#108) : la chaîne
+   * de ses dossiers ancêtres se déplie, et sa ligne est sélectionnée.
+   *
+   * **Un objet, dont l'identité est le jeton** : deux créations successives dans le même dossier
+   * doivent chacune révéler la leur, et un identifiant nu égal au précédent ne relancerait rien.
+   */
+  revelation?: { connection: ConnectionId }
   onRenameFolder?: (dossier: FolderId, nom: string) => Promise<void>
   onRecolorFolder?: (dossier: FolderId, couleur: FolderColor | null) => Promise<void>
   onSetFolderReadOnly?: (dossier: FolderId, lectureSeule: boolean) => Promise<void>
@@ -255,6 +263,7 @@ export function Workbench({
   onNewDatabase,
   onNewFolder,
   renommageInitial,
+  revelation,
   onRenameFolder,
   onRecolorFolder,
   onSetFolderReadOnly,
@@ -295,6 +304,7 @@ export function Workbench({
     charge,
     etatDeBase,
     basculer,
+    deplierLesDossiers,
     charger,
     assurerLOuverture,
     rechargerLesSchemas,
@@ -327,6 +337,32 @@ export function Workbench({
    */
   const [schemasAGerer, setSchemasAGerer] = useState<ConnectionId | null>(null)
   const [selection, setSelection] = useState<Noeud | null>(null)
+  /**
+   * **Révéler la connexion qu'on vient de créer** (#108). Sans cela, « Enregistrer & ouvrir » posait
+   * la connexion dans un dossier replié : rien ne bougeait à l'écran, et le geste se lisait comme un
+   * enregistrement sans effet — le défaut n° 36 au bout du formulaire.
+   *
+   * **Le nœud est composé ici, sur l'arbre d'après et le dépliage d'après**, plutôt qu'attendu au
+   * rendu suivant : App pose l'arbre et la révélation dans le même geste, donc l'effet voit déjà la
+   * connexion, et `aplatir` rend sa ligne dès que ses ancêtres sont comptés comme dépliés. Attendre
+   * que la sidebar la produise demanderait un second effet qui guette son apparition.
+   *
+   * **Seule la révélation déclenche** : l'arbre, le dépliage et le cache sont lus à cet instant, et
+   * les suivre ferait resélectionner la connexion à chaque changement de l'écran.
+   */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: le jeton est la révélation elle-même
+  useEffect(() => {
+    if (revelation === undefined) return
+    const situee = connexion(arbre, revelation.connection)
+    if (situee === null) return
+    const ancetres = situee.ancetres.map((dossier) => idDossier(dossier.id))
+    deplierLesDossiers(ancetres)
+    const ouverts = new Set([...deplies, ...ancetres])
+    const noeud = aplatir(arbre, ouverts, charge, etatDeBase, t).find(
+      (candidat) => candidat.id === idBase(revelation.connection),
+    )
+    if (noeud) setSelection(noeud)
+  }, [revelation])
   const [etatOnglets, setEtatOnglets] = useState(AUCUN_ONGLET)
   const [type, setType] = useState<TypeObjet>('tables')
   const [filtre, setFiltre] = useState('')

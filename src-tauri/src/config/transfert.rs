@@ -224,6 +224,7 @@ impl FolderOutcome {
             verdict,
             folders_added: Vec::new(),
             folders_kept: Vec::new(),
+            folders_omitted: Vec::new(),
             read_only_from_file: Vec::new(),
             connections_added: Vec::new(),
             connections_kept: Vec::new(),
@@ -713,7 +714,24 @@ impl Versement<'_> {
     /// affaiblie : ni ce qui est déjà là — un garde-fou posé sur cette machine ne se lève pas par un
     /// import —, ni ce qui arrive — une connexion « prod » importée n'arrive pas inscriptible parce
     /// qu'un dossier local du même nom l'est.
-    fn verser_le_dossier(&mut self, entrant: &Folder, freres: &mut Vec<Folder>, chemin: &[String]) {
+    ///
+    /// # Un dossier créé qui n'apporte rien n'est pas créé (#108)
+    ///
+    /// Les connexions s'apparient par identifiant, **où qu'elles soient** : réimporter un sous-dossier
+    /// sur son poste d'origine trouve toutes ses connexions déjà déclarées, à leur place d'origine.
+    /// Sans cette règle, l'import posait à la racine un dossier de ce nom **vide** — le seul effet
+    /// visible d'un geste qui n'avait rien à apporter. Le dossier est donc retiré après la descente
+    /// si son sous-arbre n'a rien reçu, et le rapport le **nomme** (`folders_omitted`).
+    ///
+    /// **Seulement s'il portait au moins une connexion.** Un dossier vide *dans le fichier* est une
+    /// intention — une arborescence préparée sur une autre machine —, et il arrive vide comme il est
+    /// parti. Rend vrai quand ce dossier-ci a été omis.
+    fn verser_le_dossier(
+        &mut self,
+        entrant: &Folder,
+        freres: &mut Vec<Folder>,
+        chemin: &[String],
+    ) -> bool {
         let nom = entrant.name.trim();
         let etiquette = joindre(chemin, nom);
 
@@ -722,6 +740,7 @@ impl Versement<'_> {
         } else {
             freres.iter().position(|frere| frere.name.trim() == nom)
         };
+        let cree = place.is_none();
         let index = match place {
             Some(index) => {
                 let local = &mut freres[index];
@@ -774,6 +793,27 @@ impl Versement<'_> {
         for base in &entrant.connections {
             self.verser_la_connexion(base, &mut local.connections, &chemin_ici);
         }
+
+        if !cree {
+            return false;
+        }
+        let local = &freres[index];
+        let apporte = !local.connections.is_empty()
+            || !local.folders.is_empty()
+            || !local.value_labels.is_empty()
+            || !local.queries.is_empty();
+        if apporte || !porte_une_connexion(entrant) {
+            return false;
+        }
+        // Le dossier a été poussé en dernier, et la descente n'écrit que dans ses propres enfants :
+        // il est toujours au bout de `freres`.
+        let omis = freres.remove(index);
+        self.dossiers_poses.retain(|pose| pose != &omis.id);
+        self.sort
+            .folders_added
+            .retain(|ajoute| ajoute != &etiquette);
+        self.sort.folders_omitted.push(etiquette);
+        true
     }
 
     /// Les libellés de valeurs (`API-75`), **colonne par colonne** : deux machines peuvent avoir
@@ -889,6 +929,11 @@ impl Versement<'_> {
         self.connexions_ajoutees.push(arrivante.id.clone());
         destination.push(arrivante);
     }
+}
+
+/// Vrai si ce dossier du fichier porte une connexion, à n'importe quelle profondeur.
+fn porte_une_connexion(dossier: &Folder) -> bool {
+    !dossier.connections.is_empty() || dossier.folders.iter().any(porte_une_connexion)
 }
 
 /// Repose la référence de kubeconfig d'une connexion.
@@ -1042,7 +1087,9 @@ pub fn fusionner(
             };
             match entree {
                 Entree::Dossier(dossier) => {
-                    versement.verser_le_dossier(dossier, &mut candidat.folders, &[]);
+                    if versement.verser_le_dossier(dossier, &mut candidat.folders, &[]) {
+                        versement.sort.verdict = FolderVerdict::Omitted;
+                    }
                 }
                 Entree::Racine(connexions) => {
                     for base in connexions {
@@ -1819,6 +1866,80 @@ mod tests {
     }
 
     // ----- la fusion -----
+
+    /// **Un sous-dossier réimporté sur son poste d'origine ne crée rien** (#108). Ses connexions sont
+    /// reconnues par identifiant et restent où elles sont ; sans la règle, un dossier « prod » vide
+    /// arrivait à la racine, à côté de « Halle ». Les consoles, elles, sont bien versées : l'entrée
+    /// n'est pas inutile, seul son contenant l'est.
+    #[test]
+    fn un_sous_dossier_reimporte_chez_lui_n_est_pas_cree_a_la_racine() {
+        let locaux = halle();
+        let mut prod = locaux.folders[0].folders[1].clone();
+        prod.connections[0].consoles.push(Console {
+            name: "venue du fichier".into(),
+            sql: "select 1".into(),
+        });
+
+        let fusion = fusionner(
+            &locaux,
+            &Kubeconfigs::default(),
+            &fichier_de(vec![prod], Vec::new()),
+            None,
+        );
+
+        let sort = &fusion.report.folders[0];
+        assert_eq!(sort.verdict, FolderVerdict::Omitted);
+        assert_eq!(sort.folders_omitted, vec!["prod".to_owned()]);
+        assert!(sort.folders_added.is_empty(), "{:?}", sort.folders_added);
+        assert_eq!(
+            fusion.arbre.folders.len(),
+            1,
+            "aucun dossier racine de plus"
+        );
+        assert_eq!(
+            fusion.arbre.folders[0].folders[1].connections[0]
+                .consoles
+                .len(),
+            1,
+            "la console est versée dans la connexion, à sa place locale"
+        );
+    }
+
+    /// **Seul le contenant vide est omis, à la profondeur où il l'est.** Un dossier du fichier qui
+    /// apporte une connexion est créé ; son sous-dossier dont la connexion est déjà ici ne l'est pas.
+    /// Et un dossier vide **dans le fichier** arrive vide : c'est une intention, pas un résidu.
+    #[test]
+    fn seuls_les_dossiers_crees_sans_rien_apporter_sont_omis() {
+        let locaux = halle();
+        let mut nouveau = dossier("nouveau", "Nouveau", false);
+        nouveau.folders.push(locaux.folders[0].folders[1].clone());
+        nouveau.folders.push(dossier("prepare", "Préparé", false));
+        nouveau.connections.push(base("c-neuve", false));
+
+        let fusion = fusionner(
+            &locaux,
+            &Kubeconfigs::default(),
+            &fichier_de(vec![nouveau], Vec::new()),
+            None,
+        );
+
+        let sort = &fusion.report.folders[0];
+        assert_eq!(sort.verdict, FolderVerdict::Created);
+        assert_eq!(sort.folders_omitted, vec!["Nouveau › prod".to_owned()]);
+        assert_eq!(
+            sort.folders_added,
+            vec!["Nouveau".to_owned(), "Nouveau › Préparé".to_owned()]
+        );
+        let cree = &fusion.arbre.folders[1];
+        assert_eq!(cree.name, "Nouveau");
+        assert_eq!(
+            cree.folders
+                .iter()
+                .map(|d| d.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Préparé"]
+        );
+    }
 
     #[test]
     fn un_dossier_absent_arrive_entier_avec_ses_identifiants() {

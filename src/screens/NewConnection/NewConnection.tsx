@@ -8,6 +8,7 @@ import {
 import { Icon } from '../../design/icons/Icon'
 import type { SaveDatabaseResult, UpdateVariantRequest } from '../../domain/arbre'
 import type {
+  ConnectionId,
   Database,
   Engine,
   Folder,
@@ -113,8 +114,12 @@ type NewConnectionProps = {
   edition?: Database
   /** Appelle la commande `update_variant` (`08g`). */
   onUpdate?: (request: UpdateVariantRequest) => Promise<FolderTree>
-  /** Appelé après un enregistrement réussi, avec l'arbre à jour. */
-  onSaved?: (arbre: FolderTree) => void
+  /**
+   * Appelé après un enregistrement réussi, avec l'arbre à jour — et, **à la création seulement**,
+   * l'identifiant que le cœur vient de tirer, pour que l'écran révèle la connexion (#108). En édition
+   * il n'y a rien à révéler : la connexion était déjà dans l'arbre, là où on l'a prise.
+   */
+  onSaved?: (arbre: FolderTree, creee?: ConnectionId) => void
 }
 
 /**
@@ -343,10 +348,9 @@ export function NewConnection({
       // **Le dossier du cadre, jamais un champ du brouillon** (#166) : une seule commande, un seul
       // acte. L'identifiant de la connexion est tiré par le cœur.
       const issue = await onSave(draftToSaveRequest(draft, dossier))
-      onSaved?.(issue.tree)
-      // La modale se ferme : `08e` § Hors périmètre — « ouvrir » veut dire aller vers `A4`,
-      // qui n'existe pas avant `09`. Ce scope enregistre et ferme ; `09` branchera la
-      // navigation. Dit ici pour qu'un lecteur ne cherche pas le bug.
+      onSaved?.(issue.tree, issue.connection)
+      // La modale se ferme, et « ouvrir » veut dire **révéler** : l'écran de travail déplie les
+      // dossiers ancêtres de la connexion et la sélectionne (#108).
       onClose()
     } catch (cause) {
       // Le refus s'affiche là où `08d` affiche déjà les échecs : le message inline du pied.

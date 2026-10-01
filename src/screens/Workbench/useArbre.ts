@@ -451,6 +451,21 @@ export function useArbre(
     [deplies, charger],
   )
 
+  /**
+   * Déplie des nœuds **sans jamais en replier** — la chaîne des dossiers ancêtres d'une connexion
+   * qu'on vient de créer (#108). `basculer` n'y convient pas : il replie ce qui est déjà ouvert, et
+   * il demande un nœud que l'arbre n'a pas encore produit, un dossier replié ne rendant pas ses
+   * enfants. Un dossier n'a rien à charger, donc il n'y a que le dépliage à poser.
+   */
+  const deplierLesDossiers = useCallback((ids: readonly string[]) => {
+    setDeplies((precedent) => {
+      if (ids.every((id) => precedent.has(id))) return precedent
+      const suivant = new Set(precedent)
+      for (const id of ids) suivant.add(id)
+      return suivant
+    })
+  }, [])
+
   /** Oublie tout ce qui est chargé, sans replier : le prochain regard rechargera. */
   const rafraichir = useCallback(() => {
     setCharge(CHARGE_VIDE)
@@ -463,6 +478,7 @@ export function useArbre(
       charge,
       etatDeBase,
       basculer,
+      deplierLesDossiers,
       charger,
       assurerLOuverture,
       rechargerLesSchemas,
@@ -473,6 +489,7 @@ export function useArbre(
       charge,
       etatDeBase,
       basculer,
+      deplierLesDossiers,
       charger,
       assurerLOuverture,
       rechargerLesSchemas,

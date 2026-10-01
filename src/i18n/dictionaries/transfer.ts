@@ -48,6 +48,7 @@ export const transferFr: Dictionnaire = {
     verdict: {
       created: 'Nouveau dossier',
       merged: 'Dossier existant, complété',
+      omitted: 'Déjà ici : rien à créer',
       rootMerged: 'Ajoutées à la racine',
       skipped: 'Écarté',
       rejected: 'Refusé',
@@ -60,6 +61,11 @@ export const transferFr: Dictionnaire = {
     consolesKept: (p) => `${p.count} console(s) homonymes : le texte local est gardé`,
     foldersKept: (p) =>
       `${p.count} dossier(s) déjà présents ici : leur nom et leur couleur sont gardés`,
+    // **Une réserve** (#108) : le fichier portait ces dossiers, et ils ne sont pas créés — leurs
+    // connexions sont déjà déclarées ici, ailleurs. Un dossier vide à la racine aurait été le seul
+    // effet visible de l'import ; le taire ferait croire qu'il manque quelque chose.
+    foldersOmitted: (p) =>
+      `${p.count} dossier(s) non créés : leurs connexions sont déjà ici, à leur place`,
     // **Une réserve, et non un détail** (#169) : la lecture seule fusionne en « locale OU fichier »,
     // donc un dossier local peut la **recevoir**. C'est la seule chose qu'un import change à ce qui
     // était déjà là, et elle ferme les connexions concernées.
@@ -113,6 +119,7 @@ export const transferEn: Dictionnaire = {
     verdict: {
       created: 'New folder',
       merged: 'Existing folder, completed',
+      omitted: 'Already here: nothing to create',
       rootMerged: 'Added at the root',
       skipped: 'Skipped',
       rejected: 'Refused',
@@ -124,6 +131,8 @@ export const transferEn: Dictionnaire = {
       `${p.count} connection(s) already declared here: settings and place are kept`,
     consolesKept: (p) => `${p.count} console(s) with the same name: the local text is kept`,
     foldersKept: (p) => `${p.count} folder(s) already here: their name and colour are kept`,
+    foldersOmitted: (p) =>
+      `${p.count} folder(s) not created: their connections are already here, in place`,
     readOnlyFromFile: (p) => `${p.count} local folder(s) become read-only`,
     passwordsMissing: (p) => `${p.count} connection(s) are waiting for their password`,
     passwordsStored: (p) => `${p.count} password(s) stored from the file`,

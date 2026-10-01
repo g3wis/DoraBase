@@ -13,6 +13,7 @@ function sort(name: string | null, patch: Partial<FolderOutcome> = {}): FolderOu
     verdict: { kind: 'created' },
     foldersAdded: [],
     foldersKept: [],
+    foldersOmitted: [],
     readOnlyFromFile: [],
     connectionsAdded: [],
     connectionsKept: [],
@@ -259,6 +260,34 @@ test('ce qui n’arrivera pas est dit, avec sa liste en infobulle', async () => 
   )
 })
 
+/**
+ * **Un dossier qui n'apporte rien le dit** (#108) : réimporté sur son poste d'origine, un sous-dossier
+ * trouve toutes ses connexions déjà ici et n'est pas créé. La ligne ne doit pas s'annoncer « Nouveau
+ * dossier », et la réserve nomme le dossier omis.
+ */
+test('un dossier omis faute de rien apporter le dit, sans s’annoncer nouveau', async () => {
+  render(
+    <Piloté
+      onInspecter={() =>
+        Promise.resolve(
+          rapport([
+            sort('Atelier Nord', {
+              verdict: { kind: 'omitted' },
+              foldersOmitted: ['Atelier Nord'],
+              connectionsKept: ['Atelier Nord › prod › catalogue'],
+            }),
+          ]),
+        )
+      }
+    />,
+  )
+  await choisir()
+
+  expect(screen.getByText(/Déjà ici : rien à créer/)).toBeVisible()
+  expect(screen.queryByText(/Nouveau dossier/)).toBeNull()
+  expect(screen.getByText(/1 dossier\(s\) non créés/)).toHaveAttribute('title', 'Atelier Nord')
+})
+
 test('une réserve vide ne paraît pas', async () => {
   // **Le contrôle négatif du test précédent** : sans lui, des lignes rendues d'office passeraient
   // aussi — et « 0 connexion(s) déjà déclarées ici » se lirait comme une réserve.
@@ -270,6 +299,7 @@ test('une réserve vide ne paraît pas', async () => {
   expect(screen.queryByText(/à vérifier/)).toBeNull()
   expect(screen.queryByText(/libellés/)).toBeNull()
   expect(screen.queryByText(/lecture seule/)).toBeNull()
+  expect(screen.queryByText(/non créés/)).toBeNull()
 })
 
 test('un fichier qui porte des mots de passe en clair le dit', async () => {

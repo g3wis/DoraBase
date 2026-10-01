@@ -23,6 +23,7 @@ import { ARBRE_VIDE, arbreEstVide } from '../data/dossiers'
 import { useConfiguration } from '../data/useConfiguration'
 import { Sprite } from '../design/icons/Sprite'
 import type {
+  ConnectionId,
   Database,
   FolderId,
   FolderTree,
@@ -112,6 +113,12 @@ export function App() {
    * N », puis se nomme là où il est.
    */
   const [aRenommer, setARenommer] = useState<string | undefined>(undefined)
+  /**
+   * La connexion qu'« Enregistrer & ouvrir » vient de créer, que l'écran de travail **révèle** —
+   * ancêtres dépliés, ligne sélectionnée (#108). Un objet neuf à chaque création : c'est son
+   * identité qui relance la révélation, même pour deux créations dans le même dossier.
+   */
+  const [revelation, setRevelation] = useState<{ connection: ConnectionId } | undefined>(undefined)
   /**
    * Les préférences (`15a`), lues au démarrage avec les projets.
    *
@@ -378,6 +385,7 @@ export function App() {
             onNewDatabase={(dossier) => setConnexionOuverte({ dossier })}
             onNewFolder={creerUnDossier}
             renommageInitial={aRenommer}
+            revelation={revelation}
             onRenameFolder={async (folder, name) => {
               setArbre(await renameFolder({ folder, name }))
             }}
@@ -522,7 +530,10 @@ export function App() {
               kubeconfigs={kubeconfigs}
               onDeclareKubeconfig={declarerUnKubeconfigEtRendreSaReference}
               catalogueKubernetes={catalogueKubernetes}
-              onSaved={setArbre}
+              onSaved={(suivant, creee) => {
+                setArbre(suivant)
+                if (creee !== undefined) setRevelation({ connection: creee })
+              }}
             />
           )}
         </>

@@ -135,6 +135,12 @@ foldersAdded: Array<string>,
  */
 foldersKept: Array<string>, 
 /**
+ * Les dossiers que la fusion **aurait créés** et qu'elle omet, parce que leur sous-arbre
+ * n'apporte rien — ni connexion, ni sous-dossier retenu, ni libellé (#108). Leurs connexions
+ * sont déjà déclarées ici, ailleurs : le dossier serait un contenant vide.
+ */
+foldersOmitted: Array<string>, 
+/**
  * Les dossiers locaux qui **passent en lecture seule** parce que le fichier la déclare : la
  * lecture seule fusionne en « local OU fichier », jamais affaiblie.
  */
@@ -148,7 +154,7 @@ connectionsKept: Array<string>, connectionsRejected: Array<string>, consolesAdde
 /**
  * Le sort d'une entrée du fichier.
  */
-export type FolderVerdict = { "kind": "created" } | { "kind": "merged" } | { "kind": "skipped" } | { "kind": "rejected", reason: string, };
+export type FolderVerdict = { "kind": "created" } | { "kind": "merged" } | { "kind": "omitted" } | { "kind": "skipped" } | { "kind": "rejected", reason: string, };
 
 /**
  * `import_projects`.

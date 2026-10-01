@@ -435,6 +435,25 @@ describe('Workbench', () => {
     expect(screen.getByText('Sélectionner une entité pour commencer')).toBeInTheDocument()
   })
 
+  // **Révéler une connexion déplie *toute* la chaîne de ses ancêtres** (#108) — ce qu'« Enregistrer &
+  // ouvrir » demande. Le décor la range deux paliers sous la racine, tous deux repliés : ne déplier
+  // que le parent direct laisserait la ligne invisible, et le test le verrait, l'arbre ne produisant
+  // aucun enfant d'un dossier replié.
+  it('une connexion révélée a ses dossiers ancêtres dépliés et sa ligne sélectionnée', async () => {
+    monter({ revelation: { connection: ANALYTICS } })
+    const ligne = await screen.findByRole('treeitem', { name: /^analytics\b/ })
+    expect(ligne).toHaveAttribute('aria-selected', 'true')
+    expect(ligne).toHaveAttribute('aria-level', '3')
+    // Et elle seule : sa voisine du même dossier paraît, sans être sélectionnée.
+    expect(screen.getByRole('treeitem', { name: /^shop\b/ })).toHaveAttribute(
+      'aria-selected',
+      'false',
+    )
+    expect(
+      screen.getAllByRole('treeitem').filter((l) => l.getAttribute('aria-selected') === 'true'),
+    ).toHaveLength(1)
+  })
+
   // **Le schéma est le premier palier qui a quelque chose à dire** : c'est `A4`, et il reste.
   it('assemble la coquille dès qu’un schéma est sélectionné : arbre, centre, panneau droit', async () => {
     const utilisateur = userEvent.setup()
