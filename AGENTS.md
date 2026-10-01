@@ -210,21 +210,35 @@ qu'il portait et que le rendu ne dit pas.
   onglet. Elle prend la largeur de son `SplitPane` au lieu de l'imposer — sinon la poignée
   ne déplacerait rien. Un mockup figé ne peut pas exprimer un panneau que l'utilisateur
   déplace ; c'est la raison de tous les écarts de cote restants.
-- **Aucune modale ne nomme un objet à sa création.** Une console prend « console N », le
-  plus petit numéro libre. Nommer avant d'avoir écrit revient à demander un titre pour une
-  page blanche. Le renommage se fait **sur place**, au double-clic, sur la ligne d'arbre
-  comme sur l'onglet : `Entrée` valide, `Échap` abandonne, la perte de focus valide.
-  L'entrée « Renommer… » du menu « … » subsiste — un geste qui n'existe qu'au double-clic
-  est invisible et inatteignable au clavier.
-- **Le projet est le *cadre* de la modale de connexion, pas un de ses champs** (26 août 2026).
-  Il s'annonce dans la bande d'en-tête, à droite du titre, et ne se choisit nulle part : le
-  triplet `projet/base/environnement` est la clé du registre et la référence du secret, donc un
-  sélecteur y proposait un geste qui **n'existe pas** — déplacer une connexion d'un projet à
-  l'autre. Corollaire : le geste de création part du **palier qui connaît son contexte** — le
-  menu d'une ligne d'environnement —, comme la création de console part du menu d'une connexion.
-  Le pied de la sidebar est parti pour la même raison : il devait deviner, et se trompait dès que
-  deux projets étaient dépliés. Ce qu'il portait encore, « Nouveau projet », est monté dans une
-  bande d'icônes en tête, où 35 px remplacent ses 78 px pris sur la hauteur de l'arbre.
+- **Aucune modale ne nomme un objet à sa création.** Une console prend « console N », le plus petit
+  numéro libre, et un dossier « dossier N » parmi ses frères (#166). Nommer avant d'avoir écrit
+  revient à demander un titre pour une page blanche. Le renommage se fait **sur place**, au
+  double-clic, sur la ligne d'arbre comme sur l'onglet : `Entrée` valide, `Échap` abandonne, la
+  perte de focus valide. L'entrée « Renommer… » du menu « … » subsiste — un geste qui n'existe qu'au
+  double-clic est invisible et inatteignable au clavier.
+- **Le dossier est le *cadre* de la modale de connexion, pas un de ses champs** (26 août 2026
+  pour le projet, 29 septembre 2026 pour le dossier, #166). Il s'annonce dans la bande d'en-tête,
+  à droite du titre, par son **chemin** (« Atelier Nord › prod », ou « Racine »), et ne se choisit
+  nulle part. La raison d'origine est morte — le triplet `projet/base/environnement` était la clé
+  du registre, donc un sélecteur proposait un geste qui n'existait pas —, puisque déplacer une
+  connexion existe désormais (#167). Ce qui reste vrai est l'autre moitié : **le geste de création
+  part du palier qui connaît son contexte** — le menu d'une ligne de dossier —, comme la création
+  de console part du menu d'une connexion. Un sélecteur de dossier dans `A2` ferait deux gestes
+  pour ranger une connexion, dont l'un au milieu d'un formulaire de connexion. Le pied de la
+  sidebar est parti pour la même raison : il devait deviner, et se trompait dès que deux projets
+  étaient dépliés. Ce qu'il portait encore est monté dans une bande d'icônes en tête, où 35 px
+  remplacent ses 78 px pris sur la hauteur de l'arbre, et c'est désormais « Nouveau dossier ».
+
+  **Et « Enregistrer & ouvrir » révèle ce qu'il vient de créer** (29 septembre 2026, #108). La
+  connexion naissait dans un dossier replié : rien ne bougeait à l'écran, et le geste se lisait
+  comme un enregistrement sans effet — le défaut n° 36 au bout du formulaire. `save_database` rend
+  l'identifiant tiré par le cœur, `App` le passe à l'écran de travail en **révélation** (un objet
+  neuf par création, dont l'identité est le jeton : deux créations dans le même dossier doivent
+  chacune révéler la leur), et la **chaîne entière** des dossiers ancêtres se déplie avant que la
+  ligne soit sélectionnée. Pas seulement le parent : un dossier replié ne produit aucun enfant,
+  donc déplier le parent sous un grand-parent replié ne montrerait rien. Le nœud est composé par
+  `aplatir` sur le dépliage d'après, dans l'effet même, plutôt qu'attendu au rendu où la sidebar
+  le produirait — ce qui aurait demandé un second effet qui guette son apparition.
 - **« Copier le nom » est dans les deux listes qui nomment un objet** (#162). L'arbre et la liste du
   centre nomment tous deux une table, et ni l'un ni l'autre ne laissait en reprendre le nom : la
   ligne n'est pas du texte sélectionnable, donc le nom se retapait. Quatre décisions à ne pas
@@ -305,15 +319,15 @@ qu'il portait et que le rendu ne dit pas.
   reste ne suffit pas.
 - **Et cet engrenage n'ouvrait rien sur `A1`** (26 août 2026). `WelcomeScreen` montait la barre sans
   `onOpenPreferences`, donc le bouton retombait sur le `disabled` de `TitleBar` — dont l'infobulle
-  renvoyait vers *l'écran de travail*, qui n'existe précisément pas tant qu'aucun projet n'est
-  déclaré. Le premier écran du produit avait un réglage inatteignable, et un commentaire d'`App`
-  affirmait le contraire depuis que la modale y avait été montée « pour être atteignable depuis
-  `A1` ». Deux choses à en retenir : **un composant juste dans sa vitrine ne prouve rien de
-  l'assemblage** — le test qui manquait partait de `/` —, et **rien ne se voyait**, parce que
-  `.action` n'a aucun style `:disabled` : le bouton mort avait l'exacte apparence du vivant, et son
-  `disabled` avalait au passage l'infobulle qui aurait dit pourquoi (le piège n° 3
-  d'accessibilité). L'infobulle ne nomme plus d'écran ; la galerie est le dernier appelant à monter
-  la barre sans gestionnaire.
+  renvoyait vers *l'écran de travail*, qui n'existe précisément pas tant qu'aucun projet —
+  aujourd'hui aucun dossier — n'est déclaré. Le premier écran du produit avait un réglage
+  inatteignable, et un commentaire d'`App` affirmait le contraire depuis que la modale y avait été
+  montée « pour être atteignable depuis `A1` ». Deux choses à en retenir : **un composant juste dans
+  sa vitrine ne prouve rien de l'assemblage** — le test qui manquait partait de `/` —, et **rien ne
+  se voyait**, parce que `.action` n'a aucun style `:disabled` : le bouton mort avait l'exacte
+  apparence du vivant, et son `disabled` avalait au passage l'infobulle qui aurait dit pourquoi (le
+  piège n° 3 d'accessibilité). L'infobulle ne nomme plus d'écran ; la galerie est le dernier
+  appelant à monter la barre sans gestionnaire.
 - **La barre de titre n'a plus qu'une action, l'engrenage** (26 août 2026). Le bouton de console
   qu'elle portait n'avait pas d'`onClick` depuis le premier assemblage : cliquable et inerte, donc
   lisible comme une panne — le défaut n° 36, dont l'engrenage voisin portait déjà le remède. Et il
@@ -363,7 +377,7 @@ qu'il portait et que le rendu ne dit pas.
     sa raison*. Ce grisé était juste tant que tous les écrans du produit passaient le gestionnaire et
     que la galerie était le seul appelant à ne pas le faire ; il serait devenu un carré mort annonçant
     un réglage inatteignable **alors qu'il est à trente pixels de là**. C'est l'arbitrage de
-    `onNewProject` dans la même bande, et le défaut n° 36 par l'autre bout. La clé
+    `onNewFolder` (alors `onNewProject`) dans la même bande, et le défaut n° 36 par l'autre bout. La clé
     `preferencesDisabledTitle` est partie avec l'état qu'elle décrivait (règle n° 20) ;
   - **à gauche, contre le « + »** — et une fin de bande poussée à droite a existé une demi-heure avant
     d'être retirée (rapporté à l'usage : « aligne l'icône à gauche à côté du + »). Elle rangeait ce
@@ -1174,6 +1188,289 @@ qu'il portait et que le rendu ne dit pas.
   sur le seul onglet laisserait revenir la phrase sous « Général ». Vérifié par deux sabotages, un
   par moitié : chacun ne fait tomber que son assertion.
 
+### L'arborescence en dossiers (29 septembre 2026, #108)
+
+L'arbre en projets et environnements était restrictif : deux paliers fixes, un drapeau `production`
+par environnement, et une connexion désignée par le nom des deux. Il est remplacé par un **arbre de
+dossiers sans limite de profondeur** : un dossier a un nom renommable, une pastille de couleur et un
+réglage de **lecture seule qui s'impose à tous ses descendants**. Livré d'une passe, en six
+sous-tickets — le modèle et le cran de migration (#164), le registre et les secrets (#165), la
+sidebar (#166), le déplacement (#167), la lecture seule (#168), le transfert (#169). Les sections
+« Une seule identité pour une connexion », « La migration du format de configuration » et « Exporter
+et importer des dossiers » portent ce qui les concerne ; celle-ci porte le reste.
+
+**Le modèle est imbriqué, et non à plat.** Une liste de dossiers qui porteraient chacun un `parent`
+aurait rendu exprimables les cycles et les parents morts ; imbriqués, ils ne le sont pas, l'export
+d'un sous-arbre est un clonage, et le fichier se lit à la main. Le prix — une recherche par
+identifiant est un parcours — ne pèse rien à cette taille. Dans un dossier, **les sous-dossiers
+d'abord, puis les connexions, dans l'ordre déclaré** : pas de tri alphabétique, l'ordre
+dev / staging / prod voulu par quelqu'un survit à la migration. **La racine n'est pas un dossier** :
+elle n'a ni nom, ni couleur, ni lecture seule, et elle peut porter des connexions.
+
+**L'identifiant d'une connexion est tiré à la création, et dérivé à la migration.** Seize caractères
+hexadécimaux, sans aucun sens : ni le déplacement ni le renommage ne peuvent le « périmer ». Un
+identifiant lisible dérivé du libellé, comme `InstanceId`, a été écarté : deux postes qui créent
+chacun une « psql » produiraient le même, et l'import les prendrait pour la même connexion — ses
+consoles versées dans une connexion étrangère. **C'est la commande qui tire, et elle passe
+l'identifiant aux fonctions pures** (`NouvelleBase { id, … }`), qui restent testables avec des
+identifiants fixes ; une collision fait retirer, ce qui n'arrive jamais en pratique. `valider`
+refuse tout identifiant hors de `[0-9a-z-]{1,64}` : un `/` fabriquerait une clé `connexion/a/b`.
+`FolderId` suit la même règle. La dérivation de la migration est écrite dans « La migration du
+format ».
+
+#### L'apparence d'un dossier, sans maquette
+
+Aucune maquette n'existe : **tout est réemployé de ce que l'arbre dessinait déjà**, pour n'inventer
+aucun pixel.
+
+- **un glyphe unique, `pin`** — celui de l'environnement : « un lieu où vivent des connexions » se lit
+  sans légende, et c'est ce qu'est un dossier. Deux glyphes pour un seul concept ne diraient rien de
+  plus, donc le `bag` des projets est parti ;
+- **la teinte est la pastille du dossier, ou `--accent-deep` sans couleur** — celle des projets
+  d'avant : un dossier racine migré ne change pas d'aspect. **En gras au niveau 0**, comme un projet ;
+  replié, il annonce « n connexions » **à toute profondeur** — « n sous-dossiers » ne dirait pas s'il
+  y a quoi que ce soit dedans ;
+- **le verrou sur le dossier qui *déclare* la lecture seule**, et lui seul, et l'état entre dans
+  l'annonce de la ligne : un glyphe n'a pas de nom accessible. Le badge `PROD` est parti ;
+- **« Couleur… » ouvre une petite modale**, la rangée de pastilles de l'ancien éditeur de projet
+  extraite en `Nuancier`, plus une pastille « Aucune ». Pas de sous-menu : `RowMenu` n'a que des
+  entrées simples ;
+- **un dossier vide le dit** (« Dossier vide ») : un nœud déplié sans enfant se lit comme un
+  chargement en cours, or rien ne charge ici ;
+- **un dossier naît « dossier N » et passe en renommage sur place** — depuis l'accueil, la bande de
+  tête, `⌘N` ou le menu d'un dossier. C'est « aucune modale ne nomme un objet à sa création »,
+  appliqué au seul objet qui en avait encore une : le parcours en deux étapes de l'accueil (projet,
+  puis connexion) est parti avec les projets.
+
+**L'indentation est devenue une règle, et c'est la table qui l'a dite** (#166) :
+`8 + 14 × niveau + 16 × paliers sous la connexion`. `TreeRow` portait une table littérale de cinq
+valeurs — 8, 22, 36, 52, 68 — avec un commentaire qui interdisait de la remplacer par un calcul ;
+elle ne pouvait pas dire six niveaux de dossiers. La règle **reproduit la table au pixel** pour la
+forme migrée, et elle **est** la loi que la table mettait au jour : +14 d'un nœud dépliable au
+suivant, +16 vers ce qui est sous la connexion. Dossier et connexion ont la même cadence — 8, 22, 36,
+puis 50 pour une connexion sous trois dossiers. `depth` reste le **niveau logique** (`aria-level`,
+et la pile du filtre, qui marche à toute profondeur tant que ce n'est pas l'indentation) ; le retrait
+visuel est un champ à part. Le sabotage `8 + 14 × (niveau + paliers)` fait tomber quatre valeurs.
+
+**Le menu d'un dossier, dans cet ordre** : « Rafraîchir l'arborescence » (sur un dossier racine
+seulement), « Nouvelle connexion… », « Nouveau dossier », « Renommer… », « Couleur… », « Passer en
+lecture seule » ou « Lever la lecture seule », « Exporter le dossier… », « Déplacer vers… »,
+« Retirer… ». Ce qui crée d'abord, ce qui règle ensuite, ce qui produit un fichier puis ce qui
+déplace, et **le geste destructeur en dernier**, comme partout dans le produit. Sous un ancêtre en
+lecture seule, l'entrée de lecture seule est **désactivée avec sa raison** — « Imposée par « X » » —,
+et **X est le plus extérieur** des dossiers qui l'imposent : c'est celui qu'il faut aller lever.
+
+#### La lecture seule remplace `production`, et elle refuse au lieu de confirmer
+
+**Le drapeau `production` des environnements a disparu, au profit de la seule lecture seule**
+(arbitrage de #108). La migration pose la lecture seule sur l'environnement qui était marqué
+production. **Conséquence assumée** : on ne peut plus écrire sur une cible « prod » après
+confirmation — il faut lever la lecture seule du dossier. Ce que la confirmation faisait, la
+lecture seule le fait plus fort, et d'un seul geste réversible.
+
+**Ce que l'exploration a trouvé d'abord, et qui a fait de #168 un chantier plutôt qu'un
+renommage** : la lecture seule n'était appliquée **presque nulle part**. `ConnectionSettings.read_only`
+n'était lu que par l'import de dump, et encore sur la `variant` envoyée par le front, crue sur
+parole ; ni l'écriture de la grille, ni la console, ni la création d'un schéma ne la consultaient, et
+`Guards.prod_read_only` n'avait aucun lecteur. Remplacer `production` par elle sans la **construire**
+aurait retiré à une connexion « prod » migrée ses garde-fous sans rien en échange.
+
+**Elle s'impose à tous les descendants, sans exception.** Un sous-dossier ou une connexion ne peut
+pas la lever pour lui-même : le réglage local est alors **figé avec sa raison**, et reste dans le
+fichier. La case « Lecture seule » d'`A2` montre l'état **effectif**, désactivée avec « Imposée par le
+dossier « X » », mais ce qui s'enregistre est le réglage **local** : lever la lecture seule du dossier
+rend à la connexion le choix que quelqu'un y avait fait. Le brouillon distingue donc les deux.
+
+**Elle refuse, elle ne confirme pas** — et ce qui confirmait est **supprimé**, non rebranché :
+`ApplyConfirm` et l'encart rouge du panneau des modifications, la ligne « production » de
+`RunConfirm` et de `CommitConfirm`, le rappel du gestionnaire de schémas. Garder une confirmation sur
+une cible qui refuse de toute façon serait une question sans issue. À la place :
+
+- `⌘E` et la bascule du mode édition sont **désactivés avec leur raison**, et la barre d'état de la
+  grille dit **pourquoi** au lieu d'inviter à `⌘E`. **Un `⌘E` refusé ne se rejoue pas à la levée** :
+  lever la lecture seule n'ouvre pas une édition que personne ne demande plus ;
+- une connexion qui **passe** en lecture seule avec des modifications en attente **les garde** et
+  sort du mode édition ; « Appliquer » passe en `aria-disabled` avec sa raison. Jeter en silence un
+  travail en cours n'était pas une option. `Button` a appris au passage à donner à `[aria-disabled]`
+  l'apparence de `:disabled` — le bouton d'import d'`API-30` avait l'air actif ;
+- une instruction d'écriture ou de schéma en console est **refusée avant la modale**, et le refus
+  paraît dans le résultat avec sa raison. Ce refus-là repose sur `nature.ts`, **syntaxique** : ce
+  n'est pas lui la garantie, c'est la session (plus bas) ;
+- la rangée de création du gestionnaire de schémas est désactivée, les schémas affichés restant
+  réglables — une préférence, pas une écriture ;
+- la barre de titre porte la puce « Lecture seule », enfin alimentée : sa prop n'était passée par
+  personne.
+
+**Une règle, un lieu, deux côtés du pont** (règle n° 20). Côté Rust, les commandes qui écrivent —
+`apply_changes`, `run_sql`, `create_schema`, `start_import`, `inspect_dump` — **relisent la
+configuration à chaque appel** et calculent la lecture seule effective par l'identifiant : aucune
+`variant` n'entre dans la signature d'un refus, et c'est ce qui en fait une garantie. Le sabotage qui
+relit `variant.read_only` — le défaut exact du dump d'avant — fait tomber le test. Pas de drapeau figé
+dans le registre, que N commandes de configuration devraient tenir à jour : « une règle, pas N
+branchements ». Côté écran, un **miroir** (`lectureSeuleEffective`, `data/dossiers.ts`) sert à
+désactiver avec la raison. Les deux implémentations divergeraient en silence ; **une fixture partagée**
+(`src-tauri/tests/fixtures/lecture-seule.json`, un arbre et les réponses attendues) est lue par un
+test Rust **et** par un test Vitest, et le sabotage « ignorer les ancêtres au-delà du parent »
+tombe des deux côtés.
+
+**Et c'est le serveur qui refuse, pas seulement l'application** (#168). `open_database` pose la
+lecture seule effective dans la recette, et l'adaptateur la pose sur la **session** :
+`SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY` pour PostgreSQL, `SET SESSION TRANSACTION
+READ ONLY` pour MySQL, `PRAGMA query_only` pour SQLite. Toute transaction qu'elle ouvre — l'autocommit
+d'une instruction, le `begin` d'`apply_updates`, celui d'une console — naît en lecture seule, et le
+serveur répond `25006` chez PostgreSQL. Quatre points :
+
+- **un `SET` après la connexion, et non un paramètre de démarrage** (`options=-c …`) : un répartiteur
+  comme PgBouncer refuse les paramètres de démarrage qu'il ne connaît pas, et la connexion échouerait
+  pour une raison sans rapport avec elle ;
+- **la valeur voyage dans la recette**, donc la reconnexion (`API-37`) et les sessions de console
+  (`API-38`) en héritent sans une ligne de plus ;
+- **SQLite en `query_only` refuse `BEGIN IMMEDIATE`** : une transaction de console en lecture seule
+  s'y ouvre en `BEGIN`. Elle ne peut rien écrire, donc le verrou d'écriture qu'`IMMEDIATE` prenait
+  d'avance n'a rien à protéger ;
+- **ce qu'elle n'arrête pas, et il faut le savoir** : elle arrête la **faute**, pas l'intention. Une
+  console peut la lever — `set session characteristics as transaction read write`,
+  `pragma query_only = off`. **MongoDB et BigQuery n'ont rien d'équivalent** : pour eux la garantie
+  reste celle de l'application, et `raisonDeLaLectureSeule` le dit en toutes lettres plutôt que de
+  laisser croire à un verrou de serveur.
+
+**Changer la lecture seule ferme les connexions dont l'effectif change — et elles seules**
+(`FolderTree::lecture_seule_changee`). Reposer un `SET` sur une session ouverte ne suffirait pas : le
+pool de MySQL ne le propagerait pas à ses autres connexions. Fermer, c'est laisser la réouverture
+poser le bon régime depuis la recette. Les autres connexions restent `Connected`, sans toucher au
+registre ni au Trousseau. **Le refus pendant une transaction manuelle vaut dans les deux sens** —
+poser comme lever —, parce que fermer emporterait la transaction (`API-38`) ; il nomme le chemin de
+la connexion, le registre ne rendant qu'un booléen. C'est le **patron** que `set_folder_read_only`,
+les deux déplacements et l'import suivent tous les trois : d'abord calculer sans écrire ce qu'il
+faudrait fermer, refuser si c'est une transaction ouverte, écrire, puis fermer hors du verrou de
+configuration.
+
+**Et un défaut antérieur, trouvé en route : `init` de `mysql_async` n'est joué qu'une fois** (#168).
+Il ne s'exécute qu'à la création d'une connexion du pool, or le pool **réinitialise** la session à
+chaque retour. Le `time_zone` et le `sql_mode` que l'adaptateur forçait ne tenaient donc que jusqu'au
+premier retour au pool — et la lecture seule posée au même endroit aurait fait passer une écriture
+au deuxième essai. Tout est passé en **`setup`**, rejoué à la création **et** après chaque
+réinitialisation, et le test fait exprès plusieurs lectures avant d'écrire, pour que chacune rende sa
+connexion au pool.
+
+**Le drapeau `production` survit sur une seule chose : l'instance managée**, et c'est délibéré. Une
+instance n'est pas dans l'arbre, et elle existe **pour écrire** — rôles, bases, privilèges : la
+lecture seule la rendrait inutile. Son drapeau gouverne `SqlConfirm`, le rappel TLS de sa modale et le
+badge de sa ligne, qui n'ont pas changé, et son ouverture force `read_only` à faux. L'asymétrie est
+voulue : une connexion sensible **refuse**, une instance sensible **confirme en montrant le SQL**.
+
+#### Déplacer, confirmé et nommé
+
+Une connexion ou un dossier se déplace — par glisser-déposer **et** par « Déplacer vers… » : un chemin
+unique à la souris est un chemin que personne ne trouve au clavier. Ni le registre ni le Trousseau ne
+sont touchés, c'est le bénéfice de l'identifiant stable ; `index` réordonne parmi les frères, ce qui
+rend le réordonnancement que l'éditeur de projet offrait sur les environnements.
+
+**Sortir une connexion d'un dossier en lecture seule contourne l'arbitrage « sans exception », et
+c'est autorisé — confirmé et nommé.** Une réorganisation est légitime, un contournement silencieux ne
+l'est pas. Le refus strict — interdire de sortir tant que le dossier source est en lecture seule —
+aurait rendu toute réorganisation d'un dossier « prod » impossible sans lever d'abord la lecture seule
+de tout le monde. Sept points :
+
+- **le drapeau `confirmed` est exigé côté Rust**, pas seulement par la modale : une question qui ne
+  vivrait qu'à l'écran se contournerait par tout autre appelant. Le sabotage qui l'ignore fait tomber
+  « quitter la lecture seule sans confirmation » ;
+- **une question n'est pas une erreur** : elle sort en `Ok(ConfirmationRequired { … })`, rien n'est
+  écrit, et elle est **recalculée sur l'arbre relu au moment d'écrire** — un arbre modifié entre-temps
+  repose la question, jamais ne l'écrit en silence ;
+- **c'est la lecture seule *effective* qui compte, pas sa cause.** Un dossier en lecture seule
+  déplacé l'emporte avec lui ; une connexion réglée en lecture seule localement sous « prod » ne
+  demande rien en sortant. Le dossier nommé est celui qui impose **après** une entrée, **avant** une
+  sortie ;
+- **un seul chemin porte la règle** (règle n° 17) : un dépôt part avec `confirmed = false`, et si le
+  cœur pose la question, c'est « Déplacer vers… » qui s'ouvre, **préremplie**. La modale n'envoie
+  `confirmed = true` que si la phrase de lecture seule est **affichée** : on ne confirme que ce qu'on a
+  lu ;
+- **« Déplacer vers… » réemploie `TreeRow`**, « Racine » en tête. Le dossier lui-même et ses
+  descendants (« Un dossier ne se range pas dans lui-même. ») et le parent actuel (« Déjà ici. ») sont
+  en `aria-disabled` avec leur `title` : le test **compte** les boutons actifs plutôt que de chercher
+  par nom, le piège de la case de l'import ;
+- **`index` est le rang parmi les frères d'arrivée, le sujet exclu**, un rang trop grand voulant dire
+  « en dernier ». Une connexion n'a pas d'homonymie à craindre ; un dossier arrivant près d'un frère
+  de même nom est refusé, sans renommage automatique ;
+- **refusé si une transaction manuelle est ouverte** sur une connexion qu'il faudrait fermer — le
+  patron de la lecture seule, plus haut.
+
+**Le glisser se fait aux événements pointeur, jamais en `draggable`.** Le glisser-déposer HTML5 ne
+marche pas dans WKWebView — `VirtualGrid` l'avait appris le 2 septembre 2026 —, et une suite
+Playwright verte sous Chromium n'en aurait rien dit. C'est le patron de
+`VirtualGrid::debuterLeReordonnancement` : capture du pointeur, `elementFromPoint` pour savoir ce qui
+est dessous — la ligne saisie captant tous les événements, leur cible ne dit rien, leurs coordonnées
+si. Armé au-delà de **4 px**, pour qu'un clic reste un clic ; **par tiers sur un dossier** (avant,
+dedans, après) et **par moitié sur une connexion**, qui ne contient rien ; « après » un dossier déplié
+veut dire en tête de ses enfants ; une connexion lâchée sur un dossier y entre toujours, les
+connexions suivant les sous-dossiers ; **la racine est la bande de tête** pendant le glissement
+(« Déposer à la racine ») ; le dossier d'arrivée replié se déplie, et le clic que produit le
+relâchement est avalé, sans quoi il sélectionnerait la ligne sous le pointeur. L'arrivée se marque
+d'un filet d'accent : **c'est un état de glissement, pas un survol**, et la prohibition des survols
+inventés n'en est pas touchée.
+
+**Le dépliage, la sélection, les onglets et les consoles ouvertes survivent au déplacement**, puisque
+les identités de nœud sont stables : c'est ce que l'e2e de #167 mesure en glissant pour de vrai une
+connexion ouverte (`mouse.down`, `move`, `up`).
+
+#### Ce que la vérification a appris
+
+**Les sabotages restés verts au premier passage**, et chacun a sa leçon — la règle n° 1 ne dit pas
+assez, *un sabotage vert doit être interrogé sur ce qui le rend vert* :
+
+- **« la lecture seule jugée sur sa cause plutôt que sur son effet »**, côté écran (#167) : le décor
+  n'avait aucun cas où la cause change sans l'effet. Un cas s'y ajoute — une connexion en lecture seule
+  locale sous « prod » ne demande rien — et c'est la règle n° 5 : le décor doit distinguer ce qu'on
+  prétend distinguer ;
+- **« gardé » mesuré sur l'arbre courant plutôt que d'origine** (#169) : aucun décor ne portait deux
+  fois la même connexion, donc les deux instantanés étaient indiscernables. Même leçon ;
+- **deux gardes qui se couvrent ne se dénoncent pas** (#168) : celle de `basculerLEdition` était
+  couverte par celle d'`enEdition`, et retirer l'une laissait la suite verte. Chacune a désormais son
+  test — c'est la leçon du chargeur du diagramme, pour la seconde fois ;
+- **un harnais qui fige le décor** (#168) : `monter({ arbre })` de `Workbench.test.tsx` étale `over`
+  **après** l'arbre tenu en état, donc un test qui passe son propre arbre le fige — un geste au menu
+  n'y change plus rien, et l'assertion qui suit mesure le décor. Connu, à garder en tête avant
+  d'écrire un test qui fait bouger l'arbre ;
+- **un sabotage qui ne s'applique pas est vert pour rien**, et c'est arrivé **trois fois** dans ce
+  chantier : `cargo fmt` a reformaté une ligne dont le motif devenait introuvable (#168), une entrée de
+  menu « retirée » ne l'était pas (#169), et un motif qui contenait `||` a été coupé en deux par le
+  script qui l'appliquait (la passe finale). **Vérifier que le sabotage a eu lieu** — un compte
+  d'occurrences avant d'écrire — fait partie du sabotage, et le script de #164 le faisait d'emblée :
+  ses huit sabotages sont tous tombés ;
+- **une garantie passée dans la signature ne se sabote plus au même endroit** (#165) : « rappeler
+  `registry.fermer` au renommage » ne pouvait plus s'écrire, le renommage ne recevant plus le registre.
+  Ce qu'il reste à garder est l'**invariant** qui rend la garantie vraie — un identifiant qui ne bouge
+  pas —, et c'est en faisant tirer un nouvel identifiant au renommage que le test est tombé ;
+- **et un sabotage attendu vert** (#166) : l'indentation cassée laisse vert le test de renommage, qui
+  ne mesure aucun pixel ; celui des trois niveaux tombe. Ce n'est pas un défaut du test : c'est le
+  partage des deux.
+
+**Le décor `?demo` a changé de sens sur un point** : « Atelier Nord › prod » **n'y est plus** en
+lecture seule, parce que ses deux connexions étaient les seules inscriptibles de la démo et que l'e2e
+ne pourrait plus rien y écrire ; c'est « Outils internes › prod » qui porte la lecture seule. Un test
+qui cherche « prod » pour mesurer un refus doit viser ce dernier.
+
+#### Ce qui reste à voir à l'œil
+
+- **La migration réelle d'un `config.json` v6 dont les mots de passe sont au Trousseau**, puis
+  quitter et relancer, et ouvrir chaque connexion sans rien ressaisir. C'est le seul geste qui dise
+  que les secrets ont suivi ; tout le reste est mesuré contre le magasin chiffré et des doubles. Y
+  ajouter une autorisation du Trousseau **refusée** en cours de migration, qui doit laisser le
+  fichier intact et dire « relancez DoraBase ».
+- **Le glissement et les modales sous WKWebView, et en « Nuit »** — « Déplacer vers… », le nuancier,
+  le verrou en bout de ligne, le chemin long tronqué à gauche dans la barre de titre, la bascule en
+  `aria-disabled` et son infobulle, le `title` de la case figée d'`A2`. Tout a été regardé sous
+  Chromium, en clair. **Le défilement au bord de la sidebar pendant un glissement n'a aucun test**, et
+  l'avalement du clic de relâchement n'est distingué d'une resélection par aucun.
+- **Le vrai aller-retour d'export** : un dossier exporté avec ses mots de passe, importé sur une autre
+  machine, ouvert sans rien ressaisir ; et un vrai export v6 réimporté.
+- **La session en lecture seule derrière un proxy** — tunnel SSH, `kubectl port-forward`, PgBouncer :
+  le `SET` est mesuré contre des décors directs seulement, et c'est précisément derrière un
+  répartiteur que le choix du `SET` plutôt que d'un paramètre de démarrage se justifie.
+- **« Badge OK reste » après un déplacement, en e2e, est vrai par construction** : `?demo` ne ferme
+  rien. La vraie garantie est le test Rust sur un fichier SQLite ouvert qui reste `Connected`.
+
 ### La sidebar ne redit pas la table qu'on a ouverte (10 septembre 2026, `API-44`)
 
 La section « Colonnes de *table* » du bas de la sidebar paraissait aussi **sous un onglet de table**,
@@ -1432,8 +1729,10 @@ sur son icône : une icône ne se relit pas.
 elle vit dans le registre, à côté de la connexion, et attend « Enregistrer » comme tout formulaire de
 connexion. `create schema` s'exécute **sur la base** et DoraBase ne peut pas le défaire : il a donc
 son propre bouton, dans un bloc séparé, et le schéma créé arrive coché. Les mêler ferait
-qu'« Annuler » ne défasse qu'une moitié de ce qu'on a fait. Sur un environnement marqué production,
-la bande de création porte le rappel — le drapeau de la déclaration, jamais le libellé (`23g`).
+qu'« Annuler » ne défasse qu'une moitié de ce qu'on a fait. **Sous un dossier en lecture seule, la
+bande de création est désactivée avec sa raison** (29 septembre 2026, #168) — le rappel qu'elle portait
+sur un environnement marqué production est parti avec le drapeau : la lecture seule refuse, elle ne
+rappelle pas. Les schémas affichés, eux, restent réglables : c'est une préférence, pas une écriture.
 
 Sept décisions à ne pas défaire :
 
@@ -1461,8 +1760,8 @@ Sept décisions à ne pas défaire :
   deux gestes le périment, chacun à sa façon : régler change le filtre, créer ajoute un schéma que la
   lecture précédente ne pouvait pas connaître. Sans cette relecture, décocher un schéma n'aurait
   aucun effet visible jusqu'au prochain « Rafraîchir l'arborescence », qui replie tout. **La
-  préférence lui est passée, non relue dans `projects`** : l'appelant vient de l'enregistrer, et les
-  projets à jour ne reviennent qu'au rendu suivant — la relire appliquerait le filtre qu'on vient de
+  préférence lui est passée, non relue dans l'arbre** : l'appelant vient de l'enregistrer, et l'arbre
+  à jour ne revient qu'au rendu suivant — la relire appliquerait le filtre qu'on vient de
   remplacer. C'est `tourDesEtats` par un autre bout ;
 - **le propriétaire vient du catalogue** (`SchemaInfo.owner`), le pendant exact de `cardinality`
   ajouté pour le diagramme : ce que le moteur sait, on le lui demande. `pg_get_userbyid(nspowner)`
@@ -1485,7 +1784,7 @@ Sept décisions à ne pas défaire :
 **Trois choses apprises en le vérifiant**, et les deux dernières valent au-delà de cet écran :
 
 - **`assurerLOuverture` est devenue attendable.** Le menu d'une connexion est atteignable dès que son
-  *environnement* est déplié — sa ligne, non —, donc ce chemin arrive sur une connexion **fermée** :
+  *dossier* est déplié — sa ligne, non —, donc ce chemin arrive sur une connexion **fermée** :
   la lecture des schémas partait sur « aucune connexion ouverte » alors que rien n'allait mal. C'est
   le cinquième point d'ouverture, après les trois consoles et le diagramme, et le premier qui a
   besoin de la réponse plutôt que du seul déclenchement ;
@@ -1495,9 +1794,10 @@ Sept décisions à ne pas défaire :
   *pendant* l'appel, donc elle était ouverte avant que la lecture ne parte. Un `await Promise.resolve()`
   dans le double le fait mordre. C'est la leçon du chargeur du diagramme, sous une autre forme :
   ce que le décor rend indiscernable, aucune assertion ne le rattrape ;
-- **`ecrire_les_consoles` s'appelle désormais `ecrire_les_projets`.** Elle n'a jamais rien su des
-  consoles — elle lit les projets, applique une opération, écrit —, et un nom qui annonce un domaine
-  fait hésiter à s'en servir depuis un autre : donc fait écrire une seconde fois la même chose.
+- **`ecrire_les_consoles` s'est appelée `ecrire_les_projets`, puis `ecrire_l_arbre` (#165).** Elle
+  n'a jamais rien su des consoles — elle lit l'arbre, applique une opération, écrit —, et un nom qui
+  annonce un domaine fait hésiter à s'en servir depuis un autre : donc fait écrire une seconde fois
+  la même chose.
 
 **Ce que la maquette portait et qui n'a pas été retenu** : la colonne « objets » montre le **total**
 des quatre compteurs, le détail en infobulle — quatre nombres dans une colonne de 90 px seraient
@@ -1668,10 +1968,12 @@ qu'on fait vingt fois, ne protégeait de rien. Quatre points :
 
 - **`CommitConfirm` récapitule ce qui devient définitif** : les verbes des écritures dans l'ordre —
   « UPDATE, DELETE », et non « 2 écritures », parce que deux corrections ne sont pas une suppression
-  —, le compte d'instructions, la cible, le drapeau de production, et le `where` manquant **en
-  premier** s'il en manque un. Le panneau derrière elle porte déjà la liste complète : la modale
-  n'en redit rien, elle en donne la mesure. Elle emprunte la feuille de style de `RunConfirm` plutôt
-  qu'une copie — même écran, même coquille, mêmes blocs ;
+  —, le compte d'instructions, la cible, et le `where` manquant **en premier** s'il en manque un. La
+  ligne « production » est partie avec le drapeau (#168) : une connexion en lecture seule ne tient
+  pas de transaction qui écrive, donc il n'y a plus de cible sensible à rappeler ici. Le panneau
+  derrière elle porte déjà la liste complète : la modale n'en redit rien, elle en donne la mesure.
+  Elle emprunte la feuille de style de `RunConfirm` plutôt qu'une copie — même écran, même coquille,
+  mêmes blocs ;
 - **une transaction qui n'a fait que lire se valide sans question.** C'est la règle de
   `demandeConfirmation` — un `select` n'en demande pas — appliquée à un lot, et le classificateur
   est le **même** (`natureDe`) : deux règles pour « est-ce que ceci écrit ? » auraient divergé, et
@@ -1801,10 +2103,15 @@ retiré ce recours, donc l'issue devait devenir explicite. Quatre points :
   pourtant, `achever` fermant la session dans les deux issues : la transaction est annulée par le
   serveur même quand l'ordre échoue.
 
-**Ce qui ferme aussi ces sessions, et qu'il ne faut pas croire couvert par l'onglet** : retirer une
-console de l'arbre, comme les cinq autres commandes de configuration, ferme la **connexion** — donc
-`fermer` emporte toutes les sessions de console de cette base. Le geste d'onglet n'a donc à traiter
-que la fermeture d'onglet.
+**Ce qui ferme aussi ces sessions, et qu'il ne faut pas croire couvert par l'onglet** : les six
+commandes de configuration qui ferment une **connexion** — `update_variant`, les deux retraits, et
+les trois gestes qui changent sa lecture seule (voir « Le cache de l'arbre suit le registre ») —,
+puisque `fermer` emporte toutes les sessions de console de cette base. **Retirer une console de
+l'arbre n'en fait pas partie**, contrairement à ce que ce paragraphe a longtemps affirmé — et c'était
+faux avant les dossiers aussi : la console quitte la configuration, son onglet est délié du disque, et
+ni la connexion ni la session de console ne sont touchées. Une transaction que cet onglet tenait reste
+donc ouverte, avec son panneau pour la finir, et c'est la fermeture de l'onglet qui l'annule. Le geste
+d'onglet n'a toujours à traiter que la fermeture d'onglet.
 
 **Et une transaction abandonnée n'offre plus que l'annulation** (rapporté à l'usage). Après une
 instruction refusée, PostgreSQL refuse tout ce qui suit jusqu'à la fin du bloc, et un `commit` s'y
@@ -2296,13 +2603,15 @@ rôles, les bases, les privilèges et les sessions d'une instance demandait de s
 onglet à sept sections.
 
 **Une instance n'est pas une connexion de plus, et c'est la décision qui tient tout le reste.** Une
-`Database` désigne **une base** dans un projet, pour un environnement, et sert à en lire les
-données ; une `ManagedInstance` désigne **le serveur**, joint avec un compte d'administration. Les
-deux peuvent viser le même hôte sans que cela veuille dire quoi que ce soit. Les fondre aurait
-demandé qu'une `Database` porte un drapeau « c'est aussi une instance », donc que chaque écran qui
-liste des connexions sache l'écarter, et que le registre de projets se mette à porter des objets
-qui n'appartiennent à aucun environnement. Elles vivent donc à côté des projets — ce que la seconde
-zone de la sidebar dit à l'œil.
+`Database` désigne **une base**, rangée dans l'arbre de dossiers, et sert à en lire les données ;
+une `ManagedInstance` désigne **le serveur**, joint avec un compte d'administration. Les deux peuvent
+viser le même hôte sans que cela veuille dire quoi que ce soit. Les fondre aurait demandé qu'une
+`Database` porte un drapeau « c'est aussi une instance », donc que chaque écran qui liste des
+connexions sache l'écarter. Elles vivent donc à côté de l'arbre — ce que la seconde zone de la
+sidebar dit à l'œil. **L'arbre en dossiers (#108) a rouvert la question sans la trancher** : la raison
+d'origine — le registre de projets aurait porté des objets hors de tout environnement — est tombée
+avec les environnements, et une instance pourrait désormais se ranger dans un dossier comme une
+connexion. Voir « Ce qui attend une décision humaine ».
 
 **Ce qui a été tranché avant d'écrire** (les quatre points que le ticket laissait ouverts) : le
 rafraîchissement est **à la demande seule** ; le **journal des actions** reste hors périmètre ; un
@@ -2333,8 +2642,8 @@ d'une passe, gestes destructeurs compris.
 - **`RadioGroup` gagne un `disabled` par option**, et `TreeRow` un `indent`. Les deux sont des
   exceptions étroites, documentées sur place : le bloc « Moteur » désactive trois options sur
   quatre, et la liste d'instances est une liste de **feuilles** posée sous un arbre — sans
-  `INDENT[0] + 16`, ses icônes tomberaient 16 px à gauche de celles des projets, dans la même
-  colonne visuelle et à un palier apparent d'écart.
+  `indentation(0, 1)`, ses icônes tomberaient 16 px à gauche de celles des dossiers racine, dans la
+  même colonne visuelle et à un palier apparent d'écart.
 
 #### Le fichier de configuration, et le défaut qu'il rend possible
 
@@ -2346,7 +2655,7 @@ défaillance propre à ce format, et il est silencieux — aucun test de projet 
 Deux parades, et elles se complètent :
 
 - **`save` prend les instances en paramètre**, sans variante à trois arguments. Une signature qui
-  les aurait laissées de côté aurait fait qu'enregistrer un projet efface toutes les instances
+  les aurait laissées de côté aurait fait qu'enregistrer un dossier efface toutes les instances
   déclarées ; il n'y a donc pas de chemin qui les oublie par omission. Un test le démontre en le
   provoquant délibérément, pour que la conséquence soit écrite noir sur blanc.
 - **`ecrire_le_reste_intact` remplace huit recopies.** Les trois lignes « relire les préférences,
@@ -2476,7 +2785,7 @@ même chose et deux lignes ne se compareraient plus d'un coup d'œil.
   18 px occupent 45 px depuis le bord droit, là où la gouttière réservée en fait 24 : ils se
   peignaient par-dessus la version et le badge d'état. La parade évidente — élargir la gouttière —
   aurait coûté 45 px de libellé **en permanence** pour deux gestes rares. `RowMenu` règle les deux, et
-  c'est ce que portent déjà les lignes de projet, d'environnement et de connexion : deux formes
+  c'est ce que portent déjà les lignes de dossier et de connexion : deux formes
   d'actions de ligne dans la même colonne auraient été deux conventions à apprendre.
 
   **Et le test de recouvrement est resté vert sous sabotage** (règle n° 1). Mesurer un chevauchement
@@ -2589,7 +2898,7 @@ l'accepterait, mais rien ne s'en servirait jamais.
 #### Ce qui n'a pas été fait, et pourquoi
 
 - **La déclaration n'est atteignable que depuis l'écran de travail.** La zone vit sous l'arbre, et
-  l'écran d'accueil n'a pas de sidebar : un utilisateur sans aucun projet ne peut donc pas déclarer
+  l'écran d'accueil n'a pas de sidebar : un utilisateur sans aucun dossier ne peut donc pas déclarer
   d'instance. Le monter plus haut ferait exister un état que rien ne pourrait déclencher — l'inverse
   du défaut n° 89, et tout aussi faux. À reprendre si l'usage dit que c'est une impasse.
 - **Un nom de rôle ne se change pas.** `ALTER ROLE … RENAME TO` invalide le mot de passe stocké côté
@@ -2615,42 +2924,55 @@ l'accepterait, mais rien ne s'en servirait jamais.
 - **Un serveur à vingt bases et cinquante rôles.** La matrice défile dans son conteneur — mesuré —
   mais sa lisibilité à cette échelle n'a jamais été regardée.
 - **Les sept sections en « Nuit »**, comme les dix écrans : toute la suite mesure le clair.
-### Exporter et importer des projets (9 septembre 2026, `API-30`)
+### Exporter et importer des dossiers (9 septembre 2026, `API-30` ; dossiers le 29 septembre 2026, #169)
 
 Rien du produit ne savait sortir une déclaration de connexion de la machine où elle avait été
 saisie. Un fichier JSON s'exporte et se réimporte désormais, « comme une collection Postman » le
-demandait : tous les projets depuis le menu natif, un seul depuis le menu de sa ligne d'arbre.
+demandait : l'arbre entier depuis le menu natif (« Tout exporter… »), un dossier et son sous-arbre
+depuis le menu de sa ligne (« Exporter le dossier… »).
 
-**Le mot du produit est « projets », pas « collections ».** L'analogie de la demande est juste, mais
-« collection » est déjà le mot de MongoDB pour une table, et l'arbre en affiche sous une connexion
-mongo : « Exporter les collections… » dans le menu Fichier se lirait comme un export de données. Ce
-qui voyage est un projet, et la demande le dit elle-même — « everything or only a specific project ».
+**Le mot du produit était « projets », il est devenu « dossiers » avec l'arbre** (#169), et ce n'est
+toujours pas « collections ». L'analogie de la demande est juste, mais « collection » est déjà le mot
+de MongoDB pour une table, et l'arbre en affiche sous une connexion mongo : « Exporter les
+collections… » dans le menu Fichier se lirait comme un export de données. **Deux noms n'ont pas
+suivi, délibérément** : les commandes (`export_projects`, `import_projects`) et le marqueur `kind`
+du fichier, qui vaut toujours `dorabase.projects`. Le marqueur existe pour **refuser** ; en changer
+obligerait à en accepter deux pour relire les exports v6 qui traînent dans des dossiers partagés.
 
 **Le fichier ne traverse jamais l'IPC**, dans aucun sens. À l'export, la webview envoie un chemin et
 une case cochée ; à l'import, elle envoie un chemin et reçoit un **rapport**. C'est la contrainte
 transverse du projet — « le cœur détient les résultats ; la webview ne reçoit que ce qu'elle
 montre » —, et elle a ici une seconde raison qui suffirait seule : le fichier peut porter des mots de
 passe en clair, et une forme qui ne peut pas atteindre la webview ne peut pas finir dans une console
-de développement ni dans un journal. `FichierDeProjets` ne dérive donc pas `TS` là où les deux
+de développement ni dans un journal. `FichierDeDossiers` ne dérive donc pas `TS` là où les deux
 rapports le font, et son `Debug` est écrit à la main.
 
-**Les types du modèle sont réemployés tels quels**, et c'est ce qui tient tout le reste. La clé
-`projects` du fichier est **exactement** celle de `config.json` : le même `Vec<Project>`, le même
-`serde`. Une seconde description — un « ProjectExport » à douze champs — aurait divergé au premier
+**Les types du modèle sont réemployés tels quels**, et c'est ce qui tient tout le reste. Les clés
+`folders` et `connections` du fichier sont **exactement** celles de `config.json` v7 : le même
+`Folder`, la même `Database`, le même `serde`. Une seconde description aurait divergé au premier
 champ ajouté à `ConnectionSettings`, sans qu'aucun test le voie (règle n° 17). Corollaire à ne pas
-défaire : **le champ de version s'appelle `version`, à la racine, à côté de `projects`**. Ce n'est
-pas de la coquetterie — c'est ce qui fait de l'enveloppe un document que la chaîne de migrations lit
-**sans adaptateur**, les crans v1 → v2 et suivants désérialisant un `{ version, projects, … }`. Un
-`configVersion` les aurait fait échouer sur un champ manquant, et il aurait fallu une seconde échelle
-de migration pour la même forme de données — celle que le fichier qui traîne six mois dans un dossier
-partagé aurait payée. D'où l'extraction de `store::migrer_le_document`, la chaîne sans son chemin ni
-sa sauvegarde, et de `store::projets_du_document` qui la dispatche.
+défaire : **le champ de version s'appelle `version`, à la racine**. C'est ce qui fait de
+l'enveloppe un document que la chaîne de migration lit **sans adaptateur** : un export v6 — des
+`projects` — passe par les mêmes crans que la configuration, jusqu'au cran v6 → v7 sur types
+(`migration::arbre_du_document`). Deux réglages en plus, propres au fichier : sa clé `kubeconfigs`
+est une **liste** en v6 et doit être retirée avant la relecture v6, puis rendue ; et ses
+`passwords` sont **réindexés** par le `PlanDeSecrets` du cran — sans quoi les valeurs resteraient
+sous les anciennes clés `projet/base/environnement` et aucune connexion migrée ne les trouverait.
 
-**Et le bras « rien à migrer » vit chez l'appelant, pas dans la chaîne.** Élargir le `2..=4` de
-`migrer_le_document` jusqu'à `VERSION_COURANTE` aurait été plus court et en aurait fait un bras
-attrape-tout (règle n° 16) : le jour où la v5 → v6 demande une transformation, la plage l'avalerait
-en silence et lirait un fichier v5 comme s'il portait la forme v6. Séparés, l'oubli se **dit** — une
-version sans cran tombe sur « aucune migration connue ».
+**Et le bras « rien à migrer » vit chez l'appelant, pas dans la chaîne.** Élargir une plage de crans
+jusqu'à `VERSION_COURANTE` aurait été plus court et en aurait fait un bras attrape-tout (règle
+n° 16) : le jour où un cran demande une transformation, la plage l'avalerait en silence. Séparés,
+l'oubli se **dit** — une version sans cran tombe sur « aucune migration connue ». C'est cette
+séparation qui a fait remarquer, deux fois (v5 → v6, puis v6 → v7), qu'il y avait un cran à écrire
+plutôt qu'une borne à pousser.
+
+**Un dossier exporté seul emporte ce qu'il hérite** (#169). Il devient un dossier **racine** du
+fichier, donc il perd ses ancêtres, et ce qu'il leur devait doit voyager avec lui : sa lecture seule
+vaut sa lecture seule **effective**, et ses libellés de valeurs reçoivent, table par table, ce que
+ses ancêtres lui fournissaient — la règle de résolution, figée dans le fichier. Sans cela, « prod »
+rangé sous un dossier en lecture seule arriverait **inscriptible** sur l'autre machine : le pire sens
+possible pour cette erreur. « Tout exporter » ne matérialise rien, l'arbre entier n'ayant pas
+d'ancêtre à perdre.
 
 #### Les mots de passe : trois états, et la structure les distingue
 
@@ -2683,16 +3005,15 @@ Cinq points à ne pas défaire :
   l'export : quelqu'un a demandé les mots de passe, et un fichier qui en tairait la moitié serait
   l'artefact dangereux de ce geste. C'est la distinction que `SecretStore::retrieve` porte depuis
   `05c`, et les deux moitiés ont leur test ;
-- **la référence est recalculée sur le triplet d'arrivée, jamais reprise du fichier.** Une référence
-  est dérivée de `projet/base/environnement` (`08e`) ; celle du fichier est une coordonnée locale
-  d'une autre machine, et un fichier édité à la main peut en porter n'importe laquelle. C'est **sous
-  elle** que la valeur se cherche — c'est la clé sous laquelle l'export l'a rangée — et la locale qui
-  s'écrit. Le décor du test a dû apprendre à les distinguer : avec `Halle/catalogue/prod` des deux
-  côtés, « recalculée » et « reprise » rendent la même valeur, donc le sabotage restait vert
-  (règle n° 5) ;
+- **la référence est recalculée sur l'identifiant d'arrivée, jamais reprise du fichier.** Une
+  référence vaut `connexion/<id>` ; celle du fichier est une coordonnée locale d'une autre machine,
+  et un fichier édité à la main peut en porter n'importe laquelle. C'est **sous elle** que la valeur
+  se cherche — c'est la clé sous laquelle l'export l'a rangée — et la locale qui s'écrit. Le décor
+  du test a dû apprendre à les distinguer : avec la même référence des deux côtés, « recalculée » et
+  « reprise » rendent la même valeur, donc le sabotage restait vert (règle n° 5) ;
 - **aucun mot de passe existant n'est écrasé, et c'est une conséquence, pas une précaution.**
-  `fusionner` n'en range un que pour une connexion qu'elle **ajoute**, dont le triplet n'était donc
-  déclaré nulle part. Ce qui peut se trouver sous cette référence est un orphelin resté d'une
+  `fusionner` n'en range un que pour une connexion qu'elle **ajoute**, dont l'identifiant n'était
+  donc déclaré nulle part. Ce qui peut se trouver sous cette référence est un orphelin resté d'une
   connexion retirée : l'écraser est exactement ce qu'il faut faire ;
 - **`0600` quand le fichier porte des mots de passe, et posé sur un fichier encore vide.**
   `set_permissions` après l'écriture laisserait les octets sensibles lisibles par tout compte de la
@@ -2704,48 +3025,69 @@ Cinq points à ne pas défaire :
 
 #### L'import fusionne, et dit ce qu'il n'a pas fait
 
-Un projet dont le nom existe déjà est **complété**, non refusé : c'est ce qui rend le geste utile
-entre deux machines. Mais rien n'y écrase quoi que ce soit, et chaque refus est nommé.
+**Les dossiers sont des contenants appariés par nom, les connexions des identités appariées par
+identifiant** (#169). C'est la règle qu'avaient les projets et le triplet, portée sur l'arbre. Les
+dossiers du fichier arrivent **à la racine** ; importer « dans » un dossier choisi est hors du
+périmètre. Rien n'y écrase quoi que ce soit, et chaque refus est nommé :
 
-- **les réglages d'une connexion déjà déclarée sont gardés**, et ses **consoles versées quand
-  même.** C'est la décision centrale. Les réglages décrivent *comment joindre un serveur* : les
-  reprendre pourrait repointer en silence une connexion vers un autre hôte, ce que `update_variant`
-  ferme une connexion pour éviter. Les consoles, elles, sont tout l'intérêt du geste — recevoir les
-  requêtes de quelqu'un sur une base qu'on a déjà —, et un SQL ajouté ne détruit rien ;
+- **un dossier face à un frère homonyme au même endroit s'y fond, récursivement.** Nom et couleur
+  locaux gardés. C'est ce qui rend le geste utile entre deux machines ;
+- **la lecture seule fusionne en « locale OU fichier », jamais affaiblie**, dans les deux sens. Un
+  garde-fou posé sur cette machine ne se lève pas par un import, et une connexion « prod » importée
+  n'arrive pas inscriptible parce qu'un dossier local du même nom l'est. C'est **la seule chose
+  qu'un import change à ce qui était déjà là**, donc une réserve du rapport la nomme
+  (`read_only_from_file`) — et elle ferme les connexions dont la lecture seule effective change, sur
+  le patron de `set_folder_read_only` (voir « L'arborescence en dossiers ») ;
+- **un dossier créé garde l'identifiant du fichier s'il est libre**, sinon un identifiant **dérivé**
+  (`["import", id, nom]`) et non tiré : `fusionner` sert l'aperçu autant que l'écriture, et deux
+  appels doivent rendre le même arbre ;
+- **une connexion dont l'identifiant existe ici, où que ce soit dans l'arbre, est « déjà
+  déclarée »**, et ses **consoles versées quand même.** C'est la décision centrale. Les réglages
+  décrivent *comment joindre un serveur* : les reprendre pourrait repointer en silence une connexion
+  vers un autre hôte, ce que `update_variant` ferme une connexion pour éviter. Son **emplacement**
+  local est gardé aussi, et le rapport l'écrit par son chemin **local** — c'est là qu'on la
+  trouvera. Les consoles, elles, sont tout l'intérêt du geste — recevoir les requêtes de quelqu'un
+  sur une base qu'on a déjà —, et un SQL ajouté ne détruit rien. Elles sont versées **après** la
+  descente, la connexion pouvant vivre loin du dossier qu'on descend ;
+- **une connexion inconnue arrive avec son identifiant**, ce qui rend le réimport idempotent ;
+- **un dossier créé qui n'apporte rien n'est pas créé** (29 septembre 2026, #108). Réimporter un
+  sous-dossier sur son poste d'origine trouve toutes ses connexions déjà déclarées, à leur place : le
+  seul effet visible de l'import était alors un dossier **vide** posé à la racine, sous le nom du
+  sous-dossier. Un dossier que la fusion vient de créer est donc retiré après la descente si son
+  sous-arbre n'a reçu ni connexion, ni sous-dossier retenu, ni libellé — et le rapport le **dit**,
+  par une liste de plus (`folders_omitted`) et, pour une entrée de premier niveau, un verdict de
+  plus (`omitted`, « Déjà ici : rien à créer ») : « Nouveau dossier » y aurait annoncé ce qui n'a pas
+  eu lieu. **Seulement s'il portait une connexion** : un dossier vide *dans le fichier* est une
+  intention — une arborescence préparée ailleurs — et il arrive vide comme il est parti ;
 - **une console homonyme est refusée, le texte local gardé.** Un SQL est un travail : le remplacer
   par celui du fichier perdrait ce que quelqu'un a écrit, sans un mot. Le refus, lui, se dit ;
-- **une déclaration d'environnement déjà présente est gardée, drapeau de production compris**, et la
-  raison n'est pas la simplicité : `production` gouverne les garde-fous d'écriture. Reprendre la
-  valeur du fichier pourrait **lever** un garde-fou posé sur cette machine, en silence. Dans ce sens,
-  l'import ne peut jamais affaiblir ce qui est déjà là ;
-- **« gardé » veut dire « déjà déclaré *ici* », non « le fichier le porte deux fois ».** Les deux
-  listes se mesurent sur un instantané pris **avant** la fusion : les mesurer sur le candidat qui
-  grandit ferait passer un doublon du fichier pour une déclaration locale — un rapport qui accuse la
-  machine de ce que le fichier porte ;
-- **une connexion dont l'environnement n'est déclaré ni par le fichier ni ici est refusée**, seule :
-  elle serait invisible dans l'arbre, qui liste les connexions sous le nœud de leur environnement.
-  Une connexion refusée ne coûte pas le projet ;
-- **un projet refusé est défait par un compte, pas par un filtre**, et c'est une correction faite en
-  relisant. La première version retirait les secrets déjà mis en attente par un `retain` sur le
-  préfixe de leur référence — or une référence vaut `projet/base/environnement`, donc écarter tout ce
-  qui commence par « Halle/ » emportait aussi ceux d'un projet nommé « Halle/Est », traité plus tôt.
-  La leçon dépasse ce cas : **une collision déjà assumée ne doit pas devenir la base d'un retrait.**
-  Le `/` dans un nom de projet est une ambiguïté connue et tolérée pour les références elles-mêmes
-  (voir `reference_de`), où elle coûte au pire un mot de passe partagé ; en faire dépendre une
-  suppression la transformait en perte, et sur les secrets d'un autre projet que celui qu'on refuse.
-  Une troncature à la longueur d'avant est exacte et ne suppose rien du contenu. Le décor qui le
-  garde porte les deux noms qu'il faut — sans eux, aucune assertion ne peut le voir (règle n° 5) ;
-- **et le sort d'un projet refusé est remis à neuf**, non amendé champ par champ : aucune de ses dix
-  listes ne veut plus rien dire, et « n connexions attendent leur mot de passe » sur un projet dont
+- **« gardé » veut dire « déjà déclaré *ici* », non « le fichier le porte deux fois ».** Deux
+  instantanés, et c'est nécessaire : les listes « gardé » se mesurent sur l'arbre **d'avant tout
+  versement**, l'existence d'une connexion et la liberté d'un identifiant sur l'arbre **d'avant
+  l'entrée**. Les mesurer sur le candidat qui grandit ferait passer un doublon du fichier pour une
+  déclaration locale — un rapport qui accuse la machine de ce que le fichier porte. **Ce sabotage est
+  resté vert au premier passage** : aucun décor ne portait deux fois la même connexion, donc les deux
+  instantanés étaient indiscernables (règle n° 5). Un test « connexion portée deux fois » les
+  distingue ;
+- **une connexion à l'identifiant invalide est refusée, seule** : il pourrait fabriquer une clé
+  `connexion/a/b`, et une connexion refusée ne coûte pas le dossier ;
+- **une entrée refusée est défaite par un compte, pas par un filtre**, et c'est une correction faite
+  en relisant. La première version retirait les secrets déjà mis en attente par un `retain` sur le
+  préfixe de leur référence — or une référence valait `projet/base/environnement`, donc écarter tout
+  ce qui commençait par « Halle/ » emportait aussi ceux d'un projet nommé « Halle/Est ». Ce cas
+  d'origine a disparu avec les références par identifiant, et la règle reste : **une collision déjà
+  assumée ne doit pas devenir la base d'un retrait.** Une troncature à la longueur d'avant est exacte
+  et ne suppose rien du contenu ; elle défait désormais aussi les kubeconfigs que l'entrée avait fait
+  déclarer ;
+- **et le sort d'une entrée refusée est remis à neuf**, non amendé champ par champ : aucune de ses
+  listes ne veut plus rien dire, et « n connexions attendent leur mot de passe » sur un dossier dont
   aucune connexion n'arrive serait une réserve à propos de rien — le genre d'oubli qui revient à
   chaque liste ajoutée ;
-- **et `valider` reste appelé sur le projet candidat**, en filet. Les refus nommés couvrent ce qu'on
-  sait nommer ; celui-ci couvre ce qu'on ne sait pas encore — un invariant ajouté au modèle après ce
-  fichier. Une configuration invalide écrite sur disque coûterait la mise en quarantaine de tout au
-  prochain démarrage. Le test qui le garde a d'abord été **faux** : écrit sur un environnement en
-  double, il attendait un refus que la fusion n'a aucune raison de prononcer — elle dédoublonne. Le
-  seul cas qui l'atteigne aujourd'hui est un projet que le fichier déclare **sans aucun
-  environnement** ;
+- **et `valider` reste appelé sur l'arbre candidat, après chaque entrée**, en filet. Les refus nommés
+  couvrent ce qu'on sait nommer ; celui-ci couvre ce qu'on ne sait pas encore — un invariant ajouté
+  au modèle après ce fichier. Une configuration invalide écrite sur disque coûterait la mise en
+  quarantaine de tout au prochain démarrage. Le cas qui l'atteint aujourd'hui est un dossier que le
+  fichier déclare **sans nom** ;
 - **les chemins locaux voyagent tels quels, et sont dits.** Fichier SQLite, certificat d'autorité,
   clé privée de bastion, kubeconfig : ce sont des réglages, donc l'intention de quelqu'un, et les
   réécrire ou les vider serait pire. Mais ils décrivent une autre machine, donc l'import les nomme
@@ -2757,22 +3099,26 @@ entre deux machines. Mais rien n'y écrase quoi que ce soit, et chaque refus est
 
 **L'aperçu et l'écriture viennent de la même fonction**, et il n'y a pas de « planifier » distinct
 d'un « appliquer » : deux calculs pour le même acte en laissent un en arrière (règle n° 17), et
-c'est celui qui décide qu'on aurait cessé d'exercer. La commande d'aperçu jette la configuration
-d'après et les secrets à ranger ; celle qui écrit les emploie. Le versement est donc **recalculé** au
-moment d'écrire, sur la configuration telle qu'elle est alors — rejouer l'aperçu écraserait une
-connexion créée entre-temps dans un autre écran. C'est `tourDesEtats` par un autre bout.
+c'est celui qui décide qu'on aurait cessé d'exercer. La commande d'aperçu jette l'arbre d'après et
+les secrets à ranger ; celle qui écrit les emploie. Le versement est donc **recalculé** au moment
+d'écrire, sur la configuration telle qu'elle est alors — rejouer l'aperçu écraserait une connexion
+créée entre-temps dans un autre écran. C'est `tourDesEtats` par un autre bout.
 
-**Ce qui autorise cet aperçu est une propriété, et elle a son test** : le sort d'un projet ne dépend
-pas de la sélection, les projets étant indépendants par leur nom. L'aperçu tout-retenu décrit donc
-exactement ce que n'importe quel sous-ensemble fera, et la modale peut laisser décocher sans
-redemander quoi que ce soit au cœur.
+**Ce qui autorise cet aperçu est une propriété, et elle a son test** : le sort d'une entrée ne dépend
+pas de la sélection, les dossiers de premier niveau étant indépendants par leur nom. L'aperçu
+tout-retenu décrit donc exactement ce que n'importe quel sous-ensemble fera, et la modale peut laisser
+décocher sans redemander quoi que ce soit au cœur. La seule exception est une connexion que **deux**
+entrées du fichier portent : la seconde la trouve déjà versée — un fichier écrit à la main. Les
+connexions que le fichier range à la racine ont leur propre ligne, « Connexions à la racine », sous
+une clé interne vide qu'aucun nom de dossier ne peut prendre.
 
-**Aucune connexion n'est fermée, et aucune n'a à l'être.** Les six commandes de configuration qui
-ferment le font parce qu'elles *périment* la recette d'une connexion ouverte — un hôte qui change, un
-secret qui se déplace. L'import n'en modifie aucune : il ajoute ce qui manquait et garde le reste,
-donc toute connexion ouverte reste décrite par ce qui l'a ouverte. Ce qu'il rend, en revanche, est
-`Vec<Project>`, que `App` repose : c'est ce changement qui fait relire les états du registre et purger
-le cache de l'arbre, comme pour les six autres.
+**Ce que l'import ferme, et c'est nouveau avec la lecture seule** (#169). Il ne modifie la recette
+d'aucune connexion : il ajoute ce qui manquait et garde le reste, donc toute connexion ouverte reste
+décrite par ce qui l'a ouverte. Mais un dossier local peut **recevoir** la lecture seule du fichier,
+et une session ouverte inscriptible sous lui la contredirait : l'import ferme donc les connexions que
+`lecture_seule_changee` désigne, et refuse de s'appliquer tant qu'une transaction manuelle est
+ouverte sur l'une d'elles. C'est aussi le seul appelant qui écrit les kubeconfigs **issus de la
+fusion** au lieu de les relire.
 
 **L'en-tête `secrets` du fichier est recalculé à la lecture, jamais cru sur parole.** Il existe pour
 qu'un humain sache d'un coup d'œil ce que le fichier porte ; un en-tête faux est pire qu'un en-tête
@@ -2806,22 +3152,22 @@ dépôt a déjà payée trois fois, au `⌘E` du mode édition, au `⇧`-clic du
 console. *Un chemin unique qu'on ne voit pas est un chemin qui n'existe pas*, et un menu natif est
 aussi invisible qu'un raccourci. Deux endroits le portent désormais :
 
-- **la bande en tête de l'arbre**, à côté de « Nouveau projet ». Les deux gestes y produisent la
-  même chose — un projet —, l'un en le déclarant, l'autre en le recevant d'un fichier : les
-  voisiner est ce qui fait trouver le second quand on cherchait le premier. L'export n'y est pas,
-  et ce n'est pas un oubli : il ne crée rien, et sa portée la plus utile est *un* projet, donc elle
-  vit sur la ligne qui le nomme ;
-- **l'écran d'accueil**, en bouton secondaire à côté de « Nouveau projet ». C'est là qu'il manquait
+- **la bande en tête de l'arbre**, à côté de « Nouveau dossier ». Les deux gestes y produisent la
+  même chose — un dossier —, l'un en le créant, l'autre en le recevant d'un fichier : les voisiner
+  est ce qui fait trouver le second quand on cherchait le premier. L'export n'y est pas, et ce n'est
+  pas un oubli : il ne crée rien, et sa portée la plus utile est *un* dossier, donc elle vit sur la
+  ligne qui le nomme ;
+- **l'écran d'accueil**, en bouton secondaire à côté de « Nouveau dossier ». C'est là qu'il manquait
   le plus : sur un second poste il n'y a ni arbre ni bande, donc rien ne disait qu'un fichier
-  pouvait rendre ses projets. Recevoir est une façon de commencer, au même titre que déclarer.
+  pouvait rendre ses dossiers. Recevoir est une façon de commencer, au même titre que créer.
 
 **Et ce bouton a découvert un défaut que le menu natif cachait** : `TransferDialogs` était montée
-**dans la branche de l'écran de travail**. Sur `A1` — aucun projet — « Importer des projets… » du
-menu posait donc son état et **rien ne paraissait**, c'est-à-dire précisément là où l'on importe.
-C'est le défaut de l'engrenage d'`A1` du 26 août 2026 à la lettre, et la règle qui en sort est celle
-que les préférences énonçaient déjà : **une modale atteignable depuis deux écrans se monte au-dessus
-des deux**. Le test qui le garde part de `/` (règle n° 8) ; il est rouge sous le sabotage qui la
-remet dans la branche.
+**dans la branche de l'écran de travail**. Sur `A1` — aucun dossier — « Importer… » du menu posait
+donc son état et **rien ne paraissait**, c'est-à-dire précisément là où l'on importe. C'est le défaut
+de l'engrenage d'`A1` du 26 août 2026 à la lettre, et la règle qui en sort est celle que les
+préférences énonçaient déjà : **une modale atteignable depuis deux écrans se monte au-dessus des
+deux**. Le test qui le garde part de `/` (règle n° 8) ; il est rouge sous le sabotage qui la remet
+dans la branche.
 
 **Et le glyphe de l'import a dû changer, à la demande** (« do not use a save icon for an import
 feature »). Il portait `save`, la disquette — reprise telle quelle de la modale d'import de dump,
@@ -2857,37 +3203,37 @@ vaut au-delà d'ici : **ce qu'un test ne peut atteindre que par une porte dérob
 qu'un utilisateur ne peut pas atteindre du tout.** Les deux modales de dump, toujours sans test de
 bout en bout parce que le menu natif est leur seule porte, sont le même cas resté ouvert.
 
-**Les deux entrées du menu natif restent**, et **sans accélérateur** : `⇧⌘E` et `⇧⌘I` appartiennent
-au dump, et les chords qui resteraient ne sont le geste de personne. Et « Exporter le projet… » dans le menu d'une
-ligne de projet, seul des trois à nommer une portée parce que **c'est le seul palier qui la
-connaisse** — une bande en tête de colonne aurait dû la deviner, comme le pied de la sidebar devait
-deviner un environnement. Son rang dans le menu est une décision : après « Modifier le projet… »,
-avant « Retirer… », parce qu'il ne configure rien et n'ouvre rien — il produit un fichier —, et que
-le geste destructeur reste le dernier de la liste partout dans le produit.
+**Les deux entrées du menu natif restent** — « Tout exporter… » et « Importer des dossiers… » —, et
+**sans accélérateur** : `⇧⌘E` et `⇧⌘I` appartiennent au dump, et les chords qui resteraient ne sont
+le geste de personne. Et « Exporter le dossier… » dans le menu d'une ligne de dossier, seul des trois
+à nommer une portée parce que **c'est le seul palier qui la connaisse** — une bande en tête de
+colonne aurait dû la deviner, comme le pied de la sidebar devait deviner un environnement. Son rang
+dans le menu est donné dans « L'arborescence en dossiers » : après la lecture seule, avant
+« Déplacer vers… » et « Retirer… ».
 
 **La case à cocher d'une ligne d'import est un contrôle natif**, et c'est le troisième du produit
 après le curseur des préférences et le calendrier des filtres — le quatrième étant la case « Par
-défaut » des kubeconfigs déclarés (`API-70`), pour la même raison et avec le même argument. La prohibition porte sur les listes
-déroulantes, dont le maison remplace l'apparence ; une case n'a rien de tel à remplacer — c'est un
-carré et une coche, que le système dessine correctement, au thème près que `color-scheme` lui donne
-déjà. `accent-color` est la seule déclaration qui compte. Un `<button role="checkbox">` aurait redit
-ce que la plateforme sait faire en perdant l'appariement au libellé, **et Biome le refuse**, avec
-raison.
+défaut » des kubeconfigs déclarés (`API-70`), pour la même raison et avec le même argument. La
+prohibition porte sur les listes déroulantes, dont le maison remplace l'apparence ; une case n'a
+rien de tel à remplacer — c'est un carré et une coche, que le système dessine correctement, au thème
+près que `color-scheme` lui donne déjà. `accent-color` est la seule déclaration qui compte. Un
+`<button role="checkbox">` aurait redit ce que la plateforme sait faire en perdant l'appariement au
+libellé, **et Biome le refuse**, avec raison.
 
-**Aucune case sur un projet refusé, plutôt qu'une case grisée.** Un contrôle désactivé annonce « pas
-maintenant » ; celui-ci ne pourra jamais retenir ce projet-là. Sa raison est déjà **écrite** sur la
-ligne, ce qui vaut mieux qu'une infobulle sur un contrôle mort — c'est l'arbitrage du bouton
+**Aucune case sur une entrée refusée, plutôt qu'une case grisée.** Un contrôle désactivé annonce
+« pas maintenant » ; celui-ci ne pourra jamais retenir ce dossier-là. Sa raison est déjà **écrite**
+sur la ligne, ce qui vaut mieux qu'une infobulle sur un contrôle mort — c'est l'arbitrage du bouton
 « Valider » d'une transaction abandonnée. Et le test qui le garde a dû devenir un **compte** : une
 case rendue sur cette ligne n'aurait aucun nom accessible, le libellé n'étant un `<label>` que sur une
 ligne retenue, donc une recherche par nom rendait zéro pour la mauvaise raison et restait verte sous
 le sabotage.
 
-**L'état de la modale d'import est celui des projets *écartés*, non des retenus.** Un fichier
-fraîchement inspecté a tous ses projets cochés ; une liste de retenus aurait dû être remplie à
+**L'état de la modale d'import est celui des entrées *écartées*, non des retenues.** Un fichier
+fraîchement inspecté a toutes ses entrées cochées ; une liste de retenues aurait dû être remplie à
 l'arrivée du rapport, donc dans un effet, qui se serait rejoué à chaque rendu de l'hôte — le piège de
 `10d`.
 
-**Douze listes dans le rapport plutôt qu'un compte**, et la modale n'en montre les noms qu'en
+**Quinze listes dans le rapport plutôt qu'un compte**, et la modale n'en montre les noms qu'en
 infobulle. Un import amputé en silence se lirait comme un import complet, ce qui est le pire défaut
 que ce geste puisse avoir ; mais un nom par connexion dans une modale serait illisible, et le compte
 dit d'abord s'il y a quelque chose à regarder. Une réserve vide ne paraît pas — « 0 connexion déjà
@@ -2895,36 +3241,28 @@ déclarée » se lirait comme une réserve —, et c'est un contrôle négatif q
 
 #### Ce qui n'a pas été retenu, et ce qui reste à voir
 
-**L'import s'ouvre par un paramètre du décor sous Playwright** (`?demo&transfert=import`), et c'est
-un aveu autant qu'un outil : son seul point d'entrée dans le produit est le menu natif, que Playwright
-ne touche pas — et c'est exactement la raison pour laquelle **les modales de dump n'ont aucun test de
-bout en bout**. Un bouton inventé dans la démo aurait été un pixel inventé ; un paramètre de décor ne
-ment sur rien et rend la géométrie mesurable, que jsdom ne calcule pas (règle n° 9). C'est le même
-arbitrage que `DORABASE_PLATEFORME_DECOR`. L'export, lui, a un vrai chemin — le menu d'une ligne de
-projet —, et c'est celui que le test emprunte.
+**Les instances managées ne voyagent pas** (`API-32`, constaté au rebasage du 17 septembre 2026).
+Une instance vit **à côté** de l'arbre, n'appartient à aucun dossier, et la portée de cet export est
+le dossier — « tout » ou « un seul » : il n'y a pas de place où une instance entrerait. Conséquence à
+connaître avant de s'y fier : **« Tout exporter » ne suffit pas à déménager une installation.** C'est
+la seule chose que ce geste tait — voir « Ce qui attend une décision humaine ». L'écriture, elle,
+passe par `ecrire_le_reste_intact`, donc un import **ne les efface pas** : c'est la fonction qui
+existe pour que la neuvième commande n'oublie pas ce qu'elle n'écrit pas.
 
-**Les instances managées ne voyagent pas non plus** (`API-32`, constaté au rebasage du 17 septembre
-2026). Une instance vit **à côté** des projets, n'appartient à aucun d'eux, et la portée de cet
-export est le projet — « tous » ou « un seul » : il n'y a pas de place où une instance entrerait.
-Conséquence à connaître avant de s'y fier : **un export « tous les projets » ne suffit pas à
-déménager une installation.** C'est la seule chose que ce geste tait, et le dire ici ne suffira pas
-longtemps — voir « Ce qui attend une décision humaine ». L'écriture, elle, passe par
-`ecrire_le_reste_intact`, donc un import **ne les efface pas** : c'est la fonction qui existe pour
-que la neuvième commande n'oublie pas ce qu'elle n'écrit pas.
-
-**Les préférences ne voyagent pas** : un thème n'appartient pas à un projet, et `save_preferences`
-les relit déjà plutôt que de les recevoir, pour la même raison. **`Project::queries` non plus** :
-l'export le vide, et l'import le reverse en consoles par la fonction qui le fait déjà à la lecture
-d'une configuration — l'écrire dans le fichier le verserait une seconde fois, dans une connexion qui
-n'est peut-être pas la même.
+**Les préférences ne voyagent pas** : un thème n'appartient pas à un dossier, et `save_preferences`
+les relit déjà plutôt que de les recevoir, pour la même raison. **`Folder::queries` non plus** :
+l'export le vide, à toute profondeur, et l'import le reverse en consoles par la fonction qui le fait
+déjà à la lecture d'une configuration — l'écrire dans le fichier le verserait une seconde fois, dans
+une connexion qui n'est peut-être pas la même.
 
 **Ce qui reste à voir à l'œil** : les deux modales sous WKWebView et en « Nuit » — même réserve que
-les dix écrans, pour la même raison. Et surtout le **vrai aller-retour** : exporter un projet avec
+les dix écrans, pour la même raison. Et surtout le **vrai aller-retour** : exporter un dossier avec
 ses mots de passe, l'importer sur une autre machine, et ouvrir une connexion sans rien ressaisir.
 C'est le seul geste qui dise que le mot de passe est arrivé sous la référence que la connexion ira
-lire — l'équivalent, pour ce chantier, du « renommer, quitter, relancer » du Trousseau. Le rapport de
-l'import de `?demo` est **simulé** au même degré que son `runSql` : il rend trois verdicts plausibles
-pour que l'écran soit visible sans fichier réel.
+lire — l'équivalent, pour ce chantier, du « quitter, relancer » de la migration. Un **vrai export v6**
+réimporté n'a jamais été fait non plus : le cran et la réindexation des `passwords` sont gardés par
+des tests purs. Et le câblage `App` → « Exporter le dossier… » n'est suivi depuis `/` par aucun test.
+Le rapport de l'import de `?demo` est **simulé** au même degré que son `runSql`.
 
 ### Les kubeconfigs se déclarent une fois, les connexions les référencent (18 septembre 2026, `API-70`)
 
@@ -2950,7 +3288,7 @@ mode de défaillance que ce chantier traite partout comme inacceptable : se trom
 
 Onze décisions à ne pas défaire :
 
-- **les déclarations vivent à la racine du fichier, à côté des projets et des instances, et non dans
+- **les déclarations vivent à la racine du fichier, à côté de l'arbre et des instances, et non dans
   `preferences`.** Une connexion les *référence* : ce sont des objets que le modèle désigne, comme
   une instance managée, pas un réglage d'affichage. Dans `preferences`, un `save_preferences` serait
   passé par-dessus des déclarations dont dépendent des connexions ouvertes. Et c'est ce qui permet
@@ -3008,7 +3346,11 @@ Onze décisions à ne pas défaire :
   deux appelés `config.yaml` ;
 - **retirer une déclaration qu'une connexion emploie est refusé, en nommant ce qui l'emploie** —
   connexions *et* instances managées, qui portent les mêmes réglages de connexion. Une liste, jamais
-  un compte : un nombre dit qu'il y a un obstacle, une liste dit lequel et où aller. L'écran grise le
+  un compte : un nombre dit qu'il y a un obstacle, une liste dit lequel et où aller. **Une connexion
+  s'y écrit par son chemin de dossiers** (« Atelier Nord › prod › analytics », `FolderTree::chemin_de`,
+  29 septembre 2026, #165) : l'étiquette « projet › base (environnement) » d'avant nommait deux paliers
+  qui n'existent plus, et le libellé seul ne suffit pas — les noms de connexion ne sont plus uniques,
+  « psql » peut être dix fois dans l'arbre. L'écran grise le
   bouton en `aria-disabled` — la raison vit dans une infobulle qu'un `disabled` rendrait
   inatteignable (piège n° 3) — **et** le cœur refuse : les deux gardent deux chemins différents, le
   second valant quand la demande ne vient pas de l'écran ;
@@ -3019,10 +3361,10 @@ Onze décisions à ne pas défaire :
 - **et le fichier de transfert porte les déclarations que ses projets référencent** (`API-30`).
   Sans cela `API-70` casserait l'import **en silence** : la connexion arriverait en désignant une
   déclaration que l'autre machine n'a jamais eue. Une clé `kubeconfigs` à la racine, sur le patron
-  de `passwords` — **seulement les référencées**, parce qu'exporter un projet ne doit pas divulguer
+  de `passwords` — **seulement les référencées**, parce qu'exporter un dossier ne doit pas divulguer
   la liste des clusters de son auteur. L'import **remappe par le chemin** : une déclaration locale
   qui porte déjà ce fichier est reprise plutôt que doublée, et c'est le même raisonnement que la
-  référence de secret, recalculée sur le triplet d'arrivée. Le chemin importé est **nommé dans le
+  référence de secret, recalculée sur l'identifiant d'arrivée. Le chemin importé est **nommé dans le
   rapport**, comme les autres chemins locaux ; le **défaut**, lui, ne voyage pas — c'est un choix de
   poste.
 
@@ -3554,12 +3896,29 @@ déclare**, colonne par colonne, depuis le menu de l'en-tête.
 Rien dans le catalogue ne dit ce que `3` veut dire, donc rien n'est deviné. L'écart est que la
 déclaration est **persistée** : ce qu'un code signifie ne change pas d'une session à l'autre.
 
-**La déclaration vit sur le projet**, clé `table` → `colonne` → valeur → libellé. Un projet porte N
-environnements × N connexions et la même table existe en dev et en prod : un code d'état est une
-propriété du **modèle de données de l'application**, pas d'un serveur. La poser sur `Database` —
-comme `visible_schemas`, qui est bien un réglage de connexion — aurait obligé à la redéclarer par
-environnement. Le prix est assumé et connu : **deux tables homonymes dans deux schémas partagent
-leurs libellés**, le nom du schéma ne voulant pas la même chose d'un moteur à l'autre.
+**La déclaration vit sur un dossier**, clé `table` → `colonne` → valeur → libellé — sur le projet
+jusqu'au 29 septembre 2026, et la migration la pose sur le dossier racine qui en est issu (#164).
+La même table existe en dev et en prod : un code d'état est une propriété du **modèle de données de
+l'application**, pas d'un serveur. La poser sur `Database` — comme `visible_schemas`, qui est bien un
+réglage de connexion — aurait obligé à la redéclarer par connexion. Le prix est assumé et connu :
+**deux tables homonymes dans deux schémas partagent leurs libellés**, le nom du schéma ne voulant pas
+la même chose d'un moteur à l'autre.
+
+**Avec les dossiers, la question « lequel ? » est devenue réelle, et trois règles y répondent**
+(#164, #165) :
+
+- **à la lecture, table par table, le dossier le plus proche qui déclare cette table l'emporte
+  entièrement.** Aucune fusion colonne par colonne entre ancêtres : on rend toujours un objet qui
+  **existe** dans l'arbre, jamais un objet composé à chaque rendu, ce qui garde intacte l'identité
+  d'`AUCUN_LIBELLE` (voir plus bas le défaut de la boucle de rendu) — et il n'y a aucune règle de
+  fusion à expliquer à qui se demande d'où vient un libellé ;
+- **à l'écriture, dans le dossier qui fournit *actuellement* cette table**, sinon dans le dossier
+  **racine** de la connexion. On écrit là où la lecture prendra, sans quoi un libellé saisi dans un
+  sous-dossier serait masqué par celui qu'un ancêtre plus proche déclare déjà. Le prix, celui d'`API-75`
+  étendu : toutes les connexions sous une même racine partagent les libellés d'une table homonyme ;
+- **une connexion rangée à la racine ne peut pas en déclarer**, et le cœur refuse avec sa raison : la
+  racine n'est pas un dossier. Un second lieu de stockage sur `Database` rien que pour ce cas aurait
+  fait deux réponses à « où vivent les libellés ? ».
 
 Onze décisions à ne pas défaire :
 
@@ -3574,7 +3933,7 @@ Onze décisions à ne pas défaire :
   **refuse** de désérialiser celle qui n'en est pas une : un `{"pending": "…"}` écrit à la main
   ferait échouer la lecture de toute la configuration, donc sa **mise en quarantaine** au démarrage
   suivant. Une clé en texte ne peut que ne correspondre à rien — un libellé qui ne paraît pas au
-  lieu de tous les projets. L'éditeur, lui, n'écrit que des entiers en décimal, et **refuse** le
+  lieu de toute la configuration. L'éditeur, lui, n'écrit que des entiers en décimal, et **refuse** le
   reste : c'est le seul endroit qui voie la liste avant qu'elle devienne une table, donc le seul qui
   puisse le dire ;
 - **trois `BTreeMap` imbriquées, aucun séparateur à convenir.** `table.colonne` aplati en une clé
@@ -3582,13 +3941,13 @@ Onze décisions à ne pas défaire :
   mauvaise colonne. Imbriquer rend la question sans objet, rend le **doublon inexprimable**, et
   garde le fichier déterministe ;
 - **le geste part du menu de l'en-tête**, qui connaît déjà la table et la colonne. La même
-  déclaration faite depuis la modale de projet aurait demandé de taper deux noms à la main sans rien
-  pour les vérifier, et une faute de frappe y aurait produit une déclaration silencieusement inerte.
-  C'est la règle qui a déjà fait partir la création de console du pied de la sidebar et la gestion
-  des schémas vers le menu d'une connexion ;
+  déclaration faite depuis la modale de projet — partie depuis avec les projets — aurait demandé de
+  taper deux noms à la main sans rien pour les vérifier, et une faute de frappe y aurait produit une
+  déclaration silencieusement inerte. C'est la règle qui a déjà fait partir la création de console
+  du pied de la sidebar et la gestion des schémas vers le menu d'une connexion ;
 - **l'éditeur attend « Enregistrer »**, comme les schémas affichés d'`API-33` : la liste n'a de sens
   qu'entière, et écrire à la frappe ferait une écriture de configuration par caractère tapé. C'est
-  l'écart avec la modale de projet, dont chaque geste est un **acte** (renommer, recolorier) ;
+  l'écart avec les gestes d'un dossier, dont chacun est un **acte** (renommer, recolorier) ;
 - **vider retire la déclaration**, et la table hôte part avec sa dernière colonne. C'est le chemin
   de retour du geste — un geste sans retour est une impasse — et c'est aussi ce qui empêche un
   `{"orders": {}}` de rester dans le fichier : une déclaration qui ne dit rien, la famille du
@@ -3617,15 +3976,15 @@ Onze décisions à ne pas défaire :
   pour deux choses fait annoncer l'une par le nom de l'autre, la raison qui garde le rouage à la
   seule section « Général » d'`A10`. Aucune icône n'a été ajoutée au sprite ;
 
-**Ils voyagent avec le projet, et il a fallu le faire pour de bon** (`API-30`). Le fichier de
-transfert porte exactement le `Vec<Project>` de `config.json`, donc les libellés partent avec un
-export sans une ligne de plus — mais un projet **déjà déclaré ici** aurait reçu ses connexions et
+**Ils voyagent avec leur dossier, et il a fallu le faire pour de bon** (`API-30`, puis #169). Le
+fichier de transfert porte exactement les dossiers de `config.json`, donc les libellés partent avec
+un export sans une ligne de plus — un dossier exporté seul reçoit en plus ceux que ses ancêtres lui
+fournissaient, **matérialisés** — mais un dossier **déjà déclaré ici** aurait reçu ses connexions et
 ses consoles en laissant ses libellés dans le fichier, **en silence**, ce qui est le défaut que ce
 geste ne doit jamais avoir. La fusion les verse donc **colonne par colonne** : deux machines peuvent
 avoir étiqueté deux colonnes différentes de la même table, et remplacer la table entière en perdrait
 une. Un libellé déjà déclaré ici est **gardé** — c'est la règle de toute la fusion, et un libellé
-faux est pire qu'un libellé absent, puisque c'est celui-là qu'on croit. Le rapport passe de dix
-listes à douze.
+faux est pire qu'un libellé absent, puisque c'est celui-là qu'on croit.
 
 **Un défaut trouvé en écrivant le test d'assemblage, et il aurait touché toute table** : `?? {}`
 rendait un objet **neuf à chaque appel**, donc une identité neuve à chaque rendu. Or `libelles` entre
@@ -3722,48 +4081,74 @@ contrainte est portée par un type : `RowLimit` est une énumération fermée (1
 1000 / 5000) — « demander tout » n'est pas exprimable. Et aucune commande ne rend « tout
 le catalogue ».
 
-**Une seule identité pour une connexion** : `projet/base/environnement`. C'est à la fois
-la clé du registre et la référence du secret dans le Trousseau. Deux conventions
-divergeraient. Corollaire : **l'identifiant d'un environnement est figé à sa création** —
-le renommer change son **libellé seulement**, et installe une divergence assumée entre ce
-qui s'affiche et ce qui désigne.
+**Une seule identité pour une connexion : son identifiant stable** (29 septembre 2026, #164 et
+#165). `ConnectionId` — seize caractères hexadécimaux, sans aucun sens — est à la fois la clé du
+registre (`connexion/<id>`) et la référence du secret dans le Trousseau (`connexion/<id>`). **Une
+seule convention**, deux fonctions qui la dérivent (`cle_de_connexion`, `reference_de_connexion`), et
+un test qui garde qu'elles s'accordent : deux conventions divergeraient. Elle remplace le triplet
+`projet/base/environnement`, qui en était une aussi, mais **composée de noms** — donc renommer un
+projet ou une connexion devait déplacer ses secrets et fermer ses connexions, et six défauts sont nés
+d'identités adossées à ce que l'écran *montrait*. Figé à la création, l'identifiant ne dépend ni du
+nom ni du dossier : **renommer et déplacer ne touchent plus ni au Trousseau ni au registre**, et c'est
+toute la raison du changement. Corollaires :
 
-**Et depuis le 27 août 2026, la base suit le même principe qu'un environnement : un
-identifiant, et un libellé optionnel qui peut en diverger.** Le nom d'une base — `Database.name`
-— portait un commentaire qui disait le contraire : « il n'y a pas d'étiquette libre ». La raison
-tombait avec le champ « Nom » devenu **optionnel** : une base sans nom saisi doit tout de même
-désigner quelque chose dans le registre, donc `A2` y substitue l'abréviation du moteur (« psql »,
-« mongo »…) avant d'enregistrer — jamais en valeur du champ, toujours en `placeholder`, sinon le
-vider ne rendrait plus le défaut. `Database.label: Option<String>` porte l'affichage libre, en
-toute fin du formulaire, jamais verrouillé par `verrouille` : contrairement à `name`, il ne fait
-partie ni de la clé du registre ni de la référence du secret, et un renommage sur place
-(« Renommer… ») continue d'éditer `name`, jamais `label`. Un défaut à surveiller si ce principe
-se redéfait : `ExplorerSidebar` faisait voyager `noeud.label` comme identité vers les commandes
-IPC (`onCreer`, `onEditDatabase`, `demanderLeRetrait`) — vrai tant que `label === name`, faux dès
-que l'un diverge de l'autre. C'est `noeud.database` qui doit y voyager.
+- **les deux espaces de références sont disjoints par leur préfixe**, `connexion/` et `instance/`,
+  deux segments chacun. L'ambiguïté du `/` dans un nom de projet — `a/b` + `c` et `a` + `b/c`
+  donnaient la même référence — a disparu avec les noms ;
+- **`valider` refuse une référence de secret qui n'est pas celle de l'identifiant**
+  (`ReferenceDeSecretIncoherente`). C'est le garde-fou qui attrape une migration oubliée ou
+  partielle, et il a son sabotage ;
+- **les identités de nœud de l'arbre portent l'identifiant, jamais un nom** (`f:<dossier>`,
+  `d:<connexion>`, puis `c:`, `s:`, `o:` sous elle, #166). Un renommage ne touche donc ni le
+  dépliage, ni le cache, ni les onglets : `idApresRenommage` et la réindexation des tables par
+  identifiant d'onglet, qui réparaient cela à la main, sont partis.
+
+**La base garde un identifiant technique et un libellé qui peut en diverger** (27 août 2026). Le nom
+d'une base — `Database.name` — portait un commentaire qui disait le contraire : « il n'y a pas
+d'étiquette libre ». `Database.label: Option<String>` porte l'affichage libre, en toute fin du
+formulaire ; un renommage sur place (« Renommer… ») édite `name`, jamais `label`. Un défaut à
+surveiller si ce principe se redéfait : `ExplorerSidebar` faisait voyager `noeud.label` comme
+identité vers les commandes IPC — vrai tant que `label === name`, faux dès que l'un diverge de
+l'autre. **Depuis #166, seuls `noeud.connection` et `noeud.folder` voyagent**, et ce défaut n'a plus
+de prise : ni `name` ni `label` ne désignent quoi que ce soit.
 
 **Et le champ « Nom » a fini par disparaître du formulaire** (1er septembre 2026) — le doublon
 qu'il formait avec « Libellé » n'avait plus de raison d'être une fois `name` devenu facultatif :
 deux champs qui font presque la même chose, l'un obligeant l'autre à exister « au cas où », sont
-un doublon plutôt qu'un choix. `A2` ne montre donc plus que l'environnement dans sa rangée
-d'identité, et `name` devient un identifiant purement technique, jamais saisi : vide sur un
-brouillon neuf, `draftToSaveRequest` y substitue toujours l'abréviation du moteur — ce n'est plus
-un repli parmi d'autres, c'est la seule voie. Le titre par défaut de l'explorateur reste donc
-cette abréviation, et `label`, en fin de formulaire, continue de le remplacer dès qu'il est
-renseigné (`arbre.ts` : `base.label?.trim() || base.name`) — la règle n'a pas changé, seul le
-champ qui la contredisait est parti. **Une collision reste un refus, pas une génération de
-suffixe** : `Project::valider` refuse déjà deux bases de même `name` dans le même environnement
-(`ModelError::ConnexionEnDouble`), et c'est le bon comportement — deviner un suffixe unique
-masquerait la collision plutôt que de la dire, quand `label` existe déjà pour désigner deux
-connexions du même moteur dans le même environnement.
+un doublon plutôt qu'un choix. `name` est un libellé technique de repli, jamais saisi : vide sur un
+brouillon neuf, `draftToSaveRequest` y substitue l'abréviation du moteur (« psql », « mongo »…).
+Le titre par défaut de l'explorateur reste donc cette abréviation, et `label` le remplace dès qu'il
+est renseigné (`arbre.ts` : `base.label?.trim() || base.name`).
+
+**Les noms de connexion ne sont plus uniques, et c'est un revirement** (29 septembre 2026, #164).
+L'arbitrage d'avant disait : « une collision reste un refus, pas une génération de suffixe » —
+`Project::valider` refusait deux bases de même `name` dans le même environnement, parce que le nom
+**était** l'identité, et deviner un suffixe aurait masqué la collision plutôt que de la dire. Le nom
+n'est plus une identité : avec les noms par défaut, deux « psql » dans le même dossier sont le cas
+ordinaire, et un refus aurait fait échouer à tout propos un déplacement vers un dossier qui en
+contient déjà une. Ce qui reste unique, et que `FolderTree::valider` tient sur **tout l'arbre**,
+est l'identifiant ; et **deux dossiers frères de même nom** restent refusés (`DossierHomonyme`),
+parce que l'import apparie les dossiers par nom — c'est la base de sa règle de fusion. Là non plus,
+aucun suffixe n'est inventé : un dossier se renomme sur place.
 
 **Le cache de l'arbre suit le registre, qui est la seule vérité sur ce qui est ouvert** (31 août
 2026). `connection_states` lit le registre ; l'arbre ne le relisait qu'au `finally` de son propre
-chargement. Or **six commandes de configuration ferment des connexions** — renommer un projet,
-renommer une connexion, retirer une base, retirer un projet, `update_variant`, retirer une console —
-et aucune ne le disait à l'écran. Conséquence mesurée à l'usage, contre un vrai cluster : l'arbre
-affichait **« OK »** sur une base que le registre avait fermée, et la première requête répondait
-« aucune connexion ouverte ».
+chargement. Or des commandes de configuration **ferment des connexions**, et aucune ne le disait à
+l'écran. Conséquence mesurée à l'usage, contre un vrai cluster : l'arbre affichait **« OK »** sur une
+base que le registre avait fermée, et la première requête répondait « aucune connexion ouverte ».
+
+**Ce ne sont plus les mêmes commandes qui ferment** (29 septembre 2026, #165 à #169). Avant les
+dossiers, renommer un projet ou une connexion fermait, parce que le triplet changeait. Aujourd'hui
+**six** commandes appellent `fermer`, chacune parce qu'elle **périme** quelque chose de la recette
+d'une connexion ouverte : `update_variant` (l'hôte peut changer), `delete_database` et
+`delete_folder` (la déclaration part), et trois qui ne ferment **que** les connexions dont la lecture
+seule effective change — `set_folder_read_only`, `move_folder` / `move_database` et
+`import_projects`. **Renommer ne ferme plus rien**, et **retirer une console non plus** : ce fichier a
+longtemps affirmé le contraire, et c'était faux déjà avant les dossiers. Retirer une console la retire
+de la configuration et délie son onglet du disque — il ne ferait sinon qu'écrire dans une console
+retirée à la frappe suivante —, sans toucher au registre ni à une session de console : une
+transaction que cet onglet tenait reste ouverte, avec son panneau pour la finir, et c'est la
+fermeture de l'onglet qui l'annule.
 
 **Et le cache rendait le mensonge irréparable.** `charger` n'appelle `chargerBase` que si les schémas
 ne sont pas déjà en cache : replier puis déplier ne rouvrait donc **rien**, et l'arbre continuait
@@ -3774,10 +4159,14 @@ les schémas de la base précédente sans qu'un *Rafraîchir* y change quoi que 
 décrivait.
 
 **Le remède est une règle, pas six branchements** : *ce que le registre ne tient plus ne peut plus
-être lu, donc ne doit plus être caché*. Les états sont relus à chaque changement de `projects` — le
-signal commun aux six, puisque toutes rendent `Vec<Project>` que `App` repose —, et le cache comme le
+être lu, donc ne doit plus être caché*. Les états sont relus à chaque changement de l'arbre — le
+signal commun aux six, puisque toutes rendent le `FolderTree` que `App` repose —, et le cache comme le
 dépliage se purgent des bases absentes du registre. Brancher chaque commande aurait demandé de les
-connaître, et la septième l'aurait oublié. Trois points à ne pas défaire :
+connaître, et la septième l'aurait oublié. **La règle a survécu aux dossiers sans changer d'une
+ligne**, et c'est ce qui la prouve : renommer ou déplacer ne ferme plus rien, donc rien n'est purgé,
+ce qui est voulu — et le sabotage qui purge sans condition fait tomber « renommer un dossier et sa
+connexion garde le cache », pendant que celui qui ne purge plus fait tomber « retirer le dossier purge
+le cache ». Trois points à ne pas défaire :
 
 - **la purge part des schémas en cache, pas des entrées du registre** : celui-ci ne dit que ce qui
   est **ouvert**, il ne peut pas énumérer ce qui a été fermé ;
@@ -3871,9 +4260,9 @@ Quatre points à ne pas défaire :
   qui le garde compte les passages de la fermeture : deux, jamais trois ;
 - **la recette part à la fermeture, et c'est ce qui distingue une perte d'une fermeture demandée.**
   Les six commandes de configuration qui appellent `fermer` sont exactement celles qui **périment**
-  ce que la recette décrit : rouvrir sur l'ancien hôte, ou avec l'ancien secret, serait pire que ne
-  rien rouvrir. Corollaire : *le registre ne rouvre que ce qu'il a déjà ouvert avec succès*, donc
-  une base jamais jointe s'entend toujours dire qu'elle doit l'être d'abord ;
+  ce que la recette décrit : rouvrir sur l'ancien hôte, ou dans l'ancien régime de lecture seule,
+  serait pire que ne rien rouvrir. Corollaire : *le registre ne rouvre que ce qu'il a déjà ouvert
+  avec succès*, donc une base jamais jointe s'entend toujours dire qu'elle doit l'être d'abord ;
 - **la recette garde un secret en mémoire**, et cela se dit plutôt que se découvre. Ce n'est pas une
   exposition d'une nature nouvelle — le client du pilote détient déjà la configuration qui le porte,
   d'où le `Debug` écrit à la main de chaque adaptateur —, mais c'est un exemplaire de plus ; `Secret`
@@ -3949,11 +4338,11 @@ plus.
 
 **Ouvrir une console ouvre sa connexion** (1er septembre 2026). L'ouverture n'avait qu'un
 déclencheur — regarder ou déplier la ligne de la base dans l'arbre —, or une console s'ouvre
-ailleurs : le menu « … » d'une connexion est atteignable dès que son **environnement** est déplié, et
+ailleurs : le menu « … » d'une connexion est atteignable dès que son **dossier** est déplié, et
 il crée la console *et* l'ouvre du même geste. L'onglet passait donc au premier plan sur une
 connexion fermée : première exécution en « aucune connexion ouverte pour … », et catalogue
 d'autocomplétion **muet** — ni schéma, ni table, ni colonne, `charge.schemas` étant simplement vide.
-`useArbre.assurerLOuverture` ouvre par les coordonnées plutôt que par le nœud d'arbre, et les trois
+`useArbre.assurerLOuverture` ouvre par l'identifiant plutôt que par le nœud d'arbre, et les trois
 points d'ouverture d'une console l'appellent. Trois points à ne pas défaire :
 
 - **un échec n'est pas mémorisé comme un refus.** Les consoles d'une connexion s'affichent malgré son
@@ -3992,13 +4381,14 @@ signée, fichier chiffré en développement. Les ACL du Trousseau sont liées à
 de code, et une signature ad-hoc change à chaque build. L'abstraction est de toute façon
 nécessaire, Windows et Linux n'ayant pas de Trousseau.
 
-**L'environnement est un palier de l'arbre**, pas un réglage global : projet →
-environnement → connexion → console|schéma → objet. Un sélecteur global obligeait à
-basculer un réglage pour regarder une connexion voisine, et refaisait de l'environnement
-une propriété du **projet** là où c'est une propriété de la **connexion**. La barre de
-titre n'est plus qu'un **indicateur passif**. Conséquence à ne pas perdre : **les
-identités de nœud portent l'environnement** — six défauts sont nés de garanties adossées à
-ce que l'écran *montrait*, dont deux qui lisaient franchement le mauvais serveur.
+**Le rangement est un palier de l'arbre**, pas un réglage global. L'environnement l'a été le premier
+(projet → environnement → connexion) : un sélecteur global obligeait à basculer un réglage pour
+regarder une connexion voisine, et refaisait de l'environnement une propriété du **projet** là où
+c'est une propriété de la **connexion**. **Depuis le 29 septembre 2026 (#108), ce sont des dossiers,
+sans limite de profondeur** : dossier → … → connexion → console|schéma → objet. La barre de titre
+n'est plus qu'un **indicateur passif**, qui porte le chemin de dossiers de la sélection. La leçon de
+l'environnement reste la raison de l'identifiant stable : six défauts sont nés de garanties adossées
+à ce que l'écran *montrait*, dont deux qui lisaient franchement le mauvais serveur.
 
 **Clé d'hôte SSH vérifiée contre `~/.ssh/known_hosts`**, hôte inconnu refusé avec un
 message qui donne la manœuvre. Quatre verdicts distincts là où `russh` n'en offre que
@@ -4230,13 +4620,19 @@ désormais le seul mode qui authentifie le serveur, et **desserrer devient un ge
 - **un défaut de brouillon, pas une migration** : les connexions et instances enregistrées gardent
   leur mode. `verify-full` étant offert par tous les moteurs à serveur, `modeSslPourLeMoteur` n'a
   rien à reporter en changeant de moteur ;
-- **sur une cible marquée production, un mode non authentifiant passe par un rappel qui le nomme**
+- **sur une cible sensible, un mode non authentifiant passe par un rappel qui le nomme**
   (`ConfirmationTls`) — `disable`, `allow`, `prefer` **et `require`**, qui chiffre sans authentifier.
-  Le drapeau `production`, jamais le libellé ; pour une connexion d'`A2` c'est celui de
-  l'environnement, pour une instance le sien. Le rappel vaut aussi en **édition** : c'est bien ce
-  mode-là qui partira. Ce n'est pas un refus — un serveur interne sans autorité publique est un cas
-  légitime —, c'est un geste qu'on fait en le nommant, sur le patron du rappel de production de
-  `SqlConfirm` et du gestionnaire de schémas ;
+  Ce qui rend une cible sensible n'est jamais son libellé : pour une instance, c'est son drapeau
+  `production` ; **pour une connexion d'`A2`, c'est la lecture seule *imposée* par son dossier**
+  (29 septembre 2026, #168), qui a remplacé le drapeau de l'environnement. Le risque que #87 couvre —
+  un intermédiaire qui lit le mot de passe — existe **même en lecture seule**, donc le rappel garde
+  son sens sur la seule marque de cible sensible qui subsiste. **Et jamais le réglage local** : un
+  brouillon neuf a `readOnly: true` par défaut, donc le rappel se déclencherait sur presque toutes les
+  connexions et cesserait de dire quoi que ce soit. Le rappel vaut aussi en **édition** : c'est bien
+  ce mode-là qui partira. Ce n'est pas un refus — un serveur interne sans autorité publique est un cas
+  légitime —, c'est un geste qu'on fait en le nommant, sur le patron du rappel de `SqlConfirm` des
+  instances. **Son titre dit encore « en production »**, partagé avec les instances : voir « Ce qui
+  attend une décision humaine » ;
 - **`onClick={enregistrer}` est interdit sur ces deux boutons** : `enregistrer` prend désormais un
   `confirme`, et l'événement de clic, qui est vrai, y sauterait le rappel. Un sabotage le garde.
 
@@ -4943,10 +5339,12 @@ CI : sa machine porte 17.6 quand celle de développement porte 17.4, et un test 
 `ends_with` a rougi sur une différence de version *mineure* du client. C'est la leçon
 générale — un test plus strict que le contrat qu'il garde finit par mesurer la machine.
 
-**Le garde-fou de l'import, c'est la modale qui nomme la cible** : projet, base,
-environnement, chemin du fichier. Pas de case à cocher, pas de nom à recopier — l'erreur que
-cela empêche est de se tromper de cible, pas d'intention. Et `readOnly` refuse **avant** toute
-autre étape : avant la découverte du binaire, avant l'inspection, avant la question posée.
+**Le garde-fou de l'import, c'est la modale qui nomme la cible** : le chemin de dossiers de la
+connexion, la connexion, le chemin du fichier. Pas de case à cocher, pas de nom à recopier —
+l'erreur que cela empêche est de se tromper de cible, pas d'intention. Et la lecture seule
+**effective** — relue dans la configuration par l'identifiant, jamais prise dans la `variant` que le
+front envoie (#168) — refuse **avant** toute autre étape : avant la découverte du binaire, avant
+l'inspection, avant la question posée.
 
 **Une connexion tunnelée exige que la base soit ouverte.** Le tunnel ne vit que tant que la
 connexion est au registre, et son port local vient de là : sur une connexion tunnelée, l'hôte
@@ -4954,8 +5352,8 @@ et le port passés à `pg_dump` sont `127.0.0.1` et ce port, jamais ceux de la c
 décrivent la base **vue depuis le bastion**. Fermée, l'export le **dit** au lieu de rendre une
 erreur réseau brute.
 
-**La cible de `⇧⌘E` / `⇧⌘I` n'est résolue que si elle est sans ambiguïté** — un seul projet,
-une seule connexion. Le menu natif n'émet qu'un identifiant d'item, et rien ne transmet encore
+**La cible de `⇧⌘E` / `⇧⌘I` n'est résolue que si elle est sans ambiguïté** — une seule
+connexion dans tout l'arbre. Le menu natif n'émet qu'un identifiant d'item, et rien ne transmet encore
 la sélection de l'arbre aux modales de dump. Sans cible unique, la modale le **dit** plutôt
 que de choisir : exporter la mauvaise base est sans conséquence, importer dans la mauvaise en
 a une. À reprendre quand la sélection sera transmise.
@@ -5190,18 +5588,76 @@ désormais sur le segment, et `std::path::is_separator` traite `/` et `\` selon 
 
 ### La migration du format de configuration
 
-`VERSION_COURANTE` vaut **6**. Les crans successifs sont des passes sur du
-`serde_json::Value`, sans type d'ancienne forme à maintenir — c'est pourquoi `migrer` et
-les migrations vivent encore dans `config/store.rs` malgré sa taille. **Le déclencheur du
-découpage** : la prochaine migration qui demande un `mod vN` de types dédiés. Ce jour-là,
-deux d'entre eux cohabiteront, et c'est cette cohabitation — pas le compte de lignes — qui
-justifiera le fichier séparé. Trois crans de suite l'ont manqué pour la même raison — le
-dernier, v5 → v6 (`API-70`), étant celui qui s'en rapproche le plus sans y arriver : il
-transforme, mais toujours sans connaître la structure qui entoure ce qu'il change.
+`VERSION_COURANTE` vaut **7** (29 septembre 2026, #164 et #165). Les crans 0 à 5 sont des passes sur
+du `serde_json::Value`, sans type d'ancienne forme à maintenir ; **le cran v6 → v7 est le premier
+écrit sur des types**, et c'est lui qui a déclenché le découpage que ce paragraphe annonçait depuis
+longtemps : « la prochaine migration qui demande un `mod vN` de types dédiés ». Il connaît la
+structure qui entoure ce qu'il change — projets, environnements, bases —, ce qu'un cran sur `Value`
+ne peut pas exprimer sans réécrire à la main ce que `serde` sait faire. La chaîne vit donc dans
+`config/migration/` : `mod.rs` (la chaîne, `migrer_le_document`, `arbre_du_document`), `v1.rs`,
+`v6.rs` — la forme v6 **figée** (`Project`, `EnvironmentDeclaration`, `Database` v6), en `serde` pur,
+sans `TS` —, `secrets.rs` et leurs tests. **Ne touchez pas à `v6.rs` pour suivre le modèle** : c'est
+la photographie d'un format que des fichiers sur disque portent encore, et les crans 0 à 5 rendent
+précisément ce type-là.
 
 **Ne retirez pas `mod v1`** : la migration v1 → v2 s'en sert pour *déduire les
 environnements déclarés*. Un projet dont la seule trace d'un environnement était d'y être
 actif perdrait sa déclaration.
+
+**Le cran v6 → v7, et ce qu'il décide** : un projet devient un dossier racine, chacun de ses
+environnements un sous-dossier (sa couleur reprise, **`production` devenu `read_only`**), chaque
+connexion une feuille de son sous-dossier. Six points à ne pas défaire :
+
+- **les identifiants sont dérivés, jamais tirés** — `hex(sha256(parties jointes par U+001F))[..16]`,
+  sur `["dossier", projet]`, `["dossier", projet, env]` et `["connexion", projet, env, base]`. La
+  configuration est relue, donc remigrée, à **chaque** commande tant que rien ne l'a réécrite : un
+  tirage donnerait deux identifiants à la même connexion d'une lecture à l'autre, et la migration des
+  secrets ne serait plus rejouable. Le déterminisme a un troisième bénéfice : un export v6 importé
+  retombe sur l'identifiant que la machine d'arrivée a déjà dérivé du même triplet — l'appariement de
+  l'import d'avant, reproduit exactement. U+001F et non `/`, qu'un nom de projet peut contenir ;
+- **une collision prend un rang**, et ce n'est pas la génération de suffixe refusée à la saisie :
+  personne ne tape ici, et elle ne peut venir que d'un fichier écrit à la main. Deux libellés
+  d'environnement égaux — permis en v6 — font de même, « {libellé} ({id}) », puisque deux dossiers
+  frères ne peuvent plus porter le même nom ;
+- **la référence de secret du plan est celle *écrite dans le fichier***, jamais recalculée depuis le
+  triplet : c'est celle qu'`open_database` lisait. Le décor qui le garde porte une connexion dont la
+  référence n'est **pas** celle du triplet — la leçon du décor trop régulier (règle n° 5), déjà payée
+  par le transfert ;
+- **les requêtes en transit (`12f`) sont versées en consoles *avant* la conversion**, dans l'ordre
+  v6 des bases : après, une requête écrite pour prod pourrait atterrir sous dev. Ce qui reste faute
+  de connexion vit dans `Folder::queries` du dossier racine, et la reprise à la lecture le verse dans
+  la première connexion du sous-arbre ;
+- **les libellés de valeurs vont sur le dossier racine** issu du projet, ce qui reproduit à
+  l'identique leur partage entre dev, staging et prod (voir `API-75`) ; une connexion dont
+  l'environnement n'est pas déclaré va au dossier racine : rien ne disparaît ;
+- **`Guards.prod_read_only` n'est pas repris** : il n'avait aucun lecteur, et l'arbitrage de la
+  lecture seule imposée ne laisse rien à régler. `serde` ignore le champ, et c'est ce cran qui le
+  justifie.
+
+**La migration des mots de passe est la seule écriture hors du fichier, et son ordre est sa
+sûreté** (#165, `migration/secrets.rs`). Les secrets d'avant vivaient sous
+`projet/base/environnement` ; le plan du cran les déplace **une fois** vers `connexion/<id>` :
+
+- **copier, relire en comparant la valeur, écrire la configuration, et seulement ensuite effacer
+  les anciennes références.** La relecture compare la **valeur**, pas le succès de l'appel : un
+  magasin peut accepter une écriture sans la garder. L'algorithme a été **extrait** de
+  `renommer_projet`, qui le faisait déjà juste ; son sabotage — effacer l'original sitôt la copie
+  faite, l'erreur qu'il avait commise lui-même — fait tomber le test ;
+- **un échec au milieu ne perd rien** : aucun original n'a bougé, les copies sont retirées, le
+  fichier reste en v6 **octet pour octet**, et le magasin passe en **refus d'écrire** —
+  `SecretsMigrationFailed`, « relancez DoraBase », sans quarantaine puisque rien n'est illisible. Un
+  mode dégradé qui garderait les anciennes références en mémoire a été écarté : une seconde voie de
+  code (règle n° 17) pour une panne rare que relancer répare. Un refus du Trousseau — il peut demander
+  une autorisation par entrée si la signature a changé — est un `Err`, donc ce chemin-là ;
+- **tué entre la copie et l'écriture**, le fichier est encore en v6 et le lancement suivant refait
+  tout, vers les mêmes références puisque les identifiants sont dérivés ; **tué entre l'écriture et
+  l'effacement**, il reste des orphelins sous les anciennes références, bénins, journalisés ;
+- **la v7 s'écrit dès qu'une migration est lue**, même sans mot de passe à déplacer : sinon chaque
+  commande remigre et pose une sauvegarde `config.json.avant-v6.k` de plus ;
+- **le magasin n'est demandé que si le plan n'est pas vide** : un lancement ordinaire, ou la
+  migration d'un fichier sans mot de passe, ne touche pas au Trousseau ;
+- **une v7 lue est validée** — un arbre invalide part en quarantaine —, et `save_config` valide
+  l'arbre que le front envoie avant de l'écrire.
 
 **Un champ ajouté avec `#[serde(default)]` ne demande aucun cran** ; un champ **retiré**
 en demande un. Et un champ conservé puis vidé (plutôt que supprimé du modèle) est la seule
@@ -5213,6 +5669,13 @@ c'est devenu une référence. `serde` relit les deux sans broncher — donc sans
 lirait comme une v6 et rendrait des références qui sont en réalité des chemins, ne résolvant
 rien et faisant ouvrir le kubeconfig par défaut de `kubectl`. **Le type n'est pas le
 critère ; ce que la valeur désigne l'est.**
+
+**Ce qui reste à voir à l'œil, et c'est le geste le plus important du chantier #108** : migrer un
+**vrai** `config.json` v6 dont les mots de passe sont au Trousseau, dans `pnpm tauri dev` puis dans un
+bundle signé, **quitter et relancer**, et ouvrir chaque connexion sans rien ressaisir. C'est le seul
+geste qui dise que les secrets ont suivi ; tout le reste est mesuré contre le magasin chiffré de
+développement et des doubles. Et le cas d'une autorisation du Trousseau **refusée** en cours de
+migration, qui doit mener à « relancez DoraBase » avec un fichier intact.
 
 ---
 
@@ -5562,10 +6025,11 @@ risquaient d'atterrir dans les applications de l'utilisateur. **Demander, ne pas
 Restent quelques observations qu'aucun test ne peut faire, et qu'il ne faut jamais
 présenter comme vérifiées tant qu'un humain ne les a pas faites :
 
-- **Renommer une connexion, quitter l'application, la relancer.** Elle doit reparaître sous
-  son nouveau nom et s'ouvrir **sans redemander son mot de passe** — c'est ce qui prouve
-  que le secret a changé de référence dans le Trousseau réel, et non dans le magasin
-  chiffré de développement.
+- **Migrer une configuration v6 dont les mots de passe sont au Trousseau, quitter l'application,
+  la relancer** (#108). Chaque connexion doit s'ouvrir **sans redemander son mot de passe** —
+  c'est ce qui prouve que les secrets ont changé de référence dans le Trousseau réel, et non dans
+  le magasin chiffré de développement. Le geste d'avant — renommer une connexion, quitter,
+  relancer — ne prouve plus rien : un renommage ne déplace plus aucun secret.
 - **Construire un bundle, le lancer depuis le Finder** sur une machine où `cloud-sql-proxy`
   n'est pas installé, et ouvrir une connexion Cloud SQL. Seule preuve du sidecar embarqué
   et du `PATH` minimal d'une app graphique.
@@ -5635,20 +6099,20 @@ présenter comme vérifiées tant qu'un humain ne les a pas faites :
 - **Déclencher `⇧⌘E` puis `⇧⌘I`.** Deux lignes distinctes doivent paraître dans la sortie de
   `pnpm tauri dev`, côté Rust **et** côté front : c'est la seule vérification du pont menu →
   React, `MenuEvent` ne portant qu'un identifiant.
-- **Exporter puis réimporter pour de vrai.** Le sélecteur de sauvegarde natif doit s'ouvrir et
-  un fichier non vide arriver au chemin choisi ; puis `⇧⌘I` sur ce fichier doit nommer projet,
-  base et environnement avant de laisser confirmer. Les sélecteurs de fichiers natifs ne sont
-  pas dans le DOM — même angle mort que « Parcourir… ».
-- **Exporter un projet avec ses mots de passe, l'importer sur une autre machine, et ouvrir une
-  connexion sans rien ressaisir** (`API-30`). Tout ce qui ne demande pas deux machines est couvert —
-  le format et sa migration, la fusion et ses six refus nommés, les droits du fichier, la reprise
-  des secrets après un échec d'écriture — mais l'aller-retour lui-même n'a jamais été fait. C'est le
-  seul geste qui dise que le mot de passe est arrivé **sous la référence que la connexion ira lire**,
-  et il est à `API-30` ce que « renommer, quitter, relancer » est au Trousseau. Trois choses ne se
-  voient que là : que le sélecteur natif s'ouvre avec le nom proposé, que le fichier écrit en `0600`
-  soit lisible par son destinataire après l'avoir reçu, et qu'une connexion importée **sans** son mot
-  de passe échoue sur le message du serveur — ce que le rapport annonce, et qui reste le point le
-  moins agréable de la fonction.
+- **Exporter puis réimporter pour de vrai.** Le sélecteur de sauvegarde natif doit s'ouvrir et un
+  fichier non vide arriver au chemin choisi ; puis `⇧⌘I` sur ce fichier doit nommer la connexion par
+  son chemin de dossiers avant de laisser confirmer. Les sélecteurs de fichiers natifs ne sont pas
+  dans le DOM — même angle mort que « Parcourir… ».
+- **Exporter un dossier avec ses mots de passe, l'importer sur une autre machine, et ouvrir une
+  connexion sans rien ressaisir** (`API-30`, #169). Tout ce qui ne demande pas deux machines est
+  couvert — le format et sa migration, la fusion et ses six refus nommés, les droits du fichier, la
+  reprise des secrets après un échec d'écriture — mais l'aller-retour lui-même n'a jamais été fait.
+  C'est le seul geste qui dise que le mot de passe est arrivé **sous la référence que la connexion
+  ira lire**, et il est à `API-30` ce que « migrer, quitter, relancer » est au Trousseau. Trois
+  choses ne se voient que là : que le sélecteur natif s'ouvre avec le nom proposé, que le fichier
+  écrit en `0600` soit lisible par son destinataire après l'avoir reçu, et qu'une connexion importée
+  **sans** son mot de passe échoue sur le message du serveur — ce que le rapport annonce, et qui
+  reste le point le moins agréable de la fonction.
 - **Lire les deux modales de transfert en « Nuit », et sous WKWebView.** Même réserve que les dix
   écrans, avec un point propre à celles-ci : la case à cocher est un contrôle **natif**, dont seul
   `color-scheme` donne le thème et `accent-color` la teinte. Chromium la dessine ; WebKit ne la
@@ -5951,29 +6415,47 @@ Aucun de ces points ne bloque le code en place.
   création. Ce qui manque pour décider est l'usage : si le fichier sert surtout à *donner* ses
   requêtes à quelqu'un, le refus suffit ; s'il sert à se synchroniser entre deux postes, il gêne.
 - **Un export ne porte pas les instances managées** (`API-30` × `API-32`). Une instance vit à côté
-  des projets, donc la portée « un projet » n'a pas de place pour elle — mais la portée « tous les
-  projets » en aurait une, et quelqu'un qui exporte tout pour changer de poste laissera ses
-  instances derrière lui. Trois formes possibles : les porter quand la portée est « tout » (le
-  fichier gagne une clé `instances`, l'import la fusionne par identifiant comme il fusionne un
-  projet) ; les porter toujours, ce qui ferait d'un export « un projet » un fichier qui parle
-  d'autre chose que de lui ; ou les laisser dehors et **le dire dans la modale**, ce qui est le
-  minimum honnête et coûte une phrase. La première est la bonne si le fichier sert à déménager, la
-  troisième si elle sert à donner un projet à quelqu'un — et c'est l'usage qui tranche.
-- **Importer un projet sous un autre nom** n'existe pas. La fusion couvre le cas courant — deux
-  machines, un même projet — mais pas « je veux les deux côte à côte pour comparer ». Le renommage
-  demanderait de recalculer les références de secret du projet importé, donc de décider ce qu'il
-  advient d'un mot de passe qui voyage vers une identité qui n'existait pas : c'est le geste que
-  `renommer_projet` sait faire, appliqué à un projet qui n'est pas encore là. Rien n'est cassé en
-  attendant : renommer le projet local d'abord donne le même résultat en deux gestes.
+  de l'arbre, donc la portée « un dossier » n'a pas de place pour elle — mais « Tout exporter » en
+  aurait une, et quelqu'un qui exporte tout pour changer de poste laissera ses instances derrière
+  lui. Trois formes possibles : les porter quand la portée est « tout » (le fichier gagne une clé
+  `instances`, l'import la fusionne par identifiant comme il fusionne une connexion) ; les porter
+  toujours, ce qui ferait d'un export « un dossier » un fichier qui parle d'autre chose que de lui ;
+  ou les laisser dehors et **le dire dans la modale**, ce qui est le minimum honnête et coûte une
+  phrase. La première est la bonne si le fichier sert à déménager, la troisième s'il sert à donner un
+  dossier à quelqu'un — et c'est l'usage qui tranche. **La question suivante décide peut-être de
+  celle-ci.**
+- **Les instances managées dans l'arbre de dossiers ?** (29 septembre 2026, #108). Elles vivent dans
+  une seconde zone de la sidebar parce qu'une instance n'appartenait à aucun environnement ; les
+  environnements partis, un dossier pourrait très bien ranger une instance à côté des connexions
+  qu'elle sert, et l'export d'un dossier l'emporterait sans question. Deux choses retiennent de le
+  faire au passage : **une instance existe pour écrire** — rôles, bases —, donc la lecture seule
+  d'un dossier n'aurait aucun sens pour elle et il faudrait une exception à « s'impose à tous les
+  descendants, sans exception » ; et elle garde son propre drapeau `production`, que l'arbre a
+  justement retiré aux connexions. Ranger sans hériter, c'est un palier de l'arbre qui ne suit pas la
+  règle des autres.
+- **Le titre de `ConfirmationTls` dit « en production »** pour les deux cibles qu'il sert : une
+  instance marquée production, et depuis #168 une connexion sous un dossier en lecture seule — qui
+  n'est pas forcément de production. Le rappel est juste, son titre ne l'est qu'à moitié. Deux titres
+  selon l'appelant, ou un titre qui nomme le risque plutôt que la cible (« le serveur ne sera pas
+  authentifié ») : c'est une phrase à choisir, pas un défaut de logique.
+- **`update_variant` ferme la connexion sans regarder une transaction manuelle ouverte** — le
+  comportement d'avant les dossiers, et il détonne maintenant : les trois gestes qui ferment pour la
+  lecture seule (`set_folder_read_only`, les déplacements, l'import) **refusent** tant qu'une
+  transaction est ouverte, parce que fermer l'emporterait. Modifier les réglages d'une connexion en
+  plein milieu d'une transaction l'annule donc sans le dire. Refuser comme les trois autres est le
+  plus simple ; confirmer en nommant la transaction est plus doux. Rien ne l'a tranché.
+- **Importer un dossier sous un autre nom, ou « à côté » de l'existant**, n'existe pas. La fusion
+  couvre le cas courant — deux machines, un même dossier — mais pas « je veux les deux côte à côte
+  pour comparer » : les connexions s'apparient par identifiant, donc un second exemplaire demanderait
+  des identifiants neufs, c'est-à-dire des connexions **différentes** qui se trouvent viser les mêmes
+  serveurs, avec leurs secrets à ranger sous des références neuves. Et importer « dans » un dossier
+  choisi plutôt qu'à la racine n'existe pas non plus. Rien n'est cassé en attendant : renommer le
+  dossier local d'abord, puis déplacer ce qui arrive, donne le rangement voulu en trois gestes.
 - **Les deux modales de dump n'ont aucun test de bout en bout**, et ce n'est pas propre à `API-30` —
   c'est ce que ce chantier a rendu visible. Leur seul point d'entrée est le menu natif, que
   Playwright ne touche pas, donc leur géométrie n'a jamais été mesurée dans une vraie fenêtre. Le
-  transfert de projets s'en sort par un paramètre de décor (`?demo&transfert=import`) ; le même
-  remède leur est applicable, et il coûte trois lignes dans `demo.tsx`.
-- **Déplacer une connexion d'un environnement à un autre** n'existe pas, délibérément : cela
-  demande de déplacer un secret du Trousseau, donc son geste et sa conception. La
-  confirmation de suppression ne le propose pas — offrir une action absente est pire que
-  son absence.
+  transfert s'en est sorti en gagnant de vrais boutons, ce qui a rendu inutile le paramètre de décor
+  qui l'ouvrait ; le dump n'a pas encore de bouton.
 
 ---
 
