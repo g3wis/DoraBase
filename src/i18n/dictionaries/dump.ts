@@ -81,7 +81,7 @@ export const dumpFr: Dictionnaire = {
   },
   noTarget: {
     title: 'Aucune base à exporter ou importer',
-    text: "Le menu ne dit pas quelle base viser, et la configuration en laisse plusieurs possibles — ou aucune. La cible viendra de la sélection de l'arbre ; d'ici là, l'export et l'import n'agissent que sur une configuration qui ne compte qu'une seule connexion.",
+    text: "Le menu ne dit pas quelle base viser, et la configuration en laisse plusieurs possibles — ou aucune. La cible viendra de la sélection de l'arbre ; d'ici là, l'export et l'import n'agissent que sur une configuration qui ne compte qu'une seule base de données.",
   },
   availabilityFailed: "La disponibilité de l'outil n'a pas pu être vérifiée",
 }
@@ -160,7 +160,7 @@ export const dumpEn: Dictionnaire = {
   },
   noTarget: {
     title: 'No database to export or import',
-    text: 'The menu does not say which database to target, and the configuration leaves several possible — or none. The target will come from the tree selection; until then, export and import only act on a configuration holding a single connection.',
+    text: 'The menu does not say which database to target, and the configuration leaves several possible — or none. The target will come from the tree selection; until then, export and import only act on a configuration holding a single database.',
   },
   availabilityFailed: 'The availability of the tool could not be checked',
 }

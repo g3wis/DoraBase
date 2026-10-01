@@ -152,7 +152,7 @@ describe('modifier une connexion (08g)', () => {
     const utilisateur = userEvent.setup()
     monter({
       onUpdate: async () => {
-        throw new Error('la connexion « c0000000000000e1 » n’existe plus')
+        throw new Error('la base de données « c0000000000000e1 » n’existe plus')
       },
     })
 
@@ -172,7 +172,7 @@ describe('modifier une connexion (08g)', () => {
       },
       onUpdate: async () => {
         throw new Error(
-          'une transaction manuelle est ouverte dans une console de « Atelier Nord › prod › analytics » : validez-la ou annulez-la avant de modifier cette connexion.',
+          'une transaction manuelle est ouverte dans une console de « Atelier Nord › prod › analytics » : validez-la ou annulez-la avant de modifier cette base de données.',
         )
       },
     })

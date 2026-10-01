@@ -121,7 +121,7 @@ pub(crate) fn lecture_seule_effective(
             .lecture_seule_effective(connexion)
             .map(|lecture| lecture.est_active())
             .ok_or_else(|| {
-                "cette connexion n'est plus déclarée dans la configuration : rafraîchissez \
+                "cette base de données n'est plus déclarée dans la configuration : rafraîchissez \
                  l'arborescence."
                     .to_owned()
             })
@@ -706,7 +706,7 @@ pub(crate) async fn mettre_a_jour_la_connexion(
         .unwrap_or_else(|| request.connection.to_string());
         return Err(format!(
             "une transaction manuelle est ouverte dans une console de « {nom} » : validez-la ou \
-             annulez-la avant de modifier cette connexion. Ses nouveaux réglages demandent de la \
+             annulez-la avant de modifier cette base de données. Ses nouveaux réglages demandent de la \
              rouvrir, et la fermer emporterait cette transaction."
         ));
     }

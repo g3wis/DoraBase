@@ -132,7 +132,9 @@ test('le rapport dit ce qui est parti, et nomme les mots de passe introuvables',
 
   await userEvent.click(screen.getByRole('button', { name: 'Choisir un fichier…' }))
 
-  expect(await screen.findByText(/2 dossier\(s\), 4 connexion\(s\), 7 console\(s\)/)).toBeVisible()
+  expect(
+    await screen.findByText(/2 dossier\(s\), 4 base\(s\) de données, 7 console\(s\)/),
+  ).toBeVisible()
   expect(screen.getByText(/3 mot\(s\) de passe écrit\(s\) en clair/)).toBeVisible()
   // **Dit, jamais tu** : sans cette ligne, le fichier serait incomplet et on ne le découvrirait
   // qu'à l'import, sur une autre machine.

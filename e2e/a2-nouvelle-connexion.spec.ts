@@ -703,7 +703,7 @@ test('la modale A2 n’est pas surlignée en rouge sous la sous-modale', async (
 
   const rouge = await page.evaluate(() => {
     const a2 = [...document.querySelectorAll('[role=dialog]')].find(
-      (d) => d.getAttribute('aria-label') === 'Nouvelle connexion',
+      (d) => d.getAttribute('aria-label') === 'Nouvelle base de données',
     )
     if (!a2) return null
     // Aucune bordure rouge dans A2 : le groupe « Environnement » et son `prod` sont partis (#166).
@@ -731,7 +731,7 @@ test('esc ferme la sous-modale sans fermer A2', async ({ page }) => {
   await page.keyboard.press('Escape')
 
   await expect(page.locator('[role=dialog][aria-label="Connexion impossible"]')).toHaveCount(0)
-  await expect(page.locator('[role=dialog][aria-label="Nouvelle connexion"]')).toHaveCount(1)
+  await expect(page.locator('[role=dialog][aria-label="Nouvelle base de données"]')).toHaveCount(1)
   // Le pied garde son état d'échec : c'est ce que le handoff montre.
   await expect(page.getByRole('button', { name: 'Retester' })).toHaveCount(1)
 })

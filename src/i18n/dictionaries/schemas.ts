@@ -5,7 +5,7 @@ import type { Dictionnaire } from '../types'
 export const schemasFr: Dictionnaire = {
   title: 'Gérer les schémas',
   filterPlaceholder: 'Filtrer les schémas…',
-  table: 'Schémas de la connexion',
+  table: 'Schémas de la base de données',
   systemTable: 'Schémas système',
   columns: {
     name: 'schéma',
@@ -20,7 +20,7 @@ export const schemasFr: Dictionnaire = {
   show: (p) => `Afficher ${p.schema} dans l’arbre`,
   system: (p) => `Schémas système (${p.count})`,
   loading: 'Lecture des schémas…',
-  empty: 'Cette connexion ne déclare aucun schéma.',
+  empty: 'Cette base de données ne déclare aucun schéma.',
   noMatch: 'Aucun schéma ne correspond au filtre.',
   create: {
     label: 'Créer un schéma',
@@ -42,7 +42,7 @@ export const schemasFr: Dictionnaire = {
 export const schemasEn: Dictionnaire = {
   title: 'Manage schemas',
   filterPlaceholder: 'Filter schemas…',
-  table: 'Schemas of this connection',
+  table: 'Schemas of this database',
   systemTable: 'System schemas',
   columns: {
     name: 'schema',
@@ -56,7 +56,7 @@ export const schemasEn: Dictionnaire = {
   show: (p) => `Show ${p.schema} in the tree`,
   system: (p) => `System schemas (${p.count})`,
   loading: 'Reading schemas…',
-  empty: 'This connection declares no schema.',
+  empty: 'This database declares no schema.',
   noMatch: 'No schema matches the filter.',
   create: {
     label: 'Create a schema',

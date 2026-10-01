@@ -164,7 +164,7 @@ pub async fn cible_et_version(
         )),
         // Fermée, tunnelée : refus explicite, **avant** de lancer quoi que ce soit.
         (_, true) => Err(DumpFailure::locale(format!(
-            "la connexion « {} » passe par un tunnel SSH : il faut l'ouvrir dans l'arbre avant \
+            "la base de données « {} » passe par un tunnel SSH : il faut l'ouvrir dans l'arbre avant \
              d'exporter ou d'importer, le tunnel ne vit que tant qu'elle est ouverte",
             key.connection
         ))),

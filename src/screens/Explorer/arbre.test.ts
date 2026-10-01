@@ -364,7 +364,7 @@ test('trois dossiers : la connexion est à 50, ce qui est dessous à 66 et 82', 
 
 test('un dossier replié annonce le compte de ses connexions, à toute profondeur', () => {
   const [racine] = aplatir(arbre(), new Set(), RIEN, JAMAIS)
-  expect(racine?.meta).toBe('2 connexions')
+  expect(racine?.meta).toBe('2 bases')
   expect(racine?.connexions).toBe(2)
 })
 
