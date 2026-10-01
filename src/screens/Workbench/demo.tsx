@@ -1330,6 +1330,7 @@ const TRANSFERT_SIMULE = {
 const SORT_VIDE: Omit<FolderOutcome, 'folder' | 'verdict'> = {
   foldersAdded: [],
   foldersKept: [],
+  foldersOmitted: [],
   readOnlyFromFile: [],
   connectionsAdded: [],
   connectionsKept: [],

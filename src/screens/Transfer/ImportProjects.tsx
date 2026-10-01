@@ -254,6 +254,13 @@ function Ligne({
             {t('transfer.import.foldersKept', { count: sort.foldersKept.length })}
           </span>
         )}
+        {/* **Ce que le fichier portait et qui n'est pas créé** (#108) : un contenant dont toutes les
+            connexions sont déjà ici. L'infobulle nomme les dossiers. */}
+        {sort.foldersOmitted.length > 0 && (
+          <span className={styles.reserve} title={sort.foldersOmitted.join('\n')}>
+            {t('transfer.import.foldersOmitted', { count: sort.foldersOmitted.length })}
+          </span>
+        )}
         {/* **La seule chose qu'un import change à ce qui était déjà là** (#169) : la lecture seule
             fusionne en « locale OU fichier », jamais affaiblie. Une réserve, parce qu'elle ferme les
             connexions ouvertes de ces dossiers, et l'infobulle les nomme. */}

@@ -139,11 +139,12 @@ test('trois niveaux de dossiers et une connexion, créés depuis l’accueil', a
     'Racine A › Niveau 2 › Niveau 3',
   )
   await page.getByRole('button', { name: /Enregistrer & ouvrir/ }).click()
-  await expect(ligne(page, 'Niveau 3')).toHaveAccessibleName(/1 connexion/)
-  // Le dossier hôte ne se déplie pas de lui-même à l'enregistrement : c'est le comportement
-  // d'aujourd'hui, consigné dans le rapport de #166 plutôt que corrigé au passage.
-  await ligne(page, 'Niveau 3').dblclick()
+  // **« Enregistrer & ouvrir » révèle la connexion** (#108) : son dossier hôte se déplie de lui-même
+  // et sa ligne est sélectionnée, sans aucun geste de plus. Avant, rien ne bougeait à l'écran — il
+  // fallait déplier « Niveau 3 » à la main pour voir que l'enregistrement avait eu lieu.
   await expect(ligne(page, 'psql')).toBeVisible()
+  await expect(ligne(page, 'psql')).toHaveAttribute('aria-selected', 'true')
+  await expect(ligne(page, 'Niveau 3')).toHaveAttribute('aria-expanded', 'true')
 
   // **La règle, au pixel** : 8 + 14 × niveau pour un dossier comme pour une connexion.
   expect(await retrait(page, 'Racine A')).toBe('8px')

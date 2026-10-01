@@ -1433,13 +1433,15 @@ mod tests_import {
         .expect("exporté");
         assert_eq!((report.folders, report.connections), (1, 1));
 
-        // Réinspecté sur le même poste : la connexion est reconnue par son identifiant, et le
-        // dossier « prod » arrive **à la racine**, à côté de « Halle ».
+        // Réinspecté sur le même poste : la connexion est reconnue par son identifiant, donc le
+        // dossier « prod » n'a **rien à apporter** et n'est pas créé à la racine (#108) — il y
+        // aurait été un dossier vide à côté de « Halle ».
         let apercu = inspecter_le_fichier(&store, &fichier.to_string_lossy()).expect("inspecté");
         assert_eq!(
             apercu.folders[0].verdict,
-            crate::config::requetes::FolderVerdict::Created
+            crate::config::requetes::FolderVerdict::Omitted
         );
+        assert_eq!(apercu.folders[0].folders_omitted, vec!["prod".to_owned()]);
         assert_eq!(
             apercu.folders[0].connections_kept,
             vec!["Halle › prod › base-jetons".to_owned()]

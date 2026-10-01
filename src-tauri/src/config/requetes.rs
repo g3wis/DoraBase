@@ -502,6 +502,10 @@ pub enum FolderVerdict {
     Created,
     /// Un dossier racine de ce nom existe : fusion récursive, rien n'est écrasé.
     Merged,
+    /// Aucun homonyme, mais **rien à créer** : tout ce que le dossier porte est déjà ici — ses
+    /// connexions, reconnues par identifiant, restent où elles sont. Le cas d'un sous-dossier
+    /// réimporté sur son poste d'origine (#108) : le créer ferait un dossier racine vide.
+    Omitted,
     /// Décoché par l'utilisateur.
     Skipped,
     /// Refusé : versé, l'arbre ne tiendrait pas ses invariants.
@@ -523,6 +527,10 @@ pub struct FolderOutcome {
     pub folders_added: Vec<String>,
     /// Les dossiers déjà présents ici (même nom, même place) : **nom et couleur locaux gardés**.
     pub folders_kept: Vec<String>,
+    /// Les dossiers que la fusion **aurait créés** et qu'elle omet, parce que leur sous-arbre
+    /// n'apporte rien — ni connexion, ni sous-dossier retenu, ni libellé (#108). Leurs connexions
+    /// sont déjà déclarées ici, ailleurs : le dossier serait un contenant vide.
+    pub folders_omitted: Vec<String>,
     /// Les dossiers locaux qui **passent en lecture seule** parce que le fichier la déclare : la
     /// lecture seule fusionne en « local OU fichier », jamais affaiblie.
     pub read_only_from_file: Vec<String>,
