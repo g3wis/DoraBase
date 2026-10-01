@@ -255,3 +255,25 @@ test('la croix d’une ligne marquée annule la marque, sans colonne à retirer'
   )
   expect(onRetirer).toHaveBeenCalledWith('184219', '')
 })
+
+/**
+ * Une connexion passée en lecture seule **avec des modifications en attente** (#167) : elles restent,
+ * « Tout annuler » aussi, et « Appliquer » dit pourquoi il ne part pas — en `aria-disabled`, pour que
+ * sa raison reste atteignable (piège n° 3).
+ */
+test('en lecture seule, « Appliquer » garde les modifications et dit sa raison', async () => {
+  const onAppliquer = vi.fn()
+  const { onToutAnnuler } = monter({
+    onAppliquer,
+    lectureSeule: 'Lecture seule imposée par « prod ».',
+  })
+  expect(screen.getAllByRole('listitem')).toHaveLength(1)
+  const appliquer = screen.getByRole('button', { name: /Appliquer/ })
+  expect(appliquer).toHaveAttribute('aria-disabled', 'true')
+  expect(appliquer).not.toBeDisabled()
+  expect(appliquer).toHaveAttribute('title', 'Lecture seule imposée par « prod ».')
+  await userEvent.click(appliquer)
+  expect(onAppliquer).not.toHaveBeenCalled()
+  await userEvent.click(screen.getByRole('button', { name: /Tout annuler/ }))
+  expect(onToutAnnuler).toHaveBeenCalled()
+})

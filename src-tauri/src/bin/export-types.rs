@@ -65,8 +65,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     LectureSeule::export_all(&config)?;
     // Le contrat IPC de #165 à #169, vers `arbre.ts` : la plupart de ces types portent le nom de
     // celui qu'ils ont remplacé à la bascule de #165. Nommés un par un : `export_all` entraîne les
-    // dépendances d'un type, jamais ses voisins. Ceux du déplacement (#167) sont projetés bien que
-    // leurs commandes ne soient pas encore branchées : l'écran code contre eux.
+    // dépendances d'un type, jamais ses voisins.
     arbre::ConfigLoad::export_all(&config)?;
     arbre::DatabaseKey::export_all(&config)?;
     arbre::ConnectionStateEntry::export_all(&config)?;

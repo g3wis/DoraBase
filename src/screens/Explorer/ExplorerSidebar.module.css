@@ -66,3 +66,56 @@
   flex: none;
   color: var(--ink-3);
 }
+
+/* **Le glisser-déposer** (#167). L'indicateur est l'accent, comme le trait de dépôt d'une colonne de
+ * `VirtualGrid` et la sélection de l'arbre : la teinte qui dit « ça va se passer ici ». Un filet de
+ * 2 px en haut ou en bas pour « avant » et « après », un cadre pour « dedans » — en `box-shadow`
+ * interne, parce qu'une ligne d'arbre n'est pas positionnée et qu'un pseudo-élément déborderait. */
+.tree [data-depot="avant"] {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.tree [data-depot="apres"] {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.tree [data-depot="dedans"] {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+/* La ligne qu'on tient s'estompe — l'opacité de `.glisseeColonne`. */
+.tree [data-glisse] {
+  opacity: 0.45;
+}
+
+/* La bande de tête pendant un glissement : **les cotes de `SidebarToolbar`**, pour que rien ne saute
+ * quand elle change de rôle, et l'aplat de la sélection quand le pointeur la désigne. */
+.depotRacine {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: 28px;
+  padding: 0 9px;
+  border-bottom: 1px solid var(--divider-2);
+  box-sizing: content-box;
+  flex: none;
+  font-family: var(--font-ui);
+  font-size: var(--text-label);
+  font-weight: var(--weight-semibold);
+  color: var(--ink-3);
+}
+
+.depotRacine[data-actif] {
+  background: color-mix(in oklab, var(--accent) 22%, transparent);
+  box-shadow: inset 0 0 0 2px var(--accent);
+  color: var(--ink);
+}
+
+/* Le curseur reste « saisi » sur toute la fenêtre, et le texte ne se sélectionne pas au passage —
+ * la règle de `.pendantLeReordonnancement` de `VirtualGrid`. */
+:global(body).pendantLeGlissement,
+:global(body).pendantLeGlissement * {
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: grabbing;
+}

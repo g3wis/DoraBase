@@ -14,14 +14,17 @@ use std::sync::Mutex;
 
 use tauri::{AppHandle, Manager, State};
 
-use super::arbre::{cle_de_connexion, tirage_du_systeme, ConnectionId, FolderId, FolderTree};
+use super::arbre::{
+    cle_de_connexion, tirage_du_systeme, ConnectionId, DeplacementError, FolderId, FolderTree,
+};
 use super::model::{Kubeconfigs, ManagedInstance, Preferences};
 use super::requetes::{
     ConfigLoad, ConsoleRequest, CreateFolderRequest, CreateFolderResult, DeleteDatabaseRequest,
     DeleteFolderRequest, DeleteResult, ExportProjectsRequest, ExportReport, ImportProjectsRequest,
-    ImportProjectsResult, ImportReport, RecolorFolderRequest, RenameDatabaseRequest,
-    RenameFolderRequest, SaveDatabaseRequest, SaveDatabaseResult, SetFolderReadOnlyRequest,
-    UpdateVariantRequest, ValueLabelsRequest, VisibleSchemasRequest,
+    ImportProjectsResult, ImportReport, MoveDatabaseRequest, MoveFolderRequest, MoveResult,
+    RecolorFolderRequest, RenameDatabaseRequest, RenameFolderRequest, SaveDatabaseRequest,
+    SaveDatabaseResult, SetFolderReadOnlyRequest, UpdateVariantRequest, ValueLabelsRequest,
+    VisibleSchemasRequest,
 };
 use super::store::{ConfigStore, LoadOutcome};
 use crate::engine::registry::ConnectionRegistry;
@@ -407,6 +410,148 @@ pub(crate) async fn regler_la_lecture_seule_du_dossier(
         changees.len()
     );
     Ok(ecrit)
+}
+
+// ---------------------------------------------------------------------------------------------
+// Déplacer (#167)
+// ---------------------------------------------------------------------------------------------
+
+/// Range un dossier ailleurs, ou le réordonne parmi ses frères — voir [`deplacer`].
+#[tauri::command]
+pub async fn move_folder(
+    request: MoveFolderRequest,
+    state: State<'_, ConfigState>,
+    registry: State<'_, ConnectionRegistry>,
+) -> Result<MoveResult, String> {
+    deplacer(
+        &state,
+        &registry,
+        &format!("dossier {}", request.folder),
+        |arbre| {
+            super::arbre::deplacer_dossier(
+                arbre,
+                &request.folder,
+                request.parent.as_ref(),
+                request.index,
+                request.confirmed,
+            )
+        },
+    )
+    .await
+}
+
+/// Range une connexion ailleurs, ou la réordonne — voir [`deplacer`].
+#[tauri::command]
+pub async fn move_database(
+    request: MoveDatabaseRequest,
+    state: State<'_, ConfigState>,
+    registry: State<'_, ConnectionRegistry>,
+) -> Result<MoveResult, String> {
+    deplacer(
+        &state,
+        &registry,
+        &format!("connexion {}", request.connection),
+        |arbre| {
+            super::arbre::deplacer_connexion(
+                arbre,
+                &request.connection,
+                request.folder.as_ref(),
+                request.index,
+                request.confirmed,
+            )
+        },
+    )
+    .await
+}
+
+/// Le corps des deux déplacements, sans Tauri — **le patron de `set_folder_read_only`**.
+///
+/// **Ni le registre ni le magasin de secrets ne sont touchés**, sauf pour une seule raison : une
+/// connexion dont la lecture seule effective change est **fermée**, parce que sa session a été
+/// ouverte avec l'ancien réglage côté moteur (#168). Les autres restent ouvertes — la clé du registre
+/// dérive de l'identifiant, que le déplacement ne change pas, et c'est ce que #165 a acheté.
+///
+/// **Une question n'est pas une erreur** : un déplacement qui changerait la lecture seule sans
+/// `confirmed` rend `MoveResult::ConfirmationRequired`, et rien n'est écrit. L'écran la pose dans la
+/// modale « Déplacer vers… », que le déplacement vienne de là ou d'un glisser-déposer.
+///
+/// **Refusé tant qu'une transaction manuelle est ouverte** sur une connexion qu'il faudrait fermer :
+/// la fermer emporterait sa transaction (`API-38`).
+pub(crate) async fn deplacer(
+    state: &ConfigState,
+    registry: &ConnectionRegistry,
+    sujet: &str,
+    geste: impl Fn(&FolderTree) -> Result<FolderTree, DeplacementError>,
+) -> Result<MoveResult, String> {
+    // Une question se rend en réponse, jamais en refus.
+    fn issue(erreur: DeplacementError) -> Result<MoveResult, String> {
+        match erreur {
+            DeplacementError::ConfirmationRequise {
+                devient_lecture_seule,
+                quitte_lecture_seule,
+                dossiers,
+            } => Ok(MoveResult::ConfirmationRequired {
+                becomes_read_only: devient_lecture_seule,
+                leaves_read_only: quitte_lecture_seule,
+                folders: dossiers,
+            }),
+            autre => Err(autre.to_string()),
+        }
+    }
+
+    // D'abord **sans écrire** : la question, ou ce qu'il faudrait fermer.
+    let calcul = avec_le_magasin(state, |store| {
+        let arbre = store.load_tree()?;
+        Ok((geste(&arbre), arbre))
+    })?;
+    let (avant, projete) = match calcul {
+        (Ok(projete), avant) => (avant, projete),
+        (Err(erreur), _) => return issue(erreur),
+    };
+    for id in avant.lecture_seule_changee(&projete) {
+        if registry.transaction_ouverte(&cle_de_connexion(&id)).await {
+            let nom = avant
+                .chemin_de(&id)
+                .map(|morceaux| morceaux.join(" › "))
+                .unwrap_or_else(|| id.to_string());
+            return Err(format!(
+                "une transaction manuelle est ouverte dans une console de « {nom} », dont ce \
+                 déplacement change la lecture seule : validez-la ou annulez-la avant de déplacer. \
+                 La connexion doit être rouverte pour suivre le réglage, et la fermer emporterait \
+                 cette transaction."
+            ));
+        }
+    }
+
+    // L'écriture relit le disque et **recalcule** : ce qui est fermé est ce qui a réellement changé,
+    // et une question qui n'existait pas au calcul — l'arbre a bougé entre-temps — est encore posée.
+    let mut changees = Vec::new();
+    let mut question = None;
+    let ecrit = avec_le_magasin(state, |store| {
+        ecrire_l_arbre_sur(store, |arbre| match geste(arbre) {
+            Ok(suivant) => {
+                changees = arbre.lecture_seule_changee(&suivant);
+                Ok(suivant)
+            }
+            Err(erreur @ DeplacementError::ConfirmationRequise { .. }) => {
+                question = Some(erreur);
+                Err(String::new())
+            }
+            Err(autre) => Err(autre.to_string()),
+        })
+    });
+    if let Some(question) = question {
+        return issue(question);
+    }
+    let arbre = ecrit?;
+    for id in &changees {
+        registry.fermer(&cle_de_connexion(id)).await;
+    }
+    log::info!(
+        "déplacer ← {sujet} : {} connexion(s) fermée(s)",
+        changees.len()
+    );
+    Ok(MoveResult::Moved { tree: arbre })
 }
 
 /// Le retrait d'un dossier ou d'une connexion, jusqu'à l'écriture : la commande ferme ensuite.
@@ -1299,5 +1444,203 @@ mod tests_import {
             apercu.folders[0].connections_kept,
             vec!["Halle › prod › base-jetons".to_owned()]
         );
+    }
+}
+
+/// Déplacer ne ferme que ce dont la lecture seule change (#167), sur un vrai fichier SQLite.
+#[cfg(test)]
+mod tests_deplacer {
+    use super::*;
+    use crate::config::arbre::tests::{base, dossier};
+    use crate::config::model::{Engine, SslMode};
+    use crate::engine::registry::ConnectionState;
+    use crate::engine::{RowLimit, TransactionMode};
+
+    struct Decor {
+        _repertoire: tempfile::TempDir,
+        config: ConfigState,
+        registre: ConnectionRegistry,
+        chemin_config: std::path::PathBuf,
+    }
+
+    fn cle() -> String {
+        cle_de_connexion(&ConnectionId::brut("jetons"))
+    }
+
+    /// `dev` (inscriptible) porte une connexion SQLite **ouverte** ; `prod` est en lecture seule,
+    /// `outils` inscriptible, tous deux vides.
+    async fn monter() -> Decor {
+        let repertoire = tempfile::tempdir().expect("répertoire temporaire");
+        let base_sqlite = repertoire.path().join("atelier.db");
+        rusqlite::Connection::open(&base_sqlite)
+            .expect("fichier")
+            .execute_batch("create table jetons (valeur integer)")
+            .expect("décor");
+        let mut connexion = base("jetons", false);
+        connexion.engine = Engine::Sqlite;
+        connexion.connection.default_database = base_sqlite.to_string_lossy().into_owned();
+        connexion.connection.ssl_mode = SslMode::Disable;
+        let mut dev = dossier("dev", "dev", false);
+        dev.connections.push(connexion.clone());
+        let chemin_config = repertoire.path().join("config.json");
+        let (store, _) = ConfigStore::open(&chemin_config);
+        ecrire_le_reste_intact(
+            &store,
+            &FolderTree {
+                folders: vec![
+                    dev,
+                    dossier("prod", "prod", true),
+                    dossier("outils", "outils", false),
+                ],
+                connections: Vec::new(),
+            },
+        )
+        .expect("écrit");
+
+        let registre = ConnectionRegistry::new();
+        registre
+            .ouvrir(
+                &cle(),
+                Engine::Sqlite,
+                &connexion.connection,
+                None,
+                &crate::engine::proxy::ContexteDeProxy::pour_les_tests(),
+            )
+            .await
+            .expect("un fichier SQLite doit s'ouvrir");
+        Decor {
+            _repertoire: repertoire,
+            config: ConfigState::ouvert(store),
+            registre,
+            chemin_config,
+        }
+    }
+
+    async fn deplacer_vers(
+        decor: &Decor,
+        dossier: &str,
+        confirme: bool,
+    ) -> Result<MoveResult, String> {
+        let destination = FolderId::brut(dossier);
+        deplacer(&decor.config, &decor.registre, "jetons", |arbre| {
+            crate::config::arbre::deplacer_connexion(
+                arbre,
+                &ConnectionId::brut("jetons"),
+                Some(&destination),
+                None,
+                confirme,
+            )
+        })
+        .await
+    }
+
+    fn dossier_sur_le_disque(decor: &Decor) -> String {
+        let (store, _) = ConfigStore::open(&decor.chemin_config);
+        let arbre = store.load_tree().expect("relu");
+        let (_, ancetres) = arbre
+            .connexion(&ConnectionId::brut("jetons"))
+            .expect("toujours déclarée");
+        ancetres.last().expect("rangée").id.to_string()
+    }
+
+    /// **La connexion ouverte reste `Connected`** : ni le registre ni le magasin ne sont touchés, la
+    /// clé dérivant d'un identifiant que le déplacement ne change pas. Sabotage vérifié : fermer
+    /// toutes les connexions du sujet fait tomber ce test.
+    #[tokio::test]
+    async fn une_connexion_ouverte_deplacee_sans_changer_de_lecture_seule_reste_connectee() {
+        let decor = monter().await;
+
+        let issue = deplacer_vers(&decor, "outils", false)
+            .await
+            .expect("déplacée");
+
+        assert!(matches!(issue, MoveResult::Moved { .. }));
+        assert_eq!(dossier_sur_le_disque(&decor), "outils");
+        assert!(matches!(
+            decor.registre.etat(&cle()).await,
+            ConnectionState::Connected { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn sans_confirmation_une_entree_en_lecture_seule_est_une_question_et_rien_ne_bouge() {
+        let decor = monter().await;
+
+        let issue = deplacer_vers(&decor, "prod", false)
+            .await
+            .expect("une question n'est pas un refus");
+
+        match issue {
+            MoveResult::ConfirmationRequired {
+                becomes_read_only,
+                leaves_read_only,
+                folders,
+            } => {
+                assert_eq!(becomes_read_only, vec![ConnectionId::brut("jetons")]);
+                assert!(leaves_read_only.is_empty());
+                assert_eq!(folders, vec![FolderId::brut("prod")]);
+            }
+            autre => panic!("question attendue, reçu {autre:?}"),
+        }
+        assert_eq!(dossier_sur_le_disque(&decor), "dev", "rien n'est écrit");
+        assert_eq!(decor.registre.ouvertes().await, 1, "rien n'est fermé");
+    }
+
+    #[tokio::test]
+    async fn confirmee_elle_attend_la_transaction_puis_ferme_la_connexion() {
+        let decor = monter().await;
+        decor
+            .registre
+            .executer_une_requete(
+                &cle(),
+                "insert into jetons values (1)",
+                RowLimit::OneHundred,
+                TransactionMode::Manual,
+                "console",
+            )
+            .await
+            .expect("retenue");
+
+        let refus = deplacer_vers(&decor, "prod", true)
+            .await
+            .expect_err("refus attendu");
+        assert!(refus.contains("transaction manuelle"), "{refus}");
+        assert!(
+            refus.contains("dev › base-jetons"),
+            "le refus nomme la connexion : {refus}"
+        );
+        assert_eq!(dossier_sur_le_disque(&decor), "dev", "rien n'est écrit");
+
+        decor
+            .registre
+            .annuler_la_transaction(&cle(), "console")
+            .await
+            .expect("annulée");
+        let issue = deplacer_vers(&decor, "prod", true).await.expect("déplacée");
+
+        assert!(matches!(issue, MoveResult::Moved { .. }));
+        assert_eq!(dossier_sur_le_disque(&decor), "prod");
+        // **Fermée**, pour se rouvrir avec la session en lecture seule côté moteur (#168).
+        assert!(matches!(
+            decor.registre.etat(&cle()).await,
+            ConnectionState::Never
+        ));
+    }
+
+    #[tokio::test]
+    async fn un_refus_est_une_erreur_et_non_une_question() {
+        let decor = monter().await;
+        let refus = deplacer(&decor.config, &decor.registre, "dev", |arbre| {
+            crate::config::arbre::deplacer_dossier(
+                arbre,
+                &FolderId::brut("dev"),
+                Some(&FolderId::brut("dev")),
+                None,
+                true,
+            )
+        })
+        .await
+        .expect_err("refus attendu");
+        assert!(refus.contains("lui-même"), "{refus}");
     }
 }

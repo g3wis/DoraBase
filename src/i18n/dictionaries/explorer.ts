@@ -100,6 +100,29 @@ export const explorerFr: Dictionnaire = {
     // Le refus de « Passer en / Lever la lecture seule » (#168).
     readOnlyRefusedTitle: (p) => `La lecture seule de « ${p.nom} » n’a pas changé`,
     readOnlyReassurance: 'Le dossier garde son réglage, et aucune connexion n’a été fermée.',
+    // Le refus d'un glisser-déposer (#167), qui n'a pas d'autre endroit où se dire.
+    moveRefusedTitle: (p) => `« ${p.nom} » n’a pas été déplacé`,
+    moveReassurance: 'Rien n’a bougé, et aucune connexion n’a été fermée.',
+  },
+  // « Déplacer vers… » (#167).
+  moveDialog: {
+    title: (p) => `Déplacer ${p.nom} vers…`,
+    destinations: 'Dossier d’arrivée',
+    root: 'Racine',
+    inItself: 'Un dossier ne se range pas dans lui-même.',
+    alreadyHere: 'Déjà ici.',
+    chooseFirst: 'Choisissez un dossier d’arrivée.',
+    cancel: 'Annuler',
+    move: 'Déplacer',
+    moving: 'Déplacement…',
+    becomesReadOnly: (p) =>
+      Number(p.count) > 1
+        ? `${p.connexions} passeront en lecture seule, imposée par ${p.dossiers}.`
+        : `${p.connexions} passera en lecture seule, imposée par ${p.dossiers}.`,
+    leavesReadOnly: (p) =>
+      Number(p.count) > 1
+        ? `${p.connexions} quitteront la lecture seule imposée par ${p.dossiers}.`
+        : `${p.connexions} quittera la lecture seule imposée par ${p.dossiers}.`,
   },
   rowMenu: {
     title: 'Actions',
@@ -131,6 +154,7 @@ export const explorerFr: Dictionnaire = {
       openDiagram: 'Diagramme du schéma',
       manageSchemas: 'Gérer les schémas…',
       copyName: 'Copier le nom',
+      moveTo: 'Déplacer vers…',
     },
     raisons: {
       renameUnavailable: 'Cet écran n’est pas relié à la commande de renommage.',
@@ -145,7 +169,10 @@ export const explorerFr: Dictionnaire = {
       schemasUnavailable: 'Cet écran n’est pas relié au gestionnaire de schémas.',
       schemasPostgresOnly: 'Seul PostgreSQL est géré pour l’instant.',
       exportUnavailable: 'Cet écran n’est pas relié à l’export.',
+      moveUnavailable: 'Cet écran n’est pas relié au déplacement.',
     },
+    // Le dépôt à la racine, pendant un glissement (#167) : la bande de tête change de rôle.
+    dropAtRoot: 'Déposer à la racine',
   },
   // L'aplatissement de l'arbre (`arbre.ts`) — une fonction pure, mais qui produit du texte
   // affiché. `t` y est passé en paramètre plutôt que lu par un `useT()` qu'elle ne pourrait pas
@@ -265,6 +292,22 @@ export const explorerEn: Dictionnaire = {
     reassurance: 'The previous name is kept.',
     readOnlyRefusedTitle: (p) => `The read-only setting of “${p.nom}” did not change`,
     readOnlyReassurance: 'The folder keeps its setting, and no connection was closed.',
+    moveRefusedTitle: (p) => `“${p.nom}” was not moved`,
+    moveReassurance: 'Nothing moved, and no connection was closed.',
+  },
+  moveDialog: {
+    title: (p) => `Move ${p.nom} to…`,
+    destinations: 'Destination folder',
+    root: 'Root',
+    inItself: 'A folder cannot be put inside itself.',
+    alreadyHere: 'Already here.',
+    chooseFirst: 'Choose a destination folder.',
+    cancel: 'Cancel',
+    move: 'Move',
+    moving: 'Moving…',
+    becomesReadOnly: (p) => `${p.connexions} will become read-only, imposed by ${p.dossiers}.`,
+    leavesReadOnly: (p) =>
+      `${p.connexions} will leave the read-only mode imposed by ${p.dossiers}.`,
   },
   rowMenu: {
     title: 'Actions',
@@ -296,6 +339,7 @@ export const explorerEn: Dictionnaire = {
       openDiagram: 'Schema diagram',
       manageSchemas: 'Manage schemas…',
       copyName: 'Copy name',
+      moveTo: 'Move to…',
     },
     raisons: {
       renameUnavailable: 'This screen is not wired to the rename command.',
@@ -310,7 +354,9 @@ export const explorerEn: Dictionnaire = {
       schemasUnavailable: 'This screen is not wired to the schema manager.',
       schemasPostgresOnly: 'Only PostgreSQL is supported for now.',
       exportUnavailable: 'This screen is not wired to export.',
+      moveUnavailable: 'This screen is not wired to moving.',
     },
+    dropAtRoot: 'Drop at the root',
   },
   arbre: {
     loading: 'Loading…',

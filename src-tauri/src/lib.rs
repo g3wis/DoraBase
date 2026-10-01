@@ -61,6 +61,8 @@ pub fn run() {
             config::commands::rename_folder,
             config::commands::recolor_folder,
             config::commands::set_folder_read_only,
+            config::commands::move_folder,
+            config::commands::move_database,
             config::commands::delete_folder,
             config::commands::save_database,
             config::commands::update_variant,
@@ -75,8 +77,6 @@ pub fn run() {
             config::commands::export_projects,
             config::commands::inspect_projects_file,
             config::commands::import_projects,
-            // `move_folder` et `move_database` (#167) : déclarés dans `config::requetes`, pas
-            // encore branchés.
             engine::commands::test_connection,
             engine::commands::open_database,
             engine::commands::close_database,

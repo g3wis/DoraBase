@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   connexion,
   connexionsDescendantes,
+  deplacementSimule,
   dossier,
   idDeConnexion,
   nomDeDossierLibre,
@@ -1818,6 +1819,13 @@ export function WorkbenchDemo() {
         onSetFolderReadOnly={async (folder, readOnly) =>
           setArbre((precedent) => surDossier(precedent, folder, (d) => ({ ...d, readOnly })))
         }
+        // Le déplacement (#167), **rejoué sans cœur** : mêmes refus et même question que `move_*`.
+        // Aucune connexion n'est fermée ici — la démo n'a pas de registre à qui le demander.
+        onMove={async (sujet, arrivee, confirmed) => {
+          const issue = deplacementSimule(arbre, sujet, arrivee, confirmed)
+          if (issue.kind === 'moved') setArbre(issue.tree)
+          return issue
+        }}
         onCreateConsole={async (connection, nom) =>
           surConsoles(connection, (consoles) => [...consoles, { name: nom, sql: '' }])
         }

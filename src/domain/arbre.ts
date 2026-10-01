@@ -202,8 +202,8 @@ folder: FolderId | null, index: number | null, confirmed: boolean, };
  * `move_folder` : ranger un dossier ailleurs, ou le réordonner parmi ses frères.
  *
  * Refusé : le dossier lui-même ou l'un de ses descendants comme destination, un identifiant
- * inconnu, un frère homonyme à l'arrivée (pas de renommage automatique), une transaction manuelle
- * ouverte avec écritures.
+ * inconnu, un frère homonyme à l'arrivée (pas de renommage automatique), et une transaction
+ * manuelle ouverte sur une connexion dont la lecture seule changerait.
  */
 export type MoveFolderRequest = { folder: FolderId, 
 /**
@@ -211,7 +211,8 @@ export type MoveFolderRequest = { folder: FolderId,
  */
 parent: FolderId | null, 
 /**
- * La place parmi les frères d'arrivée ; `None` : en dernier.
+ * La place parmi les frères d'arrivée, **le dossier déplacé exclu du compte** ; `None`, ou un
+ * rang trop grand : en dernier.
  */
 index: number | null, 
 /**
@@ -282,8 +283,8 @@ export type SaveDatabaseResult = { tree: FolderTree, connection: ConnectionId, }
 /**
  * `set_folder_read_only` — l'effet sur les écrans est celui de #168.
  *
- * Refusé tant qu'une console d'une connexion du sous-arbre tient une transaction manuelle avec des
- * écritures (#167) : le refus nomme la console.
+ * Refusé tant qu'une console d'une connexion dont la lecture seule changerait tient une transaction
+ * manuelle (#168) : le refus nomme la connexion.
  */
 export type SetFolderReadOnlyRequest = { folder: FolderId, readOnly: boolean, };
 

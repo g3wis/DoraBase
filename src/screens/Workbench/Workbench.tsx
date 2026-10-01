@@ -59,7 +59,7 @@ import { idBase, idSchema, type Noeud } from '../Explorer/arbre'
 import { BreadcrumbBar, type TypeObjet } from '../Explorer/BreadcrumbBar'
 import type { CibleDeSuppression } from '../Explorer/DeleteConnectionDialog'
 import { DetailPanel } from '../Explorer/DetailPanel'
-import { ExplorerSidebar } from '../Explorer/ExplorerSidebar'
+import { ExplorerSidebar, type ExplorerSidebarProps } from '../Explorer/ExplorerSidebar'
 import { ObjectTable } from '../Explorer/ObjectTable'
 import { InstancesPanel } from '../Instances/InstancesPanel'
 import { InstanceView } from '../Instances/InstanceView'
@@ -158,6 +158,8 @@ type WorkbenchProps = {
   onImportProjects?: () => void
   /** Exporte un dossier depuis le menu de sa ligne (#169). **Relayé**, comme l'import. */
   onExportFolder?: (folder: FolderId, nom: string) => void
+  /** Déplace un dossier ou une connexion (#167) — voir `ExplorerSidebar`. */
+  onMove?: ExplorerSidebarProps['onMove']
   /**
    * Renomme une connexion (`26`). **Rejette avec le refus du cœur**, et la sidebar l'affiche. Rien
    * d'autre à rapporter depuis #166 : le nom n'est dans aucune identité.
@@ -259,6 +261,7 @@ export function Workbench({
   onEditDatabase,
   onImportProjects,
   onExportFolder,
+  onMove,
   onRenameDatabase,
   onArbre,
   onDelete,
@@ -1632,6 +1635,7 @@ export function Workbench({
                   onSetFolderReadOnly={onSetFolderReadOnly}
                   onImportProjects={onImportProjects}
                   onExportFolder={onExportFolder}
+                  onMove={onMove}
                   consoles={
                     onCreateConsole === undefined
                       ? undefined
@@ -1966,6 +1970,10 @@ export function Workbench({
                               }
                         }
                         onAppliquer={application.demander}
+                        // **Une connexion passée en lecture seule garde ses modifications** (#167) :
+                        // le mode édition se ferme de lui-même (`enEdition`), « Appliquer » dit
+                        // pourquoi il ne part pas.
+                        lectureSeule={raisonDeLaTable}
                         onEcarterLePatch={application.ecarterLePatch}
                         onCopierLeSQL={
                           sqlPrevu.sql === null

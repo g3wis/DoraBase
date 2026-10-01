@@ -201,8 +201,8 @@ pub struct RecolorFolderRequest {
 
 /// `set_folder_read_only` — l'effet sur les écrans est celui de #168.
 ///
-/// Refusé tant qu'une console d'une connexion du sous-arbre tient une transaction manuelle avec des
-/// écritures (#167) : le refus nomme la console.
+/// Refusé tant qu'une console d'une connexion dont la lecture seule changerait tient une transaction
+/// manuelle (#168) : le refus nomme la connexion.
 #[derive(Debug, Clone, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "arbre.ts")]
@@ -240,8 +240,8 @@ pub struct DeleteResult {
 /// `move_folder` : ranger un dossier ailleurs, ou le réordonner parmi ses frères.
 ///
 /// Refusé : le dossier lui-même ou l'un de ses descendants comme destination, un identifiant
-/// inconnu, un frère homonyme à l'arrivée (pas de renommage automatique), une transaction manuelle
-/// ouverte avec écritures.
+/// inconnu, un frère homonyme à l'arrivée (pas de renommage automatique), et une transaction
+/// manuelle ouverte sur une connexion dont la lecture seule changerait.
 #[derive(Debug, Clone, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "arbre.ts")]
@@ -249,7 +249,8 @@ pub struct MoveFolderRequest {
     pub folder: FolderId,
     /// `None` : à la racine.
     pub parent: Option<FolderId>,
-    /// La place parmi les frères d'arrivée ; `None` : en dernier.
+    /// La place parmi les frères d'arrivée, **le dossier déplacé exclu du compte** ; `None`, ou un
+    /// rang trop grand : en dernier.
     pub index: Option<usize>,
     /// **Exigé côté cœur** quand le déplacement change la lecture seule effective d'au moins une
     /// connexion, dans un sens ou dans l'autre. Faux, la commande rend

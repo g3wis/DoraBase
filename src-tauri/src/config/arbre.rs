@@ -793,6 +793,293 @@ impl FolderTree {
     }
 }
 
+// ---------------------------------------------------------------------------------------------------
+// Déplacer (#167)
+// ---------------------------------------------------------------------------------------------------
+
+/// Les refus d'un déplacement (#167).
+///
+/// **Un seul d'entre eux n'est pas une faute** : [`DeplacementError::ConfirmationRequise`] est une
+/// question, que la commande rend en `MoveResult::ConfirmationRequired` plutôt qu'en erreur.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeplacementError {
+    /// Le dossier à déplacer n'est pas dans l'arbre — un désaccord entre l'écran et le disque.
+    DossierInconnu { folder: FolderId },
+    /// La connexion à déplacer n'est pas dans l'arbre.
+    ConnexionInconnue { connection: ConnectionId },
+    /// Le dossier d'arrivée n'est pas dans l'arbre.
+    DestinationInconnue { folder: FolderId },
+    /// Un dossier rangé dans lui-même ou dans l'un de ses descendants : l'arbre deviendrait un cycle,
+    /// que la forme imbriquée ne sait d'ailleurs pas écrire.
+    DansSonPropreDescendant { folder: FolderId },
+    /// Un frère d'arrivée porte déjà ce nom. **Pas de renommage automatique** : un suffixe masquerait
+    /// la collision plutôt que de la dire, et la fusion de #169 apparie les dossiers par leur nom.
+    DossierHomonyme {
+        parent: Option<FolderId>,
+        name: String,
+    },
+    /// Le déplacement changerait la lecture seule **effective** d'au moins une connexion, et il n'a
+    /// pas été confirmé. **Dans les deux sens** : entrer sous un dossier en lecture seule comme en
+    /// sortir — sortir est permis, mais confirmé et nommé (#108).
+    ConfirmationRequise {
+        devient_lecture_seule: Vec<ConnectionId>,
+        quitte_lecture_seule: Vec<ConnectionId>,
+        /// Les dossiers qui imposent ou imposaient la lecture seule, sans doublon, dans l'ordre où
+        /// ils sont rencontrés — pour que l'écran les nomme.
+        dossiers: Vec<FolderId>,
+    },
+    /// Le filet : un invariant que les refus nommés n'ont pas prévu.
+    Arbre(ArbreError),
+}
+
+impl std::fmt::Display for DeplacementError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::DossierInconnu { folder } => write!(f, "le dossier « {folder} » n'existe pas"),
+            Self::ConnexionInconnue { connection } => {
+                write!(f, "la connexion « {connection} » n'existe pas")
+            }
+            Self::DestinationInconnue { folder } => {
+                write!(f, "le dossier d'arrivée « {folder} » n'existe pas")
+            }
+            Self::DansSonPropreDescendant { .. } => {
+                write!(f, "un dossier ne se range pas dans lui-même ni dans ses sous-dossiers")
+            }
+            Self::DossierHomonyme { parent: None, name } => write!(
+                f,
+                "un dossier nommé « {name} » existe déjà à la racine : renommez l'un des deux avant \
+                 de déplacer"
+            ),
+            Self::DossierHomonyme {
+                parent: Some(_),
+                name,
+            } => write!(
+                f,
+                "un dossier nommé « {name} » existe déjà à cet endroit : renommez l'un des deux \
+                 avant de déplacer"
+            ),
+            Self::ConfirmationRequise { .. } => write!(
+                f,
+                "ce déplacement change la lecture seule d'au moins une connexion : il doit être \
+                 confirmé"
+            ),
+            Self::Arbre(erreur) => write!(f, "{erreur}"),
+        }
+    }
+}
+
+impl std::error::Error for DeplacementError {}
+
+/// Les deux listes d'un niveau d'accueil : la racine, ou un dossier.
+fn accueil_mut<'a>(
+    arbre: &'a mut FolderTree,
+    parent: Option<&FolderId>,
+) -> Option<(&'a mut Vec<Folder>, &'a mut Vec<Database>)> {
+    match parent {
+        None => Some((&mut arbre.folders, &mut arbre.connections)),
+        Some(id) => arbre
+            .dossier_mut(id)
+            .map(|dossier| (&mut dossier.folders, &mut dossier.connections)),
+    }
+}
+
+/// Retire un dossier où qu'il soit, et le rend.
+fn extraire_dossier(dossiers: &mut Vec<Folder>, id: &FolderId) -> Option<Folder> {
+    if let Some(rang) = dossiers.iter().position(|dossier| &dossier.id == id) {
+        return Some(dossiers.remove(rang));
+    }
+    dossiers
+        .iter_mut()
+        .find_map(|dossier| extraire_dossier(&mut dossier.folders, id))
+}
+
+/// Retire une connexion d'une liste de dossiers, où qu'elle soit, et la rend.
+fn extraire_connexion(dossiers: &mut [Folder], id: &ConnectionId) -> Option<Database> {
+    dossiers.iter_mut().find_map(|dossier| {
+        if let Some(rang) = dossier.connections.iter().position(|base| &base.id == id) {
+            return Some(dossier.connections.remove(rang));
+        }
+        extraire_connexion(&mut dossier.folders, id)
+    })
+}
+
+/// Insère à `index`, **borné** à la fin : un rang trop grand veut dire « en dernier », et le refuser
+/// ferait échouer un glisser-déposer sous la dernière ligne pour un compte à un près.
+fn inserer<T>(liste: &mut Vec<T>, index: Option<usize>, element: T) {
+    let rang = index.unwrap_or(liste.len()).min(liste.len());
+    liste.insert(rang, element);
+}
+
+/// Ce qu'un changement d'arbre fait à la lecture seule effective : la question à poser, ou rien.
+///
+/// **La lecture seule effective, pas le drapeau des dossiers** : un dossier en lecture seule qui
+/// quitte un parent en lecture seule ne change rien pour ses connexions, et une connexion réglée en
+/// lecture seule pour elle-même le reste où qu'elle aille. Ce sont les connexions que
+/// `lecture_seule_changee` rend — celles que la commande fermera.
+fn question_de_lecture_seule(avant: &FolderTree, apres: &FolderTree) -> Option<DeplacementError> {
+    let changees = avant.lecture_seule_changee(apres);
+    if changees.is_empty() {
+        return None;
+    }
+    let mut devient_lecture_seule = Vec::new();
+    let mut quitte_lecture_seule = Vec::new();
+    let mut dossiers: Vec<FolderId> = Vec::new();
+    for id in changees {
+        let devient = apres
+            .lecture_seule_effective(&id)
+            .is_some_and(|lecture| lecture.est_active());
+        // Le dossier qui l'impose **après** pour une entrée, **avant** pour une sortie : c'est celui
+        // que la phrase nomme — « imposée par « prod » », « quittera celle de « prod » ».
+        let source = if devient { apres } else { avant };
+        if let Some(LectureSeule::Imposee {
+            dossiers: imposants,
+        }) = source.lecture_seule_effective(&id)
+        {
+            for dossier in imposants {
+                if !dossiers.contains(&dossier) {
+                    dossiers.push(dossier);
+                }
+            }
+        }
+        if devient {
+            devient_lecture_seule.push(id);
+        } else {
+            quitte_lecture_seule.push(id);
+        }
+    }
+    Some(DeplacementError::ConfirmationRequise {
+        devient_lecture_seule,
+        quitte_lecture_seule,
+        dossiers,
+    })
+}
+
+/// Le tronc commun des deux déplacements, une fois l'arbre d'arrivée composé.
+fn conclure(
+    avant: &FolderTree,
+    apres: FolderTree,
+    confirme: bool,
+) -> Result<FolderTree, DeplacementError> {
+    if !confirme {
+        if let Some(question) = question_de_lecture_seule(avant, &apres) {
+            return Err(question);
+        }
+    }
+    // Le filet : les refus nommés couvrent ce qu'on sait nommer.
+    apres.valider().map_err(DeplacementError::Arbre)?;
+    Ok(apres)
+}
+
+/// Range un dossier sous `parent` (`None` : à la racine), à la place `index` parmi ses frères
+/// d'arrivée (`None` : en dernier) — ou le réordonne parmi les siens (#167).
+///
+/// **`index` compte les frères d'arrivée sans le dossier déplacé** : c'est la place qu'il aura, donc
+/// ce qu'un dépôt entre deux lignes désigne, que le dossier vienne d'ailleurs ou de la même liste.
+///
+/// **Rien d'autre ne bouge** : ni l'identifiant du dossier, ni ceux de ses connexions, donc ni la clé
+/// du registre, ni la référence d'un secret, ni une console. C'est ce que #165 a acheté.
+pub fn deplacer_dossier(
+    arbre: &FolderTree,
+    dossier: &FolderId,
+    parent: Option<&FolderId>,
+    index: Option<usize>,
+    confirme: bool,
+) -> Result<FolderTree, DeplacementError> {
+    let deplace = arbre
+        .dossier(dossier)
+        .ok_or_else(|| DeplacementError::DossierInconnu {
+            folder: dossier.clone(),
+        })?;
+    if let Some(parent) = parent {
+        // Lui-même ou un descendant : le cycle est vérifié **avant** l'existence de la destination,
+        // puisqu'un descendant existe forcément.
+        let dans_lui_meme = parent == dossier
+            || arbre
+                .descendants(dossier)
+                .is_some_and(|descendance| descendance.dossiers.iter().any(|d| &d.id == parent));
+        if dans_lui_meme {
+            return Err(DeplacementError::DansSonPropreDescendant {
+                folder: dossier.clone(),
+            });
+        }
+        if arbre.dossier(parent).is_none() {
+            return Err(DeplacementError::DestinationInconnue {
+                folder: parent.clone(),
+            });
+        }
+    }
+
+    let nom = deplace.name.trim().to_owned();
+    let mut suivant = arbre.clone();
+    let extrait = extraire_dossier(&mut suivant.folders, dossier).ok_or_else(|| {
+        DeplacementError::DossierInconnu {
+            folder: dossier.clone(),
+        }
+    })?;
+    let (freres, _) =
+        accueil_mut(&mut suivant, parent).ok_or_else(|| DeplacementError::DestinationInconnue {
+            folder: parent.cloned().unwrap_or_else(|| dossier.clone()),
+        })?;
+    // Le dossier déplacé est déjà sorti de la liste : réordonner parmi les siens n'est pas une
+    // collision avec lui-même.
+    if freres.iter().any(|frere| frere.name.trim() == nom) {
+        return Err(DeplacementError::DossierHomonyme {
+            parent: parent.cloned(),
+            name: nom,
+        });
+    }
+    inserer(freres, index, extrait);
+    conclure(arbre, suivant, confirme)
+}
+
+/// Range une connexion dans `dossier` (`None` : à la racine), à la place `index` parmi les
+/// connexions d'arrivée (`None` : en dernière) — ou la réordonne (#167).
+///
+/// **Pas de refus d'homonymie** : le nom d'une connexion n'est pas unique dans un dossier (voir
+/// [`FolderTree::valider`]), et « psql » rejoignant un dossier qui en porte déjà une serait refusé à
+/// tout propos.
+pub fn deplacer_connexion(
+    arbre: &FolderTree,
+    connexion: &ConnectionId,
+    dossier: Option<&FolderId>,
+    index: Option<usize>,
+    confirme: bool,
+) -> Result<FolderTree, DeplacementError> {
+    if arbre.connexion(connexion).is_none() {
+        return Err(DeplacementError::ConnexionInconnue {
+            connection: connexion.clone(),
+        });
+    }
+    if let Some(dossier) = dossier {
+        if arbre.dossier(dossier).is_none() {
+            return Err(DeplacementError::DestinationInconnue {
+                folder: dossier.clone(),
+            });
+        }
+    }
+
+    let mut suivant = arbre.clone();
+    let extraite = match suivant
+        .connections
+        .iter()
+        .position(|base| &base.id == connexion)
+    {
+        Some(rang) => suivant.connections.remove(rang),
+        None => extraire_connexion(&mut suivant.folders, connexion).ok_or_else(|| {
+            DeplacementError::ConnexionInconnue {
+                connection: connexion.clone(),
+            }
+        })?,
+    };
+    let (_, bases) = accueil_mut(&mut suivant, dossier).ok_or_else(|| {
+        DeplacementError::DestinationInconnue {
+            folder: dossier.cloned().unwrap_or_else(|| FolderId::brut("")),
+        }
+    })?;
+    inserer(bases, index, extraite);
+    conclure(arbre, suivant, confirme)
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -1360,5 +1647,176 @@ pub(crate) mod tests {
             sortes.into_iter().collect::<Vec<_>>(),
             ["imposed", "inconnue", "local"]
         );
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Déplacer (#167)
+    // ---------------------------------------------------------------------------------------------
+
+    fn f(id: &str) -> FolderId {
+        FolderId::brut(id)
+    }
+
+    fn c(id: &str) -> ConnectionId {
+        ConnectionId::brut(id)
+    }
+
+    #[test]
+    fn un_dossier_ne_se_range_ni_dans_lui_meme_ni_dans_un_descendant() {
+        let arbre = decor();
+        assert_eq!(
+            deplacer_dossier(&arbre, &f("prod"), Some(&f("prod")), None, true),
+            Err(DeplacementError::DansSonPropreDescendant { folder: f("prod") })
+        );
+        // Deux paliers plus bas : un parent direct ne suffirait pas à le voir.
+        assert_eq!(
+            deplacer_dossier(&arbre, &f("nord"), Some(&f("profond")), None, true),
+            Err(DeplacementError::DansSonPropreDescendant { folder: f("nord") })
+        );
+        // Le contrôle positif : un voisin n'est pas un descendant.
+        assert!(deplacer_dossier(&arbre, &f("nord"), Some(&f("voisin")), None, true).is_ok());
+    }
+
+    #[test]
+    fn un_identifiant_inconnu_est_refuse_des_deux_bouts() {
+        let arbre = decor();
+        assert_eq!(
+            deplacer_dossier(&arbre, &f("absent"), None, None, true),
+            Err(DeplacementError::DossierInconnu {
+                folder: f("absent")
+            })
+        );
+        assert_eq!(
+            deplacer_dossier(&arbre, &f("voisin"), Some(&f("absent")), None, true),
+            Err(DeplacementError::DestinationInconnue {
+                folder: f("absent")
+            })
+        );
+        assert_eq!(
+            deplacer_connexion(&arbre, &c("absente"), None, None, true),
+            Err(DeplacementError::ConnexionInconnue {
+                connection: c("absente")
+            })
+        );
+        assert_eq!(
+            deplacer_connexion(&arbre, &c("c-racine"), Some(&f("absent")), None, true),
+            Err(DeplacementError::DestinationInconnue {
+                folder: f("absent")
+            })
+        );
+    }
+
+    #[test]
+    fn un_frere_homonyme_a_l_arrivee_est_refuse_sans_renommage() {
+        let mut arbre = decor();
+        // « profond  » avec une espace : l'homonymie se juge après `trim`, comme `valider`.
+        arbre.folders[1].name = "profond  ".into();
+        assert_eq!(
+            deplacer_dossier(&arbre, &f("profond"), None, None, true),
+            Err(DeplacementError::DossierHomonyme {
+                parent: None,
+                name: "profond".into()
+            })
+        );
+        // Deux connexions homonymes, elles, sont permises : le nom n'est plus une identité.
+        let mut arbre = decor();
+        arbre.connections[0].name = "base-c-nord".into();
+        assert!(deplacer_connexion(&arbre, &c("c-racine"), Some(&f("nord")), None, true).is_ok());
+    }
+
+    #[test]
+    fn reordonner_parmi_ses_freres_n_est_pas_une_collision_avec_soi_meme() {
+        let arbre = decor();
+        let suivant =
+            deplacer_dossier(&arbre, &f("voisin"), None, Some(0), false).expect("réordonné");
+        let ordre: Vec<&str> = suivant.folders.iter().map(|d| d.id.as_str()).collect();
+        assert_eq!(ordre, ["voisin", "nord"]);
+        // Un rang trop grand veut dire « en dernier ».
+        let suivant = deplacer_dossier(&arbre, &f("nord"), None, Some(99), false).expect("déplacé");
+        let ordre: Vec<&str> = suivant.folders.iter().map(|d| d.id.as_str()).collect();
+        assert_eq!(ordre, ["voisin", "nord"]);
+    }
+
+    #[test]
+    fn entrer_sous_un_dossier_en_lecture_seule_demande_confirmation() {
+        let arbre = decor();
+        assert_eq!(
+            deplacer_connexion(&arbre, &c("c-racine"), Some(&f("profond")), None, false),
+            Err(DeplacementError::ConfirmationRequise {
+                devient_lecture_seule: vec![c("c-racine")],
+                quitte_lecture_seule: Vec::new(),
+                dossiers: vec![f("prod")],
+            })
+        );
+        let suivant =
+            deplacer_connexion(&arbre, &c("c-racine"), Some(&f("profond")), Some(0), true)
+                .expect("confirmé");
+        let (_, ancetres) = suivant.connexion(&c("c-racine")).expect("déplacée");
+        let chemin: Vec<&str> = ancetres.iter().map(|d| d.id.as_str()).collect();
+        assert_eq!(chemin, ["nord", "prod", "profond"]);
+        assert!(suivant.connections.is_empty());
+    }
+
+    /// **Le test du sabotage** : ignorer `confirme` le fait tomber. Sortir est permis, mais confirmé
+    /// et nommé (#108) — et c'est le dossier qu'on quitte qui est nommé.
+    #[test]
+    fn quitter_la_lecture_seule_sans_confirmation_est_une_question() {
+        let arbre = decor();
+        assert_eq!(
+            deplacer_connexion(&arbre, &c("c-prod"), None, None, false),
+            Err(DeplacementError::ConfirmationRequise {
+                devient_lecture_seule: Vec::new(),
+                quitte_lecture_seule: vec![c("c-prod")],
+                dossiers: vec![f("prod")],
+            })
+        );
+        let suivant = deplacer_connexion(&arbre, &c("c-prod"), None, None, true).expect("confirmé");
+        assert_eq!(
+            suivant.lecture_seule_effective(&c("c-prod")),
+            Some(LectureSeule::Reglee {
+                lecture_seule: false
+            })
+        );
+    }
+
+    #[test]
+    fn un_dossier_qui_sort_de_la_lecture_seule_nomme_toutes_ses_connexions() {
+        let arbre = decor();
+        assert_eq!(
+            deplacer_dossier(&arbre, &f("profond"), Some(&f("voisin")), None, false),
+            Err(DeplacementError::ConfirmationRequise {
+                devient_lecture_seule: Vec::new(),
+                quitte_lecture_seule: vec![c("c-profonde")],
+                dossiers: vec![f("prod")],
+            })
+        );
+    }
+
+    #[test]
+    fn un_deplacement_qui_ne_change_aucune_lecture_seule_ne_demande_rien() {
+        let arbre = decor();
+        // « prod » déclare lui-même sa lecture seule : elle voyage avec lui.
+        assert!(deplacer_dossier(&arbre, &f("prod"), Some(&f("voisin")), None, false).is_ok());
+        // Une connexion réglée en lecture seule pour elle-même le reste sous « prod ».
+        assert!(deplacer_connexion(&arbre, &c("c-nord"), Some(&f("prod")), None, false).is_ok());
+    }
+
+    #[test]
+    fn deplacer_ne_touche_ni_a_l_identite_ni_au_secret_ni_aux_consoles() {
+        let mut arbre = decor();
+        let base = arbre.connexion_mut(&c("c-prod")).expect("connexion");
+        base.connection.password = Some(reference_de_connexion(&c("c-prod")));
+        base.consoles.push(crate::config::model::Console {
+            name: "console 1".into(),
+            sql: "select 1".into(),
+        });
+        let avant = arbre.connexion(&c("c-prod")).expect("connexion").0.clone();
+
+        let suivant = deplacer_connexion(&arbre, &c("c-prod"), Some(&f("voisin")), None, true)
+            .expect("déplacée");
+        let (apres, ancetres) = suivant.connexion(&c("c-prod")).expect("toujours là");
+        assert_eq!(apres, &avant);
+        assert_eq!(ancetres.last().map(|d| d.id.as_str()), Some("voisin"));
+        assert_eq!(suivant.valider(), Ok(()));
     }
 }

@@ -51,8 +51,13 @@
  *
  * `--disabled` a la même valeur que `--border` ; les deux coexistent délibérément, parce que le
  * handoff les nomme séparément et que rien ne lie un fond de bouton à une couleur de bordure.
- * Relevé en construisant `08e`, seul écran à montrer un bouton désactivé. */
-.root:disabled {
+ * Relevé en construisant `08e`, seul écran à montrer un bouton désactivé.
+ *
+ * **`aria-disabled` a la même apparence** (#167) : c'est la forme qu'un bouton prend quand il porte
+ * la raison de son refus dans un `title` — un `disabled` la rendrait inatteignable (piège n° 3). Sans
+ * cette règle, le bouton de l'import (`API-30`) et celui de « Déplacer vers… » avaient l'air actifs. */
+.root:disabled,
+.root[aria-disabled="true"] {
   cursor: not-allowed;
   background: var(--disabled);
   border-color: transparent;
@@ -92,7 +97,7 @@
   font-weight: var(--weight-semibold);
 }
 
-.secondary:not(:disabled):hover {
+.secondary:not(:disabled, [aria-disabled="true"]):hover {
   border-color: var(--hover-border);
   background: var(--hover-bg);
 }
