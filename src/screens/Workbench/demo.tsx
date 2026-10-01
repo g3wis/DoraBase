@@ -1298,7 +1298,7 @@ const PASSERELLE_INSTANCES_DEMO: PasserelleInstances = {
 }
 
 /**
- * Le pont de transfert de projets **simulé** (`API-30`).
+ * Le pont de transfert **simulé** (`API-30`, en dossiers depuis #169).
  *
  * **Au même degré que `runSql` de cette démo** : il rend une réponse plausible pour que les deux
  * modales soient visibles sans base réelle. Ni `invoke` ni le plugin `dialog` ne répondent en
@@ -1306,11 +1306,12 @@ const PASSERELLE_INSTANCES_DEMO: PasserelleInstances = {
  *
  * **Le fichier n'est pas écrit et rien n'est lu**, ce qui est le point : ce que la démo doit rendre
  * atteignable est le *chemin* jusqu'aux deux modales et les rapports qu'elles savent afficher — dont
- * un projet refusé et une connexion gardée, cas que le cœur produit sur un fichier venu d'ailleurs.
+ * un dossier refusé, une connexion gardée et une lecture seule reprise du fichier, cas que le cœur
+ * produit sur un fichier venu d'ailleurs.
  */
 const TRANSFERT_SIMULE = {
   exporter: async () => ({
-    folders: 5,
+    folders: 3,
     connections: 2,
     consoles: 3,
     passwordsCarried: 0,
@@ -1318,8 +1319,8 @@ const TRANSFERT_SIMULE = {
   }),
   inspecter: async () => APERCU_SIMULE,
   importer: async () => ({ tree: ARBRE_DEMO, report: APERCU_SIMULE }),
-  choisirDestination: async (projet: string | null) =>
-    `/Users/demo/Desktop/${projet ?? 'projets'}.dorabase.json`,
+  choisirDestination: async (dossier: string | null) =>
+    `/Users/demo/Desktop/${dossier ?? 'dossiers'}.dorabase.json`,
   choisirSource: async () => '/Users/demo/Desktop/atelier-nord.dorabase.json',
   messageDe: (cause: unknown) => String(cause),
 }
@@ -1343,9 +1344,9 @@ const SORT_VIDE: Omit<FolderOutcome, 'folder' | 'verdict'> = {
 }
 
 /**
- * L'aperçu que le pont simulé rend, et qui porte les trois sortes de verdict — **en dossiers**
- * (#166). La modale d'import n'est portée qu'a minima, #169 la refait : le décor dit la forme du
- * contrat, pas ce que la modale en fera.
+ * L'aperçu que le pont simulé rend : les trois sortes de verdict, une lecture seule reprise du
+ * fichier, et la ligne des connexions à la racine (#169). Les étiquettes ont la forme que le cœur
+ * écrit — des chemins joints par « › » —, et la raison du refus est le message de `valider`.
  */
 const APERCU_SIMULE: ImportReport = {
   version: 7,
@@ -1359,26 +1360,34 @@ const APERCU_SIMULE: ImportReport = {
       connectionsAdded: ['Quai Sud › dev › catalogue', 'Quai Sud › prod › catalogue'],
       consolesAdded: ['Quai Sud › dev › catalogue › exploration'],
       passwordsMissing: ['Quai Sud › prod › catalogue'],
-      valueLabelsAdded: ['orders.status'],
+      valueLabelsAdded: ['Quai Sud › orders.status'],
     },
     {
       ...SORT_VIDE,
       folder: 'Atelier Nord',
       verdict: { kind: 'merged' },
-      foldersKept: ['Atelier Nord › prod'],
+      foldersKept: ['Atelier Nord', 'Atelier Nord › prod'],
+      readOnlyFromFile: ['Atelier Nord › prod'],
       connectionsKept: ['Atelier Nord › prod › analytics'],
       consolesAdded: ['Atelier Nord › prod › analytics › journal'],
       consolesKept: ['Atelier Nord › prod › analytics › exploration'],
-      valueLabelsAdded: ['orders.kind'],
-      valueLabelsKept: ['orders.status'],
+      valueLabelsAdded: ['Atelier Nord › orders.kind'],
+      valueLabelsKept: ['Atelier Nord › orders.status'],
     },
     {
       ...SORT_VIDE,
       folder: 'Bancal',
       verdict: {
         kind: 'rejected',
-        reason: 'le dossier « Bancal » porte deux sous-dossiers « dev »',
+        reason: 'le dossier « 3f0c2a91d7e4b605 » n’a pas de nom',
       },
+    },
+    {
+      ...SORT_VIDE,
+      folder: null,
+      verdict: { kind: 'merged' },
+      connectionsAdded: ['journal local'],
+      localPaths: ['journal local : /Users/demo/journal.db'],
     },
   ],
 }
@@ -1886,6 +1895,7 @@ export function WorkbenchDemo() {
         /* L'import, depuis la bande en tête de l'arbre : c'est le chemin que le test de bout en
            bout emprunte, et il n'y en a plus d'autre dans le décor. */
         onImportProjects={() => setTransfert({ sens: 'import' })}
+        onExportFolder={(id, nom) => setTransfert({ sens: 'export', dossier: { id, nom } })}
       />
       {instanceOuverte !== null && (
         <NewInstance

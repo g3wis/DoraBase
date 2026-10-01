@@ -6,11 +6,8 @@ import type { FolderOutcome, ImportReport, ImportSelection } from '../../domain/
 import { LanguageProvider } from '../../i18n/LanguageContext'
 import { ImportProjects } from './ImportProjects'
 
-/**
- * **Portage minimal pour #166** : le rapport parle désormais de dossiers de premier niveau. #169
- * refait la modale et ses tests ; ceux-ci gardent que ce qui marchait marche encore.
- */
-function sort(name: string, patch: Partial<FolderOutcome> = {}): FolderOutcome {
+/** Le sort d'une entrée du fichier — `null` pour la ligne des connexions à la racine (#169). */
+function sort(name: string | null, patch: Partial<FolderOutcome> = {}): FolderOutcome {
   return {
     folder: name,
     verdict: { kind: 'created' },
@@ -37,7 +34,7 @@ function rapport(folders: FolderOutcome[], patch: Partial<ImportReport> = {}): I
 }
 
 function Piloté({
-  onChoisirFichier = () => Promise.resolve('/tmp/projets.json'),
+  onChoisirFichier = () => Promise.resolve('/tmp/dossiers.json'),
   onInspecter = () => Promise.resolve(rapport([sort('Atelier Nord')])),
   onImporter = () => Promise.resolve(rapport([sort('Atelier Nord')])),
 }: {
@@ -75,9 +72,9 @@ test('le fichier est inspecté avant que l’import soit proposé', async () => 
           rapport([
             sort('Atelier Nord', {
               verdict: { kind: 'merged' },
-              connectionsAdded: ['catalogue (dev)'],
-              consolesAdded: ['catalogue (dev) › exploration'],
-              foldersAdded: ['dev'],
+              connectionsAdded: ['Atelier Nord › dev › catalogue'],
+              consolesAdded: ['Atelier Nord › dev › catalogue › exploration'],
+              foldersAdded: ['Atelier Nord › dev'],
             }),
           ]),
         )
@@ -90,16 +87,14 @@ test('le fichier est inspecté avant que l’import soit proposé', async () => 
   expect(screen.queryByRole('button', { name: /^Importer/ })).toBeNull()
   await choisir()
 
-  expect(screen.getByText('/tmp/projets.json')).toBeVisible()
-  expect(screen.getByText(/Projet existant, complété/)).toBeVisible()
-  expect(
-    screen.getByText(/\+1 environnement\(s\), \+1 connexion\(s\), \+1 console\(s\)/),
-  ).toBeVisible()
+  expect(screen.getByText('/tmp/dossiers.json')).toBeVisible()
+  expect(screen.getByText(/Dossier existant, complété/)).toBeVisible()
+  expect(screen.getByText(/\+1 dossier\(s\), \+1 connexion\(s\), \+1 console\(s\)/)).toBeVisible()
   // **Rien n'est écrit tant que personne n'a cliqué** : c'est l'aperçu, pas l'import.
   expect(onImporter).not.toHaveBeenCalled()
 })
 
-test('décocher un projet le retire de l’appel', async () => {
+test('décocher un dossier le retire de l’appel', async () => {
   const appels: (ImportSelection | null)[] = []
   render(
     <Piloté
@@ -115,10 +110,49 @@ test('décocher un projet le retire de l’appel', async () => {
   // Tout est coché à l'arrivée : un fichier qu'on vient de désigner s'importe en entier par défaut.
   expect(screen.getByRole('checkbox', { name: 'Quai Sud' })).toBeChecked()
   await userEvent.click(screen.getByRole('checkbox', { name: 'Quai Sud' }))
-  expect(screen.getByRole('button', { name: 'Importer 1 projet' })).toBeVisible()
+  expect(screen.getByRole('button', { name: 'Importer 1 élément' })).toBeVisible()
 
-  await userEvent.click(screen.getByRole('button', { name: 'Importer 1 projet' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Importer 1 élément' }))
 
+  expect(appels).toEqual([{ folders: ['Atelier Nord'], rootConnections: false }])
+})
+
+test('les connexions de la racine ont leur ligne, nommée, et se retiennent à part', async () => {
+  // **La ligne de la racine n'est pas un dossier** (#169) : elle se nomme par un libellé, ne se dit
+  // pas « dossier existant », et sa case gouverne `rootConnections`, non la liste des dossiers.
+  const appels: (ImportSelection | null)[] = []
+  const decor = () => (
+    <Piloté
+      onInspecter={() =>
+        Promise.resolve(
+          rapport([
+            sort('Atelier Nord'),
+            sort(null, { verdict: { kind: 'merged' }, connectionsAdded: ['journal'] }),
+          ]),
+        )
+      }
+      onImporter={async (_, selection) => {
+        appels.push(selection)
+        return rapport([])
+      }}
+    />
+  )
+  const { unmount } = render(decor())
+  await choisir()
+
+  expect(screen.getByRole('checkbox', { name: 'Connexions à la racine' })).toBeChecked()
+  expect(screen.getByText(/Ajoutées à la racine/)).toBeVisible()
+  expect(screen.queryByText(/Dossier existant/)).toBeNull()
+  await userEvent.click(screen.getByRole('button', { name: 'Importer 2 éléments' }))
+  expect(appels).toEqual([{ folders: ['Atelier Nord'], rootConnections: true }])
+  unmount()
+
+  // Décochée, elle ne part pas — et les dossiers, eux, restent.
+  appels.length = 0
+  render(decor())
+  await choisir()
+  await userEvent.click(screen.getByRole('checkbox', { name: 'Connexions à la racine' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Importer 1 élément' }))
   expect(appels).toEqual([{ folders: ['Atelier Nord'], rootConnections: false }])
 })
 
@@ -128,14 +162,14 @@ test('tout décocher désactive le bouton avec sa raison', async () => {
 
   await userEvent.click(screen.getByRole('checkbox', { name: 'Atelier Nord' }))
 
-  const bouton = screen.getByRole('button', { name: 'Importer 0 projets' })
+  const bouton = screen.getByRole('button', { name: 'Importer 0 éléments' })
   // `aria-disabled` et non `disabled` : la raison vit dans une infobulle, qu'un bouton désactivé
   // rendrait inatteignable (piège n° 3).
   expect(bouton).toHaveAttribute('aria-disabled', 'true')
-  expect(bouton).toHaveAttribute('title', 'Aucun projet retenu')
+  expect(bouton).toHaveAttribute('title', 'Rien n’est retenu')
 })
 
-test('un projet refusé n’a pas de case, et sa raison est écrite', async () => {
+test('un dossier refusé n’a pas de case, et sa raison est écrite', async () => {
   render(
     <Piloté
       onInspecter={() =>
@@ -145,7 +179,7 @@ test('un projet refusé n’a pas de case, et sa raison est écrite', async () =
             sort('Bancal', {
               verdict: {
                 kind: 'rejected',
-                reason: 'le projet « Bancal » doit déclarer au moins un environnement',
+                reason: 'le dossier « 3f0c2a91d7e4b605 » n’a pas de nom',
               },
             }),
           ]),
@@ -156,16 +190,16 @@ test('un projet refusé n’a pas de case, et sa raison est écrite', async () =
   await choisir()
 
   // **Aucune case plutôt qu'une case grisée** : un contrôle désactivé dit « pas maintenant », or
-  // celui-ci ne pourra jamais retenir ce projet-là. Sa raison est écrite sur la ligne.
+  // celui-ci ne pourra jamais retenir ce dossier-là. Sa raison est écrite sur la ligne.
   //
   // **Le compte, et non l'absence d'une case nommée « Bancal »** : une case rendue sur cette ligne
   // n'aurait aucun nom accessible — le libellé n'est un `<label>` que sur une ligne retenue —, donc
   // une recherche par nom rendrait zéro pour la mauvaise raison. Vérifié par sabotage.
   expect(screen.getAllByRole('checkbox')).toHaveLength(1)
   expect(screen.getByRole('checkbox', { name: 'Atelier Nord' })).toBeInTheDocument()
-  expect(screen.getByText(/doit déclarer au moins un environnement/)).toBeVisible()
+  expect(screen.getByText(/n’a pas de nom/)).toBeVisible()
   // Et il ne compte pas dans ce qui s'importe.
-  expect(screen.getByRole('button', { name: 'Importer 1 projet' })).toBeVisible()
+  expect(screen.getByRole('button', { name: 'Importer 1 élément' })).toBeVisible()
 })
 
 test('ce qui n’arrivera pas est dit, avec sa liste en infobulle', async () => {
@@ -176,14 +210,15 @@ test('ce qui n’arrivera pas est dit, avec sa liste en infobulle', async () => 
           rapport([
             sort('Atelier Nord', {
               verdict: { kind: 'merged' },
-              connectionsKept: ['catalogue (dev)'],
-              consolesKept: ['catalogue (dev) › exploration'],
-              foldersKept: ['prod'],
-              passwordsMissing: ['catalogue (dev)'],
-              localPaths: ['journal (dev) : /Users/alice/journal.db'],
-              connectionsRejected: ['fantome (nulle-part)'],
-              valueLabelsAdded: ['orders.kind'],
-              valueLabelsKept: ['orders.status'],
+              connectionsKept: ['Ailleurs › catalogue'],
+              consolesKept: ['Ailleurs › catalogue › exploration'],
+              foldersKept: ['Atelier Nord', 'Atelier Nord › prod'],
+              readOnlyFromFile: ['Atelier Nord › prod'],
+              passwordsMissing: ['Atelier Nord › dev › catalogue'],
+              localPaths: ['Atelier Nord › dev › journal : /Users/alice/journal.db'],
+              connectionsRejected: ['Atelier Nord › a/b'],
+              valueLabelsAdded: ['Atelier Nord › orders.kind'],
+              valueLabelsKept: ['Atelier Nord › orders.status'],
             }),
           ]),
         )
@@ -196,26 +231,31 @@ test('ce qui n’arrivera pas est dit, avec sa liste en infobulle', async () => 
   // serait illisible, et le compte dit d'abord s'il y a quelque chose à regarder.
   expect(screen.getByText(/1 connexion\(s\) déjà déclarées ici/)).toHaveAttribute(
     'title',
-    'catalogue (dev)',
+    'Ailleurs › catalogue',
   )
   expect(screen.getByText(/1 console\(s\) homonymes/)).toBeVisible()
-  expect(screen.getByText(/1 environnement\(s\) déjà déclarés ici/)).toBeVisible()
+  expect(screen.getByText(/2 dossier\(s\) déjà présents ici/)).toBeVisible()
+  // **La seule chose qu'un import change à ce qui était déjà là** (#169), nommée en infobulle.
+  expect(screen.getByText(/1 dossier\(s\) local\(aux\) passent en lecture seule/)).toHaveAttribute(
+    'title',
+    'Atelier Nord › prod',
+  )
   expect(screen.getByText(/attendent leur mot de passe/)).toBeVisible()
   expect(screen.getByText(/1 chemin\(s\) à vérifier/)).toHaveAttribute(
     'title',
-    'journal (dev) : /Users/alice/journal.db',
+    'Atelier Nord › dev › journal : /Users/alice/journal.db',
   )
-  expect(screen.getByText(/leur environnement n'est déclaré nulle part/)).toBeVisible()
+  expect(screen.getByText(/leur identifiant n'est pas valable/)).toBeVisible()
   /* Les libellés de valeurs (`API-75`), **et les deux sens**. Ce qui *arrive* se dit en neutre, ce
      qui est *gardé* en réserve : ce dernier est le seul des deux qui demande de savoir que le
      fichier portait autre chose. */
   expect(screen.getByText(/1 colonne\(s\) reçoivent leurs libellés/)).toHaveAttribute(
     'title',
-    'orders.kind',
+    'Atelier Nord › orders.kind',
   )
   expect(screen.getByText(/1 colonne\(s\) déjà libellées/)).toHaveAttribute(
     'title',
-    'orders.status',
+    'Atelier Nord › orders.status',
   )
 })
 
@@ -229,6 +269,7 @@ test('une réserve vide ne paraît pas', async () => {
   expect(screen.queryByText(/mot de passe/)).toBeNull()
   expect(screen.queryByText(/à vérifier/)).toBeNull()
   expect(screen.queryByText(/libellés/)).toBeNull()
+  expect(screen.queryByText(/lecture seule/)).toBeNull()
 })
 
 test('un fichier qui porte des mots de passe en clair le dit', async () => {
@@ -245,15 +286,13 @@ test('un fichier qui porte des mots de passe en clair le dit', async () => {
 test('un fichier refusé le dit, et rien n’est proposé à importer', async () => {
   render(
     <Piloté
-      onInspecter={() =>
-        Promise.reject('ce fichier n’est pas un export de projets DoraBase : son en-tête…')
-      }
+      onInspecter={() => Promise.reject('ce fichier n’est pas un export DoraBase : son en-tête…')}
     />,
   )
 
   await userEvent.click(screen.getByRole('button', { name: 'Choisir un fichier…' }))
 
-  expect(await screen.findByText(/n’est pas un export de projets DoraBase/)).toBeVisible()
+  expect(await screen.findByText(/n’est pas un export DoraBase/)).toBeVisible()
   expect(screen.queryByRole('button', { name: /^Importer/ })).toBeNull()
 })
 
@@ -268,7 +307,7 @@ test('après l’import, les cases disparaissent et le rapport reste', async () 
     />,
   )
   await choisir()
-  await userEvent.click(screen.getByRole('button', { name: 'Importer 1 projet' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Importer 1 élément' }))
 
   // Il n'y a plus rien à cocher : l'import a eu lieu, et une case encore là proposerait de le
   // refaire.
@@ -286,7 +325,7 @@ test('la modale d’import ne porte pas la disquette d’« enregistrer »', () 
      œil voit, et il resterait juste si `Modal` changeait la façon dont il rend son icône. */
   render(<Piloté />)
 
-  const dialogue = screen.getByRole('dialog', { name: 'Importer des projets' })
+  const dialogue = screen.getByRole('dialog', { name: 'Importer des dossiers' })
   expect(dialogue.querySelector('use[href="#i-ul"]')).not.toBeNull()
   expect(dialogue.querySelector('use[href="#i-save"]')).toBeNull()
 })

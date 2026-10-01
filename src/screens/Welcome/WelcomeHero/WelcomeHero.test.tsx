@@ -29,7 +29,7 @@ test('n’expose qu’un seul bouton quand l’écran ne relie pas l’import', 
   expect(screen.getAllByRole('button')).toHaveLength(1)
 })
 
-test('« Importer des projets… » paraît à côté, et appelle le geste', async () => {
+test('« Importer des dossiers… » paraît à côté, et appelle le geste', async () => {
   // **C'est ici que l'import manquait le plus** (`API-30`, 17 septembre 2026, à la demande) : sur un
   // second poste, il n'y a ni arbre ni bande d'actions, donc rien à l'écran ne disait qu'un fichier
   // pouvait rendre ses projets. Le seul chemin était le menu natif, que personne n'a trouvé.
@@ -37,7 +37,7 @@ test('« Importer des projets… » paraît à côté, et appelle le geste', asy
   const onNewFolder = vi.fn()
   monter(onNewFolder, onImportProjects)
 
-  await userEvent.click(screen.getByRole('button', { name: 'Importer des projets…' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Importer des dossiers…' }))
 
   expect(onImportProjects).toHaveBeenCalledOnce()
   // **Et il ne prend pas la place du geste attendu** : « Nouveau dossier » reste là, avec son

@@ -72,9 +72,11 @@ pub fn run() {
             config::commands::rename_console,
             config::commands::save_visible_schemas,
             config::commands::save_value_labels,
-            // `move_folder` et `move_database` (#167), `export_projects`, `inspect_projects_file`
-            // et `import_projects` (#169, retirés avec `transfert` jusqu'à son portage) : déclarés
-            // dans `config::requetes`, pas encore branchés.
+            config::commands::export_projects,
+            config::commands::inspect_projects_file,
+            config::commands::import_projects,
+            // `move_folder` et `move_database` (#167) : déclarés dans `config::requetes`, pas
+            // encore branchés.
             engine::commands::test_connection,
             engine::commands::open_database,
             engine::commands::close_database,

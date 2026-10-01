@@ -19,10 +19,8 @@ mod model;
 /// Le contrat IPC de l'arbre de dossiers, déclaré par #164 et branché par #165 à #169.
 pub mod requetes;
 mod store;
-// **`transfert` est retiré du build par #165**, et c'est temporaire : il est écrit pour les projets,
-// et le porter sur l'arbre est tout le chantier de #169, qui le rebranchera avec ses trois commandes
-// (`export_projects`, `inspect_projects_file`, `import_projects`). Le fichier reste, non compilé.
-// mod transfert;
+/// L'export et l'import de dossiers (`API-30`), portés sur l'arbre par #169.
+mod transfert;
 
 /// Les décors d'arbre des tests de `config::arbre`, prêtés aux tests des commandes qui écrivent (#168).
 #[cfg(test)]

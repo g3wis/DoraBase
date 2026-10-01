@@ -98,7 +98,7 @@ test('les deux boutons de l’accueil sont centrés l’un sur l’autre', async
 
   const centres = await page.evaluate(() => {
     const actions = [...document.querySelectorAll('button')].filter((bouton) =>
-      /Nouveau dossier|Importer des projets/.test(bouton.textContent ?? ''),
+      /Nouveau dossier|Importer des dossiers/.test(bouton.textContent ?? ''),
     )
     // Le bouton du pied de la sidebar porte le même libellé : seuls ceux du héros nous occupent,
     // et ce sont les deux derniers dans l'ordre du document.

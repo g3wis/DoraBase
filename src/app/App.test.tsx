@@ -37,7 +37,7 @@ test('rien n’est rendu avant que la configuration ait répondu', () => {
  * Sous Vitest le pont IPC ne répond pas, donc `load_config` rejette et l'application retombe sur
  * `A1` : c'est exactement l'écran qu'on veut ici, et il vient gratuitement.
  */
-test('depuis l’écran d’accueil, « Importer des projets… » ouvre la modale', async () => {
+test('depuis l’écran d’accueil, « Importer des dossiers… » ouvre la modale', async () => {
   const utilisateur = userEvent.setup()
   render(<App />)
 

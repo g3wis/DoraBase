@@ -144,6 +144,7 @@ export const explorerFr: Dictionnaire = {
       diagramUnavailable: 'Cet écran n’ouvre pas d’onglet.',
       schemasUnavailable: 'Cet écran n’est pas relié au gestionnaire de schémas.',
       schemasPostgresOnly: 'Seul PostgreSQL est géré pour l’instant.',
+      exportUnavailable: 'Cet écran n’est pas relié à l’export.',
     },
   },
   // L'aplatissement de l'arbre (`arbre.ts`) — une fonction pure, mais qui produit du texte
@@ -308,6 +309,7 @@ export const explorerEn: Dictionnaire = {
       diagramUnavailable: 'This screen does not open tabs.',
       schemasUnavailable: 'This screen is not wired to the schema manager.',
       schemasPostgresOnly: 'Only PostgreSQL is supported for now.',
+      exportUnavailable: 'This screen is not wired to export.',
     },
   },
   arbre: {

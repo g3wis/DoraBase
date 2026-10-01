@@ -170,9 +170,9 @@ export function App() {
   /**
    * Ce que le transfert de projets ouvre (`API-30`).
    *
-   * **Trois points d'entrée, un seul état** : les deux entrées du menu natif, et « Exporter le
-   * projet… » dans le menu d'une ligne de projet — le seul des trois qui nomme une portée, parce que
-   * c'est le seul palier qui la connaisse. Une bande en tête de colonne aurait dû la deviner, comme
+   * **Un seul état pour tous les points d'entrée** : les deux entrées du menu natif, le bouton
+   * d'import de la bande et de l'accueil, et « Exporter le dossier… » dans le menu d'une ligne de
+   * dossier (#169) — le seul qui nomme une portée, parce que c'est le seul palier qui la connaisse. Une bande en tête de colonne aurait dû la deviner, comme
    * le pied de la sidebar devait deviner un environnement.
    */
   const [transfert, setTransfert] = useState<DemandeDeTransfert | null>(null)
@@ -419,6 +419,8 @@ export function App() {
                le seul que voit quelqu'un qui a déjà des dossiers. Voir `ExplorerSidebar`, qui porte
                la raison : un chemin unique dans un menu natif n'a été trouvé par personne. */
             onImportProjects={() => setTransfert({ sens: 'import' })}
+            // « Exporter le dossier… » (#169) : le seul point d'entrée qui nomme une portée.
+            onExportFolder={(id, nom) => setTransfert({ sens: 'export', dossier: { id, nom } })}
             // Le renommage d'une connexion (`26`) : l'arbre rendu est reposé tel quel.
             onRenameDatabase={async (connection, name) => {
               setArbre(await renommerLaConnexion({ connection, name }))
