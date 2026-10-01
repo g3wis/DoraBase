@@ -4,10 +4,10 @@ import { LanguageProvider } from '../../../i18n/LanguageContext'
 import { raccourci } from '../../../shell/plateforme'
 import { WelcomeHero } from './WelcomeHero'
 
-function monter(onNewProject: () => void = () => {}, onImportProjects?: () => void) {
+function monter(onNewFolder: () => void = () => {}, onImportProjects?: () => void) {
   return render(
     <LanguageProvider preferences={{ language: 'fr' }}>
-      <WelcomeHero onNewProject={onNewProject} onImportProjects={onImportProjects} />
+      <WelcomeHero onNewFolder={onNewFolder} onImportProjects={onImportProjects} />
     </LanguageProvider>,
   )
 }
@@ -34,28 +34,28 @@ test('« Importer des projets… » paraît à côté, et appelle le geste', asy
   // second poste, il n'y a ni arbre ni bande d'actions, donc rien à l'écran ne disait qu'un fichier
   // pouvait rendre ses projets. Le seul chemin était le menu natif, que personne n'a trouvé.
   const onImportProjects = vi.fn()
-  const onNewProject = vi.fn()
-  monter(onNewProject, onImportProjects)
+  const onNewFolder = vi.fn()
+  monter(onNewFolder, onImportProjects)
 
   await userEvent.click(screen.getByRole('button', { name: 'Importer des projets…' }))
 
   expect(onImportProjects).toHaveBeenCalledOnce()
-  // **Et il ne prend pas la place du geste attendu** : « Nouveau projet » reste là, avec son
+  // **Et il ne prend pas la place du geste attendu** : « Nouveau dossier » reste là, avec son
   // raccourci — deux boutons, non un remplacement.
-  expect(onNewProject).not.toHaveBeenCalled()
-  expect(screen.getByRole('button', { name: 'Nouveau projet' })).toBeInTheDocument()
+  expect(onNewFolder).not.toHaveBeenCalled()
+  expect(screen.getByRole('button', { name: 'Nouveau dossier' })).toBeInTheDocument()
   expect(screen.getByText(raccourci('N'))).toBeInTheDocument()
 })
 
-test('le bouton demande un nouveau projet', async () => {
-  const onNewProject = vi.fn()
-  monter(onNewProject)
+test('le bouton demande un nouveau dossier', async () => {
+  const onNewFolder = vi.fn()
+  monter(onNewFolder)
   await userEvent.click(screen.getByRole('button'))
-  expect(onNewProject).toHaveBeenCalledOnce()
+  expect(onNewFolder).toHaveBeenCalledOnce()
 })
 
 test('le raccourci ⌘N est affiché sans polluer le nom accessible', () => {
   monter()
-  expect(screen.getByRole('button', { name: 'Nouveau projet' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Nouveau dossier' })).toBeInTheDocument()
   expect(screen.getByText(raccourci('N'))).toBeInTheDocument()
 })

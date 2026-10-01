@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { ExportReport } from '../../domain/transfert'
+import type { ExportReport } from '../../domain/arbre'
 import { useT } from '../../i18n/LanguageContext'
 import { Button } from '../../ui/Button/Button'
 import { Modal } from '../../ui/Modal/Modal'
@@ -113,7 +113,7 @@ export function ExportProjects({
           <>
             <p className={styles.explication}>
               {t('transfer.export.done', {
-                projects: avancement.report.projects,
+                projects: avancement.report.folders,
                 connections: avancement.report.connections,
                 consoles: avancement.report.consoles,
               })}

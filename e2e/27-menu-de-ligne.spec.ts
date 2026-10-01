@@ -181,19 +181,13 @@ test('le clic droit mène à l’action jusqu’au bout, comme le « … »', as
   await expect(page.getByRole('treeitem', { name: /entrepot/ })).toBeVisible()
 })
 
-test('le clic droit sur un environnement mène à la déclaration d’une connexion', async ({
-  page,
-}) => {
+test('le clic droit sur un dossier mène à la déclaration d’une connexion', async ({ page }) => {
   // **Le parcours entier, depuis `/?demo`** : le geste part d'une ligne d'arbre et doit aboutir à la
-  // modale, préréglée sur l'environnement d'où l'on a cliqué. Un test de la sidebar seule aurait
+  // modale, cadrée par le dossier d'où l'on a cliqué (#166). Un test de la sidebar seule aurait
   // vérifié l'appel de la prop — c'est-à-dire un proxy du chemin, le piège d'`A4`.
   await page.getByRole('treeitem', { name: /^prod\b/ }).click({ button: 'right' })
-  await page.getByRole('menuitem', { name: /Ajouter une connexion/ }).click()
+  await page.getByRole('menuitem', { name: /Nouvelle connexion/ }).click()
   await expect(page.getByRole('dialog', { name: 'Nouvelle connexion' })).toBeVisible()
-  // `prod` et non `dev` : c'est de `prod` que part le clic, et le redemander serait poser une
-  // question dont on connaissait la réponse.
-  // `exact`, et ce n'est pas une précaution : le décor déclare `preprod` à côté de `prod`, et un nom
-  // non ancré désigne les deux — Playwright refuse alors, la résolution étant stricte. C'est la même
-  // morsure que le motif des lignes d'arbre.
-  await expect(page.getByRole('radio', { name: 'prod', exact: true })).toBeChecked()
+  // `prod` et non `preprod` : c'est de `prod` que part le clic, et la modale ne le redemande pas.
+  await expect(page.getByTestId('dossier-de-la-modale')).toHaveText('Atelier Nord › prod')
 })

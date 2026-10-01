@@ -5,12 +5,8 @@ import {
   transactionResult,
   transactionState,
 } from '../../data/commandes'
-import type {
-  DatabaseKey,
-  QueryResult,
-  TransactionMode,
-  TransactionState,
-} from '../../domain/engine'
+import type { DatabaseKey } from '../../domain/arbre'
+import type { QueryResult, TransactionMode, TransactionState } from '../../domain/engine'
 import { demandeConfirmation, natureDe, sansRestriction } from './nature'
 
 /** Ce qui appelle les commandes. Injectable : le pont ne répond pas hors de la webview. */
@@ -52,7 +48,7 @@ export type Console = {
  * Les commandes reçoivent toujours le `DatabaseKey` en trois champs.
  */
 function index(cle: DatabaseKey): string {
-  return `${cle.project}/${cle.database}/${cle.environment}`
+  return `${cle.connection}`
 }
 
 /**

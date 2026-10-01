@@ -7,7 +7,7 @@ import { CommitConfirm } from './CommitConfirm'
 import type { ValidationADemander } from './useTransaction'
 
 const CONSOLE = {
-  cle: { project: 'Atelier Nord', database: 'analytics', environment: 'prod' },
+  cle: { connection: 'analytics' },
   id: 'Atelier Nord/analytics/prod::console:console 1',
 }
 

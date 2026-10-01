@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { describeTable } from '../../data/commandes'
-import type { DatabaseKey, TableDetail } from '../../domain/engine'
+import type { DatabaseKey } from '../../domain/arbre'
+import type { TableDetail } from '../../domain/engine'
 import type { Structures } from './useStructures'
 
 export type PasserelleDetail = { describeTable: typeof describeTable }
@@ -61,11 +62,9 @@ export function useDetailTable(
   const cache = useRef(structures)
   cache.current = structures
 
-  // Les trois chaînes de la clé plutôt que l'objet : une `DatabaseKey` reconstruite à chaque
+  // L'identifiant de la clé plutôt que l'objet : une `DatabaseKey` reconstruite à chaque
   // rendu relancerait la lecture indéfiniment.
-  const project = key?.project ?? null
-  const database = key?.database ?? null
-  const environment = key?.environment ?? null
+  const connection = key?.connection ?? null
 
   // `relecture` ne sert qu'à relancer cet effet : le lire dedans n'aurait aucun sens, mais il
   // **doit** figurer dans les dépendances, sans quoi « Rafraîchir » ne relirait pas la structure. Le
@@ -73,11 +72,11 @@ export function useDetailTable(
   // nœud.
   // biome-ignore lint/correctness/useExhaustiveDependencies: voir ci-dessus
   useEffect(() => {
-    if (!project || !database || !environment || !schema || !table) {
+    if (!connection || !schema || !table) {
       setEtat({ detail: null, loading: false, error: null })
       return
     }
-    const cle = { project, database, environment }
+    const cle = { connection }
     // **Le cache court-circuite tout**, y compris l'état de chargement : c'est l'ouverture
     // instantanée qu'un cache de structures permet.
     const enMemoire = cache.current?.detail(cle, schema, table)
@@ -102,7 +101,7 @@ export function useDetailTable(
     return () => {
       vivant = false
     }
-  }, [project, database, environment, schema, table, passerelle, relecture])
+  }, [connection, schema, table, passerelle, relecture])
 
   return etat
 }

@@ -9,14 +9,10 @@ import {
   openDatabase,
   surEchecDeCommande,
 } from '../../data/commandes'
-import type { EnvironmentId, Project } from '../../domain/config'
-import type {
-  ConnectionState,
-  ConnectionStateEntry,
-  DatabaseKey,
-  SchemaInfo,
-  TableSummary,
-} from '../../domain/engine'
+import { connexion } from '../../data/dossiers'
+import type { ConnectionStateEntry, DatabaseKey } from '../../domain/arbre'
+import type { ConnectionId, FolderTree } from '../../domain/config'
+import type { ConnectionState, SchemaInfo, TableSummary } from '../../domain/engine'
 import { type Charge, idBase, type Noeud, schemasAffiches } from '../Explorer/arbre'
 
 /**
@@ -53,7 +49,7 @@ export const PASSERELLE_TAURI: PasserelleArbre = {
 const CHARGE_VIDE: Charge = { schemas: {}, objets: {}, enCours: new Set(), echecs: {} }
 
 /**
- * De quoi ouvrir une connexion : ses coordonnées, et l'identité sous laquelle l'arbre la cache.
+ * De quoi ouvrir une connexion : son identifiant, et l'identité sous laquelle l'arbre la cache.
  *
  * **`chargerBase` prenait un `Noeud`**, ce qui liait l'ouverture d'une connexion à la ligne d'arbre
  * qui la montre. Une console s'ouvre sans que cette ligne soit dépliée — le menu « … » d'une
@@ -69,9 +65,7 @@ const CHARGE_VIDE: Charge = { schemas: {}, objets: {}, enCours: new Set(), echec
  */
 type BaseAOuvrir = {
   id: string
-  project: string
-  database: string
-  environment: EnvironmentId
+  connection: ConnectionId
 }
 
 /**
@@ -86,7 +80,7 @@ type BaseAOuvrir = {
  * jusqu'à trente secondes.
  */
 export function useArbre(
-  projects: readonly Project[],
+  arbre: FolderTree,
   passerelle: PasserelleArbre = PASSERELLE_TAURI,
   /**
    * Appelé quand une connexion vient de s'ouvrir **et** que ses schémas sont connus.
@@ -109,8 +103,7 @@ export function useArbre(
   const [etats, setEtats] = useState<readonly ConnectionStateEntry[]>([])
 
   const etatDeBase = useCallback(
-    (project: string, database: string, environment: EnvironmentId): ConnectionState =>
-      etatDe(etats, project, database, environment),
+    (connection: ConnectionId): ConnectionState => etatDe(etats, connection),
     [etats],
   )
 
@@ -131,7 +124,7 @@ export function useArbre(
    * `tourDesEtats` empêche une lecture dépassée d'écraser une plus récente ; il ne dit rien du cas
    * inverse, où une lecture **à jour au départ** est appliquée à un cache qui a grandi entre-temps.
    * C'est ce qui arrive dès qu'une ouverture et un changement de configuration partent du même geste
-   * — et « ouvrir une console » est exactement cela : la création réécrit `projects`, donc déclenche
+   * — et « ouvrir une console » est exactement cela : la création réécrit l'arbre, donc déclenche
    * la relecture du registre, pendant que la connexion s'ouvre. La lecture partait avant que le
    * registre ne tienne la connexion, revenait après que ses schémas étaient en cache, et **les
    * reprenait** : console sans catalogue, ligne d'arbre repliée, et rien pour le dire.
@@ -196,35 +189,39 @@ export function useArbre(
     // `ouverturesAbouties` : sans ce contrôle, ouvrir une console reprenait aussitôt les schémas
     // qu'elle venait d'obtenir. Le prochain changement de configuration purgera ce qui doit l'être.
     if (ouverturesAbouties.current !== temoin) return
-    const ouvertes = new Set(lus.map((entree) => identiteDeBase(entree.key)))
+    const ouvertes = new Set(lus.map((entree) => entree.key.connection))
     setCharge((precedent) => oublierLesFermees(precedent, ouvertes))
     setDeplies((precedent) => replierLesFermees(precedent, ouvertes))
   }, [rafraichirEtats])
 
   /**
-   * **Relu à chaque changement de projets**, et c'est ce qui couvre les six commandes d'un coup.
+   * **Relu à chaque changement de l'arbre**, et c'est ce qui couvre d'un coup les commandes qui
+   * ferment une connexion — `update_variant`, `delete_database`, `delete_folder`, le retrait d'une
+   * console. **Depuis #166, renommer ou déplacer ne ferme plus rien** : un nom n'est dans aucune
+   * identité, donc le registre garde la connexion, et la relecture qui suit ne purge rien — c'est
+   * voulu, et `useArbre.test.tsx` le garde en négatif.
    *
-   * Toutes rendent `Vec<Project>` et `App` les pose par `setProjects` : ce changement est donc le
+   * Toutes rendent l'arbre et `App` le repose : ce changement est donc le
    * signal commun, sans qu'aucune ait à se déclarer. Le coût est un appel IPC par écriture de
    * configuration — y compris pour celles qui ne ferment rien, comme l'enregistrement du SQL d'une
    * console —, ce qui est le prix d'une règle unique plutôt que de six branchements.
    *
-   * **`projects` est le déclencheur, pas une donnée lue** — d'où l'exemption ci-dessous, qui suit la
+   * **`arbre` est le déclencheur, pas une donnée lue** — d'où l'exemption ci-dessous, qui suit la
    * forme des quatre autres du dépôt. Biome a raison sur la lettre : la fonction ne lit rien de
-   * `projects`. Le retirer des dépendances rendrait pourtant l'effet inerte après le montage, donc
+   * `arbre`. Le retirer des dépendances rendrait pourtant l'effet inerte après le montage, donc
    * rendrait le défaut du 31 août 2026 exactement à son état d'avant.
    */
   // biome-ignore lint/correctness/useExhaustiveDependencies: voir ci-dessus
   useEffect(() => {
     void synchroniserAvecLeRegistre()
-  }, [projects, synchroniserAvecLeRegistre])
+  }, [arbre, synchroniserAvecLeRegistre])
 
   /**
    * **Et relu après tout échec de commande** — la moitié écran du correctif du 8 septembre 2026.
    *
    * Le registre retire désormais une connexion dont le socket est mort (`ConnectionRegistry::avec`)
    * et bascule son état en « hors ligne ». Restait le cas qu'aucun signal ne couvrait : une lecture
-   * de table ou une exécution de console **ne change rien à la configuration**, donc `projects` ne
+   * de table ou une exécution de console **ne change rien à la configuration**, donc l'arbre ne
    * bouge pas, donc l'effet ci-dessus ne se rejoue pas. L'arbre affichait « OK » sur une base morte
    * jusqu'à la prochaine écriture de configuration — c'est-à-dire souvent jusqu'à la fin de la
    * session.
@@ -257,12 +254,11 @@ export function useArbre(
   }, [])
 
   const chargerBase = useCallback(
-    async ({ id, project, database, environment }: BaseAOuvrir) => {
-      const cle = databaseKey(project, database, environment)
-      // **La connexion est identifiée par son nom *et* son environnement** (`23b`) : deux connexions
-      // homonymes coexistent, et n'en chercher qu'une par le nom ouvrirait la première venue — celle
-      // de dev alors qu'on a cliqué celle de prod.
-      const declaration = baseDeclaree(projects, project, database, environment)
+    async ({ id, connection }: BaseAOuvrir) => {
+      const cle = databaseKey(connection)
+      // **Par identifiant** (#166) : deux connexions homonymes coexistent dans deux dossiers, et en
+      // chercher une par le nom ouvrirait la première venue — sur le mauvais serveur.
+      const declaration = connexion(arbre, connection)?.base
       const variante = declaration?.connection
       if (!declaration || !variante) return
 
@@ -304,15 +300,15 @@ export function useArbre(
         await rafraichirEtats()
       }
     },
-    [projects, passerelle, marquer, onOuverture, rafraichirEtats],
+    [arbre, passerelle, marquer, onOuverture, rafraichirEtats],
   )
 
   const chargerSchema = useCallback(
     async (noeud: Noeud) => {
-      const { project, database, environment, schema } = noeud
-      if (!project || !database || !environment || !schema) return
+      const { connection, schema } = noeud
+      if (!connection || !schema) return
       const id = noeud.id
-      const cle = databaseKey(project, database, environment)
+      const cle = databaseKey(connection)
 
       marquer(id, true)
       try {
@@ -343,12 +339,9 @@ export function useArbre(
   const charger = useCallback(
     (noeud: Noeud) => {
       if (noeud.kind === 'database' && !charge.schemas[noeud.id]) {
-        const { project, database, environment } = noeud
-        // Les coordonnées d'un nœud sont optionnelles — un message n'en a pas —, et c'est ici
-        // qu'elles se contrôlent : `chargerBase` les reçoit désormais complètes.
-        if (project && database && environment) {
-          void chargerBase({ id: noeud.id, project, database, environment })
-        }
+        // L'identifiant d'un nœud est optionnel — un message n'en a pas —, et c'est ici qu'il se
+        // contrôle : `chargerBase` le reçoit complet.
+        if (noeud.connection) void chargerBase({ id: noeud.id, connection: noeud.connection })
       }
       if (noeud.kind === 'schema' && !charge.objets[noeud.id]) void chargerSchema(noeud)
     },
@@ -389,17 +382,12 @@ export function useArbre(
    */
   const assurerLOuverture = useCallback(
     (cle: DatabaseKey): Promise<void> => {
-      const id = idBase(cle.project, cle.environment, cle.database)
+      const id = idBase(cle.connection)
       // **`enCours` en plus des schémas**, là où `charger` ne regarde que les schémas : un clic sur
       // une console n'est pas une bascule, donc rien n'empêche un second d'arriver pendant que le
       // premier ouvre.
       if (charge.schemas[id] || charge.enCours.has(id)) return Promise.resolve()
-      return chargerBase({
-        id,
-        project: cle.project,
-        database: cle.database,
-        environment: cle.environment,
-      })
+      return chargerBase({ id, connection: cle.connection })
     },
     [charge, chargerBase],
   )
@@ -415,9 +403,9 @@ export function useArbre(
    * connaître. Sans cette relecture, l'arbre garderait la liste d'avant et le seul recours serait
    * « Rafraîchir l'arborescence », qui replie tout.
    *
-   * # La préférence est **passée**, non relue dans `projects`
+   * # La préférence est **passée**, non relue dans l'arbre
    *
-   * L'appelant vient de l'enregistrer, et les projets à jour remontent par `onProjets` : les lire
+   * L'appelant vient de l'enregistrer, et l'arbre à jour remonte par `onArbre` : les lire
    * ici les prendrait dans la fermeture de ce rendu-ci, donc **avant** l'écriture — et le filtre
    * appliqué serait celui qu'on vient de remplacer. C'est le même piège que `tourDesEtats` par un
    * autre bout : ce qui est vrai à l'appel ne l'est pas au retour.
@@ -429,7 +417,7 @@ export function useArbre(
    */
   const rechargerLesSchemas = useCallback(
     async (cle: DatabaseKey, affiches: readonly string[] | null) => {
-      const id = idBase(cle.project, cle.environment, cle.database)
+      const id = idBase(cle.connection)
       if (!charge.schemas[id]) return
 
       try {
@@ -494,21 +482,13 @@ export function useArbre(
 }
 
 /**
- * L'identité d'une base telle que les identifiants de l'arbre la portent.
+ * L'identifiant de nœud, privé de son étiquette de sorte (`d:`, `s:`, `o:`).
  *
- * `idBase` compose `d:projet/environnement/base`, `idSchema` compose
- * `s:projet/environnement/base/schéma` : la part commune est ce que cette fonction rend, et c'est
- * elle qui permet d'apparier un nœud à une entrée du registre.
- *
- * **Réserve connue** : un nom de projet, d'environnement ou de base qui contiendrait une barre
- * oblique rendrait ces identifiants ambigus. Le défaut est antérieur et vaut pour tout l'arbre, pas
- * seulement ici.
+ * Ce qui reste commence par l'identifiant de la connexion (#166) — `d:<id>`, `s:<id>/schéma`,
+ * `o:<id>/schéma/objet` —, et c'est ce qui permet d'apparier un nœud à une entrée du registre. Un
+ * identifiant ne contient jamais de `/`, donc `sousLaBase` ne peut pas confondre deux connexions
+ * dont l'une préfixerait l'autre : le défaut de « Halle » et « Halles » est parti avec les noms.
  */
-function identiteDeBase(key: DatabaseKey): string {
-  return `${key.project}/${key.environment}/${key.database}`
-}
-
-/** L'identifiant de nœud, privé de son étiquette de sorte (`d:`, `s:`, `o:`). */
 function identiteDuNoeud(id: string): string {
   return id.slice(id.indexOf(':') + 1)
 }
@@ -536,7 +516,7 @@ function basesFermees(charge: Charge, ouvertes: ReadonlySet<string>): readonly s
  * Oublie ce qui est chargé pour les bases que le registre ne tient plus.
  *
  * **Rend `charge` inchangé quand il n'y a rien à oublier**, et ce n'est pas une micro-optimisation :
- * cette fonction est appelée à chaque changement de projets, y compris ceux qui ne ferment rien, et
+ * cette fonction est appelée à chaque changement de l'arbre, y compris ceux qui ne ferment rien, et
  * un objet neuf à chaque fois ferait re-rendre l'arbre entier pour rien.
  */
 function oublierLesFermees(charge: Charge, ouvertes: ReadonlySet<string>): Charge {
@@ -579,31 +559,6 @@ function replierLesFermees(
     [...deplies].filter((id) => !identites.some((identite) => sousLaBase(id, identite))),
   )
   return suivant
-}
-
-/** La variante d'environnement d'une base, celle que `open_database` réclame. */
-/**
- * La base **déclarée**, et non sa seule variante d'environnement.
- *
- * Depuis `18`, l'ouverture a besoin du moteur, qui vit au niveau de la `Database` : rendre la
- * variante seule obligeait à refaire la même recherche une seconde fois pour l'obtenir.
- */
-/**
- * La connexion déclarée, par projet, nom **et** environnement (`23b`).
- *
- * Le dernier paramètre n'est pas une commodité : `analytics` peut exister en dev et en prod, et deux
- * connexions homonymes ont des hôtes différents. Chercher par le seul nom ouvrirait l'une pour
- * l'autre — sans erreur, sur le mauvais serveur.
- */
-function baseDeclaree(
-  projects: readonly Project[],
-  project: string,
-  database: string,
-  environment: string,
-) {
-  return projects
-    .find((p) => p.name === project)
-    ?.databases.find((d) => d.name === database && d.environment === environment)
 }
 
 function message(cause: unknown): string {

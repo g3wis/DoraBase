@@ -1,5 +1,7 @@
-import { type ReactNode, useMemo, useState } from 'react'
-import type { EnvironmentId, Project } from '../../domain/config'
+import { type ReactNode, useEffect, useMemo, useState } from 'react'
+import { dossier } from '../../data/dossiers'
+import { Icon } from '../../design/icons/Icon'
+import type { ConnectionId, FolderColor, FolderId, FolderTree } from '../../domain/config'
 import type { ColumnInfo, ConnectionState } from '../../domain/engine'
 import { useT } from '../../i18n/LanguageContext'
 import { raccourci } from '../../shell/plateforme'
@@ -11,149 +13,89 @@ import { Sidebar } from '../../ui/Sidebar/Sidebar'
 import { SidebarFilterBar } from '../../ui/SidebarFilterBar/SidebarFilterBar'
 import { SidebarSectionTitle } from '../../ui/SidebarSectionTitle/SidebarSectionTitle'
 import { SidebarToolbar, SidebarToolbarButton } from '../../ui/SidebarToolbar/SidebarToolbar'
-import { INDENT, TreeRow } from '../../ui/TreeRow/TreeRow'
-import { aplatir, type Charge, type Deplies, type Noeud } from './arbre'
+import { TreeRow } from '../../ui/TreeRow/TreeRow'
+import { aplatir, type Charge, type Deplies, idDossier, type Noeud } from './arbre'
+import { CouleurDialog } from './CouleurDialog'
 import { type CibleDeSuppression, DeleteConnectionDialog } from './DeleteConnectionDialog'
 import styles from './ExplorerSidebar.module.css'
 import { type RapportDeRenommage, RenameReportDialog } from './RenameReportDialog'
 import { RowMenu } from './RowMenu'
 
 export type ExplorerSidebarProps = {
-  projects: readonly Project[]
+  arbre: FolderTree
   deplies: Deplies
   charge: Charge
-  etatDe: (project: string, database: string, environment: EnvironmentId) => ConnectionState
+  etatDe: (connection: ConnectionId) => ConnectionState
   selectedId?: string | null
   onToggle: (noeud: Noeud) => void
   onSelect: (noeud: Noeud) => void
   /**
-   * Ouvre la déclaration d'une connexion **dans un environnement d'un projet** (26 août 2026).
+   * Ouvre la déclaration d'une connexion **dans un dossier** (#166).
    *
-   * La cible est **obligatoire**, et c'est le point : une connexion appartient à un environnement,
-   * donc le geste ne peut partir que d'un endroit qui sait lequel. Le pied de la sidebar devait
-   * deviner, le raccourci `⇧⌘N` aussi — les deux ont été retirés, et le type dit maintenant pourquoi
-   * ils ne pouvaient pas marcher.
+   * La cible est **obligatoire**, et c'est le point : le geste part du menu d'une ligne de dossier,
+   * le palier qui connaît son contexte. Le dossier est le **cadre** de la modale, pas un champ.
    */
-  onAddDatabase?: (cible: { project: string; environment: EnvironmentId }) => void
+  onAddDatabase?: (dossier: FolderId) => void
   /**
-   * Ouvre l'étape 1 du parcours de création (`24d`).
+   * Crée un dossier — à la racine (`null`), depuis la bande de tête, ou dans un dossier, depuis son
+   * menu — et rend son identifiant, que le cœur a tiré.
    *
-   * Absent, le bouton n'est pas rendu — et non rendu inerte : un contrôle qui ne fait rien est pire
-   * qu'un contrôle absent (défaut n° 36). C'est le cas de la galerie, où aucune commande ne répond.
+   * **La ligne passe aussitôt en renommage sur place** : aucune modale ne nomme un objet à sa
+   * création, le dossier naît « dossier N » et se nomme ensuite, là où il est. Sans l'identifiant
+   * rendu, la sidebar ne saurait pas quelle ligne éditer.
+   *
+   * Absent, le bouton de la bande n'est pas rendu — et non rendu inerte : un contrôle qui ne fait
+   * rien est pire qu'un contrôle absent (défaut n° 36). C'est le cas de la galerie.
    */
-  onNewProject?: () => void
+  onNewFolder?: (parent: FolderId | null) => Promise<FolderId>
   /**
-   * Ouvre les préférences (`API-46`), depuis la fin de la bande de tête.
-   *
-   * **C'est le seul point d'entrée dans l'écran de travail** : l'engrenage a quitté la barre de titre,
-   * qui n'y porte plus aucune action. Il y reste sur l'accueil, faute d'arborescence où le mettre.
-   *
-   * Absent, le bouton n'est pas rendu — jamais rendu inerte : c'est la règle de `onNewProject` juste
-   * au-dessus, et le cas de la galerie, où aucune modale ne répond.
+   * La ligne à passer en renommage dès le montage (#166) — le dossier que l'écran d'accueil vient de
+   * créer. `A1` n'a pas d'arbre : c'est la première ligne de l'écran de travail qui se nomme.
+   */
+  renommageInitial?: string
+  /** Renomme un dossier ; rejette avec le refus du cœur (un frère homonyme). */
+  onRenameFolder?: (dossier: FolderId, nom: string) => Promise<void>
+  /** Change la pastille d'un dossier ; `null` la retire. */
+  onRecolorFolder?: (dossier: FolderId, couleur: FolderColor | null) => Promise<void>
+  /** Passe un dossier en lecture seule, ou la lève. */
+  onSetFolderReadOnly?: (dossier: FolderId, lectureSeule: boolean) => Promise<void>
+  /**
+   * Ouvre les préférences (`API-46`), depuis la bande de tête. Absent, le bouton n'est pas rendu.
    */
   onOpenPreferences?: () => void
   onRefresh?: () => void
   /**
-   * Ce qu'on peut faire d'une console depuis l'arbre — créer, renommer, retirer.
-   *
-   * **La création part du menu d'une connexion**, et de là seulement : une console appartient à une
-   * connexion, et l'endroit où on la crée doit dire laquelle. Créer l'ouvre — personne ne crée une
-   * console pour ne pas l'ouvrir.
+   * Ce qu'on peut faire d'une console depuis l'arbre — créer, renommer, retirer. **La création part
+   * du menu d'une connexion**, et de là seulement.
    */
   consoles?: {
-    onCreer: (project: string, database: string, environment: EnvironmentId) => void
+    onCreer: (connection: ConnectionId) => void
     /** Le nouveau nom est **fourni** : le renommage se fait sur place, il n'ouvre pas de modale. */
-    onRenommer: (
-      project: string,
-      database: string,
-      environment: EnvironmentId,
-      nom: string,
-      nouveau: string,
-    ) => void
-    onRetirer: (project: string, database: string, environment: EnvironmentId, nom: string) => void
+    onRenommer: (connection: ConnectionId, nom: string, nouveau: string) => void
+    onRetirer: (connection: ConnectionId, nom: string) => void
   }
+  /** Ouvre le diagramme d'un schéma, depuis le menu de sa ligne (3 septembre 2026). */
+  onOpenDiagram?: (connection: ConnectionId, schema: string) => void
+  /** Modifier la configuration d'une connexion depuis son « … » (`08h`). */
+  onEditDatabase?: (connection: ConnectionId) => void
+  /** Ouvre le gestionnaire de schémas d'une connexion (`API-33`). */
+  onManageSchemas?: (connection: ConnectionId) => void
   /**
-   * Ouvre le diagramme de structure d'un schéma, depuis le menu de sa ligne (3 septembre 2026).
-   *
-   * **La ligne de schéma est le seul endroit du produit qui nomme un schéma à tout moment** — voir la
-   * note de tête d'`entreesDe`. Absent, l'entrée est désactivée avec sa raison : c'est le cas de la
-   * galerie, où aucun onglet ne s'ouvre.
+   * Renomme une connexion depuis sa ligne (`26`), **sur place**. Rejette avec le refus du cœur.
+   * Depuis #166 il n'y a plus de réserve à rapporter : le nom n'est dans aucune identité.
    */
-  onOpenDiagram?: (
-    project: string,
-    database: string,
-    environment: EnvironmentId,
-    schema: string,
-  ) => void
-  /**
-   * Modifier la configuration d'une base depuis son « … » (`08h`) — ouvre la modale de `08g`.
-   *
-   * Absent, l'entrée « Modifier… » est désactivée avec sa raison plutôt que cliquable et inerte.
-   */
-  onEditDatabase?: (project: string, database: string, environment: EnvironmentId) => void
-  /**
-   * Ouvre le gestionnaire de schémas d'une connexion (`API-33`).
-   *
-   * **Depuis le menu de la connexion**, comme la création d'une console et pour la même raison : le
-   * geste part du palier qui connaît son contexte, et une bande en tête de colonne devrait deviner
-   * de quelle connexion il s'agit.
-   *
-   * Absent, l'entrée est désactivée avec sa raison. Hors PostgreSQL elle l'est aussi, avec une autre
-   * raison — voir `entreesDe` : la cacher ferait croire qu'elle n'existera jamais.
-   */
-  onManageSchemas?: (project: string, database: string, environment: EnvironmentId) => void
-  /**
-   * Renomme une connexion depuis sa ligne (`26`).
-   *
-   * **Sur place, et non dans une modale** : le nom est le seul champ concerné, et l'ouverture d'un
-   * formulaire pour un mot à corriger est ce que le renommage de console a déjà refusé. Le geste rend
-   * ce qu'il y a à dire — un mot de passe introuvable, un résidu dans le Trousseau — et **rejette**
-   * avec le refus du cœur : un nom déjà pris dans cet environnement (`23b`).
-   *
-   * Absent, l'entrée « Renommer… » est désactivée avec sa raison plutôt que cliquable et inerte.
-   */
-  onRenameDatabase?: (
-    project: string,
-    database: string,
-    environment: EnvironmentId,
-    nouveau: string,
-  ) => Promise<{ missingSecrets: string[]; leftoverSecrets: string[] }>
-  /**
-   * Ouvre la modale d'édition d'un projet depuis son « … » (`23e`).
-   *
-   * **Elle remplace « Renommer… »** : le renommage de `08i` est devenu le premier champ de cet écran,
-   * et l'ancienne modale n'existe plus. La sidebar ne monte donc plus rien elle-même pour ce geste —
-   * la modale vit dans l'écran de travail, qui porte aussi l'autre point d'entrée (la pastille de la
-   * barre de titre). Absent, l'entrée est désactivée avec sa raison.
-   */
-  onEditProject?: (project: string) => void
-  /**
-   * Exporte **ce projet** dans un fichier de transfert (`API-30`).
-   *
-   * **Depuis le menu de sa ligne**, comme la création d'une console part du menu de sa connexion et
-   * pour la même raison : le geste part du palier qui connaît son contexte. L'export de *tous* les
-   * projets vit dans le menu natif, où il n'a rien à deviner.
-   *
-   * Absent, l'entrée est désactivée avec sa raison — c'est le cas de la galerie.
-   */
-  onExportProject?: (project: string) => void
+  onRenameDatabase?: (connection: ConnectionId, nouveau: string) => Promise<void>
   /**
    * Ouvre l'import de projets (`API-30`), depuis la bande en tête de l'arbre.
    *
    * **Il a fallu ce second chemin, et c'est un signalement qui l'a dit** (17 septembre 2026, « je
-   * n'ai pas trouvé comment importer »). L'import n'existait que dans le menu natif : il marchait,
-   * un test le prouvait jusqu'au menu construit, et **personne ne pouvait le trouver**. C'est la
-   * règle que ce dépôt a déjà payée trois fois — le `⌘E` du mode édition, le `⇧`-clic du diagramme,
-   * le renommage d'une console : *un chemin unique qu'on ne voit pas est un chemin qui n'existe pas*.
-   *
-   * **Dans cette bande et non ailleurs** : elle porte déjà « Nouveau projet », et un import **crée
-   * des projets** — les deux gestes produisent la même chose, par deux moyens. L'export, lui, n'y
-   * est pas : il ne crée rien, et sa portée la plus utile est un projet, donc elle vit sur la ligne
-   * qui le nomme.
+   * n'ai pas trouvé comment importer ») : un chemin unique qu'on ne voit pas — le menu natif — est
+   * un chemin qui n'existe pas. **Dans cette bande**, à côté de « Nouveau dossier » : les deux gestes
+   * produisent la même chose, par deux moyens.
    */
   onImportProjects?: () => void
   /**
-   * Retirer la déclaration d'une base, ou un projet entier (`08j`).
+   * Retirer la déclaration d'une connexion, ou un dossier entier (`08j`).
    *
    * Une seule prop pour les deux : la cible dit lequel, et deux props jumelles se seraient
    * désynchronisées.
@@ -206,7 +148,7 @@ const APERCU_COLONNES = 7
  * données ».
  */
 export function ExplorerSidebar({
-  projects,
+  arbre,
   deplies,
   charge,
   etatDe,
@@ -214,7 +156,11 @@ export function ExplorerSidebar({
   onToggle,
   onSelect,
   onAddDatabase,
-  onNewProject,
+  onNewFolder,
+  renommageInitial,
+  onRenameFolder,
+  onRecolorFolder,
+  onSetFolderReadOnly,
   onOpenPreferences,
   onRefresh,
   consoles,
@@ -222,8 +168,6 @@ export function ExplorerSidebar({
   onEditDatabase,
   onManageSchemas,
   onRenameDatabase,
-  onEditProject,
-  onExportProject,
   onImportProjects,
   onDelete,
   modificationsEnAttenteDe,
@@ -234,8 +178,8 @@ export function ExplorerSidebar({
   const t = useT()
   const [filtre, setFiltre] = useState('')
   /**
-   * La ligne en cours de renommage, par identité de nœud — une console (`12f`) ou une connexion
-   * (`26`).
+   * La ligne en cours de renommage, par identité de nœud — une console (`12f`), une connexion
+   * (`26`) ou un dossier (#166).
    *
    * **Un seul état pour les deux sortes** : une seule ligne se renomme à la fois, et deux états
    * jumeaux auraient permis d'en éditer deux, dont une invisible.
@@ -244,7 +188,13 @@ export function ExplorerSidebar({
    * ni l'écran de travail ni le disque. Le remonter aurait fait voyager un identifiant de nœud à
    * travers deux composants pour revenir se poser sur la même ligne.
    */
-  const [enRenommage, setEnRenommage] = useState<string | null>(null)
+  const [enRenommage, setEnRenommage] = useState<string | null>(renommageInitial ?? null)
+  // Une demande qui arrive après le montage — le raccourci de création, porté par l'application.
+  useEffect(() => {
+    if (renommageInitial !== undefined) setEnRenommage(renommageInitial)
+  }, [renommageInitial])
+  /** Le dossier dont la modale « Couleur… » est ouverte, par identifiant. */
+  const [aColorer, setAColorer] = useState<FolderId | null>(null)
   const [aRetirer, setARetirer] = useState<CibleDeSuppression | null>(null)
   /**
    * Ce qu'un renommage a eu à dire (`26`) — un refus, ou une réserve sur le Trousseau.
@@ -267,9 +217,32 @@ export function ExplorerSidebar({
   const demanderLeRetrait = onDelete === undefined ? undefined : setARetirer
 
   const noeuds = useMemo(
-    () => aplatir(projects, deplies, charge, etatDe, t),
-    [projects, deplies, charge, etatDe, t],
+    () => aplatir(arbre, deplies, charge, etatDe, t),
+    [arbre, deplies, charge, etatDe, t],
   )
+
+  /**
+   * Crée un dossier, déplie son parent, et passe la nouvelle ligne en renommage sur place.
+   *
+   * **Déplier le parent n'est pas une commodité** : un dossier créé sous un parent replié n'aurait
+   * aucune ligne où se nommer, et le champ de renommage attendrait une ligne qui n'existe pas.
+   */
+  const creerUnDossier =
+    onNewFolder === undefined
+      ? undefined
+      : (parent: Noeud | null) => {
+          if (parent !== null && parent.chevron === 'closed') onToggle(parent)
+          void onNewFolder(parent?.folder ?? null).then(
+            (cree) => setEnRenommage(idDossier(cree)),
+            () => {
+              // Un refus de création n'a pas de ligne où se dire ; le blocage de configuration, seul
+              // cas réaliste, est déjà annoncé par l'écran (`09b`).
+            },
+          )
+        }
+
+  const dossierAColorer =
+    aColorer === null ? undefined : noeuds.find((noeud) => noeud.folder === aColorer)
 
   const visibles = useMemo(() => filtrer(noeuds, filtre), [noeuds, filtre])
 
@@ -281,21 +254,22 @@ export function ExplorerSidebar({
    * au premier ajout, et c'est le genre d'écart qu'on ne remarque qu'en montrant le produit.
    */
   const actionsDe = (noeud: Noeud): readonly EntreeDeMenu[] | undefined =>
-    entreesDe(
-      noeud,
+    entreesDe(noeud, {
       onAddDatabase,
       onEditDatabase,
       onManageSchemas,
-      onRenameDatabase !== undefined,
-      onEditProject,
-      onExportProject,
+      renommageDisponible:
+        noeud.kind === 'folder' ? onRenameFolder !== undefined : onRenameDatabase !== undefined,
+      creerUnDossier,
+      colorer: onRecolorFolder === undefined ? undefined : setAColorer,
+      onSetFolderReadOnly,
       demanderLeRetrait,
       onRefresh,
       consoles,
       onOpenDiagram,
-      setEnRenommage,
+      demanderLeRenommage: setEnRenommage,
       t,
-    )
+    })
 
   /** La ligne visée par le clic droit, si elle est toujours là, et ce que son menu propose. */
   const viseeAuPointeur =
@@ -318,37 +292,25 @@ export function ExplorerSidebar({
    * homonymes vivent dans deux environnements (`23b`), et c'est le couple qui les distingue.
    */
   function renommer(noeud: Noeud, nouveau: string) {
-    if (noeud.project === undefined || noeud.environment === undefined) return
+    const refuser = (erreur: unknown) => setRapport({ nom: nouveau, refus: String(erreur) })
 
     if (noeud.kind === 'console' && consoles !== undefined) {
-      if (noeud.database === undefined || noeud.console === undefined) return
-      consoles.onRenommer(noeud.project, noeud.database, noeud.environment, noeud.console, nouveau)
+      if (noeud.connection === undefined || noeud.console === undefined) return
+      consoles.onRenommer(noeud.connection, noeud.console, nouveau)
       return
     }
 
+    // Le refus n'est pas attendu par le champ, qui est déjà démonté : il arrive dans le rapport,
+    // seul endroit où un renommage sur place peut parler. Le succès est muet — la ligne le dit.
     if (noeud.kind === 'database' && onRenameDatabase !== undefined) {
-      if (noeud.database === undefined) return
-      const project = noeud.project
-      const environment = noeud.environment
-      // **`database`, jamais `label`.** L'ancien nom envoyé au renommage est l'identité de la
-      // connexion — voir la note sur `label` ci-dessus, à l'endroit où `TreeRow` reçoit ses props.
-      // Le refus et les réserves ne sont pas attendus par le champ, qui est déjà démonté : ils
-      // arrivent dans le rapport, seul endroit où un renommage sur place peut parler.
-      void onRenameDatabase(project, noeud.database, environment, nouveau).then(
-        (issue) => {
-          if (issue.missingSecrets.length > 0 || issue.leftoverSecrets.length > 0) {
-            setRapport({ nom: nouveau, ...issue })
-          }
-        },
-        (erreur: unknown) => {
-          setRapport({
-            nom: nouveau,
-            refus: String(erreur),
-            missingSecrets: [],
-            leftoverSecrets: [],
-          })
-        },
-      )
+      if (noeud.connection === undefined) return
+      void onRenameDatabase(noeud.connection, nouveau).catch(refuser)
+      return
+    }
+
+    if (noeud.kind === 'folder' && onRenameFolder !== undefined) {
+      if (noeud.folder === undefined) return
+      void onRenameFolder(noeud.folder, nouveau).catch(refuser)
     }
   }
 
@@ -366,6 +328,14 @@ export function ExplorerSidebar({
           onFermer={() => setMenuAuPointeur(null)}
         />
       )}
+      {dossierAColorer?.folder !== undefined && onRecolorFolder !== undefined && (
+        <CouleurDialog
+          nom={dossierAColorer.label}
+          couleur={couleurDe(arbre, dossierAColorer.folder)}
+          onRecolorer={(couleur) => onRecolorFolder(dossierAColorer.folder as FolderId, couleur)}
+          onClose={() => setAColorer(null)}
+        />
+      )}
       {aRetirer !== null && onDelete !== undefined && (
         <DeleteConnectionDialog
           cible={aRetirer}
@@ -378,32 +348,23 @@ export function ExplorerSidebar({
         width={width}
         toolbar={
           /* **La bande d'actions, en tête** (26 août 2026, à la demande) — et le pied a disparu avec
-             elle. Un seul geste pour l'instant, créer un projet, et c'est délibéré : la bande
-             accueillera les suivants, chacun nommé par son glyphe.
+             elle : 78 px pris sur la hauteur de l'arbre pour deux boutons à libellé.
 
-             **« Ajouter une connexion » n'y est pas**, et c'est la même raison qui avait déjà chassé
-             « Nouvelle console » du pied : une connexion appartient à un environnement, et une bande en
-             tête de colonne ne sait pas lequel. Le menu d'une ligne d'environnement, lui, ne devine
-             rien.
+             **« Nouveau dossier » crée à la racine** (#166), là où « Nouveau projet » créait un projet
+             — même place, même glyphe. **« Nouvelle connexion » n'y est pas** : une connexion se range
+             dans un dossier, et une bande en tête de colonne ne sait pas lequel. Le menu d'une ligne
+             de dossier, lui, ne devine rien.
 
-             **Ce que le pied coûtait** : 78 px pris sur la hauteur de l'arbre, pour deux boutons à
-             libellé qui devaient s'annoncer parce qu'ils vivaient seuls en bas d'une colonne. En tête,
-             la bande coûte moins, vit là où l'on cherche les actions d'un panneau, et peut porter des
-             icônes seules.
-
-             **`plus`, pas `bag`** (27 août 2026) : le sac reste le glyphe du *projet* — celui de
-             chaque ligne de l'arbre — mais ce bouton ne désigne pas un projet, il **en crée un**. Une
-             icône nue sans « + » se lisait comme un raccourci vers un projet déjà là, pas comme un
-             geste d'ajout — la même confusion que le `+` de la grille (`AGENTS.md`) écarte pour une
-             ligne. */
-          (onNewProject || onImportProjects || onOpenPreferences) && (
+             **`plus`** : ce bouton ne désigne pas un dossier, il **en crée un**. Une icône nue sans
+             « + » se lirait comme un raccourci vers un dossier déjà là. */
+          (onNewFolder || onImportProjects || onOpenPreferences) && (
             <SidebarToolbar>
-              {onNewProject && (
+              {creerUnDossier && (
                 <SidebarToolbarButton
                   icon="plus"
-                  label={t('explorer.sidebar.newProject')}
-                  title={t('explorer.sidebar.newProjectTitle', { raccourci: raccourci('N') })}
-                  onClick={onNewProject}
+                  label={t('explorer.sidebar.newFolder')}
+                  title={t('explorer.sidebar.newFolderTitle', { raccourci: raccourci('N') })}
+                  onClick={() => creerUnDossier(null)}
                 />
               )}
               {/* **L'import, juste après la création** (`API-30`, 17 septembre 2026, à la demande).
@@ -473,12 +434,12 @@ export function ExplorerSidebar({
               // Une ligne de message n'est pas un `treeitem` : ce n'est pas un nœud de l'arbre
               // mais un état de son chargement, et l'annoncer comme tel ferait compter un
               // enfant qui n'existe pas.
-              // L'indentation vient d'`INDENT`, la table exportée par `TreeRow` : le CSS en
-              // tenait une copie, qu'un palier ajouté aurait laissée en retard (`25a`).
+              // L'indentation vient d'`indentation()` de `TreeRow`, calculée par `aplatir` : le CSS
+              // en tenait une copie, qu'un palier ajouté aurait laissée en retard (`25a`).
               <p
                 key={noeud.id}
                 className={styles.message}
-                style={{ paddingLeft: INDENT[noeud.depth] }}
+                style={{ paddingLeft: noeud.indent }}
                 data-depth={noeud.depth}
               >
                 {noeud.label}
@@ -495,6 +456,7 @@ export function ExplorerSidebar({
                 aria-selected={noeud.id === selectedId}
                 aria-label={noeud.announce}
                 depth={noeud.depth}
+                indent={noeud.indent}
                 // **`label` nourrit aussi le champ d'édition sur place** (`TreeRow` y prend sa
                 // `valeurInitiale`). Une connexion qui « Renommer… » modifie son **identité**
                 // (`database`, `08i`), jamais son libellé d'affichage (`27a`) — donc pendant
@@ -542,12 +504,20 @@ export function ExplorerSidebar({
                 metaVariant={compteDe(noeud, modifications) ? 'caps' : noeud.metaVariant}
                 metaBadge={compteDe(noeud, modifications) !== undefined}
                 selected={noeud.id === selectedId}
-                strong={noeud.kind === 'project'}
+                // Les dossiers de premier niveau en graisse pleine, comme les projets qu'ils remplacent.
+                strong={noeud.kind === 'folder' && noeud.depth === 0}
                 trailing={
                   noeud.badge ? (
                     <Badge tone={noeud.badge.tone} size="xs">
                       {noeud.badge.text}
                     </Badge>
+                  ) : noeud.readOnly ? (
+                    /* **Le verrou, sur le dossier qui déclare la lecture seule** (#166) — à la place
+                       du badge `PROD` des environnements. Un glyphe en trait du sprite plutôt
+                       qu'un badge de texte : c'est le glyphe que la barre d'état emploie déjà pour
+                       « lecture seule ». Il n'a pas de nom accessible ; l'état est dans l'annonce
+                       de la ligne. */
+                    <Icon name="lock" size={11} strokeWidth={2.2} className={styles.verrou} />
                   ) : undefined
                 }
                 actions={renderActions(noeud, actionsDe(noeud))}
@@ -676,123 +646,129 @@ export function filtrer(noeuds: readonly Noeud[], filtre: string): Noeud[] {
   return noeuds.filter((noeud) => garde.has(noeud.id))
 }
 
-/**
- * Le menu « … » d'une ligne, ou rien (`08h`).
- *
- * **Les lignes qui portent une configuration en ont un** — projet, environnement, connexion,
- * console. Une table n'en a pas : ce qu'un menu y offrirait — copier le nom, ouvrir dans un onglet —
- * double un geste que le clic fait déjà.
- *
- * **Le schéma a fait exception le 3 septembre 2026, et c'est un cas à part motivé.** Ce commentaire
- * disait « seuls le projet et la base en ont un », et sa raison — il n'y a rien à configurer sur un
- * schéma — reste vraie : le diagramme n'est pas de la configuration. Ce qui décide, c'est qu'un
- * diagramme parle d'un **schéma** et que la ligne de schéma est le seul endroit du produit qui en
- * nomme un à tout moment. Le fil d'Ariane du centre en nomme un aussi, mais il disparaît dès qu'un
- * onglet s'ouvre — c'est-à-dire précisément quand on voudrait revenir au diagramme. C'est le même
- * raisonnement que « le geste part du palier qui connaît son contexte », appliqué à un geste de
- * lecture plutôt qu'à un geste de configuration.
- */
-function entreesDe(
-  noeud: Noeud,
-  onAddDatabase: ExplorerSidebarProps['onAddDatabase'],
-  onEditDatabase: ExplorerSidebarProps['onEditDatabase'],
-  onManageSchemas: ExplorerSidebarProps['onManageSchemas'],
+/** Ce dont les menus de ligne ont besoin, câblé par la sidebar. */
+type Cablage = {
+  onAddDatabase: ExplorerSidebarProps['onAddDatabase']
+  onEditDatabase: ExplorerSidebarProps['onEditDatabase']
+  onManageSchemas: ExplorerSidebarProps['onManageSchemas']
   /**
    * Un booléen et non la fonction : ce menu n'appelle pas le renommage, il **passe la ligne en
    * édition** — c'est le champ de saisie qui appellera. Il n'a donc besoin que de savoir si l'action
    * aboutira, pour désactiver l'entrée avec sa raison plutôt que de l'offrir en vain.
    */
-  renommageDisponible: boolean,
-  onEditProject: ExplorerSidebarProps['onEditProject'],
-  onExportProject: ExplorerSidebarProps['onExportProject'],
-  demanderLeRetrait: ((cible: CibleDeSuppression) => void) | undefined,
-  onRefresh: ExplorerSidebarProps['onRefresh'],
-  consoles: ExplorerSidebarProps['consoles'],
-  onOpenDiagram: ExplorerSidebarProps['onOpenDiagram'],
-  demanderLeRenommage: (id: string) => void,
-  t: ReturnType<typeof useT>,
-): readonly EntreeDeMenu[] | undefined {
+  renommageDisponible: boolean
+  creerUnDossier: ((parent: Noeud | null) => void) | undefined
+  colorer: ((dossier: FolderId) => void) | undefined
+  onSetFolderReadOnly: ExplorerSidebarProps['onSetFolderReadOnly']
+  demanderLeRetrait: ((cible: CibleDeSuppression) => void) | undefined
+  onRefresh: ExplorerSidebarProps['onRefresh']
+  consoles: ExplorerSidebarProps['consoles']
+  onOpenDiagram: ExplorerSidebarProps['onOpenDiagram']
+  demanderLeRenommage: (id: string) => void
+  t: ReturnType<typeof useT>
+}
+
+/**
+ * Le menu « … » d'une ligne (`08h`).
+ *
+ * **Toute ligne d'arbre en a un** — dossier, connexion, console, schéma, objet. Seules les lignes de
+ * message n'en ont pas, et ce ne sont pas des nœuds de l'arbre. Le schéma a gagné le sien pour le
+ * diagramme (3 septembre 2026), l'objet pour « Copier le nom » (#162).
+ */
+function entreesDe(noeud: Noeud, c: Cablage): readonly EntreeDeMenu[] | undefined {
+  const { t } = c
   const RAISONS = raisons(t)
-  if (noeud.kind === 'project') {
+
+  /*
+   * **Le menu d'un dossier** (#166), dans cet ordre — le geste destructeur reste le dernier :
+   * « Nouvelle connexion… », « Nouveau dossier », « Renommer… », « Couleur… », la lecture seule,
+   * « Retirer… ». « Déplacer vers… » (#167) et « Exporter le dossier… » (#169) n'y sont pas encore,
+   * et ne sont pas posés désactivés : une entrée qui n'aboutit à rien d'ici à son ticket se lirait
+   * comme une panne.
+   *
+   * **« Rafraîchir l'arborescence » reste en tête des dossiers de premier niveau**, là où il vivait
+   * sur les projets : sa portée est l'arbre entier, et la racine est l'endroit le moins mensonger
+   * pour l'accrocher.
+   */
+  if (noeud.kind === 'folder') {
+    const folder = noeud.folder
+    if (folder === undefined) return undefined
+    const lectureSeule = noeud.readOnly === true
+    const rafraichir: EntreeDeMenu[] =
+      noeud.depth === 0
+        ? [
+            {
+              libelle: t('explorer.sidebar.menu.refreshTree'),
+              icone: 'refresh',
+              onClick: c.onRefresh,
+              raison: c.onRefresh ? undefined : RAISONS.rafraichirIndisponible,
+            },
+          ]
+        : []
     return [
+      ...rafraichir,
       {
-        /* **« Rafraîchir l'arborescence », et non « Rafraîchir »** — l'action a quitté le pied
-               de la sidebar le 20 août 2026, où son icône seule faisait nombre avec trois boutons
-               de création qu'elle ne rejoignait pas.
-
-               Le nom long lève une ambiguïté qui existait déjà : la toolbar d'une table porte un
-               « Rafraîchir » qui relit **les lignes**, quand celui-ci vide le cache de **l'arbre**.
-               Deux boutons de même nom pour deux portées différentes — `e2e/10e-toolbar.spec.ts` le
-               contournait par un commentaire.
-
-               Sa portée est celle de l'arbre entier, pas du seul projet cliqué ; le menu d'une ligne
-               projet est néanmoins le seul déjà monté, et la racine est l'endroit le moins mensonger
-               pour l'accrocher. */
-        libelle: t('explorer.sidebar.menu.refreshTree'),
-        icone: 'refresh',
-        onClick: onRefresh,
-        raison: onRefresh ? undefined : RAISONS.rafraichirIndisponible,
+        // **Le geste part du palier qui connaît son contexte** : le dossier est le cadre d'`A2`.
+        libelle: t('explorer.sidebar.menu.newConnection'),
+        icone: 'plus',
+        onClick: c.onAddDatabase ? () => c.onAddDatabase?.(folder) : undefined,
+        raison: c.onAddDatabase ? undefined : RAISONS.ajoutIndisponible,
       },
       {
-        // **« Modifier le projet… » et non « Renommer… »** (`23e`) : l'écran fait les deux, et
-        // un libellé qui n'annonce que le renommage cacherait les environnements.
-        libelle: t('explorer.sidebar.menu.editProject'),
+        // **Création immédiate, puis renommage sur place** : aucune modale ne nomme un objet à sa
+        // création — le dossier naît « dossier N », là où il sera.
+        libelle: t('explorer.sidebar.menu.newFolder'),
+        icone: 'pin',
+        onClick: c.creerUnDossier ? () => c.creerUnDossier?.(noeud) : undefined,
+        raison: c.creerUnDossier ? undefined : RAISONS.dossierIndisponible,
+      },
+      {
+        libelle: t('explorer.sidebar.menu.rename'),
         icone: 'pencil',
-        onClick: onEditProject ? () => onEditProject(noeud.label) : undefined,
-        raison: onEditProject ? undefined : RAISONS.editionIndisponible,
+        onClick: c.renommageDisponible ? () => c.demanderLeRenommage(noeud.id) : undefined,
+        raison: c.renommageDisponible ? undefined : RAISONS.renommerIndisponible,
       },
       {
-        /* **« Exporter le projet… », après « Modifier » et avant « Retirer »** (`API-30`). Il ne
-           configure rien et n'ouvre rien : il produit un fichier. Sa place est donc après les deux
-           entrées qui touchent à la déclaration, et avant celle qui la retire — le geste destructeur
-           reste le dernier de la liste, partout dans le produit.
-
-           **Le libellé vient du dictionnaire du transfert**, non de celui de l'explorateur : c'est le
-           même geste que la modale nomme, et deux chaînes pour une action auraient divergé à la
-           première reformulation. */
-        libelle: t('transfer.export.menu'),
-        icone: 'dl',
-        onClick: onExportProject ? () => onExportProject(noeud.label) : undefined,
-        raison: onExportProject ? undefined : RAISONS.exportIndisponible,
+        libelle: t('explorer.sidebar.menu.color'),
+        icone: 'paint',
+        onClick: c.colorer ? () => c.colorer?.(folder) : undefined,
+        raison: c.colorer ? undefined : RAISONS.dossierIndisponible,
       },
       {
-        // **« Retirer… » et non « Supprimer… »** : le mot compte, et c'est toute la décision de
-        // `08j`. Ce qui part est une déclaration sur cet ordinateur, pas une base de données.
+        /* **Désactivée avec sa raison sous un ancêtre en lecture seule** : celle-ci s'impose à tous
+           les descendants (#108), donc la régler ici ne changerait rien — et la lever laisserait
+           croire que le dossier devient inscriptible. La raison nomme l'ancêtre à lever. */
+        libelle: lectureSeule
+          ? t('explorer.sidebar.menu.liftReadOnly')
+          : t('explorer.sidebar.menu.setReadOnly'),
+        // Le glyphe dit l'état d'arrivée, comme la bascule de la grille (`API-48`).
+        icone: lectureSeule ? 'unlock' : 'lock',
+        onClick:
+          c.onSetFolderReadOnly && noeud.imposeePar === undefined
+            ? () => void c.onSetFolderReadOnly?.(folder, !lectureSeule).catch(() => {})
+            : undefined,
+        raison:
+          noeud.imposeePar !== undefined
+            ? RAISONS.lectureSeuleImposee(noeud.imposeePar)
+            : c.onSetFolderReadOnly
+              ? undefined
+              : RAISONS.dossierIndisponible,
+      },
+      {
+        // **« Retirer… » et non « Supprimer… »** : ce qui part est une déclaration sur cet
+        // ordinateur, pas une base de données (`08j`).
         libelle: t('explorer.sidebar.menu.removeFromDoraBase'),
         icone: 'trash',
-        onClick: demanderLeRetrait
+        onClick: c.demanderLeRetrait
           ? () =>
-              demanderLeRetrait({
-                kind: 'project',
-                project: noeud.label,
+              c.demanderLeRetrait?.({
+                kind: 'folder',
+                folder,
+                nom: noeud.label,
                 connexions: noeud.connexions ?? 0,
               })
           : undefined,
-        raison: demanderLeRetrait ? undefined : RAISONS.retirerIndisponible,
-      },
-    ]
-  }
-
-  /*
-   * **Le menu d'un environnement** : y ajouter une connexion, et rien d'autre.
-   *
-   * Une connexion appartient à un environnement d'un projet (`23b`) : c'est l'endroit qui dit lequel,
-   * exactement comme le menu d'une connexion est l'endroit d'où l'on crée une console. Le pied de la
-   * sidebar, lui, devait deviner — et se tromper dès que deux projets étaient dépliés.
-   *
-   * Pas de « Retirer… » ni de « Renommer… » ici : les environnements d'un projet se déclarent
-   * ensemble, dans « Modifier le projet… » (`23e`), et l'identifiant d'un environnement est figé à sa
-   * création. Deux entrées de plus feraient croire à un geste qui n'existe pas.
-   */
-  if (noeud.kind === 'environment') {
-    const { project, environment } = noeud
-    if (project === undefined || environment === undefined) return undefined
-    return [
-      {
-        libelle: t('explorer.sidebar.menu.addConnection'),
-        icone: 'plus',
-        onClick: onAddDatabase ? () => onAddDatabase({ project, environment }) : undefined,
-        raison: onAddDatabase ? undefined : RAISONS.ajoutIndisponible,
+        raison: c.demanderLeRetrait ? undefined : RAISONS.retirerIndisponible,
       },
     ]
   }
@@ -800,77 +776,44 @@ function entreesDe(
   /* **Le menu d'une console** : renommer, retirer. Pas de « Modifier… » — une console se modifie en
      l'ouvrant et en y écrivant, ce que le clic sur la ligne fait déjà. */
   if (noeud.kind === 'console') {
-    const { project, database, environment, console: nom } = noeud
-    if (
-      consoles === undefined ||
-      project === undefined ||
-      database === undefined ||
-      environment === undefined ||
-      nom === undefined
-    ) {
-      return undefined
-    }
+    const { connection, console: nom } = noeud
+    const consoles = c.consoles
+    if (consoles === undefined || connection === undefined || nom === undefined) return undefined
     return [
       {
-        /* **Le même mécanisme que le double-clic**, pas une modale. L'entrée reste malgré tout :
-               un geste qui n'existe qu'au double-clic est invisible pour qui ne l'essaie pas, et
-               inatteignable au clavier. Elle passe la ligne en édition, le champ prend le focus. */
+        /* **Le même mécanisme que le double-clic**, pas une modale. L'entrée reste : un geste qui
+           n'existe qu'au double-clic est invisible pour qui ne l'essaie pas, et inatteignable au
+           clavier. */
         libelle: t('explorer.sidebar.menu.rename'),
         icone: 'pencil',
-        onClick: () => demanderLeRenommage(noeud.id),
+        onClick: () => c.demanderLeRenommage(noeud.id),
       },
       {
-        // **« Retirer… » et non « Supprimer… »**, comme partout : le mot est celui de `08j`.
         libelle: t('explorer.sidebar.menu.removeEllipsis'),
         icone: 'trash',
-        onClick: () => consoles.onRetirer(project, database, environment, nom),
+        onClick: () => consoles.onRetirer(connection, nom),
       },
     ]
   }
 
-  /*
-   * **Le menu d'un schéma** : son diagramme, et rien d'autre.
-   *
-   * Voir la note de tête pour la raison d'être de ce menu. Une seule entrée, comme celui d'un
-   * environnement — la bande accueillera les suivantes si le schéma en gagne.
-   */
+  /* **Le menu d'un schéma** : son diagramme. La ligne de schéma est le seul endroit du produit qui
+     nomme un schéma à tout moment (3 septembre 2026). */
   if (noeud.kind === 'schema') {
-    const { project, database, environment, schema } = noeud
-    if (
-      project === undefined ||
-      database === undefined ||
-      environment === undefined ||
-      schema === undefined
-    ) {
-      return undefined
-    }
+    const { connection, schema } = noeud
+    if (connection === undefined || schema === undefined) return undefined
     return [
       {
         libelle: t('explorer.sidebar.menu.openDiagram'),
         icone: 'plan',
-        onClick: onOpenDiagram
-          ? () => onOpenDiagram(project, database, environment, schema)
-          : undefined,
-        raison: onOpenDiagram ? undefined : RAISONS.diagrammeIndisponible,
+        onClick: c.onOpenDiagram ? () => c.onOpenDiagram?.(connection, schema) : undefined,
+        raison: c.onOpenDiagram ? undefined : RAISONS.diagrammeIndisponible,
       },
     ]
   }
 
   /*
-   * **Le menu d'un objet** : copier son nom, et rien d'autre (#162).
-   *
-   * Ces lignes n'avaient aucun menu — `entreesDe` rendait `undefined` pour elles, donc ni « … » ni
-   * clic droit. Elles en gagnent un pour le geste qu'on vient chercher dans un explorateur de bases :
-   * reprendre un nom de table pour l'écrire dans une requête, sans le retaper ni le sélectionner à la
-   * main dans une ligne qui n'est pas du texte sélectionnable.
-   *
-   * **Le nom, pas le libellé**, et c'est `noeud.object` qui le porte : voir la note de ce champ dans
-   * `arbre.ts`. **Le nom nu**, aussi — `orders` et non `public.orders` : le schéma est le palier
-   * au-dessus, il se lit à l'écran, et le coller dans une requête qui l'a déjà le dirait deux fois.
-   *
-   * **Aucune confirmation après la copie**, comme partout ailleurs dans le produit — les quatre
-   * autres copies sont muettes. Il n'y a pas de composant de notification dans `src/ui/`, et en
-   * inventer un pour cette entrée serait inventer un pixel que le handoff ne porte pas.
+   * **Le menu d'un objet** : copier son nom (#162). **Le nom, pas le libellé** — `noeud.object` —,
+   * et **le nom nu**, `orders` et non `public.orders`. Muet, comme les autres copies du produit.
    */
   if (noeud.kind === 'object') {
     const nom = noeud.object
@@ -886,94 +829,59 @@ function entreesDe(
 
   if (noeud.kind !== 'database') return undefined
 
-  // Les coordonnées viennent du **nœud**, jamais d'une déduction sur son libellé : deux bases
-  // peuvent porter le même nom dans deux projets, et c'est la clé d'identité de `05a`.
-  //
-  // **`database`, jamais `label`.** Depuis que `label` peut afficher un libellé distinct du nom
-  // réel (`27a`), c'est `database` — resté `base.name` dans `arbre.ts` — qui reste l'identité à
-  // envoyer aux commandes IPC. `label` divergerait dès qu'une connexion porte un libellé, et ces
-  // appels viseraient une base qui n'existe pas.
-  const { project, database, environment } = noeud
-  // Le moteur, tel que le nœud le porte (`API-33`) : c'est lui qui décide si le gestionnaire de
-  // schémas est cliquable ou désactivé avec sa raison.
+  // **L'identifiant, jamais le libellé ni le nom** : deux connexions homonymes vivent dans deux
+  // dossiers, et c'est l'identifiant qui les distingue (#166).
+  const { connection } = noeud
+  if (connection === undefined) return undefined
   const estPostgres = noeud.engine === 'postgresql'
-  const modifiable =
-    onEditDatabase !== undefined && project !== undefined && environment !== undefined
 
   return [
     {
-      /* **La création d'une console part d'ici**, et non du pied de la sidebar. Une console
-             appartient à une connexion : l'endroit d'où on la crée doit dire laquelle, sans quoi il
-             faudrait deviner le contexte — et se tromper dès que deux connexions sont dépliées. */
+      /* **La création d'une console part d'ici** : une console appartient à une connexion. */
       libelle: t('explorer.sidebar.menu.newConsole'),
       icone: 'term',
-      onClick:
-        consoles && project !== undefined && database !== undefined && environment !== undefined
-          ? () => consoles.onCreer(project, database, environment)
-          : undefined,
-      raison: consoles ? undefined : RAISONS.consoleIndisponible,
+      onClick: c.consoles ? () => c.consoles?.onCreer(connection) : undefined,
+      raison: c.consoles ? undefined : RAISONS.consoleIndisponible,
     },
     {
-      /* **« Gérer les schémas… » en seconde position**, juste après la console (`API-33`). Les deux
-         premières entrées du menu sont les deux gestes qui *ouvrent* quelque chose ; les trois
-         suivantes configurent la déclaration ou la retirent.
-
-         **Hors PostgreSQL, l'entrée reste et se désactive avec sa raison.** La cacher ferait croire
-         qu'elle n'existera jamais, quand c'est un « pas encore » — la distinction que les cinq
-         verdicts de disponibilité du dump tiennent déjà. Et le moteur vient du **nœud**, non d'une
-         déduction sur son icône. */
+      /* **« Gérer les schémas… » en seconde position** (`API-33`). Hors PostgreSQL, l'entrée reste
+         et se désactive avec sa raison : la cacher ferait croire qu'elle n'existera jamais. */
       libelle: t('explorer.sidebar.menu.manageSchemas'),
       icone: 'schema',
-      onClick:
-        onManageSchemas &&
-        estPostgres &&
-        project !== undefined &&
-        database !== undefined &&
-        environment !== undefined
-          ? () => onManageSchemas(project, database, environment)
-          : undefined,
+      onClick: c.onManageSchemas && estPostgres ? () => c.onManageSchemas?.(connection) : undefined,
       raison: estPostgres
-        ? onManageSchemas
+        ? c.onManageSchemas
           ? undefined
           : RAISONS.schemasIndisponible
         : RAISONS.schemasHorsPostgres,
     },
     {
-      /* **« Renommer… » et « Modifier… » sont deux entrées, pas une** (`26`). Le nom est le seul
-             champ qui se corrige sur place, et le seul dont le changement déplace un mot de passe
-             dans le Trousseau ; les autres réglages se relisent ensemble, dans un formulaire. Les
-             fondre aurait fait ouvrir une modale de quinze champs pour corriger une lettre. */
+      /* **« Renommer… » et « Modifier… » sont deux entrées** (`26`) : le nom se corrige sur place,
+         les autres réglages se relisent ensemble dans un formulaire. */
       libelle: t('explorer.sidebar.menu.rename'),
       icone: 'pencil',
-      onClick: renommageDisponible ? () => demanderLeRenommage(noeud.id) : undefined,
-      raison: renommageDisponible ? undefined : RAISONS.renommerIndisponible,
+      onClick: c.renommageDisponible ? () => c.demanderLeRenommage(noeud.id) : undefined,
+      raison: c.renommageDisponible ? undefined : RAISONS.renommerIndisponible,
     },
     {
       libelle: t('explorer.sidebar.menu.edit'),
       icone: 'pencil',
-      onClick:
-        modifiable && database !== undefined
-          ? () => onEditDatabase(project as string, database, environment as EnvironmentId)
-          : undefined,
-      raison: modifiable ? undefined : RAISONS.modifierIndisponible,
+      onClick: c.onEditDatabase ? () => c.onEditDatabase?.(connection) : undefined,
+      raison: c.onEditDatabase ? undefined : RAISONS.modifierIndisponible,
     },
     {
       libelle: t('explorer.sidebar.menu.removeFromDoraBase'),
       icone: 'trash',
-      onClick:
-        demanderLeRetrait && project !== undefined && database !== undefined
-          ? () =>
-              demanderLeRetrait({
-                kind: 'database',
-                project,
-                database,
-                // L'environnement fait partie de l'identité de la connexion (`23b`) : sans lui, le
-                // retrait viserait la première connexion de ce nom, quel que soit l'environnement.
-                environment: environment as EnvironmentId,
-                connexions: noeud.connexions ?? 1,
-              })
-          : undefined,
-      raison: demanderLeRetrait ? undefined : RAISONS.retirerIndisponible,
+      onClick: c.demanderLeRetrait
+        ? () =>
+            c.demanderLeRetrait?.({
+              kind: 'database',
+              connection,
+              nom: noeud.label,
+              connexions: 1,
+            })
+        : undefined,
+      raison: c.demanderLeRetrait ? undefined : RAISONS.retirerIndisponible,
     },
   ]
 }
@@ -1001,14 +909,15 @@ function raisons(t: ReturnType<typeof useT>) {
     renommerIndisponible: t('explorer.sidebar.raisons.renameUnavailable'),
     retirerIndisponible: t('explorer.sidebar.raisons.removeUnavailable'),
     modifierIndisponible: t('explorer.sidebar.raisons.editUnavailable'),
-    editionIndisponible: t('explorer.sidebar.raisons.projectEditUnavailable'),
+    dossierIndisponible: t('explorer.sidebar.raisons.folderUnavailable'),
+    lectureSeuleImposee: (dossier: string) =>
+      t('explorer.sidebar.raisons.readOnlyImposed', { dossier }),
     rafraichirIndisponible: t('explorer.sidebar.raisons.refreshUnavailable'),
     consoleIndisponible: t('explorer.sidebar.raisons.consoleUnavailable'),
     ajoutIndisponible: t('explorer.sidebar.raisons.addUnavailable'),
     diagrammeIndisponible: t('explorer.sidebar.raisons.diagramUnavailable'),
     schemasIndisponible: t('explorer.sidebar.raisons.schemasUnavailable'),
     schemasHorsPostgres: t('explorer.sidebar.raisons.schemasPostgresOnly'),
-    exportIndisponible: t('explorer.sidebar.raisons.exportUnavailable'),
   }
 }
 
@@ -1033,4 +942,9 @@ function estDeduit(colonnes: readonly ColumnInfo[]): boolean {
 function frequenceLisible(colonne: ColumnInfo): string | null {
   if (colonne.frequency === null || colonne.frequency >= 0.995) return null
   return `${Math.round(colonne.frequency * 100)} %`
+}
+
+/** La couleur d'un dossier telle que l'arbre la porte — la modale s'ouvre sur elle. */
+function couleurDe(arbre: FolderTree, id: FolderId): FolderColor | null {
+  return dossier(arbre, id)?.dossier.color ?? null
 }

@@ -1,0 +1,39 @@
+/* Les pastilles, serrées : c'est un nuancier, pas cinq contrôles à viser un par un. Extrait de
+ * l'éditeur de projet (#166), qui les posait sur chaque environnement. */
+.nuancier {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+
+/*
+ * La pastille est une **case radio déguisée** : `appearance: none` retire le rond du système, et le
+ * fond porte la couleur. C'est ce qui garde la navigation aux flèches du groupe natif tout en
+ * dessinant ce que le handoff dessine.
+ *
+ * 9 px : la pastille **se clique**, et une cible de 7 px se rate. Le bord transparent réserve la place
+ * de l'anneau du choix, pour que la rangée ne se décale pas d'un pixel quand on change de couleur.
+ */
+.pastille {
+  appearance: none;
+  width: 9px;
+  height: 9px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+/* La couleur choisie porte un anneau, **et non une simple taille différente** : un daltonien doit
+ * pouvoir lire laquelle est active. L'état ne vit jamais dans la seule couleur. */
+.choisie {
+  box-shadow:
+    0 0 0 2px var(--bar),
+    0 0 0 3px var(--ink-4);
+}
+
+.pastille:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}

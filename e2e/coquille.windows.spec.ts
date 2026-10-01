@@ -136,12 +136,12 @@ test('les trois boutons sont cliquables, pas seulement visibles', async ({ page 
  * mesure qu'à l'écran. Un `⌘` restant ici voudrait dire qu'une chaîne a échappé au composeur.
  */
 test('aucun ⌘ ne subsiste à l’écran, et le raccourci de A1 est en Ctrl+', async ({ page }) => {
-  // **Deux boutons « Nouveau projet » sur `A1`**, et un seul porte le rappel : celui du héros.
+  // **Deux boutons « Nouveau dossier » sur `A1`**, et un seul porte le rappel : celui du héros.
   // `.first()` attrapait l'autre — mesuré le 31 août 2026 —, ce qui aurait fait échouer le test
   // sur un rendu parfaitement juste. Le rappel est un `<span aria-hidden>` dans le bouton, donc
   // il est dans son texte sans être dans son nom accessible : c'est par le **texte** qu'on le
   // désigne.
-  const bouton = page.getByRole('button', { name: /Nouveau projet/i }).filter({
+  const bouton = page.getByRole('button', { name: /Nouveau dossier/i }).filter({
     hasText: 'Ctrl+N',
   })
   await expect(bouton).toHaveCount(1)

@@ -1,11 +1,4 @@
-import type {
-  ConnectionSettings,
-  Database,
-  Engine,
-  EnvironmentId,
-  SslMode,
-  Tunnel,
-} from '../../domain/config'
+import type { ConnectionSettings, Database, Engine, SslMode, Tunnel } from '../../domain/config'
 import { modeSslPourLeMoteur, PORT_PAR_DEFAUT } from './engines'
 
 /**
@@ -20,8 +13,8 @@ import { modeSslPourLeMoteur, PORT_PAR_DEFAUT } from './engines'
 export type ConnectionDraft = {
   engine: Engine
   /**
-   * Nom de la base. **L'identité de la connexion**, avec l'environnement : c'est ce qui vit dans
-   * la clé du registre et la référence du secret (`05a`, `08e`).
+   * Le nom technique de la connexion (`Database.name`). **Ce n'est plus une identité** (#166) :
+   * la clé du registre et la référence du secret dérivent de l'identifiant que le cœur tire.
    *
    * **N'est plus un champ du formulaire depuis le 1er septembre 2026** : c'est un identifiant
    * technique, jamais saisi. Sur un brouillon neuf il reste vide, et `draftToSaveRequest` y
@@ -39,16 +32,6 @@ export type ConnectionDraft = {
    * de titre affichent la base.
    */
   label: string
-  /** Identifiant du projet d'accueil. `A2` choisit parmi les projets existants (`08e`). */
-  project: string
-  /**
-   * Le nom saisi sous « + Nouveau projet… » (`08f`).
-   *
-   * Séparé de `project`, qui porte alors la sentinelle : les fusionner ferait du nom en cours de
-   * frappe une valeur de `Select`, et le champ perdrait sa saisie à chaque rendu.
-   */
-  newProjectName: string
-  environment: EnvironmentId
   host: string
   /** Chaîne et non nombre : un champ de saisie passe par des états qu'un `u16` interdit. */
   port: string
@@ -219,9 +202,9 @@ export function emptyTunnel(kind: ProxyKind): TunnelDraft {
  * l'utilisateur à chaque ouverture.
  *
  * Ce qui est prérempli, en revanche, l'est parce que c'est vrai pour la quasi-totalité des
- * cas : `postgresql` est le premier moteur de l'ordre du handoff, `dev` est l'environnement le moins
- * risqué, et le port est celui du moteur choisi — lu dans `PORT_PAR_DEFAUT`, jamais recopié ici.
- * Ouvrir sur `prod` serait une invitation à l'accident.
+ * cas : `postgresql` est le premier moteur de l'ordre du handoff, et le port est celui du moteur
+ * choisi — lu dans `PORT_PAR_DEFAUT`, jamais recopié ici. Le dossier n'est pas dans le brouillon :
+ * c'est le cadre de la modale (#166).
  *
  * **Le mode SSL fait exception à ce critère, et c'est délibéré** (#87). Il valait `prefer`, le
  * défaut de `libpq` — celui qui marche le plus souvent, parce qu'il **replie en clair** sans le
@@ -238,9 +221,6 @@ export function emptyDraft(): ConnectionDraft {
     engine: 'postgresql',
     name: '',
     label: '',
-    project: '',
-    newProjectName: '',
-    environment: 'dev',
     host: '',
     // `?? ''` par nécessité du type : PostgreSQL a un port, mais la table en admet l'absence.
     port: PORT_PAR_DEFAUT.postgresql ?? '',
@@ -327,20 +307,13 @@ function brouillonDeProxy(tunnel: Tunnel): TunnelDraft {
 }
 
 export function draftDepuisLaVariante(
-  project: string,
   database: Database,
   variant: ConnectionSettings,
 ): ConnectionDraft {
-  // L'environnement appartient à la connexion (`23b`), non à ses réglages.
-  const environnement = database.environment
   return {
     engine: database.engine,
     name: database.name,
     label: database.label ?? '',
-    project,
-    newProjectName: '',
-    // L'environnement vient de la **connexion**, non de ses réglages (`23b`).
-    environment: environnement,
     host: variant.host,
     port: String(variant.port),
     defaultDatabase: variant.defaultDatabase,

@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
-import type { ConfigLoad, Preferences } from '../domain/config'
+import type { ConfigLoad } from '../domain/arbre'
+import type { FolderTree, Preferences } from '../domain/config'
 import { PREFERENCES_PAR_DEFAUT } from '../screens/Preferences/preferences'
 import { type EtatDeConfiguration, interpreter, loadConfig } from './commandes'
+import { ARBRE_VIDE } from './dossiers'
 
 /**
  * Lit la configuration au démarrage.
@@ -20,9 +22,9 @@ export type EtatDeDemarrage =
   /** La commande elle-même a échoué — pont cassé, panique. Distinct d'un fichier illisible. */
   | {
       kind: 'injoignable'
-      projects: never[]
+      tree: FolderTree
       preferences: Preferences
-      /** Vide, comme les projets : rien n'est connu du disque quand le pont ne répond pas. */
+      /** Vide, comme l'arbre : rien n'est connu du disque quand le pont ne répond pas. */
       instances: never[]
       /** Vides, pour la même raison (`API-70`). */
       kubeconfigs: Record<string, never>
@@ -46,7 +48,7 @@ export function useConfiguration(charger: () => Promise<ConfigLoad> = loadConfig
         if (vivant) {
           setEtat({
             kind: 'injoignable',
-            projects: [],
+            tree: ARBRE_VIDE,
             instances: [],
             kubeconfigs: {},
             // Les défauts : sans jetons, le message qui explique la panne serait illisible.

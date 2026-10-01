@@ -24,8 +24,7 @@
 //! prend son tirage en paramètre ([`ConnectionId::aleatoire`]), pour que les commandes génèrent et
 //! que les tests posent des identifiants fixes.
 //!
-//! **Pas encore branché** : `VERSION_COURANTE` vaut toujours 6, et c'est #165 qui fait lire ce
-//! modèle au chargement.
+//! **Branché par #165** : `VERSION_COURANTE` vaut 7, et c'est ce modèle que le chargement rend.
 
 use std::collections::BTreeMap;
 
@@ -162,20 +161,6 @@ impl ConnectionId {
     /// L'identifiant que la migration v6 → v7 dérive de `parties` — voir [`deriver`].
     pub fn derive(parties: &[&str], pris: impl Fn(&str) -> bool) -> Self {
         Self(deriver_libre(parties, pris))
-    }
-
-    /// L'identifiant absent d'une connexion lue en v6 par le modèle courant.
-    ///
-    /// **Temporaire, jusqu'à la bascule de #165.** `Database` gagne son `id` dès #164, mais la
-    /// chaîne de chargement lit encore des fichiers v6, qui n'en portent pas : le champ se lit donc
-    /// par défaut à vide, et ne s'écrit pas tant qu'il l'est. Un identifiant vide est refusé par
-    /// [`FolderTree::valider`], donc il ne peut pas franchir la migration v7.
-    pub fn vide() -> Self {
-        Self(String::new())
-    }
-
-    pub fn est_vide(&self) -> bool {
-        self.0.is_empty()
     }
 
     pub fn as_str(&self) -> &str {
@@ -750,7 +735,7 @@ impl FolderTree {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::config::model::{ConnectionSettings, Engine, EnvironmentId, SslMode};
+    use crate::config::model::{ConnectionSettings, Engine, SslMode};
 
     pub(crate) fn reglages(lecture_seule: bool) -> ConnectionSettings {
         ConnectionSettings {
@@ -774,7 +759,6 @@ pub(crate) mod tests {
             name: format!("base-{id}"),
             label: None,
             engine: Engine::PostgreSql,
-            environment: EnvironmentId::absent(),
             connection: reglages(lecture_seule),
             consoles: Vec::new(),
             visible_schemas: None,

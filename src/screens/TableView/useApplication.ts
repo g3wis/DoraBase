@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 import { applyChanges } from '../../data/commandes'
-import type { ApplyOutcome, ColumnInfo, DatabaseKey, UpdatePlan } from '../../domain/engine'
+import type { DatabaseKey } from '../../domain/arbre'
+import type { ApplyOutcome, ColumnInfo, UpdatePlan } from '../../domain/engine'
 import type { EnAttente } from './modifications'
 import { planDuModele } from './useSqlPrevu'
 

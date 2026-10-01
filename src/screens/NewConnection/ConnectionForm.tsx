@@ -1,11 +1,9 @@
 import { useState } from 'react'
 import { Icon } from '../../design/icons/Icon'
-import type { Engine, EnvironmentDeclaration, EnvironmentId, SslMode } from '../../domain/config'
+import type { Engine, SslMode } from '../../domain/config'
 import { useT } from '../../i18n/LanguageContext'
 import { Badge } from '../../ui/Badge/Badge'
-import { cx } from '../../ui/cx'
 import { Field } from '../../ui/Field/Field'
-import { RadioGroup } from '../../ui/RadioGroup/RadioGroup'
 import { Select } from '../../ui/Select/Select'
 import type { ConnectionDraft } from './ConnectionDraft'
 import { authentifieParBase, estUnFichier, estUnProjet, modesSslDisponibles } from './engines'
@@ -13,38 +11,9 @@ import { authentifie, SSL_MODES } from './environments'
 import styles from './NewConnection.module.css'
 import { ToggleWithLabel } from './ToggleWithLabel'
 
-/**
- * La valeur sentinelle du `Select` qui demande la création d'un projet.
- *
- * Une sentinelle et non un booléen à part : le `Select` a **une** valeur, et un état parallèle
- * (« projet choisi » + « ou bien nouveau ») divergerait — c'est exactement le piège du select
- * contrôlé que `08e` a déjà payé une fois. Le préfixe la rend impossible à confondre avec un nom
- * de projet, que `05a` n'autorise pas à commencer par un caractère de contrôle.
- */
-
 type ConnectionFormProps = {
   draft: ConnectionDraft
   onChange: (patch: Partial<ConnectionDraft>) => void
-  /**
-   * Les environnements **déclarés par le projet** dans lequel cette connexion se déclare (`23d`).
-   *
-   * La liste elle-même, et non la liste des projets d'où la tirer : le formulaire ne choisit plus de
-   * projet, donc il n'a plus à en chercher un. Un projet à cinq environnements en montre cinq.
-   *
-   * **L'ancienne recherche était un défaut connu** : elle lisait `projetImpose ?? draft.project`, et
-   * l'oubli du premier terme avait rendu le groupe d'environnements vide à l'étape 2 — on ne pouvait
-   * plus déclarer de connexion. Recevoir la liste toute faite supprime la recherche, donc l'oubli.
-   */
-  environnements: readonly EnvironmentDeclaration[]
-  /**
-   * Verrouille le champ qui **désigne** la base : son environnement.
-   *
-   * Le triplet `projet/base/environnement` est la clé du registre (`09b`) et la référence du secret
-   * (`08e`) : en changer un élément demanderait de déplacer le secret et de fermer la connexion
-   * ouverte. Voir `08g`. `name` n'est plus un champ du formulaire depuis le 1er septembre 2026 : il
-   * n'y a donc plus rien à verrouiller de ce côté.
-   */
-  verrouille?: boolean
 }
 
 /**
@@ -60,28 +29,6 @@ function optionsSsl(engine: Engine) {
 }
 
 /**
- * Les entrées du groupe d'environnements, **construites depuis les déclarations du projet** (`23d`).
- *
- * C'était une constante de module, dérivée du trio en dur : elle ne pouvait pas dépendre du projet
- * choisi. Depuis `23a`, chaque projet déclare les siens — un projet à cinq environnements en montre
- * cinq, et changer de projet change la liste.
- *
- * **L'habillage d'alerte suit le drapeau `production`, jamais le libellé.** Un environnement nommé
- * « live » et marqué production porte le fond rouge pâle et l'icône d'avertissement ; un environnement
- * nommé « prod » que l'utilisateur n'a pas marqué ne les porte pas.
- */
-function optionsDEnvironnement(declarations: readonly EnvironmentDeclaration[]) {
-  return declarations.map((declaration) => ({
-    value: declaration.id,
-    label: declaration.label,
-    // L'icône d'avertissement : décorative, `RadioGroup` la masque à l'accessibilité puisqu'elle
-    // redouble un mot déjà écrit.
-    prefix: declaration.production ? <Icon name="warn" size={13} strokeWidth={2} /> : undefined,
-    className: cx(styles.envOption, declaration.production && styles.envDanger),
-  }))
-}
-
-/**
  * Le formulaire principal de `A2`.
  *
  * La structure est une **grille**, pas une pile de rangées flex : le mockup impose deux
@@ -89,12 +36,7 @@ function optionsDEnvironnement(declarations: readonly EnvironmentDeclaration[]) 
  * flex imbriqué donnerait des colonnes qui ne s'alignent pas d'une rangée à l'autre — écart
  * que Vitest ne peut pas voir, d'où les mesures dans `e2e/`.
  */
-export function ConnectionForm({
-  draft,
-  onChange,
-  environnements,
-  verrouille = false,
-}: ConnectionFormProps) {
+export function ConnectionForm({ draft, onChange }: ConnectionFormProps) {
   const t = useT()
   const [passwordVisible, setPasswordVisible] = useState(false)
   // **Un moteur de fichier n'a pas de serveur** (`17a`) : cinq champs du formulaire ne veulent rien
@@ -144,28 +86,14 @@ export function ConnectionForm({
 
   return (
     <div className={styles.form}>
-      {/* Rangée pleine largeur : depuis le retrait du champ « Nom » (1er septembre 2026), il ne
-          reste que l'environnement — un champ seul prend la rangée entière (`grid-column: 1 / -1`),
-          comme la règle de `A2` le demande pour tout champ qui ne s'apparie pas (voir AGENTS.md).
+      {/* **Le groupe « Environnement » est parti** (#166) : l'environnement était un palier du
+          modèle, et la connexion se range désormais dans le **dossier** d'où part le geste, que la
+          bande d'en-tête annonce. C'est le cadre de la modale, pas un de ses champs — la leçon du
+          projet, appliquée à son dernier palier. Le formulaire commence donc par l'hôte.
 
-          `name` n'est plus saisi : c'est un identifiant technique, calculé par
-          `draftToSaveRequest` à partir de l'abréviation du moteur. Le titre affiché dans
-          l'explorateur reste cette abréviation par défaut, et `label` — en fin de formulaire —
-          le remplace dès qu'il est renseigné. */}
-      <div className={styles.rowIdentity}>
-        {/* « Environnement », et non plus « Variante d'environnement » : le mot décrivait le modèle
-            à variantes, que `23b` a retiré. */}
-        <div className={styles.label}>{t('newConnection.form.environmentLabel')}</div>
-        <RadioGroup
-          label={t('newConnection.form.environmentLabel')}
-          options={optionsDEnvironnement(environnements)}
-          value={draft.environment}
-          disabled={verrouille}
-          title={verrouille ? t('newConnection.form.reasons.lock') : undefined}
-          onValueChange={(environment) => onChange({ environment: environment as EnvironmentId })}
-        />
-      </div>
-
+          `name` n'est pas saisi non plus : c'est un nom technique, calculé par
+          `draftToSaveRequest` à partir de l'abréviation du moteur, et `label` — en fin de
+          formulaire — le remplace à l'affichage dès qu'il est renseigné. */}
       {/* **Un moteur de fichier n'a ni hôte ni port** (`17a`). Les afficher ferait remplir cinq
           champs pour rien, et laisserait croire qu'ils comptent — c'est la raison qui a fait
           préférer masquer plutôt qu'ajouter un champ `path` vide pour six moteurs sur sept. */}

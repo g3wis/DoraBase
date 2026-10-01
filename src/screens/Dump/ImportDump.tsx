@@ -170,8 +170,12 @@ export function ImportDump({
       <div className={styles.body}>
         {/* L'erreur que la modale empêche est de se tromper de cible. */}
         <p className={styles.cible}>
-          {cible.projet} <span aria-hidden="true">·</span> {cible.base}{' '}
-          <span aria-hidden="true">·</span> {cible.environnement}
+          {cible.chemin !== '' && (
+            <>
+              {cible.chemin} <span aria-hidden="true">·</span>{' '}
+            </>
+          )}
+          {cible.base}
         </p>
         {fichier && <p className={styles.chemin}>{fichier}</p>}
         {/* Le transport est dit avant qu'on s'engage (#82) : un dump parti en clair ne se

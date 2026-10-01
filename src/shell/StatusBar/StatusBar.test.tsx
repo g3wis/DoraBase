@@ -3,22 +3,22 @@ import { LanguageProvider } from '../../i18n/LanguageContext'
 import { raccourci } from '../plateforme'
 import { StatusBar } from './StatusBar'
 
-function monter(projectCount: number) {
+function monter(folderCount: number) {
   return render(
     <LanguageProvider preferences={{ language: 'fr' }}>
-      <StatusBar projectCount={projectCount} />
+      <StatusBar folderCount={folderCount} />
     </LanguageProvider>,
   )
 }
 
-test('accorde le compteur de projets', () => {
+test('accorde le compteur de dossiers', () => {
   monter(0)
-  expect(screen.getByText('0 projet')).toBeInTheDocument()
+  expect(screen.getByText('0 dossier')).toBeInTheDocument()
 })
 
 test('met le compteur au pluriel au-delà de un', () => {
   monter(3)
-  expect(screen.getByText('3 projets')).toBeInTheDocument()
+  expect(screen.getByText('3 dossiers')).toBeInTheDocument()
 })
 
 // La version est une donnée, et le handoff impose de remplacer les données fictives —

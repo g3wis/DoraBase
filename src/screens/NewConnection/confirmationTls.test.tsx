@@ -1,12 +1,13 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Sprite } from '../../design/icons/Sprite'
-import type { Project, SaveDatabaseRequest, SslMode } from '../../domain/config'
+import type { SaveDatabaseRequest } from '../../domain/arbre'
+import type { SslMode } from '../../domain/config'
 import { LanguageProvider } from '../../i18n/LanguageContext'
 import { NewInstance, type NewInstanceProps } from '../Instances/NewInstance'
 import { confirmationTlsRequise } from './engines'
 import { NewConnection } from './NewConnection'
-import { TRIO_DE_TEST } from './pourLesTests'
+import { arbreDeTest, ID_DE_TEST, trioDeTest } from './pourLesTests'
 
 // Le rappel d'un mode SSL non authentifiant sur une cible marquée production (#87), et le défaut qui
 // le rend rare : `verify-full`.
@@ -37,12 +38,14 @@ test('un moteur sans champ SSL n’a rien à confirmer', () => {
 
 // --- A2 ---
 
-const PROJETS = [{ id: 'Atelier Nord', name: 'Atelier Nord', environments: TRIO_DE_TEST }]
-const APRES: Project[] = [
-  { name: 'Atelier Nord', environments: TRIO_DE_TEST, databases: [], queries: [] },
-]
+const ARBRE = arbreDeTest(trioDeTest())
 
-function monterA2() {
+/**
+ * `A2` cadré sur un dossier. **`prod` est en lecture seule** dans le décor migré : c'est la lecture
+ * seule effective la plus simple qui tient lieu, jusqu'à #168, du drapeau `production` que
+ * l'environnement portait pour ce rappel.
+ */
+function monterA2(dossier: string = ID_DE_TEST.dev) {
   const requetes: SaveDatabaseRequest[] = []
   render(
     <>
@@ -50,15 +53,15 @@ function monterA2() {
       <LanguageProvider preferences={{ language: 'fr' }}>
         <NewConnection
           onClose={() => {}}
-          projects={PROJETS}
-          projet="Atelier Nord"
+          arbre={ARBRE}
+          dossier={dossier}
           onBrowseKey={async () => null}
           onTest={async () => {
             throw new Error('non employé')
           }}
           onSave={async (requete) => {
             requetes.push(requete)
-            return APRES
+            return { tree: ARBRE, connection: 'c-neuve' }
           }}
         />
       </LanguageProvider>
@@ -78,8 +81,7 @@ const enregistrerA2 = () => screen.getByRole('button', { name: /Enregistrer & ou
 const rappel = () => screen.queryByRole('dialog', { name: 'Mode SSL non vérifié en production' })
 
 test('en prod, un mode non authentifiant passe par un rappel qui le nomme', async () => {
-  const requetes = monterA2()
-  await userEvent.click(screen.getByRole('radio', { name: 'prod' }))
+  const requetes = monterA2(ID_DE_TEST.prod)
   await choisirLeMode('prefer')
 
   await userEvent.click(enregistrerA2())
@@ -87,7 +89,7 @@ test('en prod, un mode non authentifiant passe par un rappel qui le nomme', asyn
   const dialogue = rappel()
   expect(dialogue).not.toBeNull()
   // Le rappel nomme la cible par son libellé et le mode — deux fois : dans le corps et sur le bouton.
-  expect(dialogue).toHaveTextContent('« prod » est marqué production')
+  expect(dialogue).toHaveTextContent('Le dossier « prod » est en lecture seule.')
   expect(dialogue).toHaveTextContent('Le mode « prefer »')
   expect(dialogue).toHaveTextContent('repasse en clair')
   // Rien n'est parti tant qu'on n'a pas confirmé.
@@ -99,8 +101,7 @@ test('en prod, un mode non authentifiant passe par un rappel qui le nomme', asyn
 })
 
 test('« Revenir » ferme le rappel sans rien enregistrer', async () => {
-  const requetes = monterA2()
-  await userEvent.click(screen.getByRole('radio', { name: 'prod' }))
+  const requetes = monterA2(ID_DE_TEST.prod)
   await choisirLeMode('require')
   await userEvent.click(enregistrerA2())
 
@@ -113,8 +114,7 @@ test('« Revenir » ferme le rappel sans rien enregistrer', async () => {
 })
 
 test('en prod, le défaut verify-full enregistre sans question', async () => {
-  const requetes = monterA2()
-  await userEvent.click(screen.getByRole('radio', { name: 'prod' }))
+  const requetes = monterA2(ID_DE_TEST.prod)
 
   await userEvent.click(enregistrerA2())
 
@@ -125,7 +125,7 @@ test('en prod, le défaut verify-full enregistre sans question', async () => {
 
 test('hors prod, un mode non authentifiant enregistre sans question', async () => {
   // **Le contrôle négatif** : sans lui, un rappel posé sur tout mode non authentifiant, quel que
-  // soit l'environnement, passerait les trois tests d'au-dessus.
+  // soit le dossier, passerait les trois tests d'au-dessus.
   const requetes = monterA2()
   await choisirLeMode('prefer')
 

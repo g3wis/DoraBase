@@ -3,11 +3,11 @@ import { checkUpdate, installUpdate } from '../../data/commandes'
 import { Icon } from '../../design/icons/Icon'
 import type { IconName } from '../../design/icons/names'
 import type {
+  FolderTree,
   Guards,
   Kubeconfigs,
   ManagedInstance,
   Preferences,
-  Project,
   Theme,
 } from '../../domain/config'
 import type { AvailableUpdate } from '../../domain/maj'
@@ -86,7 +86,7 @@ type PreferencesDialogProps = {
    *
    * Passés plutôt que lus : cette modale ne lit rien de la configuration, et `App` les a déjà.
    */
-  projects: readonly Project[]
+  arbre: FolderTree
   instances: readonly ManagedInstance[]
 }
 
@@ -124,7 +124,7 @@ export function PreferencesDialog({
   kubeconfigs,
   onKubeconfigsChange,
   onDeclarerKubeconfig,
-  projects,
+  arbre,
   instances,
 }: PreferencesDialogProps) {
   const t = useT()
@@ -260,7 +260,7 @@ export function PreferencesDialog({
               kubeconfigs={kubeconfigs}
               onDeclarer={onDeclarerKubeconfig}
               onRegler={onKubeconfigsChange}
-              projects={projects}
+              arbre={arbre}
               instances={instances}
             />
           )}
@@ -337,13 +337,13 @@ function Connexions({
   kubeconfigs,
   onDeclarer,
   onRegler,
-  projects,
+  arbre,
   instances,
 }: {
   kubeconfigs: Kubeconfigs
   onDeclarer: () => Promise<void>
   onRegler: (kubeconfigs: Kubeconfigs) => void
-  projects: readonly Project[]
+  arbre: FolderTree
   instances: readonly ManagedInstance[]
 }) {
   const t = useT()
@@ -361,7 +361,7 @@ function Connexions({
       ) : (
         <ul className={styles.kubeconfigs}>
           {declarations.map((declaration) => {
-            const utilisations = utilisationsDe(declaration.id, projects, instances)
+            const utilisations = utilisationsDe(declaration.id, arbre, instances)
             const employe = utilisations.length > 0
             return (
               <li key={declaration.id} className={styles.kubeconfig}>

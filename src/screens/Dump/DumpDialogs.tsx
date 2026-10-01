@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { Project } from '../../domain/config'
+import type { FolderTree } from '../../domain/config'
 import type { DumpAvailability, DumpTransport, Inspection } from '../../domain/dump'
 import { useT } from '../../i18n/LanguageContext'
 import { Button } from '../../ui/Button/Button'
@@ -14,7 +14,7 @@ export type SensDuDump = 'export' | 'import'
 
 type DumpDialogsProps = {
   sens: SensDuDump
-  projects: readonly Project[]
+  arbre: FolderTree
   onClose: () => void
   /** Le pont IPC, injecté pour les tests — voir `dumpCommands.ts`. */
   commandes?: typeof pont
@@ -29,11 +29,11 @@ type DumpDialogsProps = {
  * de sélection d'arbre (`A4` n'est pas assemblé en écran). Sans cible unique, la modale le
  * **dit** plutôt que de choisir — se tromper de base à l'import écrirait dans la mauvaise.
  */
-export function DumpDialogs({ sens, projects, onClose, commandes = pont }: DumpDialogsProps) {
+export function DumpDialogs({ sens, arbre, onClose, commandes = pont }: DumpDialogsProps) {
   const t = useT()
   // `useMemo` et non un appel direct : la cible est l'objet dont dépend l'effet ci-dessous,
   // et la recalculer à chaque rendu relancerait la demande de verdict en boucle.
-  const cible = useMemo(() => cibleUnique(projects), [projects])
+  const cible = useMemo(() => cibleUnique(arbre), [arbre])
   const [availability, setAvailability] = useState<DumpAvailability | null>(null)
   const [transport, setTransport] = useState<DumpTransport | null>(null)
   const [erreur, setErreur] = useState<string | null>(null)
@@ -109,11 +109,7 @@ export function DumpDialogs({ sens, projects, onClose, commandes = pont }: DumpD
     )
   }
 
-  const nommee = {
-    projet: cible.request.key.project,
-    base: cible.request.key.database,
-    environnement: cible.request.key.environment,
-  }
+  const { nommee } = cible
 
   if (sens === 'export') {
     return (

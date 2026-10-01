@@ -1,20 +1,25 @@
 import { useEffect, useState } from 'react'
+import {
+  ancetreEnLectureSeule,
+  connexion,
+  dossier as dossierDe,
+  idDeConnexion,
+} from '../../data/dossiers'
 import { Icon } from '../../design/icons/Icon'
+import type { SaveDatabaseResult, UpdateVariantRequest } from '../../domain/arbre'
 import type {
   Database,
   Engine,
-  EnvironmentDeclaration,
-  EnvironmentId,
+  Folder,
+  FolderId,
+  FolderTree,
   Kubeconfigs,
-  Project,
-  UpdateVariantRequest,
 } from '../../domain/config'
 import type { ConnectionRequest, ConnectionTest } from '../../domain/engine'
 import { useT } from '../../i18n/LanguageContext'
 import { modificateurActif, raccourci } from '../../shell/plateforme'
 import { Button } from '../../ui/Button/Button'
 import { Modal } from '../../ui/Modal/Modal'
-import { Stepper } from '../../ui/Stepper/Stepper'
 import { ConfirmationTls } from './ConfirmationTls'
 import {
   type ConnectionDraft,
@@ -49,13 +54,11 @@ import type { CatalogueKubernetes } from './useCatalogueKubernetes'
 
 type NewConnectionProps = {
   onClose: () => void
-  /** Les projets existants. Vide, l'enregistrement sera refusé par `08e`. */
-  projects?: readonly {
-    id: string
-    name: string
-    /** Ses environnements déclarés, que `A2` propose (`23d`). */
-    environments: readonly EnvironmentDeclaration[]
-  }[]
+  /**
+   * L'arbre de dossiers, pour nommer le cadre et dire s'il est en lecture seule. Absent — la vitrine,
+   * les tests —, le cadre s'annonce « Racine ».
+   */
+  arbre?: FolderTree
   /**
    * Ouvre le sélecteur de fichier de la clé privée.
    *
@@ -90,53 +93,28 @@ type NewConnectionProps = {
    */
   onTest?: (request: ConnectionRequest) => Promise<ConnectionTest>
   /** Appelle la commande `save_database`. Injectée pour la même raison que `onTest`. */
-  onSave?: (request: ReturnType<typeof draftToSaveRequest>) => Promise<Project[]>
+  onSave?: (request: ReturnType<typeof draftToSaveRequest>) => Promise<SaveDatabaseResult>
   /**
-   * Le projet dans lequel la connexion se déclare. **Toujours connu, jamais choisi ici**
-   * (26 août 2026, à la demande).
+   * Le dossier dans lequel la connexion se déclare — `null` : la racine. **Toujours connu, jamais
+   * choisi ici** (26 août 2026, puis #166).
    *
-   * Il vivait dans le formulaire, sous une étiquette « Projet », dans un sélecteur qui proposait d'en
-   * changer. Or changer de projet dans ce formulaire n'a jamais voulu dire ce que le contrôle laissait
-   * croire : le triplet `projet/base/environnement` est la clé du registre et la référence du secret,
-   * et déplacer une connexion d'un projet à l'autre est un geste qui **n'existe pas** — la
-   * confirmation de suppression se garde déjà de le proposer.
-   *
-   * Le projet est donc le **cadre** du formulaire, non un de ses champs, et il s'annonce en tête de la
-   * modale. En édition, c'est celui de la base modifiée, qui fait foi.
-   *
-   * En création, l'appelant le désigne : le menu d'une ligne d'environnement le connaît, le parcours de
-   * création vient de le créer.
+   * Le dossier est le **cadre** du formulaire, non un de ses champs, et il s'annonce en tête de la
+   * modale. Le déplacer est un autre geste (#167), qui ne se confond pas avec la déclaration. En
+   * création, l'appelant le désigne : le menu d'une ligne de dossier le connaît. En édition, c'est
+   * celui qui contient la connexion modifiée, qui fait foi.
    */
-  projet?: string
-  /**
-   * L'environnement préréglé, quand l'appelant le connaît (26 août 2026).
-   *
-   * Le menu d'une ligne d'environnement le connaît. Absent, le brouillon prend `dev` — le moins
-   * risqué. Le groupe de radios reste là : l'environnement, lui, est bien un champ de la connexion.
-   */
-  environnement?: EnvironmentId
-  /**
-   * Vrai quand cet écran est **l'étape 2 du parcours de création** (`24c`).
-   *
-   * La bande de progression paraît, « Annuler » devient « Plus tard » — à ce moment, « Annuler »
-   * mentirait, le projet étant déjà créé — et la phrase du pied dit ce qu'il advient de lui.
-   *
-   * **Distinct de « le projet est connu »**, qu'il était jusqu'ici sous le nom `projetImpose` : le
-   * projet est désormais *toujours* connu, et confondre les deux faisait paraître une bande de
-   * progression à deux étapes devant quelqu'un qui n'en avait franchi aucune.
-   */
-  venantDuParcours?: boolean
+  dossier?: FolderId | null
   /**
    * La base à modifier (`08g`). Absente, la modale **crée**.
    *
    * Le même formulaire sert les deux : `A2` porte déjà tous les champs, et un second écran en
    * dupliquerait la mise en page — donc la dérive au premier changement du handoff.
    */
-  edition?: { project: string; database: Database }
+  edition?: Database
   /** Appelle la commande `update_variant` (`08g`). */
-  onUpdate?: (request: UpdateVariantRequest) => Promise<Project[]>
-  /** Appelé après un enregistrement réussi, avec les projets à jour. */
-  onSaved?: (projects: Project[]) => void
+  onUpdate?: (request: UpdateVariantRequest) => Promise<FolderTree>
+  /** Appelé après un enregistrement réussi, avec l'arbre à jour. */
+  onSaved?: (arbre: FolderTree) => void
 }
 
 /**
@@ -175,13 +153,13 @@ type EtatDuTest =
  * fonction prenait la première variante « ou celle qui correspond », et le commentaire d'origine
  * renvoyait le vrai choix à un écran « Bases du projet ». Le modèle a tranché à sa place.
  */
-function varianteCible(edition: { database: Database }) {
-  return edition.database.connection
+function varianteCible(edition: Database) {
+  return edition.connection
 }
 
 export function NewConnection({
   onClose,
-  projects = [],
+  arbre,
   onBrowseKey = ouvrirSelecteurDeCle,
   kubeconfigs = {},
   onDeclareKubeconfig = async () => null,
@@ -191,30 +169,26 @@ export function NewConnection({
   edition,
   onUpdate = mettreAJourLaVariante,
   onSaved,
-  projet,
-  environnement,
-  venantDuParcours = false,
+  dossier = null,
 }: NewConnectionProps) {
   const t = useT()
   /**
-   * Le projet qui fait foi.
+   * Les dossiers du cadre, du plus extérieur au plus proche.
    *
-   * **En édition, celui de la base**, jamais celui qu'on aurait passé à côté : la base modifiée dit
-   * dans quel projet elle vit, et deux sources pour un même nom finiraient par se contredire.
+   * **En édition, ceux de la connexion**, jamais le dossier qu'on aurait passé à côté : la connexion
+   * modifiée dit où elle vit, et deux sources pour un même cadre finiraient par se contredire.
    */
-  const projetCourant = edition?.project ?? projet ?? ''
+  const cadre: readonly Folder[] = (() => {
+    if (arbre === undefined) return []
+    if (edition) return connexion(arbre, idDeConnexion(edition))?.ancetres ?? []
+    if (dossier === null) return []
+    const situe = dossierDe(arbre, dossier)
+    return situe === null ? [] : [...situe.ancetres, situe.dossier]
+  })()
   // En mode édition, le brouillon part des réglages enregistrés. `useState` avec initialiseur : le
   // recalculer à chaque rendu écraserait la saisie en cours.
   const [draft, setDraft] = useState<ConnectionDraft>(() =>
-    edition
-      ? draftDepuisLaVariante(edition.project, edition.database, varianteCible(edition))
-      : {
-          ...emptyDraft(),
-          // Le projet du brouillon **est** celui du cadre : plus personne ne peut le changer, donc il
-          // n'a plus à être aligné après coup — c'est tout l'effet qui suivait, et il disparaît.
-          project: projetCourant,
-          ...(environnement === undefined ? {} : { environment: environnement }),
-        },
+    edition ? draftDepuisLaVariante(edition, varianteCible(edition)) : emptyDraft(),
   )
   // Le panneau proxy est replié à l'ouverture : le mockup le montre déplié, mais il y montre
   // aussi un tunnel configuré. Pour une connexion neuve, déplier un bloc vide de cinq champs
@@ -312,20 +286,6 @@ export function NewConnection({
     )
   }
 
-  /**
-   * Les environnements déclarés par le projet du cadre (`23d`).
-   *
-   * **Calculés ici, et passés tout faits au formulaire.** Le formulaire les cherchait lui-même sur
-   * `projetImpose ?? draft.project`, et l'oubli du premier terme avait rendu le groupe vide à l'étape 2
-   * — on ne pouvait plus déclarer de connexion. Une recherche en moins est un oubli en moins.
-   */
-  const environnementsDuProjet =
-    // **Par le nom, et non par l'`id`.** Un projet est identifié par son nom (`05a`) : c'est ce que
-    // porte la ligne d'arbre, ce que la requête d'enregistrement envoie, et ce que l'en-tête affiche.
-    // L'`id` du sélecteur était le seul endroit où les deux se distinguaient, et le sélecteur est
-    // parti.
-    projects.find((candidat) => candidat.name === projetCourant)?.environments ?? []
-
   const engineImplemented = IMPLEMENTED_ENGINES.includes(draft.engine)
 
   async function lancerLeTest() {
@@ -341,31 +301,15 @@ export function NewConnection({
   }
 
   // « Enregistrer & ouvrir » est désactivé **après un échec de test**, et réactivé après un
-  // succès. Pas désactivé avant tout test : rien n'oblige à tester pour enregistrer, et le
-  // handoff ne le demande pas.
-  //
-  // Il est aussi désactivé **sans aucun projet** : `A2` déclare une base *dans un projet
-  // existant*, et le handoff ne maquette pas le parcours d'un utilisateur qui n'en a aucun.
-  // Le handoff ne maquettait pas le parcours d'un utilisateur sans aucun projet.
-  // **Il est de nouveau désactivé faute de projet**, et c'est le retour de la garde de `08e` : cet
-  // écran ne sait plus créer de projet (`24c`), donc sans projet il n'a rien où enregistrer. Le cas
-  // ne se produit plus dans l'application — `24d` renvoie vers l'étape 1 — mais la garde reste : un
-  // appelant qui l'oublierait verrait un refus, non un enregistrement dans le vide.
-  // **Sans projet, rien à enregistrer.** La garde de `08e` reste, sous une autre forme : le cadre est
-  // désormais une chaîne, et c'est son vide qui dit qu'aucun projet n'a été désigné. Le cas ne se
-  // produit plus dans l'application — `24d` renvoie vers l'étape 1 — mais un appelant qui l'oublierait
-  // verrait un refus, non un enregistrement dans le vide.
-  const sansProjet = projetCourant === ''
-  const enregistrementBloque =
-    test.phase === 'echoue' || sansProjet || enregistrement.phase === 'en-cours'
+  // succès. Pas désactivé avant tout test : rien n'oblige à tester pour enregistrer. **Plus de garde
+  // « sans projet »** (#166) : le cadre est toujours valide, la racine comprise.
+  const enregistrementBloque = test.phase === 'echoue' || enregistrement.phase === 'en-cours'
 
   /**
-   * L'environnement de la connexion, **par son identifiant** : c'est ce que porte le brouillon, et le
-   * libellé peut en diverger (voir « Une seule identité pour une connexion »).
+   * Le dossier qui impose la lecture seule au cadre, s'il y en a un — ce qui tient lieu, en attendant
+   * #168, du drapeau `production` que l'environnement portait pour le rappel TLS de #87.
    */
-  const environnementCible = environnementsDuProjet.find(
-    (declaration) => declaration.id === draft.environment,
-  )
+  const dossierEnLectureSeule = ancetreEnLectureSeule(cadre)
 
   /**
    * Enregistre — après le rappel de #87 quand la cible est marquée production et que le mode ne
@@ -376,7 +320,7 @@ export function NewConnection({
     if (enregistrementBloque) return
     if (
       !confirme &&
-      confirmationTlsRequise(draft.engine, draft.sslMode, environnementCible?.production ?? false)
+      confirmationTlsRequise(draft.engine, draft.sslMode, dossierEnLectureSeule !== null)
     ) {
       setConfirmationTlsOuverte(true)
       return
@@ -387,22 +331,15 @@ export function NewConnection({
       if (edition) {
         // **Mise à jour, pas enregistrement** : `save_database` refuserait une base déjà là, et
         // c'est cette garde qui protège d'un écrasement par mégarde.
-        const projets = await onUpdate(
-          draftToUpdateRequest(draft, {
-            project: edition.project,
-            database: edition.database.name,
-            environment: edition.database.environment,
-          }),
-        )
-        onSaved?.(projets)
+        const suivant = await onUpdate(draftToUpdateRequest(draft, idDeConnexion(edition)))
+        onSaved?.(suivant)
         onClose()
         return
       }
-      // **Cet écran ne crée plus de projet** (`24c`). Il en créait un au passage, par la sentinelle
-      // du sélecteur : deux commandes pour un geste. Le projet est désormais créé par l'étape 1, et
-      // arrive ici dans le cadre — une seule commande, un seul acte.
-      const projets = await onSave(draftToSaveRequest({ ...draft, project: projetCourant }))
-      onSaved?.(projets)
+      // **Le dossier du cadre, jamais un champ du brouillon** (#166) : une seule commande, un seul
+      // acte. L'identifiant de la connexion est tiré par le cœur.
+      const issue = await onSave(draftToSaveRequest(draft, dossier))
+      onSaved?.(issue.tree)
       // La modale se ferme : `08e` § Hors périmètre — « ouvrir » veut dire aller vers `A4`,
       // qui n'existe pas avant `09`. Ce scope enregistre et ferme ; `09` branchera la
       // navigation. Dit ici pour qu'un lecteur ne cherche pas le bug.
@@ -413,12 +350,7 @@ export function NewConnection({
       // question d'un affichage par champ est consignée au § « À trancher ».
       setEnregistrement({
         phase: 'refuse',
-        // **Le message dit que le projet est gardé** (`24c`). Sans cette précision, l'utilisateur
-        // ferme, recommence par « Nouveau projet », et se heurte à « ce nom est déjà pris » — le
-        // défaut se produirait à coup sûr.
-        message: !venantDuParcours
-          ? messageDe(cause)
-          : `${messageDe(cause)} Le projet « ${projetCourant} » est créé ; la connexion n’a pas été enregistrée.`,
+        message: messageDe(cause),
       })
     }
   }
@@ -442,23 +374,26 @@ export function NewConnection({
         edition
           ? t('newConnection.title.edit', {
               // L'affichage suit `label` quand il est renseigné, comme partout ailleurs (`27a`) —
-              // `edition.database.name` reste l'identité, inchangée par cette substitution.
-              name: edition.database.label?.trim() || edition.database.name,
+              // `edition.name` reste le nom technique, inchangé par cette substitution.
+              name: edition.label?.trim() || edition.name,
             })
           : t('newConnection.title.new')
       }
       icon="db"
       onClose={onClose}
       contexte={
-        /* **Le projet, en tête** (26 août 2026). Du texte et un glyphe, **pas un `Chip`** : un chip
-           est un contrôle partout ailleurs dans ce produit, et un chip inerte se lit comme un contrôle
-           en panne. Le sac est le glyphe du projet dans tout le produit. */
-        projetCourant === '' ? undefined : (
-          <span className={styles.projetDuTitre} data-testid="projet-de-la-modale">
-            <Icon name="bag" size={13} strokeWidth={1.8} className={styles.projetIcone} />
-            <span className={styles.projetDuTitreNom}>{projetCourant}</span>
+        /* **Le dossier, en tête** (26 août 2026, puis #166). Du texte et un glyphe, **pas un
+           `Chip`** : un chip est un contrôle partout ailleurs dans ce produit, et un chip inerte se
+           lit comme un contrôle en panne. `pin` est le glyphe du dossier dans l'arbre ; la racine
+           se dit « Racine », jamais un vide qui laisserait deviner. */
+        <span className={styles.dossierDuTitre} data-testid="dossier-de-la-modale">
+          <Icon name="pin" size={13} strokeWidth={1.8} className={styles.dossierIcone} />
+          <span className={styles.dossierDuTitreNom}>
+            {cadre.length === 0
+              ? t('newConnection.frame.root')
+              : cadre.map((ancetre) => ancetre.name).join(' › ')}
           </span>
-        )
+        </span>
       }
       footer={
         <>
@@ -527,11 +462,8 @@ export function NewConnection({
               </span>
             )}
           </span>
-          {/* **« Plus tard », et non « Annuler », quand le projet vient d'être créé** (`24c`). À ce
-              moment, « Annuler » mentirait : le projet reste, et un bouton ne doit pas nommer un
-              défaissement qui n'a pas lieu. C'est la règle de `08j` prise par l'autre bout. */}
           <Button variant="secondary" size="lg" onClick={onClose}>
-            {venantDuParcours ? t('newConnection.footer.later') : t('newConnection.footer.cancel')}
+            {t('newConnection.footer.cancel')}
           </Button>
           {/* `08e` le branchera, avec son raccourci ⌘↩. */}
           <Button
@@ -543,31 +475,9 @@ export function NewConnection({
             <Icon name="save" size={14} strokeWidth={2.2} />
             {edition ? t('newConnection.footer.saveEdit') : t('newConnection.footer.saveNew')}
           </Button>
-          {/* **Dite avant le clic, non après** (`24c`). Elle fait trois choses en une phrase : elle
-              confirme l'écriture de l'étape 1, elle rend « Plus tard » sans conséquence, et elle nomme
-              le chemin de retour. Sans elle, « Plus tard » demanderait de deviner ce qu'il advient du
-              projet. */}
-          {venantDuParcours && (
-            <p className={styles.projetCree} role="status">
-              {t('newConnection.footer.projectCreatedPrefix')} <strong>{projetCourant}</strong>{' '}
-              {t('newConnection.footer.projectCreatedSuffix')}
-            </p>
-          )}
         </>
       }
     >
-      {/* La bande de progression : **seulement à l'étape 2 du parcours** (`24b`). Ouvert pour un
-          projet existant, cet écran n'a qu'une étape, et une bande à une seule étape utile
-          affirmerait que cette modale a créé le projet. */}
-      {venantDuParcours && (
-        <Stepper
-          etapes={[
-            { libelle: t('newConnection.stepper.project') },
-            { libelle: t('newConnection.stepper.connection') },
-          ]}
-          courante={1}
-        />
-      )}
       <EngineSelector value={draft.engine} onValueChange={changerMoteur} />
       {/* **Le panneau passe avant le formulaire** (24 août 2026, à la demande). L'ordre dit
           quelque chose : par où l'on joint la base se décide avant ce qu'on y saisit, parce
@@ -586,20 +496,15 @@ export function NewConnection({
         onDeclareKubeconfig={onDeclareKubeconfig}
         {...(catalogueKubernetes === undefined ? {} : { catalogueKubernetes })}
       />
-      <ConnectionForm
-        draft={draft}
-        onChange={patch}
-        environnements={environnementsDuProjet}
-        verrouille={!!edition}
-      />
+      <ConnectionForm draft={draft} onChange={patch} />
 
       {confirmationTlsOuverte &&
         draft.sslMode !== 'verify-ca' &&
         draft.sslMode !== 'verify-full' && (
           <ConfirmationTls
             mode={draft.sslMode}
-            rappel={t('newConnection.tlsConfirm.environment', {
-              name: environnementCible?.label ?? draft.environment,
+            rappel={t('newConnection.tlsConfirm.folder', {
+              name: dossierEnLectureSeule?.name ?? '',
             })}
             onConfirmer={() => void enregistrer(true)}
             onClose={() => setConfirmationTlsOuverte(false)}

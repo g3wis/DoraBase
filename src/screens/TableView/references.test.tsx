@@ -3,14 +3,8 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { Sprite } from '../../design/icons/Sprite'
-import type {
-  ColumnInfo,
-  DatabaseKey,
-  Filter,
-  Relation,
-  RowWindow,
-  Value,
-} from '../../domain/engine'
+import type { DatabaseKey } from '../../domain/arbre'
+import type { ColumnInfo, Filter, Relation, RowWindow, Value } from '../../domain/engine'
 import { LanguageProvider } from '../../i18n/LanguageContext'
 import type { EnAttente } from './modifications'
 import { TableView } from './TableView'
@@ -25,7 +19,7 @@ import type { PasserelleLignes } from './useLignes'
  * les boutons sont donc « visibles ». C'est `e2e/references.spec.ts` qui mesure.
  */
 
-const CLE: DatabaseKey = { project: 'Atelier Nord', database: 'analytics', environment: 'prod' }
+const CLE: DatabaseKey = { connection: 'analytics' }
 
 const colonne = (name: string, over: Partial<ColumnInfo> = {}): ColumnInfo => ({
   position: 1,

@@ -3,12 +3,13 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { Sprite } from '../../design/icons/Sprite'
-import type { ColumnInfo, DatabaseKey, RowQuery } from '../../domain/engine'
+import type { DatabaseKey } from '../../domain/arbre'
+import type { ColumnInfo, RowQuery } from '../../domain/engine'
 import { LanguageProvider } from '../../i18n/LanguageContext'
 import { TableView } from './TableView'
 import type { PasserelleLignes } from './useLignes'
 
-const CLE: DatabaseKey = { project: 'Halle', database: 'analytics', environment: 'prod' }
+const CLE: DatabaseKey = { connection: 'analytics' }
 
 const colonne = (name: string): ColumnInfo => ({
   position: 1,

@@ -2,12 +2,12 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, test, vi } from 'vitest'
 import { Sprite } from '../../design/icons/Sprite'
-import type { ExportReport } from '../../domain/transfert'
+import type { ExportReport } from '../../domain/arbre'
 import { LanguageProvider } from '../../i18n/LanguageContext'
 import { ExportProjects } from './ExportProjects'
 
 const RAPPORT: ExportReport = {
-  projects: 1,
+  folders: 1,
   connections: 3,
   consoles: 5,
   passwordsCarried: 0,
@@ -108,7 +108,7 @@ test('le rapport dit ce qui est parti, et nomme les mots de passe introuvables',
     <Piloté
       onExporter={() =>
         Promise.resolve({
-          projects: 2,
+          folders: 2,
           connections: 4,
           consoles: 7,
           passwordsCarried: 3,

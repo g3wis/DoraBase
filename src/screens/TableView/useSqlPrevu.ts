@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { previewUpdates } from '../../data/commandes'
+import type { DatabaseKey } from '../../domain/arbre'
 import type {
   ColumnInfo,
-  DatabaseKey,
   PendingDelete,
   PendingInsert,
   PendingUpdate,

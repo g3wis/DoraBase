@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { ouvrirLaNouvelleConnexion } from './pourLesTests'
 
 // **Trois références régénérées le 19 août 2026**, en remplaçant les `<select>` natifs par la liste
 // déroulante maison (« pas de composant natif » — décision de ce jour). L'écart mesuré valait
@@ -57,6 +58,20 @@ import { expect, test } from '@playwright/test'
 // les mesures de `a2-nouvelle-connexion` et `a4-barre-de-titre` affirment indépendamment. Une capture
 // régénérée sans cette vérification n'aurait plus rien gardé.
 
+// **Les quatre références régénérées le 29 septembre 2026** (#166), et `a1-etape-projet` retirée
+// avec l'étape qu'elle montrait. Les diffs ont été regardés côte à côte avant régénération :
+//
+//   1. `a1-accueil` (3 331 pixels) : les libellés seuls — « Mes dossiers », « Aucun dossier », la
+//      phrase du vide, le sous-titre, « Nouveau dossier » dans le héros et le pied, « 0 dossier »
+//      dans la barre d'état — et l'icône de l'en-tête, `pin` au lieu du sac. Les deux boutons du
+//      héros se déplacent de la différence de largeur de leur libellé ; rien d'autre ne bouge ;
+//   2. `a2-nouvelle-connexion`, `a2-tunnel`, `a3-echec` (103 515, 70 880 et 24 270 pixels) : la
+//      bande du stepper « Projet › Connexion » et le groupe « Environnement » sont partis, donc la
+//      modale raccourcit de 115 px et tout son corps remonte ; l'en-tête annonce « Atelier Nord »
+//      avec l'icône de dossier, le pied perd « Plus tard » et la phrase du projet créé — « Annuler »
+//      reprend sa place —, et l'arbre derrière n'a plus de « Comptoir Sud », la modale partant du
+//      menu d'un dossier existant et non d'un projet qu'on vient de créer.
+
 test('A1 est conforme à la référence', async ({ page }) => {
   await page.goto('/')
   await page.evaluate(() => document.fonts.ready)
@@ -83,7 +98,7 @@ test('les deux boutons de l’accueil sont centrés l’un sur l’autre', async
 
   const centres = await page.evaluate(() => {
     const actions = [...document.querySelectorAll('button')].filter((bouton) =>
-      /Nouveau projet|Importer des projets/.test(bouton.textContent ?? ''),
+      /Nouveau dossier|Importer des projets/.test(bouton.textContent ?? ''),
     )
     // Le bouton du pied de la sidebar porte le même libellé : seuls ceux du héros nous occupent,
     // et ce sont les deux derniers dans l'ordre du document.
@@ -113,33 +128,18 @@ test('les deux boutons de l’accueil sont centrés l’un sur l’autre', async
 // **Les trois feux ne sont pas dans la capture** : ils sont dessinés par macOS par-dessus la
 // fenêtre, hors du DOM et hors de portée de Playwright comme du CSS. Le mockup les grise ;
 // nous ne pouvons pas — écart consigné dans `AGENTS.md`.
-// **Les trois captures suivantes ont changé de décor le 19 août 2026** (`24d`). Le bouton de `A1`
-// ouvrait `A2` ; il ouvre maintenant l'étape 1 du parcours de création. Par-dessus `A1`, c'est donc
-// l'étape 1 qui se capture — et c'est juste : c'est ce que ce bouton fait. `A2` et `A3`, eux, se
-// capturent depuis la démo, seul décor où les deux étapes s'enchaînent (`create_project` est une
-// commande Tauri, qui ne répond pas dans un navigateur).
-test('l’étape 1 par-dessus A1 est conforme à la référence', async ({ page }) => {
-  await page.goto('/')
-  await page
-    .getByRole('button', { name: /Nouveau projet/ })
-    .first()
-    .click()
-  await page.waitForSelector('[role=dialog][aria-label="Nouveau projet"]')
-  await page.evaluate(() => document.fonts.ready)
-  await expect(page).toHaveScreenshot('a1-etape-projet.png', { fullPage: true })
-})
-
-/** Les deux étapes, jusqu'à `A2` — dans la démo, où la création répond. */
+/**
+ * `A2` depuis la démo, **par le menu d'un dossier** (#166).
+ *
+ * Le parcours en deux étapes est parti avec les projets : une connexion se crée depuis le palier qui
+ * connaît son contexte, le menu « … » d'un dossier, et la modale s'annonce par ce dossier. `A1` ne
+ * mène plus à `A2` — son bouton crée un dossier —, d'où une capture qui part de `?demo`.
+ */
 async function allerAA2(page: import('@playwright/test').Page) {
   await page.goto('/?demo')
-  await page.getByRole('button', { name: /Nouveau projet/ }).click()
-  // **Un nom que le décor ne porte pas.** Le projet de la démo s'appelle « Atelier Nord » depuis la
-  // relecture du 19 août 2026 ; créer un homonyme fait refuser la création — à juste titre — et le
-  // bouton « Continuer » reste désactivé. Vingt-quatre tests sont tombés d'un coup sur ce point, tous
-  // pour la même raison.
-  await page.getByLabel('Nom du projet').fill('Comptoir Sud')
-  await page.getByRole('button', { name: /Continuer/ }).click()
-  await page.waitForSelector('[data-testid=projet-de-la-modale]')
+  await ouvrirLaNouvelleConnexion(page)
+  // Le menu fermé rend le focus au « … », dont l'anneau entrerait dans la référence.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
   await page.evaluate(() => document.fonts.ready)
 }
 

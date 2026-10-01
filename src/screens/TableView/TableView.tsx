@@ -8,10 +8,10 @@ import {
 } from 'react'
 import { Icon } from '../../design/icons/Icon'
 import type { IconName } from '../../design/icons/names'
+import type { DatabaseKey } from '../../domain/arbre'
 import type { Engine } from '../../domain/config'
 import type {
   ColumnInfo,
-  DatabaseKey,
   Filter,
   FilterOperator,
   Relation,

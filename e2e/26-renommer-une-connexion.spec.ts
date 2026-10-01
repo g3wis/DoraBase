@@ -76,7 +76,7 @@ test('« Échap » abandonne un renommage commencé par erreur', async ({ page }
   await expect(page.getByRole('treeitem', { name: /Perdu/ })).toHaveCount(0)
 })
 
-test('un nom déjà pris dans l’environnement est refusé, et la modale le dit', async ({ page }) => {
+test('un nom déjà pris dans le dossier est refusé, et la modale le dit', async ({ page }) => {
   // `evenements` est l'autre connexion de `prod` dans le décor de la démo : deux homonymes dans le
   // même environnement rendraient la clé d'identité ambiguë (`23b`).
   await page
@@ -92,7 +92,7 @@ test('un nom déjà pris dans l’environnement est refusé, et la modale le dit
   const modale = page.getByRole('dialog')
   await expect(modale).toContainText('déjà déclarée')
   // Le fait qui rassure, dit aussi fort que celui qui inquiète — la règle de `08j`.
-  await expect(modale).toContainText('mot de passe est intact')
+  await expect(modale).toContainText('Le nom d’avant est gardé')
   // Et rien n'a bougé dans l'arbre.
   await expect(page.getByRole('treeitem', { name: /analytics/ }).first()).toBeVisible()
 })

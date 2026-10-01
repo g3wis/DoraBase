@@ -1,5 +1,5 @@
-import type { DatabaseKey } from '../../domain/engine'
-
+import type { DatabaseKey } from '../../domain/arbre'
+import type { ConnectionId } from '../../domain/config'
 /**
  * Le modèle d'onglets de l'écran de travail, en fonctions **pures**.
  *
@@ -130,12 +130,13 @@ export type Onglet = OngletTable | OngletConsole | OngletDiagramme | OngletInsta
  */
 export function idOnglet(onglet: Onglet): string {
   // **Avant la lecture de `key`, et c'est structurel** : un onglet d'instance n'en a pas. Le
-  // préfixe `instance/` sépare cet espace de celui des coordonnées, qui portent toujours deux `/`
-  // dans leur première partie — un identifiant d'instance n'en contient aucun, `InstanceId` ne
-  // laissant passer que lettres, chiffres et tirets.
+  // préfixe `instance/` sépare cet espace de celui des connexions : un identifiant de connexion ne
+  // contient jamais de `/` (#166), un identifiant d'onglet d'instance en contient toujours un.
   if (onglet.sorte === 'instance') return `instance/${onglet.instance}`
-  const { project, database, environment } = onglet.key
-  const coordonnees = `${project}/${database}/${environment}`
+  // **L'identifiant de la connexion, et rien d'autre** (#166) : ni nom, ni dossier. Renommer ou
+  // déplacer une connexion ne change donc l'identité d'aucun onglet — la réindexation que le
+  // renommage exigeait (`26`) est partie avec les noms.
+  const coordonnees = onglet.key.connection
   switch (onglet.sorte) {
     // `instance` est traité au-dessus : ce `switch` ne voit que les trois sortes qui portent une
     // `DatabaseKey`, et le compilateur le sait par rétrécissement.
@@ -257,7 +258,7 @@ export function ouvrirDiagramme(etat: EtatOnglets, key: DatabaseKey, schema: str
 }
 
 function memeBase(a: DatabaseKey, b: DatabaseKey): boolean {
-  return a.project === b.project && a.database === b.database && a.environment === b.environment
+  return a.connection === b.connection
 }
 
 /**
@@ -302,41 +303,19 @@ export function ongletActif(etat: EtatOnglets): Onglet | null {
 }
 
 /**
- * Vrai quand un identifiant d'onglet appartient à la cible d'un retrait (`08j`).
+ * Vrai quand un identifiant d'onglet appartient à l'une des connexions retirées (`08j`).
  *
- * **Sur les coordonnées, pas sur le préfixe de la chaîne.** `idOnglet` compose
- * `projet/base/env::schema.table`, et un test de préfixe ferait de « Halle » un préfixe de
- * « Halles » — deux projets distincts dont l'un emporterait les onglets de l'autre.
+ * **Un ensemble de connexions, plus une cible typée** (#166) : retirer un dossier retire toutes ses
+ * connexions descendantes, et c'est le cœur qui les nomme (`DeleteResult.deletedConnections`) — l'écran
+ * n'a pas à les recalculer sur un arbre qui ne les contient déjà plus. **Sur l'identifiant décomposé,
+ * pas sur un préfixe** : un identifiant de connexion ne contenant jamais `/` ni `::`, la partie qui
+ * précède `::` est exactement lui.
  */
-export function viseeParLId(
-  cible: {
-    kind: 'database' | 'project'
-    project: string
-    database?: string
-    /**
-     * L'environnement de la connexion visée, **obligatoire pour une cible `database`**.
-     *
-     * `idOnglet` le compose depuis toujours ; cette fonction ne le lisait pas. Retirer `analytics` en
-     * production fermait donc aussi les onglets d'`analytics` en dev, et faussait le compte de
-     * modifications que la confirmation de `08j` promet exact. Le défaut ne se voyait pas tant que
-     * l'arbre ne montrait qu'un environnement à la fois ; le palier de `25a` le rend franc.
-     */
-    environment?: string
-  },
-  id: string,
-): boolean {
-  // **Un onglet d'instance n'est visé par aucun retrait de projet ou de connexion** : il
-  // n'appartient à aucun des deux. Sans cette garde, `split('/')` sur `instance/pg-prod` rendrait
-  // `['instance', 'pg-prod']`, donc un « projet » nommé `instance` — et retirer un projet ainsi
-  // nommé fermerait toutes les instances.
+export function viseeParLId(cible: { connexions: ReadonlySet<ConnectionId> }, id: string): boolean {
+  // **Un onglet d'instance n'est visé par aucun retrait** : il n'appartient à aucune connexion.
   if (id.startsWith('instance/')) return false
-  // `??` plutôt qu'un `!` : `split` rend toujours au moins un élément, mais l'affirmer au
-  // compilateur pour une ligne n'apprend rien à personne — la valeur par défaut est vraie.
-  const [coordonnees = ''] = id.split('::')
-  const [projet, base, environnement] = coordonnees.split('/')
-  if (projet !== cible.project) return false
-  if (cible.kind === 'project') return true
-  return base === cible.database && environnement === cible.environment
+  const [connection = ''] = id.split('::')
+  return cible.connexions.has(connection)
 }
 
 /**
@@ -395,86 +374,4 @@ export function baptiserLeBrouillon(etat: EtatOnglets, id: string, nom: string):
     onglets: etat.onglets.map((onglet) => (onglet === cible ? baptise : onglet)),
     actif: etat.actif === id ? idOnglet(baptise) : etat.actif,
   }
-}
-
-/**
- * Fait suivre un **renommage de connexion** aux onglets ouverts (`26`).
- *
- * # Pourquoi les onglets suivent au lieu de se fermer
- *
- * `08j` les ferme quand une connexion est *retirée* : leur déclaration a disparu. Ici elle existe
- * toujours, sous un autre nom — les fermer ferait perdre la place de l'utilisateur, et une
- * modification en attente non appliquée avec elle. Un renommage est une correction de libellé du
- * point de vue de celui qui le fait ; le lui faire payer d'une bande d'onglets vidée serait une
- * punition.
- *
- * # Ce que ça demande
- *
- * `idOnglet` compose `projet/base/env::…` : la `key` de chaque onglet concerné est réécrite, donc son
- * identité change, donc **`actif` aussi** — sans quoi la bande désignerait un onglet qui n'existe
- * plus et le centre reviendrait à `A4` juste après un renommage réussi. C'est la même mécanique que
- * `renommerLaConsole`, un cran au-dessus : là c'était le nom d'un onglet, ici les coordonnées de
- * tous ceux d'une connexion.
- */
-export function renommerLaConnexion(
-  etat: EtatOnglets,
-  key: DatabaseKey,
-  nouveau: string,
-): EtatOnglets {
-  if (nouveau === key.database) return etat
-
-  const onglets = etat.onglets.map((onglet) =>
-    // **Un onglet d'instance n'est jamais visé** : il ne porte pas de connexion, donc il n'y a rien
-    // à y renommer. La garde est sur la sorte et non sur la présence de `key` — c'est le
-    // compilateur qui doit refuser l'accès, pas un `?.` qui le rendrait `undefined` en silence.
-    onglet.sorte !== 'instance' && memeBase(onglet.key, key)
-      ? { ...onglet, key: { ...onglet.key, database: nouveau } }
-      : onglet,
-  )
-  return {
-    onglets,
-    actif: etat.actif === null ? null : idApresRenommage(etat.actif, key, nouveau),
-  }
-}
-
-/**
- * L'identifiant d'onglet tel qu'il devient après le renommage d'une connexion (`26`).
- *
- * **Sur les coordonnées décomposées, pas sur un remplacement de sous-chaîne.** `id.replace(ancien,
- * nouveau)` renommerait aussi une table homonyme de la base — `orders/orders::public.orders` en est
- * l'exemple minimal — et le bogue ne se verrait que sur ce cas précis. C'est la leçon du test de
- * préfixe de `viseeParLId`.
- *
- * Un identifiant qui ne vise pas cette connexion est rendu **tel quel** : la fonction est donc sûre
- * à appliquer à toutes les clés d'une table indexée par identifiant d'onglet.
- */
-export function idApresRenommage(id: string, key: DatabaseKey, nouveau: string): string {
-  const [coordonnees = '', reste] = id.split('::')
-  const [projet, base, environnement] = coordonnees.split('/')
-  if (projet !== key.project || base !== key.database || environnement !== key.environment) {
-    return id
-  }
-  const suffixe = reste === undefined ? '' : `::${reste}`
-  return `${key.project}/${nouveau}/${key.environment}${suffixe}`
-}
-
-/**
- * Réindexe une table dont les clés sont des identifiants d'onglets (`26`).
- *
- * Le texte d'une console, ses modifications en attente, l'association d'un onglet à sa console
- * persistée : trois tables indexées par un identifiant qui **contient le nom de la connexion**. Sans
- * cette réindexation, un renommage vide silencieusement l'éditeur et perd les modifications en
- * attente — l'onglet est là, sous son nouveau nom, et ne trouve plus rien à sa clé.
- *
- * Une fonction générique plutôt que trois boucles chez l'appelant : ce sont les mêmes clés, et la
- * troisième copie serait celle qu'on oublie de corriger.
- */
-export function reindexerParConnexion<T>(
-  table: Readonly<Record<string, T>>,
-  key: DatabaseKey,
-  nouveau: string,
-): Record<string, T> {
-  return Object.fromEntries(
-    Object.entries(table).map(([id, valeur]) => [idApresRenommage(id, key, nouveau), valeur]),
-  )
 }

@@ -5,14 +5,14 @@ export const welcomeFr: Dictionnaire = {
   hero: {
     title: 'Prêt à explorer\xa0?',
     subtitle:
-      "Crée un projet, branche ses bases, puis bascule de dev à prod d'un seul clic. Pas d'IDE à lancer.",
-    newProject: 'Nouveau projet',
+      "Crée un dossier, branche ses bases, puis passe de dev à prod d'un seul clic. Pas d'IDE à lancer.",
+    newFolder: 'Nouveau dossier',
   },
   sidebar: {
-    header: 'Mes projets',
-    emptyTitle: 'Aucun projet',
-    emptyText: 'Un projet regroupe plusieurs bases ; chacune se décline par environnement.',
-    newProject: 'Nouveau projet',
+    header: 'Mes dossiers',
+    emptyTitle: 'Aucun dossier',
+    emptyText: 'Un dossier range des connexions, et d’autres dossiers — dev, staging, prod.',
+    newFolder: 'Nouveau dossier',
   },
 }
 
@@ -20,13 +20,13 @@ export const welcomeEn: Dictionnaire = {
   hero: {
     title: 'Ready to explore?',
     subtitle:
-      'Create a project, connect its databases, then switch from dev to prod in one click. No IDE to launch.',
-    newProject: 'New project',
+      'Create a folder, connect its databases, then switch from dev to prod in one click. No IDE to launch.',
+    newFolder: 'New folder',
   },
   sidebar: {
-    header: 'My projects',
-    emptyTitle: 'No projects',
-    emptyText: 'A project groups several databases; each one comes in its own environment.',
-    newProject: 'New project',
+    header: 'My folders',
+    emptyTitle: 'No folders',
+    emptyText: 'A folder holds connections, and other folders — dev, staging, prod.',
+    newFolder: 'New folder',
   },
 }

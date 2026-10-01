@@ -1,25 +1,37 @@
 import { type InvokeArgs, invoke } from '@tauri-apps/api/core'
 import type {
   ConfigLoad,
-  ConnectionSettings,
+  ConnectionStateEntry,
   ConsoleRequest,
-  Engine,
+  CreateFolderRequest,
+  CreateFolderResult,
+  DatabaseKey,
+  DeleteFolderRequest,
+  DeleteResult,
   ExportProjectsRequest,
+  ExportReport,
   ImportProjectsRequest,
   ImportProjectsResult,
+  ImportReport,
+  RecolorFolderRequest,
+  RenameFolderRequest,
+  SetFolderReadOnlyRequest,
+  ValueLabelsRequest,
+  VisibleSchemasRequest,
+} from '../domain/arbre'
+import type {
+  ConnectionId,
+  ConnectionSettings,
+  Engine,
+  FolderTree,
   InstanceId,
   Kubeconfigs,
   ManagedInstance,
   Preferences,
-  Project,
-  ValueLabelsRequest,
-  VisibleSchemasRequest,
 } from '../domain/config'
 import type {
   ApplyOutcome,
   ConnectionState,
-  ConnectionStateEntry,
-  DatabaseKey,
   ExportFormat,
   QueryResult,
   RowLimit,
@@ -48,8 +60,8 @@ import type {
   SaveInstanceRequest,
 } from '../domain/instances'
 import type { AvailableUpdate } from '../domain/maj'
-import type { ExportReport, ImportReport } from '../domain/transfert'
 import { PREFERENCES_PAR_DEFAUT } from '../screens/Preferences/preferences'
+import { ARBRE_VIDE } from './dossiers'
 
 /**
  * Les commandes du câblage de `09b`, en un seul point de contact avec l'IPC.
@@ -76,11 +88,11 @@ const ecouteurs = new Set<Ecouteur>()
  * quoi la moitié Rust serait juste et l'arbre continuerait d'afficher « OK » sur une base morte,
  * exactement le défaut n° 20 — une garantie posée d'un seul côté du pont ne garantit rien.
  *
- * L'arbre relit déjà les états à chaque changement de `projects`, ce qui couvre les six commandes
+ * L'arbre relit déjà les états à chaque changement de l’arbre, ce qui couvre les commandes
  * de configuration qui ferment des connexions. Il manquait le cas où **rien ne change dans la
  * configuration** : une lecture de table, une exécution de console. Ce signal est ce déclencheur-là.
  *
- * **Une règle, pas N branchements** — c'est le même arbitrage que la relecture sur `projects` :
+ * **Une règle, pas N branchements** — c'est le même arbitrage que la relecture sur l’arbre :
  * brancher chaque commande demanderait de les connaître, et la suivante l'oublierait. La règle
  * tient en une phrase : *toute commande qui échoue peut avoir échoué parce que le registre a perdu
  * une connexion, donc l'écran relit ce que le registre dit maintenant*. Une relecture inutile ne
@@ -204,12 +216,10 @@ export async function closeDatabase(key: DatabaseKey): Promise<void> {
 }
 
 /**
- * Les états de toutes les connexions connues, en **triplets** et non en table indexée.
+ * Les états de toutes les connexions connues, **par identifiant de connexion** (#166).
  *
- * Le registre s'indexe bien par `projet/base/environnement`, mais rendre cette chaîne au front
- * l'obligerait à savoir la recomposer — donc à dupliquer la convention. Une première version le
- * faisait ; le test qui devait vérifier l'accord des deux implémentations a montré qu'il valait
- * mieux n'en avoir qu'une.
+ * Le registre s'indexe par une clé que le cœur dérive de l'identifiant ; rendre cette chaîne au
+ * front l'obligerait à savoir la recomposer — donc à dupliquer la convention.
  */
 export async function connectionStates(): Promise<ConnectionStateEntry[]> {
   return appeler<ConnectionStateEntry[]>('connection_states')
@@ -310,27 +320,64 @@ export async function applyChanges(key: DatabaseKey, plan: UpdatePlan): Promise<
 /**
  * Crée une console vide sur une connexion.
  *
- * Rend les projets à jour, comme les autres écritures de configuration : sans cela l'écran devrait
+ * Rend l’arbre à jour, comme les autres écritures de configuration : sans cela l'écran devrait
  * relire pour afficher l'arbre, ce qui ferait deux allers-retours et laisserait une fenêtre où
  * l'écran et le disque divergent.
  */
-export async function createConsole(request: ConsoleRequest): Promise<Project[]> {
-  return appeler<Project[]>('create_console', { request })
+export async function createConsole(request: ConsoleRequest): Promise<FolderTree> {
+  return appeler<FolderTree>('create_console', { request })
 }
 
 /** Écrit le texte d'une console. */
-export async function saveConsole(request: ConsoleRequest): Promise<Project[]> {
-  return appeler<Project[]>('save_console', { request })
+export async function saveConsole(request: ConsoleRequest): Promise<FolderTree> {
+  return appeler<FolderTree>('save_console', { request })
 }
 
 /** Retire une console. */
-export async function deleteConsole(request: ConsoleRequest): Promise<Project[]> {
-  return appeler<Project[]>('delete_console', { request })
+export async function deleteConsole(request: ConsoleRequest): Promise<FolderTree> {
+  return appeler<FolderTree>('delete_console', { request })
 }
 
 /** Renomme une console. */
-export async function renameConsole(request: ConsoleRequest): Promise<Project[]> {
-  return appeler<Project[]>('rename_console', { request })
+export async function renameConsole(request: ConsoleRequest): Promise<FolderTree> {
+  return appeler<FolderTree>('rename_console', { request })
+}
+
+/**
+ * Les gestes sur les dossiers (#166). **Chacun nomme un geste**, comme les consoles : un appel qui
+ * enverrait l'arbre entier ne permettrait pas au cœur de distinguer un renommage d'un retrait suivi
+ * d'une création.
+ *
+ * Ils rendent **l'arbre à jour**, que `App` repose : c'est ce changement que l'arbre suit, et qui
+ * fait relire les états du registre.
+ */
+export async function createFolder(request: CreateFolderRequest): Promise<CreateFolderResult> {
+  return appeler<CreateFolderResult>('create_folder', { request })
+}
+
+/** Renomme un dossier. **Ne ferme rien** : un nom de dossier n'est dans aucune identité. */
+export async function renameFolder(request: RenameFolderRequest): Promise<FolderTree> {
+  return appeler<FolderTree>('rename_folder', { request })
+}
+
+/** Change la pastille d'un dossier ; `null` la retire. */
+export async function recolorFolder(request: RecolorFolderRequest): Promise<FolderTree> {
+  return appeler<FolderTree>('recolor_folder', { request })
+}
+
+/** Passe un dossier en lecture seule, ou la lève. Elle s'impose à tous ses descendants. */
+export async function setFolderReadOnly(request: SetFolderReadOnlyRequest): Promise<FolderTree> {
+  return appeler<FolderTree>('set_folder_read_only', { request })
+}
+
+/**
+ * Retire un dossier, **et tout ce qu'il contient** : sous-dossiers, connexions, leurs mots de passe.
+ *
+ * **Rien n'est supprimé sur le serveur**, comme pour une connexion (`08j`). Le résultat nomme les
+ * connexions retirées : c'est ce que l'écran ferme — onglets, états, cache.
+ */
+export async function deleteFolder(request: DeleteFolderRequest): Promise<DeleteResult> {
+  return appeler<DeleteResult>('delete_folder', { request })
 }
 
 /**
@@ -347,23 +394,23 @@ export async function createSchema(key: DatabaseKey, name: string): Promise<void
 /**
  * Règle les schémas que l'arbre montre sous une connexion (`API-33`).
  *
- * Rend les projets à jour, comme les autres écritures de configuration — c'est ce changement que
+ * Rend l’arbre à jour, comme les autres écritures de configuration — c'est ce changement que
  * l'arbre suit pour se redessiner. **Elle ne ferme pas la connexion**, contrairement à
  * `update_variant` : rien de ce qui décrit le serveur n'a changé.
  */
-export async function saveVisibleSchemas(request: VisibleSchemasRequest): Promise<Project[]> {
-  return appeler<Project[]>('save_visible_schemas', { request })
+export async function saveVisibleSchemas(request: VisibleSchemasRequest): Promise<FolderTree> {
+  return appeler<FolderTree>('save_visible_schemas', { request })
 }
 
 /**
  * Règle ce que les entiers d'une colonne veulent dire (`API-75`).
  *
- * Rend les projets à jour, comme les autres écritures de configuration — c'est ce changement que la
+ * Rend l’arbre à jour, comme les autres écritures de configuration — c'est ce changement que la
  * vue de table suit pour réafficher ses cellules. **Elle ne ferme pas la connexion** : rien de ce
  * qui décrit le serveur n'a changé.
  */
-export async function saveValueLabels(request: ValueLabelsRequest): Promise<Project[]> {
-  return appeler<Project[]>('save_value_labels', { request })
+export async function saveValueLabels(request: ValueLabelsRequest): Promise<FolderTree> {
+  return appeler<FolderTree>('save_value_labels', { request })
 }
 
 /**
@@ -390,7 +437,7 @@ export async function inspectProjectsFile(file: string): Promise<ImportReport> {
 /**
  * Verse les projets d'un fichier dans la configuration (`API-30`).
  *
- * Rend les projets à jour, comme les autres écritures : c'est ce changement que `App` repose et
+ * Rend l’arbre à jour, comme les autres écritures : c'est ce changement que `App` repose et
  * que l'arbre suit.
  */
 export async function importProjects(
@@ -517,37 +564,32 @@ export async function rollbackTransaction(key: DatabaseKey, console: string): Pr
 }
 
 /**
- * La clé d'une base, composée **côté Rust**.
+ * La clé d'une connexion : **son identifiant, et rien d'autre** (#166).
  *
- * Le front envoie les trois chaînes ; c'est `registry::cle` qui les assemble. Composer ici
- * dupliquerait la convention, et une convention dupliquée diverge — le même arbitrage qu'en
- * `08e` pour la référence de secret.
+ * Le triplet `projet/base/environnement` est parti avec les projets. C'est le cœur qui en dérive la
+ * clé du registre (`cle_de_connexion`) et la référence du secret ; le front n'a aucune convention à
+ * connaître — celle qu'il composait autrefois est exactement ce qui divergeait.
  */
-export function databaseKey(project: string, database: string, environment: string): DatabaseKey {
-  return { project, database, environment }
+export function databaseKey(connection: ConnectionId): DatabaseKey {
+  return { connection }
 }
 
 /**
- * L'état d'une base parmi les triplets rendus, `never` par défaut.
+ * L'état d'une connexion parmi les entrées rendues, `never` par défaut.
  *
  * `never` et non `offline` : afficher en rouge une base qu'on n'a pas ouverte serait faux, et
  * c'est ce que la décision « l'arbre se lit sans réseau » impose de distinguer.
  */
 export function etatDe(
   entrees: readonly ConnectionStateEntry[],
-  project: string,
-  database: string,
-  environment: string,
+  connection: ConnectionId,
 ): ConnectionState {
-  const trouve = entrees.find(
-    (e) =>
-      e.key.project === project && e.key.database === database && e.key.environment === environment,
-  )
+  const trouve = entrees.find((e) => e.key.connection === connection)
   return trouve?.state ?? { kind: 'never' }
 }
 
 /**
- * Les projets d'une issue de lecture, et ce qu'il faut en dire.
+ * L'arbre d'une issue de lecture, et ce qu'il faut en dire.
  *
  * **Les quatre issues ne se réduisent pas à « des projets ou rien ».** Un fichier illisible ou
  * d'une version trop récente n'a pas zéro projet : il a des projets qu'on ne sait pas lire, et
@@ -557,21 +599,21 @@ export function etatDe(
 export type EtatDeConfiguration =
   | {
       kind: 'fresh'
-      projects: Project[]
+      tree: FolderTree
       preferences: Preferences
       instances: ManagedInstance[]
       kubeconfigs: Kubeconfigs
     }
   | {
       kind: 'loaded'
-      projects: Project[]
+      tree: FolderTree
       preferences: Preferences
       instances: ManagedInstance[]
       kubeconfigs: Kubeconfigs
     }
   | {
       kind: 'blocked'
-      projects: Project[]
+      tree: FolderTree
       preferences: Preferences
       /**
        * Vide, comme les projets : un fichier qu'on n'a pas su lire ne dit rien de ses instances,
@@ -590,7 +632,7 @@ export function interpreter(issue: ConfigLoad): EtatDeConfiguration {
     case 'fresh':
       return {
         kind: 'fresh',
-        projects: [],
+        tree: ARBRE_VIDE,
         preferences: PREFERENCES_PAR_DEFAUT,
         instances: [],
         kubeconfigs: {},
@@ -598,7 +640,7 @@ export function interpreter(issue: ConfigLoad): EtatDeConfiguration {
     case 'loaded':
       return {
         kind: 'loaded',
-        projects: issue.projects,
+        tree: issue.tree,
         preferences: issue.preferences,
         instances: issue.instances,
         kubeconfigs: issue.kubeconfigs,
@@ -606,7 +648,7 @@ export function interpreter(issue: ConfigLoad): EtatDeConfiguration {
     case 'unreadable':
       return {
         kind: 'blocked',
-        projects: [],
+        tree: ARBRE_VIDE,
         // **Les défauts, même sur un fichier illisible.** Le produit doit rester regardable pour
         // afficher le message qui explique le blocage : sans jetons, l'écran d'erreur serait
         // lui-même illisible.
@@ -616,10 +658,22 @@ export function interpreter(issue: ConfigLoad): EtatDeConfiguration {
         reason: issue.reason,
         quarantinedTo: issue.quarantinedTo,
       }
+    case 'secretsMigrationFailed':
+      // **Bloqué, et non vide** : les mots de passe n'ont pas pu suivre la migration v7, donc
+      // écrire maintenant figerait des connexions dont le secret est resté sous l'ancienne
+      // référence. Le cœur n'a rien écrit ; l'écran ne doit rien proposer d'écrire.
+      return {
+        kind: 'blocked',
+        tree: ARBRE_VIDE,
+        preferences: PREFERENCES_PAR_DEFAUT,
+        instances: [],
+        kubeconfigs: {},
+        reason: issue.reason,
+      }
     case 'tooNew':
       return {
         kind: 'blocked',
-        projects: [],
+        tree: ARBRE_VIDE,
         preferences: PREFERENCES_PAR_DEFAUT,
         instances: [],
         kubeconfigs: {},

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Kubeconfigs, ManagedInstance, Project } from '../../domain/config'
+import type { Database, FolderTree, Kubeconfigs, ManagedInstance } from '../../domain/config'
 import {
   avecLeChemin,
   avecLeDefaut,
@@ -45,22 +45,37 @@ function connexion(name: string, environment: string, kubeconfig: string | null)
   }
 }
 
-function projet(name: string, databases: ReturnType<typeof connexion>[]): Project {
+/** La forme migrée : un dossier racine, un sous-dossier `prod`, les connexions dedans. */
+function projet(name: string, databases: ReturnType<typeof connexion>[]): FolderTree {
   return {
-    name,
-    environments: [{ id: 'prod', label: 'prod', color: 'rouge', production: true }],
-    databases,
-    queries: [],
-  } as unknown as Project
+    folders: [
+      {
+        id: 'f-racine',
+        name,
+        readOnly: false,
+        folders: [
+          {
+            id: 'f-prod',
+            name: 'prod',
+            readOnly: true,
+            connections: databases as unknown as Database[],
+          },
+        ],
+      },
+    ],
+    connections: [],
+  }
 }
 
+const VIDE: FolderTree = { folders: [], connections: [] }
+
 describe('qui se sert d’une déclaration', () => {
-  it('nomme les connexions, projet et environnement compris', () => {
+  it('nomme les connexions par leur chemin de dossiers', () => {
     // **Des étiquettes, jamais un compte** : la raison d'un retrait refusé doit dire *quoi changer*,
     // et « 3 connexions » n'envoie nulle part.
-    const projects = [projet('Halle', [connexion('catalogue', 'prod', 'prod')])]
+    const projects = projet('Halle', [connexion('catalogue', 'prod', 'prod')])
 
-    expect(utilisationsDe('prod', projects, [])).toEqual(['Halle › catalogue (prod)'])
+    expect(utilisationsDe('prod', projects, [])).toEqual(['Halle › prod › catalogue'])
   })
 
   it('compte aussi les instances managées', () => {
@@ -71,19 +86,19 @@ describe('qui se sert d’une déclaration', () => {
       { id: 'pg-prod', label: 'pg prod', ...connexion('x', 'prod', 'prod') },
     ] as unknown as ManagedInstance[]
 
-    expect(utilisationsDe('prod', [], instances)).toEqual(['pg prod'])
+    expect(utilisationsDe('prod', VIDE, instances)).toEqual(['pg prod'])
   })
 
   it('ne nomme pas une connexion qui vise une autre déclaration', () => {
     // Le contrôle négatif : sans lui, « qui s'en sert » rendrait tout ce qui est Kubernetes, et
     // aucune déclaration ne serait jamais retirable.
-    const projects = [projet('Halle', [connexion('catalogue', 'prod', 'bac')])]
+    const projects = projet('Halle', [connexion('catalogue', 'prod', 'bac')])
 
     expect(utilisationsDe('prod', projects, [])).toEqual([])
   })
 
   it('ne nomme pas une connexion sans kubeconfig, ni sans proxy', () => {
-    const projects = [projet('Halle', [connexion('catalogue', 'prod', null)])]
+    const projects = projet('Halle', [connexion('catalogue', 'prod', null)])
 
     expect(utilisationsDe('prod', projects, [])).toEqual([])
   })

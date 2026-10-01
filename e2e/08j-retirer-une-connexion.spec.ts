@@ -89,7 +89,7 @@ test('le contenu s’aligne sur le titre et ne touche pas les bords', async ({ p
 
 test('le bouton porte le verbe du geste, jamais « OK »', async ({ page }) => {
   const pied = page.getByRole('dialog', { name: /Retirer Atelier Nord/ })
-  await expect(pied.getByRole('button', { name: 'Retirer le projet' })).toBeVisible()
+  await expect(pied.getByRole('button', { name: 'Retirer le dossier' })).toBeVisible()
   await expect(pied.getByRole('button', { name: 'OK' })).toHaveCount(0)
 })
 

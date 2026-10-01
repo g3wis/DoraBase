@@ -1,25 +1,19 @@
 import { useState } from 'react'
+import type { ConnectionId, FolderId } from '../../domain/config'
 import { useT } from '../../i18n/LanguageContext'
 import { Button } from '../../ui/Button/Button'
 import { Modal } from '../../ui/Modal/Modal'
 import styles from './DeleteConnectionDialog.module.css'
 
+/**
+ * Ce qu'un retrait vise (#166) : une connexion, ou un dossier et tout ce qu'il contient.
+ *
+ * **Désigné par identifiant, et nommé à part.** Le nom n'est là que pour la phrase de la modale :
+ * deux connexions homonymes vivent dans deux dossiers, et c'est l'identifiant qui dit laquelle part.
+ */
 export type CibleDeSuppression =
-  | {
-      kind: 'database'
-      project: string
-      database: string
-      /**
-       * L'environnement de la connexion (`23b`).
-       *
-       * **Il fait partie de son identité** : sans lui, retirer « analytics » d'un projet qui la
-       * déclare en dev et en prod supprimerait la première venue — et son mot de passe. Le modèle Rust
-       * l'exige désormais dans sa signature ; ce champ est ce qui le porte depuis l'arbre.
-       */
-      environment: string
-      connexions: number
-    }
-  | { kind: 'project'; project: string; connexions: number }
+  | { kind: 'database'; connection: ConnectionId; nom: string; connexions: number }
+  | { kind: 'folder'; folder: FolderId; nom: string; connexions: number }
 
 type DeleteConnectionDialogProps = {
   cible: CibleDeSuppression
@@ -57,10 +51,10 @@ export function DeleteConnectionDialog({
     | { phase: 'fait'; leftoverSecrets: string[] }
   >({ phase: 'confirmation' })
 
-  const nom = cible.kind === 'project' ? cible.project : cible.database
+  const nom = cible.nom
   const verbe =
-    cible.kind === 'project'
-      ? t('explorer.deleteConnection.removeProject')
+    cible.kind === 'folder'
+      ? t('explorer.deleteConnection.removeFolder')
       : t('explorer.deleteConnection.removeConnection')
 
   async function retirer() {
@@ -123,15 +117,12 @@ export function DeleteConnectionDialog({
             {/* Les accords sont écrits, pas suffixés de « (s) » : la modale la plus lue de
                 l'application est celle qui précède un geste irréversible, et un texte bâclé y
                 inspire moins confiance qu'ailleurs. */}
-            {cible.kind === 'project'
-              ? t('explorer.deleteConnection.erasedProject', {
-                  project: cible.project,
+            {cible.kind === 'folder'
+              ? t('explorer.deleteConnection.erasedFolder', {
+                  folder: cible.nom,
                   connexions: connexionsDe(t, cible.connexions),
                 })
-              : t('explorer.deleteConnection.erasedConnection', {
-                  database: cible.database,
-                  environnements: environnementsDe(t, cible.connexions),
-                })}
+              : t('explorer.deleteConnection.erasedConnection', { database: cible.nom })}
             {t('explorer.deleteConnection.erasedSuffix')}
           </p>
           {/* **Le fait qui rassure, dit aussi fort que celui qui inquiète.** Sans cette phrase, un
@@ -165,14 +156,8 @@ export function DeleteConnectionDialog({
 
 /** « sa connexion déclarée » ou « ses 3 connexions déclarées » — le compte s'écrit, il ne se suffixe pas. */
 function connexionsDe(t: ReturnType<typeof useT>, nombre: number): string {
+  if (nombre === 0) return t('explorer.deleteConnection.connexionNone')
   return nombre === 1
     ? t('explorer.deleteConnection.connexionSingular')
     : t('explorer.deleteConnection.connexionPlural', { count: nombre })
-}
-
-/** « un environnement » ou « 2 environnements ». */
-function environnementsDe(t: ReturnType<typeof useT>, nombre: number): string {
-  return nombre === 1
-    ? t('explorer.deleteConnection.environmentSingular')
-    : t('explorer.deleteConnection.environmentPlural', { count: nombre })
 }

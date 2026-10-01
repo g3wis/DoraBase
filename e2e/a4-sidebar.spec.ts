@@ -187,15 +187,15 @@ test('deux connexions homonymes de deux environnements se déplient indépendamm
 
 // Un nœud déplié sans enfant se lit comme un chargement en cours — le doute du défaut de `06d`. Ici
 // rien ne charge : la liste vient de la configuration, donc le vide est un fait, et il se dit.
-test('un environnement sans connexion le dit, aligné au palier 2', async ({ page }) => {
+test('un dossier vide le dit, aligné au palier 2', async ({ page }) => {
   await environnement(page, 'coulisses').dblclick()
 
-  const message = sidebar(page).getByText('Aucune connexion déclarée en coulisses')
+  const message = sidebar(page).getByText('Dossier vide')
   await expect(message).toBeVisible()
 
   const alignement = await page.evaluate(() => {
     const ligne = [...document.querySelectorAll('[data-testid=sidebar-a4] p')].find((p) =>
-      p.textContent?.includes('Aucune connexion déclarée en coulisses'),
+      p.textContent?.includes('Dossier vide'),
     )
     if (!ligne) return null
     // L'indentation vient d'`INDENT`, la table exportée par `TreeRow`, et non d'une copie en CSS :
@@ -205,26 +205,24 @@ test('un environnement sans connexion le dit, aligné au palier 2', async ({ pag
       palier: ligne.getAttribute('data-depth'),
     }
   })
-  // Enfant d'un environnement (palier 1), donc palier 2 : `INDENT[2]`, soit 36 px — la même valeur
+  // Enfant d'un dossier de palier 1, donc palier 2 : `indentation(2)`, soit 36 px — la même valeur
   // qu'une ligne de connexion, puisque c'est la place qu'une connexion y aurait occupée.
   expect(alignement).toEqual({ remplissage: '36px', palier: '2' })
 })
 
 /**
- * Le badge suit le **drapeau**, jamais le libellé (`23g`), ni la couleur déclarée.
+ * La lecture seule suit le **drapeau**, jamais le nom (#166).
  *
- * Le décor nomme son environnement de production « vitrine » précisément pour attraper un écran qui
- * relirait un trio `prod` / `staging` / `dev` en dur : un tel écran ne badgerait rien ici, et se
- * trahirait. La couleur, elle, voyage par l'icône — un environnement marqué production et coloré en
- * vert doit porter un badge rouge, sans quoi le badge d'alerte cesse d'alerter.
+ * Le décor nomme son dossier en lecture seule « vitrine » précisément pour attraper un écran qui
+ * relirait un nom `prod` en dur : un tel écran ne marquerait rien ici, et se trahirait.
  */
-test('le badge PROD est sur « vitrine », et sur elle seule', async ({ page }) => {
-  await expect(environnement(page, 'vitrine')).toHaveAccessibleName(/PROD/)
+test('la lecture seule est sur « vitrine », et sur elle seule', async ({ page }) => {
+  await expect(environnement(page, 'vitrine')).toHaveAccessibleName(/lecture seule/)
 
   for (const libelle of ['atelier', 'coulisses', 'bac à sable']) {
-    await expect(environnement(page, libelle)).not.toHaveAccessibleName(/PROD/)
+    await expect(environnement(page, libelle)).not.toHaveAccessibleName(/lecture seule/)
   }
-  // Le compte, plutôt que trois assertions négatives seulement : un badge qui paraîtrait sur une
-  // ligne de connexion ou de projet passerait entre les mailles.
-  await expect(sidebar(page).getByRole('treeitem', { name: /PROD/ })).toHaveCount(1)
+  // Le compte, plutôt que trois assertions négatives seulement : une marque qui paraîtrait sur une
+  // ligne de connexion ou de dossier racine passerait entre les mailles.
+  await expect(sidebar(page).getByRole('treeitem', { name: /lecture seule/ })).toHaveCount(1)
 })

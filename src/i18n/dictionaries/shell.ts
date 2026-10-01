@@ -10,10 +10,8 @@ export const shellFr: Dictionnaire = {
     ecarter: 'Écarter la notification',
   },
   selectionIndicator: {
-    prod: 'PROD',
     edition: 'Édition',
     readOnly: 'Lecture seule',
-    productionAnnouncement: ' environnement de production',
     pendingChanges: (p) => ` ${p.count} modification${Number(p.count) > 1 ? 's' : ''} en attente`,
     status: {
       never: 'jamais connectée',
@@ -23,7 +21,7 @@ export const shellFr: Dictionnaire = {
     },
   },
   statusBar: {
-    projectCount: (p) => `${p.count} projet${Number(p.count) > 1 ? 's' : ''}`,
+    folderCount: (p) => `${p.count} dossier${Number(p.count) > 1 ? 's' : ''}`,
     paletteHint: (p) => `${p.raccourci} palette`,
     version: (p) => `DoraBase ${p.version}`,
   },
@@ -47,10 +45,8 @@ export const shellEn: Dictionnaire = {
     ecarter: 'Dismiss notification',
   },
   selectionIndicator: {
-    prod: 'PROD',
     edition: 'Editing',
     readOnly: 'Read only',
-    productionAnnouncement: ' production environment',
     pendingChanges: (p) => ` ${p.count} pending change${Number(p.count) > 1 ? 's' : ''}`,
     status: {
       never: 'never connected',
@@ -60,7 +56,7 @@ export const shellEn: Dictionnaire = {
     },
   },
   statusBar: {
-    projectCount: (p) => `${p.count} project${Number(p.count) > 1 ? 's' : ''}`,
+    folderCount: (p) => `${p.count} folder${Number(p.count) > 1 ? 's' : ''}`,
     paletteHint: (p) => `${p.raccourci} palette`,
     version: (p) => `DoraBase ${p.version}`,
   },

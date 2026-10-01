@@ -6,12 +6,11 @@
 //! n'est pas rangé sous son triplet, deux connexions homonymes dans deux environnements, une requête
 //! en transit homonyme d'une console, un projet sans connexion.
 
-use super::v6::PlanDeSecrets;
+use super::v6::{reference_v6 as reference_de, PlanDeSecrets};
 use super::{migrer_vers_la_v7, DocumentV7};
 use crate::config::arbre::{
     reference_de_connexion, ConnectionId, Folder, FolderColor, FolderTree, LectureSeule,
 };
-use crate::config::enregistrer::reference_de;
 use crate::config::model::{Proxy, SecretRef, Theme};
 
 const FIXTURE_V6: &str = include_str!("../../../tests/fixtures/config-v6.json");
@@ -431,18 +430,29 @@ fn un_arbre_migre_qui_garderait_l_ancienne_reference_serait_refuse() {
 }
 
 #[test]
-fn la_fixture_v6_se_lit_toujours_par_le_chargement_courant() {
-    // Contrôle du chemin qui ne bouge pas dans #164 : `VERSION_COURANTE` vaut 6, donc la fixture est
-    // un fichier courant, et le chargement la rend en projets.
+fn la_fixture_v6_se_lit_par_le_chargement_en_arbre_avec_sa_migration_en_attente() {
+    // Depuis #165, `VERSION_COURANTE` vaut 7 : le chargement lit la fixture v6 en arbre, sans rien
+    // écrire, et rend le plan des mots de passe à déplacer — c'est `ConfigStore::ouvrir` qui
+    // l'achève.
     let dossier = tempfile::tempdir().expect("dossier temporaire");
     let chemin = dossier.path().join("config.json");
     std::fs::write(&chemin, FIXTURE_V6).expect("écriture de la fixture");
     match crate::config::load(&chemin) {
-        crate::config::LoadOutcome::Loaded { projects, .. } => {
-            assert_eq!(projects.len(), 2);
-            assert_eq!(projects[0].databases.len(), 4);
-            assert!(projects[0].databases.iter().all(|base| base.id.est_vide()));
+        crate::config::LoadOutcome::Loaded {
+            tree,
+            migration: Some(migration),
+            ..
+        } => {
+            assert_eq!(tree.folders.len(), 2);
+            assert_eq!(migration.depuis, 6);
+            assert!(!migration.secrets.est_vide());
+            assert!(tree.valider().is_ok());
         }
-        autre => panic!("la fixture devait se lire : {autre:?}"),
+        autre => panic!("la fixture devait se lire, migration en attente : {autre:?}"),
     }
+    assert_eq!(
+        std::fs::read_to_string(&chemin).expect("relecture"),
+        FIXTURE_V6,
+        "le chargement seul n'écrit rien"
+    );
 }

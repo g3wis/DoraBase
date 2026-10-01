@@ -408,8 +408,8 @@ export function VirtualGrid<Row>({
 
   /**
    * Le glissement d'une poignée de réordonnancement, **aux événements pointeur** — jamais au
-   * glisser-déposer HTML5 (`draggable`/`dragstart`/`drop`) que `TabStrip` et `ProjectEditor`
-   * emploient ailleurs dans ce dépôt.
+   * glisser-déposer HTML5 (`draggable`/`dragstart`/`drop`) que `TabStrip`
+   * emploie ailleurs dans ce dépôt.
    *
    * **WKWebView ne délivre pas `dragstart` de façon fiable pour un élément de page** — constaté à
    * l'usage le 2 septembre 2026 : le geste fonctionnait dans Chromium (Playwright, un vrai
@@ -881,7 +881,7 @@ function EnTete<Row>({
               // **Le nom de la colonne devient lui-même la poignée** — le « reste » de l'en-tête,
               // celui qui n'est ni la flèche de tri ni la poignée de redimensionnement. Aux
               // événements pointeur, jamais au glisser-déposer HTML5 (`draggable`/`dragstart`)
-              // que `TabStrip` et `ProjectEditor` emploient ailleurs : WKWebView ne le délivre pas
+              // que `TabStrip` emploie ailleurs : WKWebView ne le délivre pas
               // de façon fiable (voir `debuterLeReordonnancement`).
               <button
                 type="button"

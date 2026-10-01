@@ -4,7 +4,7 @@ import { expect, test, vi } from 'vitest'
 import { Sprite } from '../../design/icons/Sprite'
 import type { ConnectionState } from '../../domain/engine'
 import { LanguageProvider } from '../../i18n/LanguageContext'
-import { INDENT } from '../../ui/TreeRow/TreeRow'
+import { indentation } from '../../ui/TreeRow/TreeRow'
 import { InstancesPanel } from './InstancesPanel'
 import { instanceDeTest } from './pourLesTests'
 
@@ -76,8 +76,8 @@ test('le badge PROD suit le drapeau, jamais le libellé', () => {
   expect(screen.getByText('PROD')).toBeInTheDocument()
 })
 
-test('l’icône d’une instance tombe dans la colonne des icônes de projet', () => {
-  // **`INDENT[0] + 16`, la reprise de la gouttière du chevron** qu'une feuille n'occupe pas — la
+test('l’icône d’une instance tombe dans la colonne des icônes de dossier', () => {
+  // **`indentation(0) + 16`, la reprise de la gouttière du chevron** qu'une feuille n'occupe pas — la
   // règle de `TreeRow`. Sans elle, deux listes voisines auraient leurs icônes décalées de 16 px, ce
   // qui se lit comme deux composants mal assemblés.
   //
@@ -86,9 +86,9 @@ test('l’icône d’une instance tombe dans la colonne des icônes de projet', 
   monter()
   const ligne = screen.getByRole('button', { name: /^PG atelier/ })
   // jsdom réduit `calc(8px + 16px)` à `calc(24px)` : c'est la **somme** qu'il faut lire, non la
-  // chaîne écrite. Elle est comparée à `INDENT[0]`, importée et non recopiée — une valeur en dur ici
+  // chaîne écrite. Elle est comparée à `indentation(0)`, importée et non recopiée — une valeur en dur ici
   // se périmerait à la première mesure d'indentation qui bouge, sans que rien le dise.
-  expect(pixels(ligne.style.paddingLeft)).toBe(pixels(INDENT[0]) + 16)
+  expect(pixels(ligne.style.paddingLeft)).toBe(pixels(indentation(0)) + 16)
 })
 
 /** La somme des longueurs d'une déclaration CSS, en pixels. */

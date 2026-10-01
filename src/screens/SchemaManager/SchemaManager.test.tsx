@@ -6,7 +6,7 @@ import type { SchemaInfo } from '../../domain/engine'
 import { LanguageProvider } from '../../i18n/LanguageContext'
 import { SchemaManager } from './SchemaManager'
 
-const CIBLE = { projet: 'Atelier Nord', environnement: 'prod', base: 'analytics' }
+const CIBLE = { chemin: ['Atelier Nord', 'prod'], base: 'analytics' }
 
 function schema(name: string, over: Partial<SchemaInfo> = {}): SchemaInfo {
   return {
@@ -56,7 +56,7 @@ function interrupteur(nom: string) {
   return screen.getByRole('switch', { name: `Afficher ${nom} dans l’arbre` })
 }
 
-test('le cadre s’annonce dans l’en-tête : projet, environnement, connexion', async () => {
+test('le cadre s’annonce dans l’en-tête : chemin de dossiers, connexion', async () => {
   monter()
   const modale = await screen.findByRole('dialog', { name: 'Gérer les schémas' })
 

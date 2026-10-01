@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { describeTable, describeTables, listObjects } from '../../data/commandes'
-import type { DatabaseKey, SchemaInfo, TableDetail, TableSummary } from '../../domain/engine'
+import type { DatabaseKey } from '../../domain/arbre'
+import type { SchemaInfo, TableDetail, TableSummary } from '../../domain/engine'
 
 /**
  * Les commandes du préchauffage, **injectables** — même arbitrage qu'en `08d` et `09b` : le pont ne
@@ -73,7 +74,7 @@ const PLAFOND = 300
  * homonymes de deux schémas, ou de deux connexions, ne doivent pas se confondre.
  */
 export function cleDeStructure(cle: DatabaseKey, schema: string, table: string): string {
-  return `${cle.project}/${cle.database}/${cle.environment}::${schema}.${table}`
+  return `${cle.connection}::${schema}.${table}`
 }
 
 /**
@@ -81,7 +82,7 @@ export function cleDeStructure(cle: DatabaseKey, schema: string, table: string):
  * `cleDeStructure`, qui identifie une table précise.
  */
 export function cleDeSchema(cle: DatabaseKey, schema: string): string {
-  return `${cle.project}/${cle.database}/${cle.environment}::${schema}`
+  return `${cle.connection}::${schema}`
 }
 
 /**
@@ -104,7 +105,7 @@ type Tache =
 
 /** L'identité d'une connexion dans les tables internes — générations, comptes, files. */
 function idDe(cle: DatabaseKey): string {
-  return `${cle.project}/${cle.database}/${cle.environment}`
+  return `${cle.connection}`
 }
 
 export type Structures = {
@@ -331,7 +332,7 @@ export function useStructures(
 
   const oublierLaConnexion = useCallback(
     (cle: DatabaseKey) => {
-      const id = `${cle.project}/${cle.database}/${cle.environment}`
+      const id = `${cle.connection}`
       generations.current.set(id, (generations.current.get(id) ?? 0) + 1)
       const prefixe = `${id}::`
       const reste = Object.fromEntries(

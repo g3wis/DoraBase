@@ -1,22 +1,35 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { TreeRow } from './TreeRow'
+import { indentation, TreeRow } from './TreeRow'
 
 function ligne(label: string) {
   return screen.getByText(label).closest('[data-depth]') as HTMLElement
 }
 
-// Les quatre paliers relevés dans le mockup A5 : 8, 22, 36, 52. Les écarts valent 14, 14
-// puis **16** — une formule `8 + depth * 14` donnerait 50 au dernier palier, pas 52. Ce
-// test échoue si quelqu'un remplace la table littérale par un calcul.
+// La règle d'indentation (#166) : `8 + 14 × niveau + 16 × paliers sous la connexion`. Les valeurs
+// sont **littérales** — celles relevées dans le mockup A5 pour la forme migrée, puis celles d'un
+// arbre à trois dossiers. Un calcul `8 + niveau * 14` tomberait sur quatre de ces lignes.
 test.each([
-  [0, '8px'],
-  [1, '22px'],
-  [2, '36px'],
-  [3, '52px'],
-] as const)('le palier %i indente de %s', (depth, attendu) => {
-  render(<TreeRow depth={depth} label="cible" />)
+  // forme migrée : dossier racine, sous-dossier, connexion, console|schéma, objet
+  [0, 0, '8px'],
+  [1, 0, '22px'],
+  [2, 0, '36px'],
+  [2, 1, '52px'],
+  [2, 2, '68px'],
+  // trois dossiers : la connexion est au niveau 3
+  [3, 0, '50px'],
+  [3, 1, '66px'],
+  [3, 2, '82px'],
+] as const)('niveau %i, %i palier(s) sous la connexion : %s', (niveau, sous, attendu) => {
+  expect(indentation(niveau, sous)).toBe(attendu)
+  render(<TreeRow depth={niveau + sous} indent={indentation(niveau, sous)} label="cible" />)
   expect(ligne('cible').style.paddingLeft).toBe(attendu)
+})
+
+test('sans indentation fournie, la ligne suit la cadence des nœuds dépliables', () => {
+  render(<TreeRow depth={5} label="profond" />)
+  expect(ligne('profond').style.paddingLeft).toBe('78px')
+  expect(ligne('profond').dataset.depth).toBe('5')
 })
 
 test('la ligne sélectionnée porte le style dédié', () => {

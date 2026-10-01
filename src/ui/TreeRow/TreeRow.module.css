@@ -60,7 +60,7 @@
  * La flèche fait onze pixels, et elle est désormais le seul geste de dépliage au pointeur (avec le
  * double-clic) : viser onze pixels relèverait de l'adresse. `position: absolute` sur le pseudo-élément
  * ne participe pas à la mise en page, donc la gouttière du chevron garde exactement la largeur que le
- * mockup lui donne — les indentations d'`INDENT` sont mesurées contre lui et ne doivent pas bouger.
+ * mockup lui donne — les indentations d'`indentation()` sont mesurées contre lui et ne doivent pas bouger.
  * Même parade que la poignée du `SplitPane`, pour la même raison.
  */
 .chevronZone {

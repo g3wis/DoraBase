@@ -3,23 +3,21 @@
 //! La logique prend un **chemin** en paramètre : elle se teste donc avec un répertoire
 //! temporaire, et c'est la commande Tauri (`commands.rs`) qui résout le vrai chemin.
 
-#[cfg(test)]
-use std::collections::BTreeMap;
-
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::migration::migrer_le_document;
-// Les crans sur `Value` et les types du modèle que les tests de ce fichier emploient encore, depuis
-// que la chaîne vit dans `migration` (#164).
+use super::arbre::{Folder, FolderTree};
+use super::migration::secrets::deplacer_les_secrets;
+use super::migration::{migrer_vers_la_v7, PlanDeSecrets};
+// Les crans sur `Value` que les tests de ce fichier emploient encore, depuis que la chaîne vit dans
+// `migration` (#164).
 #[cfg(test)]
 use super::migration::retirer_les_comptes_de_service;
-#[cfg(test)]
-use super::model::{Database, EnvironmentColor, EnvironmentId};
-use super::model::{Kubeconfigs, ManagedInstance, Preferences, Project};
+use super::model::{Database, Kubeconfigs, ManagedInstance, Preferences};
+use crate::secrets::SecretStore;
 
 /// La version du format sur disque. À incrémenter pour tout changement de forme, en ajoutant la
 /// migration correspondante dans `migrer`.
@@ -46,12 +44,25 @@ use super::model::{Kubeconfigs, ManagedInstance, Preferences, Project};
 /// et remplacés par leur identifiant. Un `serde(default)` n'aurait pas suffi — le champ n'est pas
 /// ajouté, il **change de sens**, et une v5 relue sans cran donnerait des références qui sont en
 /// réalité des chemins, donc ne résolvant rien.
-pub const VERSION_COURANTE: u32 = 6;
+///
+/// **v7, par #164 et #165** : les projets et leurs environnements deviennent un **arbre de
+/// dossiers**, et chaque connexion reçoit un identifiant stable dont dérivent la clé du registre et
+/// la référence du mot de passe. C'est le premier cran qui touche à autre chose que le fichier : les
+/// mots de passe changent de référence, et ils sont déplacés au chargement **avant** que la v7 soit
+/// écrite — voir `ConfigStore::ouvrir`.
+pub const VERSION_COURANTE: u32 = 7;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct ConfigFile {
     version: u32,
-    projects: Vec<Project>,
+    /// L'arbre de dossiers (#164) : ses dossiers racines, puis ses connexions rangées à la racine.
+    ///
+    /// **Deux clés à la racine plutôt qu'une clé `tree`** : le fichier se lit à la main, et un palier
+    /// de plus n'y dirait rien.
+    #[serde(default)]
+    folders: Vec<Folder>,
+    #[serde(default)]
+    connections: Vec<Database>,
     /// Les préférences de `15a`.
     ///
     /// **`serde(default)` plutôt qu'une montée de version.** Une configuration écrite avant `15a`
@@ -84,14 +95,29 @@ struct ConfigFile {
     kubeconfigs: Kubeconfigs,
 }
 
-/// L'issue d'une lecture. Quatre cas distincts, délibérément : confondre « absent » et
-/// « illisible » conduirait à écraser un fichier qu'on n'a pas su lire.
+/// Une migration lue mais pas encore écrite : le fichier est antérieur à `VERSION_COURANTE`.
+///
+/// **Portée par l'issue de lecture**, parce que c'est `ConfigStore::ouvrir` — et lui seul — qui
+/// l'achève : il déplace les mots de passe du plan, puis écrit la v7. Tant que rien ne l'a écrite,
+/// chaque lecture refait la migration en mémoire, et c'est pourquoi les identifiants qu'elle
+/// attribue sont dérivés et non tirés.
+#[derive(Debug)]
+pub struct MigrationEnAttente {
+    /// La version du fichier sur disque.
+    pub depuis: u32,
+    /// Les mots de passe à déplacer vers `connexion/<id>` — vide pour un fichier qui n'en déclarait
+    /// aucun.
+    pub secrets: PlanDeSecrets,
+}
+
+/// L'issue d'une lecture. Cinq cas distincts, délibérément : confondre « absent » et « illisible »
+/// conduirait à écraser un fichier qu'on n'a pas su lire.
 #[derive(Debug)]
 pub enum LoadOutcome {
     /// Aucun fichier : premier lancement. C'est l'état que l'écran `A1` affiche.
     Fresh,
     Loaded {
-        projects: Vec<Project>,
+        tree: FolderTree,
         /// **Toujours présentes**, même quand le fichier ne les portait pas : leur défaut *est* une
         /// valeur, pas une absence.
         preferences: Preferences,
@@ -99,7 +125,15 @@ pub enum LoadOutcome {
         instances: Vec<ManagedInstance>,
         /// Les kubeconfigs déclarés (`API-70`). Vides quand le fichier n'en portait pas.
         kubeconfigs: Kubeconfigs,
+        /// `Some` quand le fichier était d'une version antérieure : la migration est faite en
+        /// mémoire, pas encore sur disque.
+        migration: Option<MigrationEnAttente>,
     },
+    /// Le fichier est lisible, mais le déplacement des mots de passe vers leur nouvelle référence
+    /// n'a pas abouti (#165). **Rien n'est perdu** — les originaux n'ont pas bougé et le fichier est
+    /// resté dans sa version —, et rien n'est mis en quarantaine, puisque rien n'est illisible.
+    /// L'écriture est bloquée. Seul `ConfigStore::ouvrir` produit ce cas.
+    SecretsMigrationFailed { reason: String },
     /// Fichier présent mais incompréhensible. L'original est **conservé** sous
     /// `quarantined_to` : c'est peut-être la seule copie du travail de l'utilisateur.
     Unreadable {
@@ -195,7 +229,7 @@ fn chemin_libre(cible: &Path, suffixe: &str) -> PathBuf {
 /// temporaire, puis vérifie que la cible n'a pas bougé.
 pub(crate) fn ecrire_temporaire_sans_renommer(
     cible: &Path,
-    projects: &[Project],
+    tree: &FolderTree,
     preferences: &Preferences,
     instances: &[ManagedInstance],
     kubeconfigs: &Kubeconfigs,
@@ -206,7 +240,8 @@ pub(crate) fn ecrire_temporaire_sans_renommer(
 
     let contenu = serde_json::to_string_pretty(&ConfigFile {
         version: VERSION_COURANTE,
-        projects: projects.to_vec(),
+        folders: tree.folders.clone(),
+        connections: tree.connections.clone(),
         // **Bornées à l'écriture**, pas seulement à la lecture : une valeur hors bornes écrite sur
         // disque reviendrait à chaque démarrage.
         preferences: preferences.clone().borner(),
@@ -229,19 +264,19 @@ pub(crate) fn ecrire_temporaire_sans_renommer(
 /// À tout instant, le chemin cible désigne soit l'ancien contenu complet, soit le
 /// nouveau — jamais un JSON tronqué.
 /// **Les instances sont un paramètre, non un défaut.** Le fichier est réécrit *entier* à chaque
-/// enregistrement : une signature qui les aurait laissées de côté aurait fait qu'enregistrer un
-/// projet **efface toutes les instances déclarées**, sans erreur et sans qu'un test de projet le
-/// voie. C'est la raison pour laquelle il n'existe pas de variante à trois arguments — deux voies
-/// pour un même acte en laissent une en arrière (règle n° 17), et celle-ci perdrait des données.
+/// enregistrement : une signature qui les aurait laissées de côté aurait fait qu'enregistrer une
+/// connexion **efface toutes les instances déclarées**, sans erreur et sans qu'un test de l'arbre le
+/// voie. C'est la raison pour laquelle il n'existe pas de variante plus courte — deux voies pour un
+/// même acte en laissent une en arrière (règle n° 17), et celle-ci perdrait des données.
 pub fn save(
     cible: &Path,
-    projects: &[Project],
+    tree: &FolderTree,
     preferences: &Preferences,
     instances: &[ManagedInstance],
     kubeconfigs: &Kubeconfigs,
 ) -> Result<(), StoreError> {
     let temporaire =
-        ecrire_temporaire_sans_renommer(cible, projects, preferences, instances, kubeconfigs)?;
+        ecrire_temporaire_sans_renommer(cible, tree, preferences, instances, kubeconfigs)?;
     fs::rename(&temporaire, cible)?;
     Ok(())
 }
@@ -292,17 +327,29 @@ pub fn load(cible: &Path) -> LoadOutcome {
     // `migrer` : ce serait dégrader ce message pour une cohérence de façade.
     match serde_json::from_str::<ConfigFile>(&brut) {
         Ok(fichier) => {
-            let mut projects = fichier.projects;
-            // **À chaque lecture, et non une seule fois** : un projet sans connexion n'a nulle part
-            // où verser ses requêtes de `12f`, et elles attendent alors la première. Sans version de
-            // format à monter — le champ `queries` se vide de lui-même une fois transféré.
-            super::enregistrer::migrer_requetes_en_consoles(&mut projects);
+            let mut tree = FolderTree {
+                folders: fichier.folders,
+                connections: fichier.connections,
+            };
+            // **À chaque lecture, et non une seule fois** : un dossier sans connexion n'a nulle part
+            // où verser ses requêtes de `12f`, et elles attendent alors la première de son
+            // sous-arbre. Sans version de format à monter — le champ `queries` se vide de lui-même
+            // une fois transféré.
+            super::enregistrer::migrer_requetes_en_consoles(&mut tree);
+            // **Validé à la lecture, comme la migration valide ce qu'elle produit** : un fichier écrit
+            // à la main peut porter deux connexions sous le même identifiant, donc partager une clé
+            // de registre et un mot de passe. Le refuser ici le met en quarantaine plutôt que de
+            // laisser la première écriture le réécrire tel quel.
+            if let Err(erreur) = tree.valider() {
+                return mettre_en_quarantaine(cible, format!("arbre invalide : {erreur}"));
+            }
             LoadOutcome::Loaded {
-                projects,
+                tree,
                 // Bornées à la lecture aussi : le fichier est éditable à la main.
                 preferences: fichier.preferences.borner(),
                 instances: fichier.instances,
                 kubeconfigs: fichier.kubeconfigs,
+                migration: None,
             }
         }
         Err(erreur) => mettre_en_quarantaine(cible, format!("forme inattendue : {erreur}")),
@@ -324,13 +371,20 @@ fn migrer(cible: &Path, brut: &str, valeur: serde_json::Value, depuis: u32) -> L
         };
     }
 
-    match migrer_le_document(valeur, depuis) {
-        Ok((projects, preferences, instances, kubeconfigs)) => LoadOutcome::Loaded {
-            projects,
-            preferences: preferences.borner(),
-            instances,
-            kubeconfigs,
-        },
+    match migrer_vers_la_v7(valeur, depuis) {
+        Ok(mut document) => {
+            super::enregistrer::migrer_requetes_en_consoles(&mut document.arbre);
+            LoadOutcome::Loaded {
+                tree: document.arbre,
+                preferences: document.preferences.borner(),
+                instances: document.instances,
+                kubeconfigs: document.kubeconfigs,
+                migration: Some(MigrationEnAttente {
+                    depuis,
+                    secrets: document.secrets_a_deplacer,
+                }),
+            }
+        }
         Err(raison) => LoadOutcome::Unreadable {
             reason: raison,
             quarantined_to: sauvegarde,
@@ -372,27 +426,119 @@ pub struct ConfigStore {
     refus: Option<String>,
 }
 
+/// Ce que le magasin relit du disque, en une fois.
+struct Lecture {
+    tree: FolderTree,
+    preferences: Preferences,
+    instances: Vec<ManagedInstance>,
+    kubeconfigs: Kubeconfigs,
+}
+
 impl ConfigStore {
-    /// Ouvre le magasin et rend l'issue de lecture. L'appelant a besoin des deux :
-    /// l'issue pour l'afficher, le magasin pour écrire ensuite.
+    /// Ouvre le magasin et rend l'issue de lecture, **sans rien écrire**. L'appelant a besoin des
+    /// deux : l'issue pour l'afficher, le magasin pour écrire ensuite.
+    ///
+    /// Une migration lue ici reste **en attente** (`LoadOutcome::Loaded { migration: Some(_) }`) :
+    /// c'est [`ConfigStore::ouvrir`] qui l'achève, parce qu'elle demande le magasin de secrets.
     pub fn open(chemin: impl Into<PathBuf>) -> (Self, LoadOutcome) {
         let chemin = chemin.into();
         let issue = load(&chemin);
+        let refus = refus_de(&issue);
+        (Self { chemin, refus }, issue)
+    }
 
-        let refus = match &issue {
-            LoadOutcome::Fresh | LoadOutcome::Loaded { .. } => None,
-            LoadOutcome::Unreadable { reason, .. } => Some(reason.clone()),
-            LoadOutcome::TooNew { found, supported } => Some(format!(
-                "le fichier est en version {found}, cette application comprend la version {supported}"
-            )),
+    /// Ouvre le magasin **et achève une migration en attente** : déplace les mots de passe vers leur
+    /// nouvelle référence, puis écrit la v7 aussitôt (#165).
+    ///
+    /// # Pourquoi écrire tout de suite
+    ///
+    /// Chaque commande relit le fichier ; tant qu'il reste en v6, chacune le migre à nouveau et pose
+    /// une sauvegarde `config.json.avant-v6.k` de plus. Et surtout, les mots de passe déplacés ne
+    /// sont trouvables que sous les références que la v7 écrit : un fichier resté en v6 avec des
+    /// secrets déjà déplacés serait le seul état où quelque chose pourrait se perdre.
+    ///
+    /// # L'échec
+    ///
+    /// Si le déplacement n'aboutit pas, **aucun original n'a bougé** et le fichier est resté dans sa
+    /// version : rien n'est perdu. Le magasin passe alors en refus d'écrire, et l'issue devient
+    /// `SecretsMigrationFailed` — sans quarantaine, puisque rien n'est illisible. Un mode dégradé qui
+    /// garderait les anciennes références en mémoire a été écarté : ce serait une seconde voie de
+    /// code (règle n° 17) pour une panne rare, que relancer répare.
+    ///
+    /// `magasin` n'est appelé **que s'il y a un mot de passe à déplacer** : un lancement ordinaire,
+    /// ou une migration d'un fichier sans mot de passe, ne touche pas au Trousseau.
+    pub fn ouvrir<'m>(
+        chemin: impl Into<PathBuf>,
+        magasin: impl FnOnce() -> Result<Box<dyn SecretStore + 'm>, String>,
+    ) -> (Self, LoadOutcome) {
+        let (mut store, issue) = Self::open(chemin);
+        let LoadOutcome::Loaded {
+            tree,
+            preferences,
+            instances,
+            kubeconfigs,
+            migration: Some(migration),
+        } = issue
+        else {
+            return (store, issue);
         };
 
-        (Self { chemin, refus }, issue)
+        let ecrire = |store: &Self| {
+            save(&store.chemin, &tree, &preferences, &instances, &kubeconfigs)
+                .map_err(|erreur| erreur.to_string())
+        };
+
+        let resultat = if migration.secrets.est_vide() {
+            // Rien à déplacer : écrire suffit. Un échec ici ne perd rien — la prochaine écriture
+            // réussie écrira la v7 —, donc il est dit sans bloquer.
+            if let Err(erreur) = ecrire(&store) {
+                log::warn!(
+                    "migration depuis la v{} non écrite : {erreur}",
+                    migration.depuis
+                );
+            }
+            Ok(())
+        } else {
+            magasin().and_then(|secrets| {
+                deplacer_les_secrets(&migration.secrets, secrets.as_ref(), &mut || ecrire(&store))
+                    .map(|rapport| {
+                        log::info!(
+                            "migration depuis la v{} : {} mot(s) de passe déplacé(s), {} absent(s),                              {} résidu(s)",
+                            migration.depuis,
+                            migration.secrets.couples().len() - rapport.absents.len(),
+                            rapport.absents.len(),
+                            rapport.residus.len()
+                        );
+                    })
+                    .map_err(|erreur| erreur.to_string())
+            })
+        };
+
+        match resultat {
+            Ok(()) => (
+                store,
+                LoadOutcome::Loaded {
+                    tree,
+                    preferences,
+                    instances,
+                    kubeconfigs,
+                    migration: None,
+                },
+            ),
+            Err(erreur) => {
+                let reason = format!(
+                    "la migration des mots de passe n'a pas abouti : {erreur} — relancez DoraBase"
+                );
+                log::error!("{reason}");
+                store.refus = Some(reason.clone());
+                (store, LoadOutcome::SecretsMigrationFailed { reason })
+            }
+        }
     }
 
     pub fn save(
         &self,
-        projects: &[Project],
+        tree: &FolderTree,
         preferences: &Preferences,
         instances: &[ManagedInstance],
         kubeconfigs: &Kubeconfigs,
@@ -402,95 +548,86 @@ impl ConfigStore {
                 raison: raison.clone(),
             });
         }
-        save(&self.chemin, projects, preferences, instances, kubeconfigs)
+        save(&self.chemin, tree, preferences, instances, kubeconfigs)
+    }
+
+    /// Relit tout ce que le fichier porte. **Refuse quand l'ouverture a refusé** : un fichier en
+    /// quarantaine ou d'une version trop récente ne doit pas être lu comme s'il était vide, ce qui
+    /// reviendrait à proposer d'écrire par-dessus.
+    fn lire(&self) -> Result<Lecture, String> {
+        if let Some(raison) = &self.refus {
+            return Err(raison.clone());
+        }
+        match load(&self.chemin) {
+            LoadOutcome::Fresh => Ok(Lecture {
+                tree: FolderTree::default(),
+                preferences: Preferences::default(),
+                instances: Vec::new(),
+                kubeconfigs: Kubeconfigs::default(),
+            }),
+            LoadOutcome::Loaded {
+                tree,
+                preferences,
+                instances,
+                kubeconfigs,
+                ..
+            } => Ok(Lecture {
+                tree,
+                preferences,
+                instances,
+                kubeconfigs,
+            }),
+            autre => Err(refus_de(&autre).unwrap_or_default()),
+        }
     }
 
     /// Relit les kubeconfigs déclarés du disque (`API-70`).
     ///
     /// **Même raison que `load_instances`** : le fichier est réécrit entier, donc toute commande qui
     /// écrit *quelque chose* doit d'abord relire ce qu'elle n'écrit pas. Sans cette lecture,
-    /// enregistrer un projet effacerait les déclarations — et **chaque connexion Kubernetes du
-    /// fichier deviendrait une référence morte**, ce qui est pire que la perte des instances : ce
-    /// n'est pas une liste qui disparaît, ce sont des connexions qui cessent d'ouvrir.
+    /// enregistrer une connexion effacerait les déclarations — et **chaque connexion Kubernetes du
+    /// fichier deviendrait une référence morte**.
     pub fn load_kubeconfigs(&self) -> Result<Kubeconfigs, String> {
-        if let Some(raison) = &self.refus {
-            return Err(raison.clone());
-        }
-        match load(&self.chemin) {
-            LoadOutcome::Fresh => Ok(Kubeconfigs::default()),
-            LoadOutcome::Loaded { kubeconfigs, .. } => Ok(kubeconfigs),
-            LoadOutcome::Unreadable { reason, .. } => Err(reason),
-            LoadOutcome::TooNew { found, supported } => Err(format!(
-                "le fichier est en version {found}, cette application comprend la version {supported}"
-            )),
-        }
+        self.lire().map(|lu| lu.kubeconfigs)
     }
 
-    /// Relit les instances managées du disque (`API-32`).
-    ///
-    /// **Même raison que `load_projects`, et une de plus** : le fichier est réécrit entier à chaque
-    /// enregistrement, donc toute commande qui écrit *quelque chose* doit d'abord relire ce qu'elle
-    /// n'écrit pas. Sans cette lecture, renommer un projet effacerait les instances.
+    /// Relit les instances managées du disque (`API-32`). Sans cette lecture, renommer un dossier
+    /// effacerait les instances.
     pub fn load_instances(&self) -> Result<Vec<ManagedInstance>, String> {
-        if let Some(raison) = &self.refus {
-            return Err(raison.clone());
-        }
-        match load(&self.chemin) {
-            LoadOutcome::Fresh => Ok(Vec::new()),
-            LoadOutcome::Loaded { instances, .. } => Ok(instances),
-            LoadOutcome::Unreadable { reason, .. } => Err(reason),
-            LoadOutcome::TooNew { found, supported } => Err(format!(
-                "le fichier est en version {found}, cette application comprend la version {supported}"
-            )),
-        }
+        self.lire().map(|lu| lu.instances)
     }
 
-    /// Relit les préférences du disque.
-    ///
-    /// **Même raison que `load_projects`** : écrire un réglage se fait sur ce qui a été lu, sinon
-    /// enregistrer un thème effacerait un garde-fou modifié entre-temps.
-    ///
-    /// Rend les valeurs par défaut quand le fichier est absent : c'est l'état d'un premier
-    /// lancement, pas une erreur.
+    /// Relit les préférences du disque : écrire un réglage se fait sur ce qui a été lu, sinon
+    /// enregistrer un thème effacerait un garde-fou modifié entre-temps. Les valeurs par défaut
+    /// quand le fichier est absent : c'est l'état d'un premier lancement, pas une erreur.
     pub fn load_preferences(&self) -> Result<Preferences, String> {
-        if let Some(raison) = &self.refus {
-            return Err(raison.clone());
-        }
-        match load(&self.chemin) {
-            LoadOutcome::Fresh => Ok(Preferences::default()),
-            LoadOutcome::Loaded { preferences, .. } => Ok(preferences),
-            LoadOutcome::Unreadable { reason, .. } => Err(reason),
-            LoadOutcome::TooNew { found, supported } => Err(format!(
-                "le fichier est en version {found}, cette application comprend la version {supported}"
-            )),
-        }
+        self.lire().map(|lu| lu.preferences)
     }
 
-    /// Relit les projets du disque.
+    /// Relit l'arbre de dossiers du disque.
     ///
     /// **Nécessaire à `08e`** : l'écriture se fait sur ce qui a été lu (`05b`), et une commande
-    /// qui recevrait la liste entière depuis le front ouvrirait la porte à un écrasement par un
-    /// état périmé — deux onglets, ou un écran qui n'a pas rafraîchi.
-    ///
-    /// Refuse quand l'ouverture a refusé : un fichier en quarantaine ou d'une version trop
-    /// récente ne doit pas être lu comme s'il était vide, ce qui reviendrait à proposer d'écrire
-    /// par-dessus.
-    pub fn load_projects(&self) -> Result<Vec<Project>, String> {
-        if let Some(raison) = &self.refus {
-            return Err(raison.clone());
-        }
-        match load(&self.chemin) {
-            LoadOutcome::Fresh => Ok(Vec::new()),
-            LoadOutcome::Loaded { projects, .. } => Ok(projects),
-            LoadOutcome::Unreadable { reason, .. } => Err(reason),
-            LoadOutcome::TooNew { found, supported } => Err(format!(
-                "le fichier est en version {found}, cette application comprend la version {supported}"
-            )),
-        }
+    /// qui recevrait l'arbre entier depuis le front ouvrirait la porte à un écrasement par un état
+    /// périmé — deux onglets, ou un écran qui n'a pas rafraîchi.
+    pub fn load_tree(&self) -> Result<FolderTree, String> {
+        self.lire().map(|lu| lu.tree)
     }
 
     pub fn path(&self) -> &Path {
         &self.chemin
+    }
+}
+
+/// La raison de refuser d'écrire après une lecture, ou `None` si elle a été saine.
+fn refus_de(issue: &LoadOutcome) -> Option<String> {
+    match issue {
+        LoadOutcome::Fresh | LoadOutcome::Loaded { .. } => None,
+        LoadOutcome::SecretsMigrationFailed { reason } | LoadOutcome::Unreadable { reason, .. } => {
+            Some(reason.clone())
+        }
+        LoadOutcome::TooNew { found, supported } => Some(format!(
+            "le fichier est en version {found}, cette application comprend la version {supported}"
+        )),
     }
 }
 
@@ -553,7 +690,14 @@ mod tests_preferences {
                 ..Guards::default()
             },
         };
-        save(&chemin, &[], &voulues, &[], &Kubeconfigs::default()).unwrap();
+        save(
+            &chemin,
+            &FolderTree::default(),
+            &voulues,
+            &[],
+            &Kubeconfigs::default(),
+        )
+        .unwrap();
 
         let LoadOutcome::Loaded { preferences, .. } = load(&chemin) else {
             panic!("le fichier doit se lire");
@@ -626,12 +770,24 @@ mod tests_preferences {
             theme: Theme::Nuit,
             ..Preferences::default()
         };
-        save(&chemin, &[], &reglees, &[], &Kubeconfigs::default()).unwrap();
+        save(
+            &chemin,
+            &FolderTree::default(),
+            &reglees,
+            &[],
+            &Kubeconfigs::default(),
+        )
+        .unwrap();
 
         let (store, _) = ConfigStore::open(&chemin);
         let relues = store.load_preferences().unwrap();
         store
-            .save(&[], &relues, &[], &Kubeconfigs::default())
+            .save(
+                &FolderTree::default(),
+                &relues,
+                &[],
+                &Kubeconfigs::default(),
+            )
             .unwrap();
 
         let LoadOutcome::Loaded { preferences, .. } = load(&chemin) else {
@@ -653,9 +809,12 @@ mod tests_preferences {
 mod tests {
 
     use super::*;
-    use crate::config::model::{
-        ConnectionSettings, Database, Engine, EnvironmentId, Proxy, ProxyCloudSql, SslMode,
-    };
+
+    /// Les connexions de l'arbre, dans l'ordre où il les montre.
+    pub(super) fn connexions(tree: &FolderTree) -> Vec<&Database> {
+        tree.connexions().map(|(base, _)| base).collect()
+    }
+    use crate::config::model::{ConnectionSettings, Proxy, ProxyCloudSql, SslMode};
 
     pub(super) fn variante() -> ConnectionSettings {
         ConnectionSettings {
@@ -673,35 +832,23 @@ mod tests {
         }
     }
 
-    fn projet_nomme(nom: &str) -> Project {
-        Project {
-            name: nom.into(),
-            environments: crate::config::model::EnvironmentDeclaration::trio_par_defaut(),
-            queries: Vec::new(),
-            value_labels: BTreeMap::new(),
-            // `analytics` en dev **et** en prod : deux connexions depuis `23b`.
-            databases: vec![
-                Database {
-                    id: crate::config::ConnectionId::vide(),
-                    name: "analytics".to_owned(),
-                    label: None,
-                    engine: Engine::PostgreSql,
-                    environment: EnvironmentId::brut("dev"),
-                    connection: variante(),
-                    consoles: Vec::new(),
-                    visible_schemas: None,
-                },
-                Database {
-                    id: crate::config::ConnectionId::vide(),
-                    name: "analytics".to_owned(),
-                    label: None,
-                    engine: Engine::PostgreSql,
-                    environment: EnvironmentId::brut("prod"),
-                    connection: variante(),
-                    consoles: Vec::new(),
-                    visible_schemas: None,
-                },
-            ],
+    /// Un arbre d'un dossier `nom`, deux sous-dossiers `dev` et `prod`, et une connexion
+    /// `analytics` dans chacun — les deux homonymes que la v6 appelait `(analytics, dev)` et
+    /// `(analytics, prod)`.
+    fn projet_nomme(nom: &str) -> FolderTree {
+        use crate::config::arbre::tests::{base, dossier};
+        let mut racine = dossier("racine", nom, false);
+        for (env, lecture_seule) in [("dev", false), ("prod", true)] {
+            let mut sous = dossier(env, env, lecture_seule);
+            let mut connexion = base(&format!("analytics-{env}"), true);
+            connexion.name = "analytics".to_owned();
+            connexion.connection = variante();
+            sous.connections.push(connexion);
+            racine.folders.push(sous);
+        }
+        FolderTree {
+            folders: vec![racine],
+            connections: Vec::new(),
         }
     }
 
@@ -711,7 +858,7 @@ mod tests {
     fn un_aller_retour_rend_la_configuration_identique() {
         let dir = tempfile::tempdir().unwrap();
         let chemin = dir.path().join("config.json");
-        let projets = vec![projet_nomme("Atelier Nord")];
+        let projets = projet_nomme("Atelier Nord");
 
         save(
             &chemin,
@@ -722,7 +869,7 @@ mod tests {
         )
         .unwrap();
         let relu = match load(&chemin) {
-            LoadOutcome::Loaded { projects, .. } => projects,
+            LoadOutcome::Loaded { tree, .. } => tree,
             autre => panic!("attendu Loaded, obtenu {autre:?}"),
         };
 
@@ -735,7 +882,7 @@ mod tests {
         let chemin = dir.path().join("config.json");
         save(
             &chemin,
-            &[],
+            &FolderTree::default(),
             &Preferences::default(),
             &[],
             &Kubeconfigs::default(),
@@ -753,7 +900,7 @@ mod tests {
         let chemin = dir.path().join("sous/dossier/config.json");
         save(
             &chemin,
-            &[],
+            &FolderTree::default(),
             &Preferences::default(),
             &[],
             &Kubeconfigs::default(),
@@ -771,7 +918,7 @@ mod tests {
 
         save(
             &chemin,
-            &[projet_nomme("Ancien")],
+            &projet_nomme("Ancien"),
             &Preferences::default(),
             &[],
             &Kubeconfigs::default(),
@@ -783,7 +930,7 @@ mod tests {
         // n'a pas lieu.
         ecrire_temporaire_sans_renommer(
             &chemin,
-            &[projet_nomme("Nouveau")],
+            &projet_nomme("Nouveau"),
             &Preferences::default(),
             &[],
             &Kubeconfigs::default(),
@@ -792,9 +939,7 @@ mod tests {
 
         assert_eq!(fs::read_to_string(&chemin).unwrap(), avant);
         match load(&chemin) {
-            LoadOutcome::Loaded {
-                projects: projets, ..
-            } => assert_eq!(projets[0].name, "Ancien"),
+            LoadOutcome::Loaded { tree, .. } => assert_eq!(tree.folders[0].name, "Ancien"),
             autre => panic!("attendu Loaded, obtenu {autre:?}"),
         }
     }
@@ -811,7 +956,7 @@ mod tests {
         let chemin = dir.path().join("config.json");
         save(
             &chemin,
-            &[],
+            &FolderTree::default(),
             &Preferences::default(),
             &[],
             &Kubeconfigs::default(),
@@ -840,7 +985,7 @@ mod tests {
 
         save(
             &chemin,
-            &[projet_nomme("Premier")],
+            &projet_nomme("Premier"),
             &Preferences::default(),
             &[],
             &Kubeconfigs::default(),
@@ -850,7 +995,7 @@ mod tests {
 
         save(
             &chemin,
-            &[projet_nomme("Second")],
+            &projet_nomme("Second"),
             &Preferences::default(),
             &[],
             &Kubeconfigs::default(),
@@ -945,7 +1090,7 @@ mod tests {
         assert!(matches!(issue, LoadOutcome::Unreadable { .. }));
 
         let erreur = store.save(
-            &[projet_nomme("Nouveau")],
+            &projet_nomme("Nouveau"),
             &Preferences::default(),
             &[],
             &Kubeconfigs::default(),
@@ -964,7 +1109,12 @@ mod tests {
 
         let (store, _) = ConfigStore::open(&chemin);
         assert!(matches!(
-            store.save(&[], &Preferences::default(), &[], &Kubeconfigs::default()),
+            store.save(
+                &FolderTree::default(),
+                &Preferences::default(),
+                &[],
+                &Kubeconfigs::default()
+            ),
             Err(StoreError::EcritureRefusee { .. })
         ));
         assert_eq!(fs::read_to_string(&chemin).unwrap(), futur);
@@ -979,7 +1129,7 @@ mod tests {
         assert!(matches!(issue, LoadOutcome::Fresh));
         assert!(store
             .save(
-                &[projet_nomme("Premier")],
+                &projet_nomme("Premier"),
                 &Preferences::default(),
                 &[],
                 &Kubeconfigs::default()
@@ -1073,10 +1223,10 @@ mod tests {
 
         let issue = load(&chemin);
 
-        let LoadOutcome::Loaded { projects, .. } = issue else {
+        let LoadOutcome::Loaded { tree, .. } = issue else {
             panic!("un fichier v2 doit se lire après migration, obtenu {issue:?}");
         };
-        let tunnel = projects[0].databases[0]
+        let tunnel = connexions(&tree)[0]
             .connection
             .tunnel
             .as_ref()
@@ -1135,10 +1285,10 @@ mod tests {
         fs::write(&chemin, &sans_tunnel).unwrap();
 
         let issue = load(&chemin);
-        let LoadOutcome::Loaded { projects, .. } = issue else {
+        let LoadOutcome::Loaded { tree, .. } = issue else {
             panic!("obtenu {issue:?}");
         };
-        assert!(projects[0].databases[0].connection.tunnel.is_none());
+        assert!(connexions(&tree)[0].connection.tunnel.is_none());
     }
 
     // --- `06j` : migration v3 → v4, le compte de service disparaît ---
@@ -1190,10 +1340,10 @@ mod tests {
         fs::write(&chemin, V3_AVEC_COMPTE_DE_SERVICE).unwrap();
 
         let issue = load(&chemin);
-        let LoadOutcome::Loaded { projects, .. } = issue else {
+        let LoadOutcome::Loaded { tree, .. } = issue else {
             panic!("un fichier v3 doit se lire après migration, obtenu {issue:?}");
         };
-        let tunnel = projects[0].databases[0]
+        let tunnel = connexions(&tree)[0]
             .connection
             .tunnel
             .as_ref()
@@ -1331,39 +1481,30 @@ mod tests {
         fs::write(&chemin, V4_AVEC_ENVIRONNEMENT_ACTIF).unwrap();
 
         let issue = load(&chemin);
-        let LoadOutcome::Loaded { projects, .. } = issue else {
+        let LoadOutcome::Loaded { tree, .. } = issue else {
             panic!("un fichier v4 doit se lire après migration, obtenu {issue:?}");
         };
 
-        // **Les trois environnements déclarés survivent, dans leur ordre.** Le cran ne transforme
-        // rien : c'est ce que ce test tient. Un cran qui « déduirait » les environnements des
-        // connexions perdrait « coulisses », qui n'en a aucune.
-        let ids: Vec<_> = projects[0]
-            .environments
+        // **Les trois environnements déclarés survivent, dans leur ordre, en sous-dossiers.** Le cran
+        // v4 → v5 ne transforme rien : c'est ce que ce test tient. Un cran qui « déduirait » les
+        // environnements des connexions perdrait « coulisses », qui n'en a aucune.
+        let noms: Vec<_> = tree.folders[0]
+            .folders
             .iter()
-            .map(|declaration| declaration.id.as_str().to_owned())
+            .map(|dossier| dossier.name.as_str())
             .collect();
-        assert_eq!(ids, vec!["atelier", "vitrine", "coulisses"]);
+        assert_eq!(noms, vec!["atelier", "vitrine", "coulisses"]);
         assert!(
-            projects[0]
-                .environnement(&EnvironmentId::brut("vitrine"))
-                .expect("vitrine")
-                .production,
-            "le drapeau de production traverse la relecture"
+            tree.folders[0].folders[1].read_only,
+            "le drapeau de production traverse la relecture, en lecture seule (#108)"
         );
 
         // Les deux connexions homonymes restent deux connexions, avec leur console.
-        assert_eq!(projects[0].databases.len(), 2);
-        assert_eq!(
-            projects[0].databases[0].connection.ssl_mode,
-            SslMode::Prefer
-        );
-        assert_eq!(
-            projects[0].databases[1].connection.ssl_mode,
-            SslMode::Require
-        );
-        assert_eq!(projects[0].databases[0].consoles[0].name, "Exploration");
-        assert!(projects[0].valider().is_ok());
+        assert_eq!(connexions(&tree).len(), 2);
+        assert_eq!(connexions(&tree)[0].connection.ssl_mode, SslMode::Prefer);
+        assert_eq!(connexions(&tree)[1].connection.ssl_mode, SslMode::Require);
+        assert_eq!(connexions(&tree)[0].consoles[0].name, "Exploration");
+        assert!(tree.valider().is_ok());
     }
 
     #[test]
@@ -1374,21 +1515,12 @@ mod tests {
         fs::write(&chemin, V4_AVEC_ENVIRONNEMENT_ACTIF).unwrap();
 
         let LoadOutcome::Loaded {
-            projects,
-            preferences,
-            ..
+            tree, preferences, ..
         } = load(&chemin)
         else {
             panic!("un fichier v4 doit se lire");
         };
-        save(
-            &chemin,
-            &projects,
-            &preferences,
-            &[],
-            &Kubeconfigs::default(),
-        )
-        .unwrap();
+        save(&chemin, &tree, &preferences, &[], &Kubeconfigs::default()).unwrap();
 
         let reecrit = fs::read_to_string(&chemin).unwrap();
         assert!(!reecrit.contains("activeEnvironment"));
@@ -1436,12 +1568,12 @@ mod tests {
         fs::write(&chemin, V2_AVEC_TUNNEL_PLAT).unwrap();
 
         let issue = load(&chemin);
-        let LoadOutcome::Loaded { projects, .. } = issue else {
+        let LoadOutcome::Loaded { tree, .. } = issue else {
             panic!("obtenu {issue:?}");
         };
         // Un tunnel v2 est SSH : le retrait n'a rien à y faire, et ne doit rien y casser.
         assert!(matches!(
-            projects[0].databases[0]
+            connexions(&tree)[0]
                 .connection
                 .tunnel
                 .as_ref()
@@ -1487,15 +1619,15 @@ mod tests {
         fs::write(&chemin, &v1).unwrap();
 
         let issue = load(&chemin);
-        let LoadOutcome::Loaded { projects, .. } = issue else {
+        let LoadOutcome::Loaded { tree, .. } = issue else {
             panic!("un fichier v1 doit se lire après double migration, obtenu {issue:?}");
         };
         assert_eq!(
-            projects[0].databases.len(),
+            connexions(&tree).len(),
             1,
             "la variante devient une connexion"
         );
-        let tunnel = projects[0].databases[0]
+        let tunnel = connexions(&tree)[0]
             .connection
             .tunnel
             .as_ref()
@@ -1535,10 +1667,10 @@ mod tests {
         fs::write(&chemin, &deja_v3).unwrap();
 
         let issue = load(&chemin);
-        let LoadOutcome::Loaded { projects, .. } = issue else {
+        let LoadOutcome::Loaded { tree, .. } = issue else {
             panic!("une forme déjà v3 doit traverser le cran sans dommage, obtenu {issue:?}");
         };
-        let tunnel = projects[0].databases[0]
+        let tunnel = connexions(&tree)[0]
             .connection
             .tunnel
             .as_ref()
@@ -1592,25 +1724,15 @@ mod tests {
                 instance_connection_name: "acme-prod:europe-west1:analytics".into(),
             }),
         });
-        let projet = Project {
-            name: "acme".into(),
-            environments: crate::config::model::EnvironmentDeclaration::trio_par_defaut(),
-            queries: Vec::new(),
-            value_labels: BTreeMap::new(),
-            databases: vec![Database {
-                id: crate::config::ConnectionId::vide(),
-                name: "analytics".to_owned(),
-                label: None,
-                engine: Engine::PostgreSql,
-                environment: EnvironmentId::brut("dev"),
-                connection: connexion,
-                consoles: Vec::new(),
-                visible_schemas: None,
-            }],
+        let mut connexion_seule = crate::config::arbre::tests::base("analytics", false);
+        connexion_seule.connection = connexion;
+        let projet = FolderTree {
+            folders: Vec::new(),
+            connections: vec![connexion_seule],
         };
         save(
             &chemin,
-            &[projet],
+            &projet,
             &Preferences::default(),
             &[],
             &Kubeconfigs::default(),
@@ -1641,27 +1763,17 @@ mod tests {
         let chemin = dir.path().join("config.json");
 
         let mut variante_avec_reference = variante();
-        variante_avec_reference.password = Some(SecretRef::new("ref-abc123"));
-        let projet = Project {
-            name: "Atelier Nord".into(),
-            environments: crate::config::model::EnvironmentDeclaration::trio_par_defaut(),
-            queries: Vec::new(),
-            value_labels: BTreeMap::new(),
-            databases: vec![Database {
-                id: crate::config::ConnectionId::vide(),
-                name: "analytics".to_owned(),
-                label: None,
-                engine: Engine::PostgreSql,
-                environment: EnvironmentId::brut("dev"),
-                connection: variante_avec_reference,
-                consoles: Vec::new(),
-                visible_schemas: None,
-            }],
+        variante_avec_reference.password = Some(SecretRef::new("connexion/analytics"));
+        let mut connexion_seule = crate::config::arbre::tests::base("analytics", false);
+        connexion_seule.connection = variante_avec_reference;
+        let projet = FolderTree {
+            folders: Vec::new(),
+            connections: vec![connexion_seule],
         };
 
         save(
             &chemin,
-            &[projet],
+            &projet,
             &Preferences::default(),
             &[],
             &Kubeconfigs::default(),
@@ -1672,7 +1784,7 @@ mod tests {
         let brut = fs::read_to_string(&chemin).unwrap();
         // Contrôle positif — sans lui, le test ne prouverait rien.
         assert!(
-            brut.contains("ref-abc123"),
+            brut.contains("connexion/analytics"),
             "la référence de secret doit être persistée"
         );
         // Et le contrôle négatif : aucune valeur de secret nulle part.
@@ -1697,10 +1809,10 @@ mod tests {
         .expect("écriture");
 
         match load(&cible) {
-            LoadOutcome::Loaded { projects, .. } => {
-                assert_eq!(projects.len(), 1);
+            LoadOutcome::Loaded { tree, .. } => {
+                assert_eq!(tree.folders.len(), 1);
                 // Vide, ce qui est l'état correct — et non une lecture qui échoue.
-                assert!(projects[0].queries.is_empty());
+                assert!(tree.folders[0].queries.is_empty());
             }
             autre => panic!("la lecture doit réussir : {autre:?}"),
         }
@@ -1714,8 +1826,8 @@ mod tests {
     fn les_requetes_enregistrees_reviennent_en_consoles() {
         let dossier = tempfile::tempdir().expect("répertoire temporaire");
         let cible = dossier.path().join("config.json");
-        let mut projets = vec![projet_nomme("Halle")];
-        projets[0].queries = vec![crate::config::model::SavedQuery {
+        let mut projets = projet_nomme("Halle");
+        projets.folders[0].queries = vec![crate::config::model::SavedQuery {
             name: "CA par jour".into(),
             sql: "select 1".into(),
         }];
@@ -1729,11 +1841,11 @@ mod tests {
         )
         .expect("écriture");
         match load(&cible) {
-            LoadOutcome::Loaded { projects, .. } => {
+            LoadOutcome::Loaded { tree, .. } => {
                 // Le concept a disparu du modèle rendu à l'écran…
-                assert!(projects[0].queries.is_empty());
-                // …et le texte est sous la première connexion déclarée, avec son nom.
-                let consoles = &projects[0].databases[0].consoles;
+                assert!(tree.folders[0].queries.is_empty());
+                // …et le texte est sous la première connexion du sous-arbre, avec son nom.
+                let consoles = &connexions(&tree)[0].consoles;
                 assert_eq!(consoles.len(), 1);
                 assert_eq!(consoles[0].name, "CA par jour");
                 assert_eq!(consoles[0].sql, "select 1");
@@ -1748,8 +1860,8 @@ mod tests {
     fn le_champ_des_requetes_disparait_du_fichier_apres_reprise() {
         let dossier = tempfile::tempdir().expect("répertoire temporaire");
         let cible = dossier.path().join("config.json");
-        let mut projets = vec![projet_nomme("Halle")];
-        projets[0].queries = vec![crate::config::model::SavedQuery {
+        let mut projets = projet_nomme("Halle");
+        projets.folders[0].queries = vec![crate::config::model::SavedQuery {
             name: "CA par jour".into(),
             sql: "select 1".into(),
         }];
@@ -1763,7 +1875,7 @@ mod tests {
         .expect("écriture");
 
         let projets = match load(&cible) {
-            LoadOutcome::Loaded { projects, .. } => projects,
+            LoadOutcome::Loaded { tree, .. } => tree,
             autre => panic!("la lecture doit réussir : {autre:?}"),
         };
         save(
@@ -1783,7 +1895,6 @@ mod tests {
 #[cfg(test)]
 mod tests_migration_v2 {
     use super::*;
-    use crate::config::model::Engine;
 
     /// Un fichier en v1 : deux projets, une base à deux variantes, une base à une seule.
     ///
@@ -1840,124 +1951,127 @@ mod tests_migration_v2 {
       ]
     }"#;
 
-    fn migrer_le_decor() -> Vec<Project> {
+    fn migrer_le_decor() -> (FolderTree, MigrationEnAttente) {
         let dossier = tempfile::tempdir().expect("dossier temporaire");
         let chemin = dossier.path().join("config.json");
         fs::write(&chemin, V1).expect("écriture du décor v1");
 
         match load(&chemin) {
-            LoadOutcome::Loaded { projects, .. } => projects,
-            autre => panic!("la migration devait aboutir : {autre:?}"),
+            LoadOutcome::Loaded {
+                tree,
+                migration: Some(migration),
+                ..
+            } => (tree, migration),
+            autre => panic!("la migration devait aboutir, en attente : {autre:?}"),
         }
+    }
+
+    /// Le sous-dossier `nom` du dossier racine `racine`.
+    fn sous_dossier<'a>(
+        tree: &'a FolderTree,
+        racine: &str,
+        nom: &str,
+    ) -> &'a crate::config::Folder {
+        tree.folders
+            .iter()
+            .find(|d| d.name == racine)
+            .and_then(|d| d.folders.iter().find(|s| s.name == nom))
+            .unwrap_or_else(|| panic!("{racine} › {nom} attendu"))
     }
 
     #[test]
     fn une_base_a_deux_variantes_devient_deux_connexions() {
-        let projets = migrer_le_decor();
-        let print = &projets[0];
-        // **Trois connexions pour deux bases** : `analytics` en dev et en prod, plus `journal` en dev.
-        assert_eq!(print.databases.len(), 3);
-
-        let analytics: Vec<_> = print
-            .databases
-            .iter()
-            .filter(|base| base.name == "analytics")
-            .collect();
-        assert_eq!(analytics.len(), 2);
+        let (tree, _) = migrer_le_decor();
+        // **Trois connexions pour deux bases** : `analytics` en dev et en prod, plus `journal` en
+        // dev — rangées dans le sous-dossier de leur environnement.
+        assert_eq!(tree.connexions().count(), 3);
         // Chacune garde **ses** réglages : l'hôte distingue les deux, et les confondre serait le
         // défaut le plus discret de cette migration.
-        let dev = analytics
-            .iter()
-            .find(|base| base.environment == EnvironmentId::brut("dev"))
-            .expect("dev");
-        let prod = analytics
-            .iter()
-            .find(|base| base.environment == EnvironmentId::brut("prod"))
-            .expect("prod");
-        assert_eq!(dev.connection.host, "dev.interne");
-        assert_eq!(prod.connection.host, "prod.interne");
-        assert!(prod.connection.reconnect_on_startup);
-        assert!(!dev.connection.reconnect_on_startup);
+        let dev = &sous_dossier(&tree, "Halle", "dev").connections;
+        let prod = &sous_dossier(&tree, "Halle", "prod").connections;
+        let analytics_dev = dev.iter().find(|b| b.name == "analytics").expect("dev");
+        assert_eq!(prod.len(), 1);
+        assert_eq!(analytics_dev.connection.host, "dev.interne");
+        assert_eq!(prod[0].connection.host, "prod.interne");
+        assert!(prod[0].connection.reconnect_on_startup);
+        assert!(!analytics_dev.connection.reconnect_on_startup);
     }
 
     #[test]
-    fn aucune_reference_de_secret_ne_bouge() {
-        // **La garantie qui rend cette migration sûre.** La référence contient déjà l'identifiant
-        // d'environnement (`08e`), et les identifiants sont conservés : `dev` reste `dev`. Un
-        // identifiant recalculé depuis le libellé aurait rendu introuvables tous les mots de passe.
-        let projets = migrer_le_decor();
-        let references: Vec<_> = projets[0]
-            .databases
+    fn les_references_de_secret_passent_sous_l_identifiant_et_le_plan_garde_les_anciennes() {
+        // **La garantie qui rend cette migration sûre** (#165) : le fichier migré ne porte plus que
+        // des références `connexion/<id>`, et le plan garde celles que le fichier **portait** — c'est
+        // sous elles que les mots de passe se cherchent au déplacement.
+        let (tree, migration) = migrer_le_decor();
+        let anciennes: Vec<_> = migration
+            .secrets
+            .couples()
             .iter()
-            .filter_map(|base| {
-                base.connection
-                    .password
-                    .as_ref()
-                    .map(|reference| reference.as_str().to_owned())
-            })
+            .map(|(ancienne, _)| ancienne.as_str().to_owned())
             .collect();
-        assert!(references.contains(&"Halle/analytics/dev".to_owned()));
-        assert!(references.contains(&"Halle/analytics/prod".to_owned()));
-        assert_eq!(references.len(), 2, "`journal` n'avait pas de mot de passe");
-    }
-
-    #[test]
-    fn les_environnements_declares_sont_ceux_qui_servaient() {
-        let projets = migrer_le_decor();
-        let ids: Vec<_> = projets[0]
-            .environments
-            .iter()
-            .map(|declaration| declaration.id.as_str().to_owned())
-            .collect();
-        // `dev` et `prod` seulement : `staging` n'était employé par aucune variante, et le déclarer
-        // ajouterait un environnement vide que l'utilisateur n'a jamais demandé.
-        assert_eq!(ids, vec!["dev", "prod"]);
-        // Dans l'ordre du trio, non dans celui des bases : l'ordre du sélecteur ne doit pas dépendre
-        // de l'ordre d'écriture du fichier.
-        let prod = projets[0]
-            .environnement(&EnvironmentId::brut("prod"))
-            .expect("prod déclaré");
-        assert!(prod.production, "prod garde son drapeau de production");
-        assert_eq!(prod.color, EnvironmentColor::Red);
-    }
-
-    #[test]
-    fn un_projet_sans_base_garde_l_environnement_ou_il_etait_actif() {
-        let projets = migrer_le_decor();
-        let outils = &projets[1];
-        // Aucune variante d'où déduire quoi que ce soit : c'est la lecture de `activeEnvironment`
-        // qui sauve le projet de l'invalidité — un projet sans environnement est refusé (`23a`).
-        //
-        // **Ce que `25c` ne change pas.** Le champ a quitté le modèle, mais la migration continue de
-        // le *lire* pour en déduire une déclaration : sans cela, ce projet-là repartirait sans aucun
-        // environnement, et donc invalide.
-        assert_eq!(outils.environments.len(), 1);
         assert_eq!(
-            outils.environments[0].id,
-            EnvironmentId::brut("dev"),
-            "l'environnement où le projet était actif reste déclaré"
+            anciennes,
+            vec![
+                "Halle/analytics/dev".to_owned(),
+                "Halle/analytics/prod".to_owned()
+            ],
+            "`journal` n'avait pas de mot de passe"
         );
-        assert!(outils.valider().is_ok());
-    }
-
-    #[test]
-    fn le_projet_migre_est_valide() {
-        for projet in migrer_le_decor() {
-            projet
-                .valider()
-                .unwrap_or_else(|erreur| panic!("le projet migré doit être valide : {erreur}"));
+        for (base, _) in tree.connexions() {
+            if let Some(reference) = &base.connection.password {
+                assert_eq!(reference, &crate::config::reference_de_connexion(&base.id));
+            }
         }
     }
 
     #[test]
-    fn le_moteur_et_le_mode_ssl_traversent_la_migration() {
-        let projets = migrer_le_decor();
-        let journal = projets[0]
-            .databases
+    fn les_environnements_declares_deviennent_des_sous_dossiers() {
+        let (tree, _) = migrer_le_decor();
+        let noms: Vec<_> = tree.folders[0]
+            .folders
             .iter()
-            .find(|base| base.name == "journal")
+            .map(|d| d.name.as_str())
+            .collect();
+        // `dev` et `prod` seulement : `staging` n'était employé par aucune variante. Dans l'ordre du
+        // trio, non dans celui des bases.
+        assert_eq!(noms, vec!["dev", "prod"]);
+        let prod = sous_dossier(&tree, "Halle", "prod");
+        assert!(
+            prod.read_only,
+            "prod garde son drapeau, en lecture seule (#108)"
+        );
+        assert_eq!(prod.color, Some(crate::config::FolderColor::Red));
+    }
+
+    #[test]
+    fn un_projet_sans_base_garde_l_environnement_ou_il_etait_actif() {
+        // Aucune variante d'où déduire quoi que ce soit : c'est la lecture de `activeEnvironment`
+        // qui garde le sous-dossier où le projet était actif.
+        let (tree, _) = migrer_le_decor();
+        let outils = tree
+            .folders
+            .iter()
+            .find(|d| d.name == "Outils")
+            .expect("Outils");
+        let noms: Vec<_> = outils.folders.iter().map(|d| d.name.as_str()).collect();
+        assert_eq!(noms, vec!["dev"]);
+    }
+
+    #[test]
+    fn l_arbre_migre_est_valide() {
+        let (tree, _) = migrer_le_decor();
+        tree.valider()
+            .unwrap_or_else(|erreur| panic!("l'arbre migré doit être valide : {erreur}"));
+    }
+
+    #[test]
+    fn le_moteur_et_le_mode_ssl_traversent_la_migration() {
+        let (tree, _) = migrer_le_decor();
+        let (journal, _) = tree
+            .connexions()
+            .find(|(base, _)| base.name == "journal")
             .expect("journal");
-        assert_eq!(journal.engine, Engine::MySql);
+        assert_eq!(journal.engine, crate::config::Engine::MySql);
         assert_eq!(journal.connection.port, 3306);
     }
 
@@ -2024,7 +2138,7 @@ mod tests_instances {
 
         save(
             &chemin,
-            &[],
+            &FolderTree::default(),
             &Preferences::default(),
             &[instance("pg-prod")],
             &Kubeconfigs::default(),
@@ -2063,7 +2177,7 @@ mod tests_instances {
         let chemin = dir.path().join("config.json");
         save(
             &chemin,
-            &[],
+            &FolderTree::default(),
             &Preferences::default(),
             &[],
             &Kubeconfigs::default(),
@@ -2083,7 +2197,7 @@ mod tests_instances {
         let chemin = dir.path().join("config.json");
         save(
             &chemin,
-            &[],
+            &FolderTree::default(),
             &Preferences::default(),
             &[instance("pg-prod")],
             &Kubeconfigs::default(),
@@ -2092,7 +2206,7 @@ mod tests_instances {
 
         save(
             &chemin,
-            &[],
+            &FolderTree::default(),
             &Preferences::default(),
             &[],
             &Kubeconfigs::default(),
@@ -2114,7 +2228,7 @@ mod tests_instances {
         let chemin = dir.path().join("config.json");
         save(
             &chemin,
-            &[],
+            &FolderTree::default(),
             &Preferences::default(),
             &[instance("pg-prod")],
             &Kubeconfigs::default(),
@@ -2172,7 +2286,7 @@ mod tests_migration_kubeconfigs {
 
     use super::tests::variante;
     use super::*;
-    use crate::config::{Engine, KubeconfigId};
+    use crate::config::KubeconfigId;
 
     /// Un document v5 portant trois connexions Kubernetes, dont **deux sur le même fichier**.
     ///
@@ -2181,7 +2295,7 @@ mod tests_migration_kubeconfigs {
     /// qu'il garde. Seule la forme du kubeconfig est réécrite — c'est précisément ce que la v5
     /// portait et que la v6 remplace.
     fn document_v5() -> serde_json::Value {
-        let bases: Vec<Database> = [
+        let bases: Vec<serde_json::Value> = [
             ("catalogue", "~/.kube/prod/config"),
             ("commandes", "~/.kube/prod/config"),
             ("stocks", "~/.kube/recette.yaml"),
@@ -2198,26 +2312,25 @@ mod tests_migration_kubeconfigs {
                     resource: "svc/postgres".to_owned(),
                 }),
             });
-            Database {
-                id: crate::config::ConnectionId::vide(),
-                name: nom.to_owned(),
-                label: None,
-                engine: Engine::PostgreSql,
-                environment: EnvironmentId::brut("prod"),
-                connection: reglages,
-                consoles: Vec::new(),
-                visible_schemas: None,
-            }
+            // La forme v6 d'une connexion : celle d'aujourd'hui, sans identifiant, avec son
+            // environnement.
+            let mut base = crate::config::arbre::tests::base("x", false);
+            base.name = nom.to_owned();
+            base.connection = reglages;
+            let mut valeur = serde_json::to_value(base).expect("sérialisable");
+            valeur.as_object_mut().expect("objet").remove("id");
+            valeur["environment"] = serde_json::json!("prod");
+            valeur
         })
         .collect();
 
-        let projet = Project {
-            name: "Halle".to_owned(),
-            environments: crate::config::model::EnvironmentDeclaration::trio_par_defaut(),
-            queries: Vec::new(),
-            value_labels: BTreeMap::new(),
-            databases: bases,
-        };
+        let projet = serde_json::json!({
+            "name": "Halle",
+            "environments": [
+                { "id": "prod", "label": "prod", "color": "red", "production": true }
+            ],
+            "databases": bases,
+        });
 
         let mut document = serde_json::json!({ "version": 5, "projects": [projet] });
         for (rang, chemin) in [
@@ -2234,11 +2347,10 @@ mod tests_migration_kubeconfigs {
         document
     }
 
-    fn reference(projets: &[Project], base: &str) -> Option<KubeconfigId> {
-        let base = projets[0]
-            .databases
-            .iter()
-            .find(|candidate| candidate.name == base)?;
+    fn reference(projets: &FolderTree, base: &str) -> Option<KubeconfigId> {
+        let (base, _) = projets
+            .connexions()
+            .find(|(candidate, _)| candidate.name == base)?;
         match &base.connection.tunnel.as_ref()?.proxy {
             crate::config::Proxy::Kubernetes(kube) => kube.kubeconfig.clone(),
             _ => None,
@@ -2249,8 +2361,12 @@ mod tests_migration_kubeconfigs {
     fn deux_connexions_sur_le_meme_fichier_partagent_une_declaration() {
         // **C'est tout l'objet du chantier** : un cluster porte des dizaines de bases, et le chemin
         // était ressaisi à chacune. La migration doit donc *rassembler*, pas recopier.
-        let (projets, _, _, kubeconfigs) =
-            migrer_le_document(document_v5(), 5).expect("la migration doit aboutir");
+        let crate::config::migration::DocumentV7 {
+            arbre: projets,
+            kubeconfigs,
+            ..
+        } = crate::config::migration::migrer_vers_la_v7(document_v5(), 5)
+            .expect("la migration doit aboutir");
 
         assert_eq!(kubeconfigs.declarations.len(), 2);
         assert_eq!(
@@ -2268,8 +2384,12 @@ mod tests_migration_kubeconfigs {
         // **L'assertion qui compte vraiment.** Sans elle, une migration qui rassemblerait bien mais
         // attribuerait la mauvaise déclaration passerait le test précédent — et ouvrirait le mauvais
         // cluster, avec succès.
-        let (projets, _, _, kubeconfigs) =
-            migrer_le_document(document_v5(), 5).expect("la migration doit aboutir");
+        let crate::config::migration::DocumentV7 {
+            arbre: projets,
+            kubeconfigs,
+            ..
+        } = crate::config::migration::migrer_vers_la_v7(document_v5(), 5)
+            .expect("la migration doit aboutir");
 
         let catalogue = reference(&projets, "catalogue").expect("une référence");
         let stocks = reference(&projets, "stocks").expect("une référence");
@@ -2289,8 +2409,12 @@ mod tests_migration_kubeconfigs {
         document["projects"][0]["databases"][0]["connection"]["tunnel"]["proxy"]["kubeconfig"] =
             serde_json::json!("   ");
 
-        let (projets, _, _, kubeconfigs) =
-            migrer_le_document(document, 5).expect("la migration doit aboutir");
+        let crate::config::migration::DocumentV7 {
+            arbre: projets,
+            kubeconfigs,
+            ..
+        } = crate::config::migration::migrer_vers_la_v7(document, 5)
+            .expect("la migration doit aboutir");
 
         assert_eq!(reference(&projets, "catalogue"), None);
         assert!(kubeconfigs.valider().is_ok());
@@ -2309,11 +2433,15 @@ mod tests_migration_kubeconfigs {
             "username": "dora", "privateKeyPath": "~/.ssh/id_ed25519"
         });
 
-        let (projets, _, _, kubeconfigs) =
-            migrer_le_document(document, 5).expect("la migration doit aboutir");
+        let crate::config::migration::DocumentV7 {
+            arbre: projets,
+            kubeconfigs,
+            ..
+        } = crate::config::migration::migrer_vers_la_v7(document, 5)
+            .expect("la migration doit aboutir");
 
         assert_eq!(kubeconfigs.declarations.len(), 1);
-        match &projets[0].databases[2]
+        match &super::tests::connexions(&projets)[2]
             .connection
             .tunnel
             .as_ref()
@@ -2337,7 +2465,14 @@ mod tests_migration_kubeconfigs {
         let prod = kubeconfigs.declarer("~/.kube/prod/config");
         kubeconfigs.default = Some(prod.clone());
 
-        save(&chemin, &[], &Preferences::default(), &[], &kubeconfigs).unwrap();
+        save(
+            &chemin,
+            &FolderTree::default(),
+            &Preferences::default(),
+            &[],
+            &kubeconfigs,
+        )
+        .unwrap();
         let LoadOutcome::Loaded {
             kubeconfigs: relus, ..
         } = load(&chemin)

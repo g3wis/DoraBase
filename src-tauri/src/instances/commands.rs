@@ -5,7 +5,7 @@
 //! **Ni réglages de connexion, ni SQL.** Une commande reçoit un `InstanceId` et, quand il y a un
 //! geste, l'`InstanceAction` nommée qui le décrit ; tout le reste — hôte, port, mot de passe, et
 //! l'ordre SQL lui-même — est relu du disque ou composé par le cœur. C'est l'arbitrage de
-//! `load_projects` étendu à un écran qui écrit sur un serveur : une déclaration envoyée par l'écran
+//! `load_tree` étendu à un écran qui écrit sur un serveur : une déclaration envoyée par l'écran
 //! pourrait être périmée, et sur cet écran-là « périmée » veut dire « le bon ordre, sur la mauvaise
 //! machine ».
 
@@ -403,7 +403,7 @@ fn lire_instance(
 
 /// Le patron d'écriture des instances : relire le disque, appliquer, écrire.
 ///
-/// Le pendant d'`ecrire_les_projets`, et pour les trois mêmes raisons : la liste vient du disque, le
+/// Le pendant d'`ecrire_l_arbre`, et pour les trois mêmes raisons : la liste vient du disque, le
 /// magasin se souvient d'un refus de lecture, et **ce qu'on n'écrit pas est préservé**.
 fn ecrire_les_instances(
     state: &State<'_, ConfigState>,
@@ -415,14 +415,14 @@ fn ecrire_les_instances(
     crate::config::commands::avec_le_magasin(state, |store| {
         let instances = store.load_instances()?;
         geste(&instances, &mut |suivantes| {
-            let projects = store.load_projects()?;
+            let arbre = store.load_tree()?;
             let preferences = store.load_preferences().unwrap_or_default();
             // `API-70` : à préserver comme le reste — une instance managée peut elle aussi viser un
             // cluster, donc effacer les déclarations en enregistrant une instance couperait
             // jusqu'à celle qu'on est en train d'écrire.
             let kubeconfigs = store.load_kubeconfigs().unwrap_or_default();
             store
-                .save(&projects, &preferences, suivantes, &kubeconfigs)
+                .save(&arbre, &preferences, suivantes, &kubeconfigs)
                 .map_err(|erreur| erreur.to_string())
         })
     })

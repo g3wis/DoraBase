@@ -4,15 +4,15 @@ import { Button } from '../../../ui/Button/Button'
 import styles from './ProjectSidebar.module.css'
 
 type ProjectSidebarProps = {
-  onNewProject: () => void
+  onNewFolder: () => void
 }
 
-export function ProjectSidebar({ onNewProject }: ProjectSidebarProps) {
+export function ProjectSidebar({ onNewFolder }: ProjectSidebarProps) {
   const t = useT()
   return (
     <div className={styles.root}>
       <div className={styles.header}>
-        <Icon name="bag" size={13} strokeWidth={2} />
+        <Icon name="pin" size={13} strokeWidth={2} />
         {t('welcome.sidebar.header')}
       </div>
       <div className={styles.empty}>
@@ -23,9 +23,9 @@ export function ProjectSidebar({ onNewProject }: ProjectSidebarProps) {
         <div className={styles.emptyText}>{t('welcome.sidebar.emptyText')}</div>
       </div>
       <div className={styles.footer}>
-        <Button variant="accent" size="md" className={styles.newProject} onClick={onNewProject}>
+        <Button variant="accent" size="md" className={styles.newProject} onClick={onNewFolder}>
           <Icon name="plus" size={14} strokeWidth={2.2} />
-          {t('welcome.sidebar.newProject')}
+          {t('welcome.sidebar.newFolder')}
         </Button>
       </div>
     </div>

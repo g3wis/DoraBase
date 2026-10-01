@@ -63,7 +63,6 @@ use ts_rs::TS;
 
 use super::arbre::{ConnectionId, FolderColor, FolderId, FolderTree};
 use super::model::{ConnectionSettings, Engine, Kubeconfigs, ManagedInstance, Preferences};
-use super::transfert::CarriedSecrets;
 use crate::engine::registry::ConnectionState;
 
 // ---------------------------------------------------------------------------------------------------
@@ -120,6 +119,13 @@ pub enum ConfigLoad {
 #[ts(export_to = "arbre.ts")]
 pub struct DatabaseKey {
     pub connection: ConnectionId,
+}
+
+impl DatabaseKey {
+    /// La clé du registre de cette connexion — `connexion/<id>`, par la seule convention.
+    pub fn cle(&self) -> String {
+        super::arbre::cle_de_connexion(&self.connection)
+    }
 }
 
 /// Un état de connexion, avec la connexion qu'il concerne — ce que `connection_states` rend.
@@ -390,6 +396,26 @@ pub struct ValueLabelsRequest {
 // ---------------------------------------------------------------------------------------------------
 // Transfert (#169)
 // ---------------------------------------------------------------------------------------------------
+
+/// Ce que le fichier porte des mots de passe, tel que son en-tête l'annonce.
+///
+/// **Sorti de `transfert.rs` par #165**, qui retire ce module du build jusqu'à #169 : le contrat de
+/// l'import en a besoin, et sa projection reste dans `transfert.ts`, à la même place, pour que rien
+/// ne bouge côté écran. #169 le fera employer par `transfert.rs` d'ici plutôt que de le redéclarer.
+///
+/// **Recalculé à la lecture, jamais cru sur parole** : un en-tête faux est pire qu'un en-tête
+/// absent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[ts(export_to = "transfert.ts")]
+pub enum CarriedSecrets {
+    /// Aucun mot de passe dans le fichier. Le défaut, y compris pour un en-tête muet.
+    #[default]
+    #[serde(rename = "none")]
+    NotCarried,
+    /// Des mots de passe **en clair**.
+    #[serde(rename = "embedded")]
+    Embedded,
+}
 
 /// `export_projects` : un dossier et son sous-arbre, ou tout l'arbre. Les noms de commande restent
 /// ceux d'`API-30`.

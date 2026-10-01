@@ -1,7 +1,8 @@
 import { renderHook, waitFor } from '@testing-library/react'
 import { useMemo, useRef, useState } from 'react'
 import { expect, it, vi } from 'vitest'
-import type { DatabaseKey, TableDetail, TableSummary } from '../../domain/engine'
+import type { DatabaseKey } from '../../domain/arbre'
+import type { TableDetail, TableSummary } from '../../domain/engine'
 import {
   grouperParBoucle,
   type PasserelleStructures,
@@ -19,7 +20,7 @@ import { PLAFOND_DE_TABLES, useDiagramme } from './useDiagramme'
  * était juste invérifiable là. Ici le cache est vide par construction : chaque source est la seule.
  */
 
-const CLE: DatabaseKey = { project: 'Atelier Nord', database: 'analytics', environment: 'prod' }
+const CLE: DatabaseKey = { connection: 'analytics' }
 
 const objet = (name: string, kind: TableSummary['kind'] = 'table'): TableSummary => ({
   name,

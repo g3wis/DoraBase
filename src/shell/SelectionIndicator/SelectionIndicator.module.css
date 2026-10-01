@@ -3,10 +3,9 @@
  *
  *   rangée      24px · gap 7px · aucun cadre, aucun fond
  *   point       6px, --success quand connectée
- *   sac à dos   12px, --accent-deep, trait 2
- *   nom         700 11.5px Nunito
- *   pastille    7px, couleur déclarée de l'environnement
- *   env         700 10.5px Nunito, encre pleine, **pas de capitales**
+ *   dossier     12px, --accent-deep, trait 2 (`pin`, #166)
+ *   chemin      700 11.5px Nunito, raccourci à gauche
+ *   pastille    7px, couleur du dossier coloré le plus proche
  *   fil         500 11px JetBrains Mono, --ink-meta (.45)
  *
  * **Le cadre a disparu, et c'est le troisième écart au handoff sur cette barre** — après le
@@ -77,6 +76,17 @@
   text-overflow: ellipsis;
 }
 
+/* Le chemin, raccourci **à gauche** (#166) : c'est sa fin — le dossier le plus proche — qui dit où
+ * l'on est. `rtl` sur la boîte place l'ellipse au début ; le texte est isolé en `ltr`. */
+.name {
+  direction: rtl;
+}
+
+.cheminTexte {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
 /* La seule reprise littérale de l'ancien sélecteur : son point de 7 px. La couleur arrive en style
  * en ligne, depuis la déclaration ; celle-ci n'est qu'un repli, pour qu'un point sans couleur reste
  * visible plutôt qu'invisible. */
@@ -86,18 +96,6 @@
   height: 7px;
   border-radius: 50%;
   background: var(--ink-4);
-}
-
-/* Le libellé de l'environnement. **Aucun `text-transform`** : il est renommable depuis `23a`, donc
- * c'est une chaîne de l'utilisateur. « Pré-production » ne doit pas devenir « PRÉ-PRODUCTION ».
- * L'ancien sélecteur ne le capitalisait pas davantage — seule son étiquette « ENV » l'était, et elle
- * disparaît : sans commutateur, il n'y a plus rien à étiqueter. */
-.env {
-  flex: none;
-  font-family: var(--font-ui);
-  font-size: var(--text-caps);
-  font-weight: var(--weight-bold);
-  color: var(--ink);
 }
 
 /* Le fil d'Ariane est en mono : un nom de schéma est une valeur technique, et c'est la règle du

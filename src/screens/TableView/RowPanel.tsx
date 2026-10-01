@@ -1,6 +1,7 @@
 import { type MouseEvent as MouseEventReact, useState } from 'react'
 import { Icon } from '../../design/icons/Icon'
-import type { ColumnInfo, DatabaseKey, Relation, Value } from '../../domain/engine'
+import type { DatabaseKey } from '../../domain/arbre'
+import type { ColumnInfo, Relation, Value } from '../../domain/engine'
 import { useT } from '../../i18n/LanguageContext'
 import { useApercuTronque } from '../../ui/ApercuTronque/useApercuTronque'
 import { cx } from '../../ui/cx'

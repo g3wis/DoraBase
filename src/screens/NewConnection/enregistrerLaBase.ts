@@ -1,23 +1,21 @@
 import { invoke } from '@tauri-apps/api/core'
 import type {
-  CreateProjectRequest,
   DeleteDatabaseRequest,
-  DeleteProjectRequest,
   DeleteResult,
-  Project,
   RenameDatabaseRequest,
-  RenameProjectRequest,
-  RenameResult,
   SaveDatabaseRequest,
+  SaveDatabaseResult,
   UpdateVariantRequest,
-} from '../../domain/config'
+} from '../../domain/arbre'
+import type { ConnectionId, FolderId, FolderTree } from '../../domain/config'
 import type { ConnectionDraft } from './ConnectionDraft'
 import { baseDAuthentificationAEnvoyer } from './draftToRequest'
 import { NOM_PAR_DEFAUT } from './engines'
 import { tunnelDraftToTunnel } from './tunnelDraftToTunnel'
 
 /**
- * Appelle la commande `save_database`, et rend les projets **à jour**.
+ * Appelle la commande `save_database`, et rend l'arbre **à jour** avec l'identifiant de la
+ * connexion créée, que le cœur a tiré.
  *
  * Rendre la liste plutôt qu'un simple succès évite un second aller-retour pour rafraîchir
  * l'écran, et supprime la fenêtre pendant laquelle l'écran et le disque divergeraient.
@@ -25,19 +23,8 @@ import { tunnelDraftToTunnel } from './tunnelDraftToTunnel'
  * Injectée dans `NewConnection` comme `onTest` et `onBrowseKey`, pour la même raison : le pont
  * ne répond pas hors de la webview, et ce qui est testable ici est le **câblage**.
  */
-export async function enregistrerLaBase(request: SaveDatabaseRequest): Promise<Project[]> {
-  return invoke<Project[]>('save_database', { request })
-}
-
-/**
- * Crée un projet vide, et rend les projets **à jour**.
- *
- * Distincte de `save_database`, et pas par symétrie : `enregistrer` refuse un projet inconnu, et
- * une commande qui créerait l'entité manquante par effet de bord ferait d'une faute de frappe un
- * second projet silencieux. Voir `08f`.
- */
-export async function creerLeProjet(request: CreateProjectRequest): Promise<Project[]> {
-  return invoke<Project[]>('create_project', { request })
+export async function enregistrerLaBase(request: SaveDatabaseRequest): Promise<SaveDatabaseResult> {
+  return invoke<SaveDatabaseResult>('save_database', { request })
 }
 
 /**
@@ -47,51 +34,35 @@ export async function creerLeProjet(request: CreateProjectRequest): Promise<Proj
  * protège d'un écrasement par mégarde, et la fondre dans une commande « enregistrer ou mettre à
  * jour » l'effacerait.
  */
-export async function mettreAJourLaVariante(request: UpdateVariantRequest): Promise<Project[]> {
-  return invoke<Project[]>('update_variant', { request })
+export async function mettreAJourLaVariante(request: UpdateVariantRequest): Promise<FolderTree> {
+  return invoke<FolderTree>('update_variant', { request })
 }
 
 /**
- * Renomme un projet (`08i`), et rend les projets à jour **avec ce qu'il y a à dire**.
+ * Renomme une connexion (`26`), et rend l'arbre à jour.
  *
- * Le nom d'un projet est dans la clé d'identité de ses secrets (`05a`) : renommer déplace des mots
- * de passe dans le Trousseau. La commande rend donc deux listes en plus des projets — ceux qui
- * étaient déclarés mais introuvables, et ceux qu'elle n'a pas su effacer. Les taire laisserait
- * l'utilisateur découvrir l'un ou l'autre bien plus tard, sur un échec de connexion sans raison
- * apparente.
+ * **Synchrone et sans rapport depuis #166** : le nom d'une connexion n'est plus dans aucune
+ * identité — ni la clé du registre, ni la référence du secret, qui dérivent toutes deux de son
+ * identifiant. Il n'y a donc plus de secret à déplacer ni de connexion à fermer, donc rien à dire.
  */
-export async function renommerLeProjet(request: RenameProjectRequest): Promise<RenameResult> {
-  return invoke<RenameResult>('rename_project', { request })
-}
-
-/**
- * Renomme une connexion (`26`), et rend les projets à jour **avec ce qu'il y a à dire**.
- *
- * Le nom d'une connexion est le deuxième tiers de sa clé d'identité (`05a`) : renommer déplace un mot
- * de passe dans le Trousseau et ferme la connexion ouverte. La commande rend donc, comme
- * `renommerLeProjet`, le secret introuvable et celui qu'elle n'a pas su effacer — les taire
- * laisserait l'utilisateur les découvrir sur un échec de connexion sans raison apparente.
- */
-export async function renommerLaConnexion(request: RenameDatabaseRequest): Promise<RenameResult> {
-  return invoke<RenameResult>('rename_database', { request })
+export async function renommerLaConnexion(request: RenameDatabaseRequest): Promise<FolderTree> {
+  return invoke<FolderTree>('rename_database', { request })
 }
 
 /**
  * Convertit le brouillon de `A2` en requête de mise à jour.
  *
- * Le nom, l'environnement et le moteur ne sont **pas** repris du brouillon : ils désignent la
- * variante et ne se modifient pas (`08g`). Le mot de passe part `null` quand le champ est vide,
+ * Le moteur n'est **pas** repris du brouillon : il ne se modifie pas (`08g`), et la connexion est
+ * désignée par son identifiant. Le mot de passe part `null` quand le champ est vide,
  * ce que le cœur lit comme « inchangé ».
  */
 export function draftToUpdateRequest(
   draft: ConnectionDraft,
-  cible: { project: string; database: string; environment: ConnectionDraft['environment'] },
+  connection: ConnectionId,
 ): UpdateVariantRequest {
-  const complet = draftToSaveRequest(draft)
+  const complet = draftToSaveRequest(draft, null)
   return {
-    project: cible.project,
-    database: cible.database,
-    environment: cible.environment,
+    connection,
     variant: complet.variant,
     password: draft.password === '' ? null : draft.password,
     label: complet.label,
@@ -109,20 +80,23 @@ export function draftToUpdateRequest(
  * `enregistrer` côté Rust qui la fabrique après avoir rangé le secret. La poser ici obligerait
  * le front à connaître la convention de nommage des références, donc à la dupliquer.
  */
-export function draftToSaveRequest(draft: ConnectionDraft): SaveDatabaseRequest {
+export function draftToSaveRequest(
+  draft: ConnectionDraft,
+  folder: FolderId | null,
+): SaveDatabaseRequest {
   const port = Number.parseInt(draft.port, 10)
 
   return {
-    project: draft.project,
+    // **Le dossier est le cadre de la modale** (#166), jamais un champ du brouillon : il vient de la
+    // ligne d'arbre d'où part le geste. `null` range la connexion à la racine.
+    folder,
     // **`name` n'est plus un champ du formulaire** (1er septembre 2026) : sur un brouillon neuf
     // il est toujours vide, et devient l'abréviation du moteur — « psql », « mongo »… — qui reste
     // aussi le titre par défaut affiché dans l'explorateur tant qu'aucun libellé ne le remplace
     // (voir `arbre.ts`). `draft.name.trim() ||` protège l'édition, où le brouillon porte le nom
     // existant de la base qu'on modifie.
-    database: draft.name.trim() || NOM_PAR_DEFAUT[draft.engine],
+    name: draft.name.trim() || NOM_PAR_DEFAUT[draft.engine],
     engine: draft.engine,
-    // Hors des réglages : l'environnement appartient à la connexion (`23b`).
-    environment: draft.environment,
     variant: {
       host: draft.host,
       port: Number.isFinite(port) ? port : 0,
@@ -154,9 +128,4 @@ export function draftToSaveRequest(draft: ConnectionDraft): SaveDatabaseRequest 
  */
 export async function retirerLaConnexion(request: DeleteDatabaseRequest): Promise<DeleteResult> {
   return invoke<DeleteResult>('delete_database', { request })
-}
-
-/** Retire un projet et toutes ses déclarations de connexion (`08j`). Même garantie. */
-export async function retirerLeProjet(request: DeleteProjectRequest): Promise<DeleteResult> {
-  return invoke<DeleteResult>('delete_project', { request })
 }

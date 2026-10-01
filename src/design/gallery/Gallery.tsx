@@ -1,15 +1,9 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react'
-import type { EnvironmentDeclaration } from '../../domain/config'
-import type { ColumnInfo, Relation, RowLimit } from '../../domain/engine'
+import type { Database, FolderTree } from '../../domain/config'
+import type { ColumnInfo, ConnectionState, Relation, RowLimit } from '../../domain/engine'
 import { DiagramStatusBar, DiagramView } from '../../screens/Diagram/DiagramView'
 import type { EntreeDeTable } from '../../screens/Diagram/disposition'
-import {
-  type Charge,
-  idBase,
-  idEnvironnement,
-  idProjet,
-  idSchema,
-} from '../../screens/Explorer/arbre'
+import { type Charge, idBase, idDossier, idSchema } from '../../screens/Explorer/arbre'
 import { BreadcrumbBar, type TypeObjet } from '../../screens/Explorer/BreadcrumbBar'
 import { DetailPanel } from '../../screens/Explorer/DetailPanel'
 import { ExplorerSidebar } from '../../screens/Explorer/ExplorerSidebar'
@@ -41,7 +35,7 @@ import { StatTile } from '../../ui/StatTile/StatTile'
 import { Stepper } from '../../ui/Stepper/Stepper'
 import { type Tab, TabStrip } from '../../ui/TabStrip/TabStrip'
 import { Toggle } from '../../ui/Toggle/Toggle'
-import { TreeRow } from '../../ui/TreeRow/TreeRow'
+import { indentation, TreeRow } from '../../ui/TreeRow/TreeRow'
 import { type GridColumn, VirtualGrid } from '../../ui/VirtualGrid/VirtualGrid'
 import { Icon } from '../icons/Icon'
 import { tokens } from '../tokens'
@@ -918,6 +912,8 @@ function SidebarGallery() {
             />
             <TreeRow
               depth={3}
+              // Une feuille sous un nœud dépliable : +16, la cadence « vers une feuille » (#166).
+              indent={indentation(2, 1)}
               label="orders"
               icon="table"
               iconColor="var(--success)"
@@ -927,6 +923,8 @@ function SidebarGallery() {
             />
             <TreeRow
               depth={3}
+              // Une feuille sous un nœud dépliable : +16, la cadence « vers une feuille » (#166).
+              indent={indentation(2, 1)}
               label="order_items"
               icon="table"
               iconColor="var(--success)"
@@ -1383,13 +1381,13 @@ function TitleBarGallery() {
         connexion, ses connexions en ont. Sans connexion ouverte, **aucun point** plutôt qu’un point
         gris inventé.
       </Note>
-      <Sub title="A4 — projet, environnement, fil d’Ariane, lecture seule">
+      <Sub title="A4 — chemin de dossiers, fil d’Ariane, lecture seule">
         <div data-testid="titlebar-a4">
           <TitleBar
             center={
               <SelectionIndicator
-                projectName="Atelier Nord"
-                environment={{ label: 'coulisses', color: 'amber', production: false }}
+                chemin={['Atelier Nord', 'coulisses']}
+                couleur="amber"
                 breadcrumb="analytics · public"
                 connection={{
                   kind: 'connected',
@@ -1402,12 +1400,13 @@ function TitleBarGallery() {
           />
         </div>
       </Sub>
-      <Sub title="Un environnement marqué production — le badge suit le drapeau, pas le libellé">
+      <Sub title="Un dossier en lecture seule — la puce suit le drapeau, pas le nom">
         <TitleBar
           center={
             <SelectionIndicator
-              projectName="Atelier Nord"
-              environment={{ label: 'vitrine', color: 'red', production: true }}
+              chemin={['Atelier Nord', 'vitrine']}
+              couleur="red"
+              readOnly
               breadcrumb="analytics · public"
               connection={{
                 kind: 'connected',
@@ -1418,8 +1417,8 @@ function TitleBarGallery() {
           }
         />
       </Sub>
-      <Sub title="Un projet seul — la sélection ne désigne pas d’environnement">
-        <TitleBar center={<SelectionIndicator projectName="Atelier Nord" />} />
+      <Sub title="Un dossier seul — aucune couleur à montrer">
+        <TitleBar center={<SelectionIndicator chemin={['Atelier Nord']} />} />
       </Sub>
       <Sub title="Rien de sélectionné — le centre n’a que son logo, et les actions ne bougent pas">
         <div data-testid="titlebar-vide">
@@ -1430,8 +1429,8 @@ function TitleBarGallery() {
         <TitleBar
           center={
             <SelectionIndicator
-              projectName="Atelier Nord"
-              environment={{ label: 'bac à sable', color: 'green', production: false }}
+              chemin={['Atelier Nord', 'bac à sable']}
+              couleur="violet"
               breadcrumb="shop · public"
               connection={{ kind: 'offline', reason: 'hôte injoignable' }}
             />
@@ -1466,81 +1465,74 @@ const REGLAGES_DE_GALERIE = {
 }
 
 /**
- * **Quatre environnements, et le seul marqué production ne s'appelle pas « prod »** (`23g`, `25a`).
+ * **L'arbre de la galerie, en dossiers** (#166) — la forme migrée de l'ancien décor à quatre
+ * environnements, dont le seul en lecture seule ne s'appelle pas « prod ».
  *
- * C'est ce qui met un trio en dur en évidence à l'œil, dans le décor même : un écran qui relirait
- * `prod` / `staging` / `dev` afficherait ici quatre lignes sans badge, ou un badge sur la mauvaise.
- * Les identifiants sont volontairement décorrélés des libellés — `23a` fige l'un et laisse renommer
- * l'autre, et un décor où les deux coïncident ne prouve rien.
+ * `analytics` est déclarée **deux fois**, dans deux dossiers : c'est le décor qui met les collisions
+ * d'identité de nœud en évidence. Elles se distinguent par leur identifiant, jamais par leur nom.
  */
-const ENVIRONNEMENTS_DE_GALERIE: EnvironmentDeclaration[] = [
-  { id: 'atelier', label: 'atelier', color: 'green', production: false },
-  { id: 'coulisses', label: 'coulisses', color: 'amber', production: false },
-  { id: 'bac-a-sable', label: 'bac à sable', color: 'violet', production: false },
-  { id: 'vitrine', label: 'vitrine', color: 'red', production: true },
-]
+const connexionDeGalerie = (
+  id: string,
+  name: string,
+  engine: Database['engine'],
+  consoles: Database['consoles'] = [],
+): Database => ({ id, name, engine, connection: REGLAGES_DE_GALERIE, consoles }) as Database
 
-const PROJETS_DEMO = [
-  {
-    name: 'Atelier Nord',
-    environments: ENVIRONNEMENTS_DE_GALERIE,
-    queries: [],
-    databases: [
-      // **`analytics` est déclarée deux fois, dans deux environnements** (`25a`). C'est le décor qui
-      // met les collisions d'identité de nœud en évidence : tant que `idBase` ne portait pas
-      // l'environnement, ces deux lignes partageaient leur dépliage, leur sélection, leur clé de
-      // rendu et leur entrée dans `charge.schemas` — la structure d'un serveur s'affichait sous la
-      // ligne de l'autre. Elles sont ici côte à côte, à un palier près, pour que ça se voie.
-      {
-        name: 'analytics',
-        engine: 'postgresql' as const,
-        environment: 'vitrine',
-        connection: REGLAGES_DE_GALERIE,
-        consoles: [],
-      },
-      {
-        name: 'shop',
-        engine: 'mysql' as const,
-        environment: 'vitrine',
-        connection: REGLAGES_DE_GALERIE,
-        consoles: [],
-      },
-      {
-        name: 'cache',
-        engine: 'redis' as const,
-        environment: 'vitrine',
-        connection: REGLAGES_DE_GALERIE,
-        consoles: [],
-      },
-      {
-        name: 'analytics',
-        engine: 'postgresql' as const,
-        environment: 'atelier',
-        connection: REGLAGES_DE_GALERIE,
-        // Une console, pour que le palier 3 montre autre chose qu'un schéma.
-        consoles: [{ name: 'Comptes du jour', sql: 'select count(*) from commandes' }],
-      },
-    ],
-  },
-  {
-    name: 'Atelier Sud',
-    environments: ENVIRONNEMENTS_DE_GALERIE,
-    queries: [],
-    databases: [
-      {
-        name: 'tracking',
-        engine: 'mongodb' as const,
-        environment: 'atelier',
-        connection: REGLAGES_DE_GALERIE,
-        consoles: [],
-      },
-    ],
-  },
-]
+const ARBRE_DEMO: FolderTree = {
+  folders: [
+    {
+      id: 'atelier-nord',
+      name: 'Atelier Nord',
+      readOnly: false,
+      folders: [
+        {
+          id: 'atelier',
+          name: 'atelier',
+          color: 'green',
+          readOnly: false,
+          connections: [
+            connexionDeGalerie('analytics-atelier', 'analytics', 'postgresql', [
+              // Une console, pour que le palier sous la connexion montre autre chose qu'un schéma.
+              { name: 'Comptes du jour', sql: 'select count(*) from commandes' },
+            ]),
+          ],
+        },
+        { id: 'coulisses', name: 'coulisses', color: 'amber', readOnly: false },
+        { id: 'bac-a-sable', name: 'bac à sable', color: 'violet', readOnly: false },
+        {
+          id: 'vitrine',
+          name: 'vitrine',
+          color: 'red',
+          readOnly: true,
+          connections: [
+            connexionDeGalerie('analytics-vitrine', 'analytics', 'postgresql'),
+            connexionDeGalerie('shop-vitrine', 'shop', 'mysql'),
+            connexionDeGalerie('cache-vitrine', 'cache', 'redis'),
+          ],
+        },
+      ],
+    },
+    {
+      id: 'atelier-sud',
+      name: 'Atelier Sud',
+      readOnly: false,
+      folders: [
+        {
+          id: 'atelier-sud-atelier',
+          name: 'atelier',
+          color: 'green',
+          readOnly: false,
+          connections: [connexionDeGalerie('tracking-atelier', 'tracking', 'mongodb')],
+        },
+      ],
+    },
+  ],
+  connections: [],
+}
 
-const ID_ENV = idEnvironnement('Atelier Nord', 'vitrine')
-const ID_BASE = idBase('Atelier Nord', 'vitrine', 'analytics')
-const ID_SCHEMA = idSchema('Atelier Nord', 'vitrine', 'analytics', 'public')
+const ID_ENV = idDossier('vitrine')
+const ID_BASE = idBase('analytics-vitrine')
+const ID_SCHEMA = idSchema('analytics-vitrine', 'public')
 
 const CHARGE_DEMO: Charge = {
   schemas: {
@@ -1593,21 +1585,21 @@ const CHARGE_DEMO: Charge = {
       },
     ],
   },
-  enCours: new Set([idBase('Atelier Nord', 'vitrine', 'shop')]),
-  echecs: { [idBase('Atelier Nord', 'vitrine', 'cache')]: 'hôte injoignable' },
+  enCours: new Set([idBase('shop-vitrine')]),
+  echecs: { [idBase('cache-vitrine')]: 'hôte injoignable' },
 }
 
 function ExplorerSidebarGallery() {
   const [deplies, setDeplies] = useState<Set<string>>(
     new Set([
-      idProjet('Atelier Nord'),
-      // **Le palier d'environnement doit être déplié**, sinon l'arbre s'ouvre sur quatre lignes
-      // d'environnement et le décor perd ses trois états de chargement.
+      idDossier('atelier-nord'),
+      // **Le sous-dossier doit être déplié**, sinon l'arbre s'ouvre sur quatre lignes de dossier et
+      // le décor perd ses trois états de chargement.
       ID_ENV,
       ID_BASE,
       ID_SCHEMA,
-      idBase('Atelier Nord', 'vitrine', 'shop'),
-      idBase('Atelier Nord', 'vitrine', 'cache'),
+      idBase('shop-vitrine'),
+      idBase('cache-vitrine'),
     ]),
   )
   const [choisi, setChoisi] = useState<string | null>(ID_SCHEMA)
@@ -1622,19 +1614,19 @@ function ExplorerSidebarGallery() {
         Un dépliage qui échoue le dit **sur sa ligne** et ne vide pas l’arbre — voir `cache`
         ci-dessous, hors ligne, tandis que `analytics` reste dépliée.
       </Note>
-      <Sub title="Cinq niveaux, trois états de chargement, deux connexions homonymes">
+      <Sub title="Des dossiers, trois états de chargement, deux connexions homonymes">
         <div data-testid="sidebar-a4" style={{ display: 'flex', height: 420 }}>
           <ExplorerSidebar
-            projects={PROJETS_DEMO}
+            arbre={ARBRE_DEMO}
             deplies={deplies}
             charge={CHARGE_DEMO}
-            // **L'état discrimine sur le nom *et* l'environnement** : avec deux `analytics`, ne
-            // regarder que le nom leur donnerait le même état — et le décor cesserait de montrer que
-            // deux connexions homonymes sont deux connexions.
-            etatDe={(_p, base, environnement) =>
-              base === 'analytics' && environnement === 'vitrine'
+            // **L'état discrimine sur l'identifiant** : avec deux `analytics`, regarder le nom leur
+            // donnerait le même état — et le décor cesserait de montrer que deux connexions
+            // homonymes sont deux connexions.
+            etatDe={(connection): ConnectionState =>
+              connection === 'analytics-vitrine'
                 ? { kind: 'connected', serverVersion: 'PostgreSQL 17.6', tunnelLocalPort: null }
-                : base === 'cache'
+                : connection === 'cache-vitrine'
                   ? { kind: 'offline', reason: 'hôte injoignable' }
                   : { kind: 'never' }
             }

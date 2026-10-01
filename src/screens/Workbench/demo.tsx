@@ -1,18 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  connexion,
+  connexionsDescendantes,
+  dossier,
+  idDeConnexion,
+  nomDeDossierLibre,
+  sansLesElements,
+  surConnexion,
+  surDossier,
+} from '../../data/dossiers'
+import type { DatabaseKey, FolderOutcome, ImportReport } from '../../domain/arbre'
 import type {
+  ConnectionId,
   ConnectionSettings,
   Database,
-  EnvironmentColor,
-  EnvironmentDeclaration,
-  EnvironmentId,
+  FolderId,
+  FolderTree,
   Kubeconfigs,
   ManagedInstance,
   Preferences,
-  Project,
 } from '../../domain/config'
 import type {
   ColumnInfo,
-  DatabaseKey,
   QueryResult,
   Relation,
   SchemaInfo,
@@ -21,13 +30,11 @@ import type {
   TransactionStatement,
 } from '../../domain/engine'
 import type { InstanceAction } from '../../domain/instances'
-import type { ImportReport } from '../../domain/transfert'
 import { LanguageProvider, langueAppliquee } from '../../i18n/LanguageContext'
 import type { PasserelleExport } from '../Console/exportResultat'
 import type { PasserelleInstances } from '../Instances/instanceCommands'
 import { NewInstance } from '../Instances/NewInstance'
 import { NewConnection } from '../NewConnection/NewConnection'
-import { ParcoursDeCreation } from '../NewProject/ParcoursDeCreation'
 import { PreferencesDialog } from '../Preferences/PreferencesDialog'
 import { jetonsDe, PREFERENCES_PAR_DEFAUT, themeApplique } from '../Preferences/preferences'
 import type { PasserelleLignes } from '../TableView/useLignes'
@@ -38,104 +45,124 @@ import { grouperParBoucle, type PasserelleStructures } from './useStructures'
 import { Workbench } from './Workbench'
 
 /**
- * Les environnements déclarés par les projets de la démo (`23g`).
+ * Le décor de la démo, **exactement la migration v6 → v7 du décor d'avant** (#166).
  *
- * **Quatre, dont un que personne ne codait en dur.** Le trio `dev` / `staging` / `prod` était une
- * énumération : un décor qui s'y limite laisserait passer un écran qui relit une table de constantes au
- * lieu des déclarations du projet. `preprod` est la sonde — s'il s'affiche partout, plus aucun trio ne
- * survit.
+ * Deux projets v6 — « Atelier Nord », qui déclarait quatre environnements dont deux connexions en
+ * `prod`, et « Outils internes », vide — deviennent deux dossiers racine ; leurs environnements, des
+ * sous-dossiers dans l'ordre déclaré, couleur reprise, et **`prod` en lecture seule** parce qu'il
+ * était marqué production. Les identifiants sont ceux que `migration::v6::vers_v7` dérive des
+ * mêmes données (`sha256` des parties jointes par U+001F, seize chiffres hexadécimaux) : un décor
+ * qui inventerait les siens ne prouverait rien de la forme que l'application reçoit vraiment.
+ *
+ * **Cette forme garde vrais la plupart des tests de bout en bout** : dossier racine, sous-dossier,
+ * connexion — donc la connexion à `aria-level` 3 et les indentations 8, 22, 36 du mockup, comme
+ * projet, environnement, connexion l'étaient. `preprod` reste la sonde qu'aucune table de constantes
+ * ne connaît.
  */
-const ENVIRONNEMENTS_DE_DEMO: EnvironmentDeclaration[] = [
-  { id: 'dev', label: 'dev', color: 'green', production: false },
-  { id: 'preprod', label: 'preprod', color: 'violet', production: false },
-  { id: 'staging', label: 'staging', color: 'amber', production: false },
-  { id: 'prod', label: 'prod', color: 'red', production: true },
-]
+const ATELIER_NORD = 'b1ac3966c682b0d4'
+const ANALYTICS = 'ba31b549870182d4'
+/** La base documentaire du décor — voir `estMongo`. */
+const EVENEMENTS = '24af7ce4cc310d22'
 
 /**
- * L'écran de travail sur des données figées, **en développement seulement**.
- *
- * Il existe pour une raison précise : Playwright pilote Chromium, où le pont Tauri ne répond
- * pas. Sans ce montage, l'écran de travail ne serait vérifiable qu'en galerie — exactement le
- * trou que `10b` corrige pour `A4`. Un test qui part de `/` doit donc pouvoir atteindre l'écran
- * sans base réelle.
- *
- * Monté derrière **deux** conditions, comme la galerie : `import.meta.env.DEV` ET `?demo` dans
- * l'URL. `import.meta.env.DEV` devient `false` à la construction de production, et le bloc
- * entier est élagué.
+ * Une connexion du décor, **sans le champ `environment`** que la projection de #164 exige encore :
+ * #165 le retire du modèle, et un décor qui l'écrirait cesserait de compiler ce jour-là.
  */
+function declarer(connexion: Omit<Database, 'environment'>): Database {
+  return connexion as Database
+}
 
-const PROJETS: Project[] = [
-  {
-    name: 'Atelier Nord',
-    // **Quatre environnements, et non trois** (`23g`) : un décor qui n'en porte que
-    // trois laisserait passer un écran qui relit le trio en dur. `preprod` est
-    // justement celui qu'aucune table de constantes ne connaît.
-    environments: ENVIRONNEMENTS_DE_DEMO,
-    queries: [],
-    databases: [
-      {
-        name: 'analytics',
-        engine: 'postgresql',
-        environment: 'prod',
-        // Trois consoles persistées : elles vivent sous la connexion depuis le 20 août 2026, et une
-        // démo sans elles ne montrerait pas ce niveau de l'arbre.
-        consoles: [
-          {
-            name: 'CA par jour',
-            sql: "select date_trunc('day', created_at), sum(total_cents)\nfrom orders\ngroup by 1",
-          },
-          {
-            name: 'Top coupons',
-            sql: 'select coupon_code, count(*)\nfrom orders\ngroup by 1 order by 2 desc',
-          },
-          { name: 'Paniers abandonnés', sql: "select * from orders where status = 'pending'" },
-        ],
-        connection: {
-          host: 'localhost',
-          port: 5432,
-          defaultDatabase: 'analytics',
-          username: 'dorabase',
-          password: null,
-          sslMode: 'prefer',
-          caCertificate: null,
-          authDatabase: null,
+const ARBRE_DEMO: FolderTree = {
+  folders: [
+    {
+      id: ATELIER_NORD,
+      name: 'Atelier Nord',
+      readOnly: false,
+      folders: [
+        { id: '7b3cc6d44c6b39b2', name: 'dev', color: 'green', readOnly: false },
+        { id: 'fa1f91a2f4143692', name: 'preprod', color: 'violet', readOnly: false },
+        { id: '5c1d310dd5740094', name: 'staging', color: 'amber', readOnly: false },
+        {
+          id: 'e804baad33a1e6d3',
+          name: 'prod',
+          color: 'red',
           readOnly: true,
-          reconnectOnStartup: false,
-          tunnel: null,
+          connections: [
+            declarer({
+              id: ANALYTICS,
+              name: 'analytics',
+              engine: 'postgresql',
+              // Trois consoles persistées : elles vivent sous la connexion depuis le 20 août 2026, et une
+              // démo sans elles ne montrerait pas ce niveau de l'arbre.
+              consoles: [
+                {
+                  name: 'CA par jour',
+                  sql: "select date_trunc('day', created_at), sum(total_cents)\nfrom orders\ngroup by 1",
+                },
+                {
+                  name: 'Top coupons',
+                  sql: 'select coupon_code, count(*)\nfrom orders\ngroup by 1 order by 2 desc',
+                },
+                {
+                  name: 'Paniers abandonnés',
+                  sql: "select * from orders where status = 'pending'",
+                },
+              ],
+              connection: {
+                host: 'localhost',
+                port: 5432,
+                defaultDatabase: 'analytics',
+                username: 'dorabase',
+                password: null,
+                sslMode: 'prefer',
+                caCertificate: null,
+                authDatabase: null,
+                readOnly: true,
+                reconnectOnStartup: false,
+                tunnel: null,
+              },
+            }),
+
+            // **Une base mongo, pour qu'`A8` soit atteignable en démo** (`13a`). Le dialecte de la
+            // console se dérive du moteur : sans base documentaire dans le décor, aucun chemin de
+            // l'application n'ouvrirait une console mongo, et rien de `13a` à `13c` ne se verrait.
+            declarer({
+              id: EVENEMENTS,
+              name: 'evenements',
+              engine: 'mongodb',
+              connection: {
+                host: 'localhost',
+                port: 27017,
+                defaultDatabase: 'atelier_journal',
+                username: '',
+                password: null,
+                sslMode: 'disable',
+                caCertificate: null,
+                authDatabase: null,
+                readOnly: true,
+                reconnectOnStartup: false,
+                tunnel: null,
+              },
+              consoles: [],
+            }),
+          ],
         },
-      },
-      // **Une base mongo, pour qu'`A8` soit atteignable en démo** (`13a`). Le dialecte de la
-      // console se dérive du moteur : sans base documentaire dans le décor, aucun chemin de
-      // l'application n'ouvrirait une console mongo, et rien de `13a` à `13c` ne se verrait.
-      {
-        name: 'evenements',
-        engine: 'mongodb',
-        environment: 'prod',
-        connection: {
-          host: 'localhost',
-          port: 27017,
-          defaultDatabase: 'atelier_journal',
-          username: '',
-          password: null,
-          sslMode: 'disable',
-          caCertificate: null,
-          authDatabase: null,
-          readOnly: true,
-          reconnectOnStartup: false,
-          tunnel: null,
-        },
-        consoles: [],
-      },
-    ],
-  },
-  {
-    name: 'Outils internes',
-    environments: ENVIRONNEMENTS_DE_DEMO,
-    databases: [],
-    queries: [],
-  },
-]
+      ],
+    },
+    {
+      id: 'c57b3dfe7ac64f12',
+      name: 'Outils internes',
+      readOnly: false,
+      folders: [
+        { id: '097774fbc9ccca89', name: 'dev', color: 'green', readOnly: false },
+        { id: '28b0ccc25046a807', name: 'preprod', color: 'violet', readOnly: false },
+        { id: '25b88b623aee066d', name: 'staging', color: 'amber', readOnly: false },
+        { id: 'f84de0621cc91d3f', name: 'prod', color: 'red', readOnly: true },
+      ],
+    },
+  ],
+  connections: [],
+}
 
 const SCHEMAS: SchemaInfo[] = [
   {
@@ -518,8 +545,8 @@ db.createCollection("evenements");
 db.evenements.createIndex({ "sorte": 1, "horodatage": -1 }, { name: "evenements_sorte_date_idx" });`,
 }
 
-/** Vrai pour la base documentaire du décor — voir `PROJETS`. */
-const estMongo = (base: string) => base === 'evenements'
+/** Vrai pour la base documentaire du décor — voir `ARBRE_DEMO`. */
+const estMongo = (connection: string) => connection === EVENEMENTS
 
 /**
  * L'export d'un résultat, simulé (`API-29`).
@@ -548,12 +575,12 @@ const PASSERELLE: PasserelleArbre = {
   surEchecDeCommande: () => () => {},
   connectionStates: async () => [
     {
-      key: { project: 'Atelier Nord', database: 'analytics', environment: 'prod' },
+      key: { connection: ANALYTICS },
       state: { kind: 'connected', serverVersion: 'PostgreSQL 17.6', tunnelLocalPort: null },
     },
   ],
-  listSchemas: async (cle) => (estMongo(cle.database) ? SCHEMAS_MONGO : SCHEMAS),
-  listObjects: async (cle) => (estMongo(cle.database) ? COLLECTIONS : OBJETS),
+  listSchemas: async (cle) => (estMongo(cle.connection) ? SCHEMAS_MONGO : SCHEMAS),
+  listObjects: async (cle) => (estMongo(cle.connection) ? COLLECTIONS : OBJETS),
 }
 
 const DETAIL_USERS: TableDetail = {
@@ -767,7 +794,7 @@ const DETAILS: Readonly<Record<string, TableDetail>> = {
 
 const PASSERELLE_DETAIL: PasserelleDetail = {
   describeTable: async (cle, _schema, table) => {
-    if (estMongo(cle.database)) return DETAIL_MONGO
+    if (estMongo(cle.connection)) return DETAIL_MONGO
     // Le repli sur `DETAIL` reste, pour une table que le décor n'aurait pas prévue — mais il ne
     // couvre plus les tables *listées*, qui sont désormais toutes décrites sous leur propre nom.
     return DETAILS[table] ?? DETAIL
@@ -1277,80 +1304,75 @@ const PASSERELLE_INSTANCES_DEMO: PasserelleInstances = {
  */
 const TRANSFERT_SIMULE = {
   exporter: async () => ({
-    projects: 1,
+    folders: 5,
     connections: 2,
     consoles: 3,
     passwordsCarried: 0,
-    passwordsMissing: ['catalogue (staging)'],
+    passwordsMissing: ['Atelier Nord › staging › catalogue'],
   }),
   inspecter: async () => APERCU_SIMULE,
-  importer: async () => ({ projects: [], report: APERCU_SIMULE }),
+  importer: async () => ({ tree: ARBRE_DEMO, report: APERCU_SIMULE }),
   choisirDestination: async (projet: string | null) =>
     `/Users/demo/Desktop/${projet ?? 'projets'}.dorabase.json`,
   choisirSource: async () => '/Users/demo/Desktop/atelier-nord.dorabase.json',
   messageDe: (cause: unknown) => String(cause),
 }
 
-/** L'aperçu que le pont simulé rend, et qui porte les trois sortes de verdict. */
+/** Un sort vide, que chaque ligne de l'aperçu complète — douze listes à tenir sinon. */
+const SORT_VIDE: Omit<FolderOutcome, 'folder' | 'verdict'> = {
+  foldersAdded: [],
+  foldersKept: [],
+  readOnlyFromFile: [],
+  connectionsAdded: [],
+  connectionsKept: [],
+  connectionsRejected: [],
+  consolesAdded: [],
+  consolesKept: [],
+  passwordsStored: [],
+  passwordsMissing: [],
+  localPaths: [],
+  valueLabelsAdded: [],
+  valueLabelsKept: [],
+  kubeconfigsMissing: [],
+}
+
+/**
+ * L'aperçu que le pont simulé rend, et qui porte les trois sortes de verdict — **en dossiers**
+ * (#166). La modale d'import n'est portée qu'a minima, #169 la refait : le décor dit la forme du
+ * contrat, pas ce que la modale en fera.
+ */
 const APERCU_SIMULE: ImportReport = {
-  version: 5,
+  version: 7,
   secrets: 'none',
-  projects: [
+  folders: [
     {
-      name: 'Quai Sud',
+      ...SORT_VIDE,
+      folder: 'Quai Sud',
       verdict: { kind: 'created' },
-      environmentsAdded: ['dev', 'prod'],
-      environmentsKept: [],
-      connectionsAdded: ['catalogue (dev)', 'catalogue (prod)'],
-      connectionsKept: [],
-      connectionsRejected: [],
-      consolesAdded: ['catalogue (dev) › exploration'],
-      consolesKept: [],
-      passwordsStored: [],
-      passwordsMissing: ['catalogue (prod)'],
-      localPaths: [],
-      kubeconfigsMissing: [],
-      // Les libellés de valeurs voyagent avec le projet (`API-75`) : un projet créé apporte les
-      // siens, un projet fusionné garde ceux qu'on avait déjà déclarés ici.
+      foldersAdded: ['Quai Sud › dev', 'Quai Sud › prod'],
+      connectionsAdded: ['Quai Sud › dev › catalogue', 'Quai Sud › prod › catalogue'],
+      consolesAdded: ['Quai Sud › dev › catalogue › exploration'],
+      passwordsMissing: ['Quai Sud › prod › catalogue'],
       valueLabelsAdded: ['orders.status'],
-      valueLabelsKept: [],
     },
     {
-      name: 'Atelier Nord',
+      ...SORT_VIDE,
+      folder: 'Atelier Nord',
       verdict: { kind: 'merged' },
-      environmentsAdded: [],
-      environmentsKept: ['prod'],
-      connectionsAdded: [],
-      connectionsKept: ['analytics (prod)'],
-      connectionsRejected: [],
-      consolesAdded: ['analytics (prod) › journal'],
-      consolesKept: ['analytics (prod) › exploration'],
-      passwordsStored: [],
-      passwordsMissing: [],
-      localPaths: [],
-      kubeconfigsMissing: [],
+      foldersKept: ['Atelier Nord › prod'],
+      connectionsKept: ['Atelier Nord › prod › analytics'],
+      consolesAdded: ['Atelier Nord › prod › analytics › journal'],
+      consolesKept: ['Atelier Nord › prod › analytics › exploration'],
       valueLabelsAdded: ['orders.kind'],
       valueLabelsKept: ['orders.status'],
     },
     {
-      name: 'Bancal',
+      ...SORT_VIDE,
+      folder: 'Bancal',
       verdict: {
         kind: 'rejected',
-        reason: 'le projet « Bancal » doit déclarer au moins un environnement',
+        reason: 'le dossier « Bancal » porte deux sous-dossiers « dev »',
       },
-      environmentsAdded: [],
-      environmentsKept: [],
-      connectionsAdded: [],
-      connectionsKept: [],
-      connectionsRejected: [],
-      consolesAdded: [],
-      consolesKept: [],
-      passwordsStored: [],
-      passwordsMissing: [],
-      localPaths: [],
-      kubeconfigsMissing: [],
-      valueLabelsAdded: [],
-      valueLabelsKept: [],
     },
   ],
 }
@@ -1361,17 +1383,23 @@ export function WorkbenchDemo() {
   // vert sur `document.title` n'aurait rien dit de la modale — le piège d'`A4`, qui n'existait que
   // dans la galerie. Les commandes du formulaire ne répondent pas en Chromium ; ce qui se vérifie
   // ici est qu'il s'ouvre, et sur la bonne base.
-  const [edition, setEdition] = useState<{ project: string; database: Database } | null>(null)
-  /** Le parcours de création, quand il est ouvert (`24d`) — étape 1 ou étape 2 selon le geste. */
-  const [creationOuverte, setCreationOuverte] = useState<
-    | { etape: 'projet' }
-    | { etape: 'connexion'; projet: string; environnement?: EnvironmentId }
-    | null
-  >(null)
-  // **Les requêtes de la démo vivent en mémoire.** Rien n'est persisté : le pont ne répond pas en
-  // Chromium, et une démo qui écrirait sur le disque de l'utilisateur serait une mauvaise surprise.
-  // Ce qui se vérifie ici est le parcours d'écran, pas la persistance — que les tests Rust couvrent.
-  const [projets, setProjets] = useState<Project[]>(PROJETS)
+  const [edition, setEdition] = useState<Database | null>(null)
+  /** La déclaration d'une connexion, quand elle est ouverte — et dans quel dossier (#166). */
+  const [creation, setCreation] = useState<{ dossier: FolderId | null } | null>(null)
+  // **L'arbre de la démo vit en mémoire.** Rien n'est persisté : le pont ne répond pas en Chromium,
+  // et une démo qui écrirait sur le disque de l'utilisateur serait une mauvaise surprise. Ce qui se
+  // vérifie ici est le parcours d'écran, pas la persistance — que les tests Rust couvrent.
+  const [arbre, setArbre] = useState<FolderTree>(ARBRE_DEMO)
+  /**
+   * Le compteur des identifiants que la démo tire — pour un dossier ou une connexion créés. Le cœur
+   * les tire au hasard ; la démo les numérote, ce qui les rend prévisibles pour les tests sans rien
+   * changer à ce qu'ils désignent.
+   */
+  const tirages = useRef(0)
+  const tirer = (prefixe: string) => {
+    tirages.current += 1
+    return `${prefixe}${String(tirages.current).padStart(4, '0')}`
+  }
   /**
    * Les préférences de la démo (`15a`), **en mémoire et appliquées pour de vrai**.
    *
@@ -1472,122 +1500,56 @@ export function WorkbenchDemo() {
   }, [preferences])
 
   /**
-   * Applique une transformation aux consoles d'**une** connexion, désignée par son identité complète.
+   * Applique une transformation aux consoles d'**une** connexion, désignée par son identifiant.
    *
    * La démo tient son état en mémoire : ce qui se vérifie ici est le chemin — le menu s'ouvre, le
    * geste part, l'arbre suit — et non les règles, qui appartiennent au cœur.
    */
   const surConsoles = (
-    project: string,
-    database: string,
-    environment: string,
+    connection: ConnectionId,
     transforme: (consoles: Database['consoles']) => Database['consoles'],
   ) =>
-    setProjets((precedents) =>
-      precedents.map((projet) =>
-        projet.name === project
-          ? {
-              ...projet,
-              databases: projet.databases.map((base) =>
-                base.name === database && base.environment === environment
-                  ? { ...base, consoles: transforme(base.consoles) }
-                  : base,
-              ),
-            }
-          : projet,
-      ),
+    setArbre((precedent) =>
+      surConnexion(precedent, connection, (base) => ({
+        ...base,
+        consoles: transforme(base.consoles),
+      })),
     )
 
   /**
-   * Applique un geste d'environnement à l'état local, et rend la liste — comme le cœur le fait.
-   *
-   * **La démo ne réimplémente pas les règles**, elle applique le geste : refuser un doublon ou un
-   * dernier environnement est le travail du cœur, et l'écran de la démo n'a pas à en juger. Ce qui se
-   * mesure ici est le chemin — la modale s'ouvre, le geste part, la liste suit.
+   * Les gestes sur les dossiers (#166), **rejoués** comme le cœur les ferait : la démo applique le
+   * geste, elle ne juge rien — sauf le refus d'un frère homonyme au renommage, sans lequel le rapport
+   * de refus du renommage sur place ne serait atteignable par aucun test.
    */
-  const surEnvironnements = (
-    nom: string,
-    transforme: (
-      environnements: Project['environments'],
-      projet: Project,
-    ) => Project['environments'],
-    surBases?: (bases: Project['databases']) => Project['databases'],
-  ): Project[] => {
-    const suivants = projets.map((projet) =>
-      projet.name === nom
-        ? {
-            ...projet,
-            environments: transforme(projet.environments, projet),
-            databases: surBases ? surBases(projet.databases) : projet.databases,
-          }
-        : projet,
-    )
-    setProjets(suivants)
-    return suivants
+  const creerUnDossier = async (parent: FolderId | null): Promise<FolderId> => {
+    const id = tirer('d0551e7')
+    setArbre((precedent) => {
+      const freres =
+        parent === null ? precedent.folders : (dossier(precedent, parent)?.dossier.folders ?? [])
+      const neuf = { id, name: nomDeDossierLibre(freres), readOnly: false }
+      return parent === null
+        ? { ...precedent, folders: [...precedent.folders, neuf] }
+        : surDossier(precedent, parent, (d) => ({ ...d, folders: [...(d.folders ?? []), neuf] }))
+    })
+    return id
   }
-
-  const gestesEnvironnement = {
-    onCreer: async (request: { project: string; label: string; color: EnvironmentColor }) =>
-      surEnvironnements(request.project, (environnements) => [
-        ...environnements,
-        {
-          id: request.label.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-          label: request.label,
-          color: request.color,
-          production: false,
-        },
-      ]),
-    onRenommer: async (request: { project: string; environment: string; label: string }) =>
-      surEnvironnements(request.project, (environnements) =>
-        environnements.map((declaration) =>
-          declaration.id === request.environment
-            ? { ...declaration, label: request.label }
-            : declaration,
-        ),
-      ),
-    onRecolorier: async (request: {
-      project: string
-      environment: string
-      color: EnvironmentColor
-      production: boolean
-    }) =>
-      surEnvironnements(request.project, (environnements) =>
-        environnements.map((declaration) =>
-          declaration.id === request.environment
-            ? { ...declaration, color: request.color, production: request.production }
-            : declaration,
-        ),
-      ),
-    onReordonner: async (request: { project: string; order: string[] }) =>
-      surEnvironnements(request.project, (environnements) =>
-        request.order.flatMap(
-          (id) => environnements.find((declaration) => declaration.id === id) ?? [],
-        ),
-      ),
-    onRetirer: async (request: { project: string; environment: string }) => {
-      const emportees = projets
-        .find((projet) => projet.name === request.project)
-        ?.databases.filter((base) => base.environment === request.environment)
-        .map((base) => base.name)
-      const suivants = surEnvironnements(
-        request.project,
-        (environnements) =>
-          environnements.filter((declaration) => declaration.id !== request.environment),
-        (bases) => bases.filter((base) => base.environment !== request.environment),
-      )
-      return {
-        projects: suivants,
-        deletedConnections: emportees ?? [],
-        // Un résidu annoncé : le cas que la commande réelle produit sur un Trousseau verrouillé, et
-        // le seul moyen de voir cet état de la modale sans pont Tauri.
-        leftoverSecrets: emportees && emportees.length > 0 ? ['dorabase/…/…'] : [],
-      }
-    },
+  const renommerUnDossier = async (folder: FolderId, name: string) => {
+    const situe = dossier(arbre, folder)
+    const freres =
+      situe === null
+        ? []
+        : situe.ancetres.length === 0
+          ? arbre.folders
+          : (situe.ancetres[situe.ancetres.length - 1]?.folders ?? [])
+    if (freres.some((frere) => frere.id !== folder && frere.name.trim() === name.trim())) {
+      throw new Error(`un dossier « ${name} » existe déjà à cet endroit`)
+    }
+    setArbre((precedent) => surDossier(precedent, folder, (d) => ({ ...d, name })))
   }
 
   return (
     <LanguageProvider preferences={preferences}>
-      {edition && (
+      {(edition !== null || creation !== null) && (
         <NewConnection
           kubeconfigs={kubeconfigs}
           catalogueKubernetes={CATALOGUE_KUBERNETES_DEMO}
@@ -1597,60 +1559,46 @@ export function WorkbenchDemo() {
             setKubeconfigs(KUBECONFIGS_DEMO)
             return 'bac-a-sable'
           }}
-          edition={edition}
-          // **Les projets, pour que le groupe d'environnements ne soit pas vide.** Le formulaire y lit
-          // les environnements déclarés du projet de la base modifiée ; sans la liste, il n'en trouve
-          // aucun et la modale s'ouvre sur trois radios absentes.
-          projects={projets.map((projet) => ({
-            id: projet.name,
-            name: projet.name,
-            environments: projet.environments,
-          }))}
-          onClose={() => setEdition(null)}
-        />
-      )}
-      {/* **Le parcours de création, dans la démo** (`24d`). `create_project` ne répond pas hors de la
-          webview : la démo fournit donc sa propre création, qui ajoute le projet à son état local. Sans
-          elle, l'étape 1 refuserait, et l'étape 2 — c'est-à-dire `A2` — serait inatteignable pour les
-          mesures de `08b`. */}
-      {creationOuverte && (
-        <ParcoursDeCreation
-          depart={creationOuverte}
-          projets={projets.map((projet) => ({
-            id: projet.name,
-            name: projet.name,
-            environments: projet.environments,
-          }))}
-          kubeconfigs={kubeconfigs}
-          catalogueKubernetes={CATALOGUE_KUBERNETES_DEMO}
-          onDeclareKubeconfig={async () => 'bac-a-sable'}
-          onClose={() => setCreationOuverte(null)}
-          onProjets={setProjets}
-          onCreate={async (request) => {
-            const suivants: Project[] = [
-              ...projets,
-              {
-                name: request.name,
-                environments: request.environments.map((declaration) => ({
-                  ...declaration,
-                  // L'identifiant est dérivé en Rust ; la démo reprend la même règle, en plus simple.
-                  id: declaration.label.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-                })),
-                databases: [],
-                queries: [],
-              },
-            ]
-            setProjets(suivants)
-            return suivants
+          {...(edition === null ? {} : { edition })}
+          // **L'arbre, pour que la bande d'en-tête nomme le cadre** — le dossier d'où part le geste,
+          // ou celui qui contient la connexion modifiée.
+          arbre={arbre}
+          dossier={creation?.dossier ?? null}
+          /* **La démo enregistre dans son état** (#166) : `save_database` ne répond pas hors de la
+             webview, et sans ce double la connexion déclarée depuis le menu d'un dossier ne
+             paraîtrait nulle part — le parcours que `e2e/166-dossiers.spec.ts` suit jusqu'au bout. */
+          onSave={async (requete) => {
+            const id = tirer('c0ec7')
+            const neuve = declarer({
+              id,
+              name: requete.name,
+              label: requete.label,
+              engine: requete.engine,
+              connection: requete.variant,
+              consoles: [],
+            })
+            const suivant =
+              requete.folder === null
+                ? { ...arbre, connections: [...arbre.connections, neuve] }
+                : surDossier(arbre, requete.folder, (d) => ({
+                    ...d,
+                    connections: [...(d.connections ?? []), neuve],
+                  }))
+            setArbre(suivant)
+            return { tree: suivant, connection: id }
+          }}
+          onClose={() => {
+            setEdition(null)
+            setCreation(null)
           }}
         />
       )}
       {transfert !== null && (
         <TransferDialogs
           demande={transfert}
-          total={projets.length}
+          total={arbre.folders.length}
           onClose={() => setTransfert(null)}
-          onImported={setProjets}
+          onImported={setArbre}
           commandes={TRANSFERT_SIMULE}
         />
       )}
@@ -1674,12 +1622,12 @@ export function WorkbenchDemo() {
               ],
             }))
           }}
-          projects={projets}
+          arbre={arbre}
           instances={INSTANCES_DEMO}
         />
       )}
       <Workbench
-        projects={projets}
+        arbre={arbre}
         /* **Une instance dans le décor** (`API-32`), et un décor qui distingue : voir
            `INSTANCES_DEMO`. Sans elle, la seconde zone de la sidebar serait vide dans `?demo`, et
            l'écran d'instance ne serait vérifiable que dans la fenêtre native — que Playwright ne
@@ -1719,7 +1667,7 @@ export function WorkbenchDemo() {
           runSql: async (cle, sql, _limite, mode, console) => {
             // **Le décor mongo rend des documents**, pas des lignes : sans cela l'arbre de `13b`
             // n'aurait rien à déplier, et `A8` ne se verrait pas en démo.
-            if (estMongo(cle.database)) {
+            if (estMongo(cle.connection)) {
               return {
                 columns: ['_id', 'sorte', 'horodatage', 'canal', 'contexte'],
                 rows: [
@@ -1843,116 +1791,95 @@ export function WorkbenchDemo() {
         }}
         // `?demo` ouvre l'écran en **mode édition** : c'est le seul moyen de voir `A6` sans base
         // réelle, Playwright ne pilotant pas le pont Tauri.
-        onEditDatabase={(projet, base) => setEdition({ project: projet, database: base })}
-        onNewProject={() => setCreationOuverte({ etape: 'projet' })}
-        // La cible traverse, et il n'y a plus de cas sans elle (26 août 2026) : le geste ne part que
-        // d'un palier d'environnement, qui la connaît.
-        onNewDatabase={(cible) =>
-          setCreationOuverte({
-            etape: 'connexion',
-            projet: cible.project,
-            environnement: cible.environment,
-          })
+        onEditDatabase={setEdition}
+        // La cible traverse, et il n'y a plus de cas sans elle : le geste ne part que d'une ligne de
+        // dossier, qui la connaît.
+        onNewDatabase={(dossierCible) => setCreation({ dossier: dossierCible })}
+        onNewFolder={creerUnDossier}
+        onRenameFolder={renommerUnDossier}
+        onRecolorFolder={async (folder, color) =>
+          setArbre((precedent) => surDossier(precedent, folder, (d) => ({ ...d, color })))
         }
-        onCreateConsole={async (projet, base, environnement, nom) =>
-          surConsoles(projet, base, environnement, (consoles) => [
-            ...consoles,
-            { name: nom, sql: '' },
-          ])
+        onSetFolderReadOnly={async (folder, readOnly) =>
+          setArbre((precedent) => surDossier(precedent, folder, (d) => ({ ...d, readOnly })))
         }
-        onSaveConsole={async (projet, base, environnement, nom, sql) =>
-          surConsoles(projet, base, environnement, (consoles) =>
+        onCreateConsole={async (connection, nom) =>
+          surConsoles(connection, (consoles) => [...consoles, { name: nom, sql: '' }])
+        }
+        onSaveConsole={async (connection, nom, sql) =>
+          surConsoles(connection, (consoles) =>
             consoles.map((console) => (console.name === nom ? { ...console, sql } : console)),
           )
         }
-        onDeleteConsole={async (projet, base, environnement, nom) =>
-          surConsoles(projet, base, environnement, (consoles) =>
-            consoles.filter((console) => console.name !== nom),
-          )
+        onDeleteConsole={async (connection, nom) =>
+          surConsoles(connection, (consoles) => consoles.filter((console) => console.name !== nom))
         }
-        onRenameConsole={async (projet, base, environnement, ancien, nouveau) =>
-          surConsoles(projet, base, environnement, (consoles) =>
+        onRenameConsole={async (connection, ancien, nouveau) =>
+          surConsoles(connection, (consoles) =>
             consoles.map((console) =>
               console.name === ancien ? { ...console, name: nouveau } : console,
             ),
           )
         }
-        // La démo renomme **pour de faux** : le pont ne répond pas en Chromium. Ce qui se vérifie ici
-        // est le chemin jusqu'à la modale, et le rapport qu'elle sait afficher — d'où un secret
-        // introuvable annoncé, cas que la commande réelle produit sur un Trousseau nettoyé à la main.
-        // La démo retire **pour de faux** — le pont ne répond pas en Chromium. Un mot de passe
-        // résiduel est annoncé : le cas que la commande réelle produit sur un Trousseau verrouillé.
-        onDelete={async () => ({ leftoverSecrets: ['Atelier Nord/analytics/prod'] })}
-        // La démo renomme **dans son état**, et pas seulement en apparence : `23e` fait suivre la
-        // modale au nouveau nom, donc une démo qui rendrait un succès sans renommer ferait disparaître
-        // l'écran — ce qui n'arrive pas avec la commande réelle. Le secret introuvable, lui, reste
-        // annoncé : c'est le cas que la commande produit sur un Trousseau nettoyé à la main.
-        onRenameProject={async (projet, nom) => {
-          setProjets((precedents) =>
-            precedents.map((p) => (p.name === projet ? { ...p, name: nom } : p)),
-          )
-          return { missingSecrets: [`${nom}/analytics/prod`], leftoverSecrets: [] }
+        /* **La démo retire un dossier pour de vrai, une connexion pour de faux.** Une connexion n'est
+           pas retirée — les tests de `08j` rouvrent le décor et comptent sur ses deux connexions —,
+           et un mot de passe résiduel est annoncé : le cas que la commande réelle produit sur un
+           Trousseau verrouillé. Un dossier, lui, part avec tout ce qu'il contient : c'est le seul
+           moyen de voir, sans pont Tauri, les onglets de ses connexions se fermer (#166). */
+        onDelete={async (cible) => {
+          if (cible.kind === 'folder') {
+            const situe = dossier(arbre, cible.folder)
+            const emportees = situe ? connexionsDescendantes(situe.dossier).map(idDeConnexion) : []
+            setArbre((precedent) =>
+              sansLesElements(precedent, { dossiers: new Set([cible.folder]) }),
+            )
+            return { leftoverSecrets: [], deletedConnections: emportees }
+          }
+          return { leftoverSecrets: ['connexion/ba31b549870182d4'] }
         }}
-        /* La démo renomme **dans son état**, comme `onRenameProject` et pour la même raison : l'arbre
-           doit montrer le nouveau nom, sans quoi le geste ne serait pas observable en Chromium.
-
-           Elle **refuse** aussi un nom déjà pris dans le même environnement — la règle de `23b`, que
-           le cœur porte et que la démo rejoue faute de pont. C'est ce qui rend le rapport de refus
-           atteignable par un test, et le succès reste **muet** : aucune réserve annoncée, donc aucune
-           modale, ce que `26` exige du cas normal. */
-        onRenameDatabase={async (projet, base, environnement, nouveau) => {
-          const homonyme = projets
-            .find((p) => p.name === projet)
-            ?.databases.some((d) => d.name === nouveau && d.environment === environnement)
-          if (homonyme) {
+        /* La démo renomme **dans son état** : l'arbre doit montrer le nouveau nom, sans quoi le geste
+           ne serait pas observable en Chromium. Elle **refuse** un nom déjà pris dans le même dossier
+           — le cœur ne le refuse plus (#164 : `name` n'est plus une identité), mais c'est le seul
+           moyen de rendre le rapport de refus atteignable par un test, et le succès reste **muet**. */
+        onRenameDatabase={async (connection, nouveau) => {
+          const situee = connexion(arbre, connection)
+          const parent = situee?.ancetres[situee.ancetres.length - 1]
+          const freres = parent?.connections ?? arbre.connections
+          if (freres.some((d) => idDeConnexion(d) !== connection && d.name === nouveau)) {
             throw new Error(
-              `une connexion « ${nouveau} » est déjà déclarée en « ${environnement} »`,
+              `une connexion « ${nouveau} » est déjà déclarée dans « ${parent?.name ?? 'la racine'} »`,
             )
           }
-          setProjets((precedents) =>
-            precedents.map((p) =>
-              p.name === projet
-                ? {
-                    ...p,
-                    databases: p.databases.map((d) =>
-                      d.name === base && d.environment === environnement
-                        ? { ...d, name: nouveau }
-                        : d,
-                    ),
-                  }
-                : p,
-            ),
+          setArbre((precedent) =>
+            surConnexion(precedent, connection, (d) => ({ ...d, name: nouveau })),
           )
-          return { missingSecrets: [], leftoverSecrets: [] }
         }}
-        onProjets={setProjets}
-        /* Les libellés de valeurs (`API-75`) : la démo écrit **dans son état**, comme
-           `onRenameDatabase` et pour la même raison — le pont ne répond pas en Chromium, et c'est
-           le seul moyen de rendre le geste observable. Elle rejoue la règle du cœur, retrait de la
-           colonne vidée et de sa table hôte compris : sans quoi le chemin de retour — vider
-           l'éditeur pour rendre la colonne à ses chiffres — ne serait vérifiable nulle part. */
+        onArbre={setArbre}
+        /* Les libellés de valeurs (`API-75`) : la démo écrit **dans son état**, pour la même raison.
+           Elle rejoue la règle du cœur — le dossier qui fournit la table, sinon le dossier racine —,
+           retrait de la colonne vidée et de sa table hôte compris : sans quoi le chemin de retour ne
+           serait vérifiable nulle part. */
         saveValueLabels={async (requete) => {
-          const suivants = projets.map((projet) => {
-            if (projet.name !== requete.project) return projet
-            const tables = { ...(projet.valueLabels ?? {}) }
+          const ancetres = connexion(arbre, requete.connection)?.ancetres ?? []
+          const hote =
+            [...ancetres].reverse().find((d) => d.valueLabels?.[requete.table] !== undefined) ??
+            ancetres[0]
+          if (hote === undefined) throw new Error('rangez la connexion dans un dossier')
+          const suivant = surDossier(arbre, hote.id, (d) => {
+            const tables = { ...(d.valueLabels ?? {}) }
             const colonnes = { ...(tables[requete.table] ?? {}) }
             if (Object.keys(requete.labels).length === 0) delete colonnes[requete.column]
             else colonnes[requete.column] = requete.labels
             if (Object.keys(colonnes).length === 0) delete tables[requete.table]
             else tables[requete.table] = colonnes
-            return { ...projet, valueLabels: tables }
+            return { ...d, valueLabels: tables }
           })
-          setProjets(suivants)
-          return suivants
+          setArbre(suivant)
+          return suivant
         }}
-        /* L'export d'un projet (`API-30`) : la démo ouvre la **vraie** modale, avec un pont simulé —
-           voir `TRANSFERT_SIMULE`. C'est le seul moyen de la rendre mesurable sous Playwright, la
-           géométrie étant hors de portée de jsdom (règle n° 9). */
-        onExportProject={(projet) => setTransfert({ sens: 'export', projet })}
         /* L'import, depuis la bande en tête de l'arbre : c'est le chemin que le test de bout en
            bout emprunte, et il n'y en a plus d'autre dans le décor. */
         onImportProjects={() => setTransfert({ sens: 'import' })}
-        gestesEnvironnement={gestesEnvironnement}
       />
       {instanceOuverte !== null && (
         <NewInstance

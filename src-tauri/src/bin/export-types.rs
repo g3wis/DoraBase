@@ -16,21 +16,11 @@
 //! Lancé par `pnpm domain:build`, vérifié par `pnpm domain:check`.
 
 use dorabase_lib::config::requetes as arbre;
-use dorabase_lib::config::{
-    ConfigLoad, Console, ConsoleRequest, CreateEnvironmentRequest, CreateProjectRequest,
-    DeleteDatabaseRequest, DeleteEnvironmentRequest, DeleteEnvironmentResult, DeleteProjectRequest,
-    DeleteResult, ExportProjectsRequest, ExportReport, FolderTree, ImportProjectsRequest,
-    ImportProjectsResult, LectureSeule, Project, RecolorEnvironmentRequest, RenameDatabaseRequest,
-    RenameEnvironmentRequest, RenameProjectRequest, RenameResult, ReorderEnvironmentsRequest,
-    SaveDatabaseRequest, SavedQuery, UpdateVariantRequest, ValueLabelsRequest,
-    VisibleSchemasRequest,
-};
-use dorabase_lib::dump::commands::{DumpFailure, DumpRequest, DumpVerdict};
+use dorabase_lib::config::{Console, FolderTree, LectureSeule, SavedQuery};
+use dorabase_lib::dump::commands::{DumpFailure, DumpVerdict};
 use dorabase_lib::dump::inspect::Inspection;
 use dorabase_lib::dump::DumpAvailability;
-use dorabase_lib::engine::commands::{
-    ConnectionRequest, ConnectionStateEntry, ConnectionTest, DatabaseKey,
-};
+use dorabase_lib::engine::commands::{ConnectionRequest, ConnectionTest};
 use dorabase_lib::engine::registry::ConnectionState;
 use dorabase_lib::engine::{
     ApplyOutcome, ConnectionProbe, EngineError, ExportFormat, PendingUpdate, QueryResult, RowQuery,
@@ -65,53 +55,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // **racines** — celles que l'IPC transporte — et non les cinquante types intermédiaires.
     // Un type atteignable depuis aucune racine n'est pas projeté, ce qui est voulu : il ne
     // traverse pas l'IPC.
-    Project::export_all(&config)?;
-    ConfigLoad::export_all(&config)?;
-    SaveDatabaseRequest::export_all(&config)?;
-    CreateProjectRequest::export_all(&config)?;
-    RenameProjectRequest::export_all(&config)?;
-    RenameDatabaseRequest::export_all(&config)?;
     SavedQuery::export_all(&config)?;
     Console::export_all(&config)?;
-    ConsoleRequest::export_all(&config)?;
-    DeleteDatabaseRequest::export_all(&config)?;
-    DeleteProjectRequest::export_all(&config)?;
-    DeleteResult::export_all(&config)?;
-    RenameResult::export_all(&config)?;
-    UpdateVariantRequest::export_all(&config)?;
-    VisibleSchemasRequest::export_all(&config)?;
-    ValueLabelsRequest::export_all(&config)?;
-    // Les cinq gestes de `23c`. **Nommés un par un** : `export_all` entraîne les dépendances d'un
-    // type, jamais ses voisins — un type de requête oublié ici ne manque pas à la compilation, il
-    // manque au front, qui découvre son absence à l'écriture de l'appel.
-    CreateEnvironmentRequest::export_all(&config)?;
-    RenameEnvironmentRequest::export_all(&config)?;
-    RecolorEnvironmentRequest::export_all(&config)?;
-    ReorderEnvironmentsRequest::export_all(&config)?;
-    DeleteEnvironmentRequest::export_all(&config)?;
-    DeleteEnvironmentResult::export_all(&config)?;
     SecretMechanism::export_all(&config)?;
-    // Le transfert de projets (`API-30`). **Quatre racines, une par sens de chaque geste** :
-    // `ExportProjectsRequest` et `ExportReport` pour l'export, `ImportProjectsRequest` et
-    // `ImportProjectsResult` pour l'import — ce dernier entraînant `ImportReport`,
-    // `ProjectOutcome`, `ProjectVerdict` et `CarriedSecrets` avec lui. `inspect_projects_file` ne
-    // prend qu'une chaîne et rend un `ImportReport`, déjà projeté par ce chemin.
-    //
-    // **`FichierDeProjets` n'y est pas, et c'est structurel** : le fichier ne traverse pas l'IPC,
-    // donc rien de son enveloppe ni de ses mots de passe n'a de projection TypeScript.
-    ExportProjectsRequest::export_all(&config)?;
-    ExportReport::export_all(&config)?;
-    ImportProjectsRequest::export_all(&config)?;
-    ImportProjectsResult::export_all(&config)?;
     // L'arbre de dossiers de #164 : le modèle, vers `config.ts` — `FolderTree` entraîne `Folder`,
     // `FolderId`, `ConnectionId` et `FolderColor` —, et la lecture seule effective, que le miroir
     // TypeScript de #168 doit rendre à l'identique.
     FolderTree::export_all(&config)?;
     LectureSeule::export_all(&config)?;
-    // Le contrat IPC de #165 à #169, **déclaré avant d'être branché**, vers `arbre.ts` : la plupart
-    // de ces types portent le nom de celui qu'ils remplacent, qui vit encore dans `config.ts`,
-    // `engine.ts` ou `dump.ts`. Nommés un par un, comme les gestes de `23c` : `export_all` entraîne
-    // les dépendances d'un type, jamais ses voisins.
+    // Le contrat IPC de #165 à #169, vers `arbre.ts` : la plupart de ces types portent le nom de
+    // celui qu'ils ont remplacé à la bascule de #165. Nommés un par un : `export_all` entraîne les
+    // dépendances d'un type, jamais ses voisins. Ceux du transfert (#169) et du déplacement (#167)
+    // sont projetés bien que leurs commandes ne soient pas encore branchées : l'écran code contre eux.
     arbre::ConfigLoad::export_all(&config)?;
     arbre::DatabaseKey::export_all(&config)?;
     arbre::ConnectionStateEntry::export_all(&config)?;
@@ -168,19 +123,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ConnectionRequest::export_all(&config)?;
     ConnectionTest::export_all(&config)?;
 
-    // Le câblage de `09b`.
-    DatabaseKey::export_all(&config)?;
-    ConnectionStateEntry::export_all(&config)?;
+    // Le câblage de `09b` : `DatabaseKey` et `ConnectionStateEntry` viennent du contrat.
     ConnectionState::export_all(&config)?;
 
-    // L'export et l'import de dump (`22b`, `22c`). `DumpRequest` entraîne `DatabaseKey` et
-    // `EnvironmentVariant` avec lui ; `DumpAvailability` et `Inspection` sont les deux
+    // L'export et l'import de dump (`22b`, `22c`). `DumpRequest` vient du contrat ; `DumpAvailability` et `Inspection` sont les deux
     // verdicts que les modales rendent.
     DumpAvailability::export_all(&config)?;
     // Le verdict entraîne `DumpTransport` et `RootCert` avec lui (#82).
     DumpVerdict::export_all(&config)?;
     Inspection::export_all(&config)?;
-    DumpRequest::export_all(&config)?;
     DumpFailure::export_all(&config)?;
 
     // Le gestionnaire d'instances (`API-32`). `SaveInstanceRequest` entraîne `ConnectionSettings`

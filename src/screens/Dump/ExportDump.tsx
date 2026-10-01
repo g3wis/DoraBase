@@ -117,8 +117,12 @@ export function ExportDump({
         {/* La cible est **nommée** dans l'export comme dans l'import : c'est la seule
             chose qui distingue un dump de staging d'un dump de prod. */}
         <p className={styles.cible}>
-          {cible.projet} <span aria-hidden="true">·</span> {cible.base}{' '}
-          <span aria-hidden="true">·</span> {cible.environnement}
+          {cible.chemin !== '' && (
+            <>
+              {cible.chemin} <span aria-hidden="true">·</span>{' '}
+            </>
+          )}
+          {cible.base}
         </p>
 
         {availability && (

@@ -1,3 +1,6 @@
+//! **Hors du build depuis #165** (voir `config/mod.rs`) : écrit pour les projets, il ne compile plus
+//! sur l'arbre de dossiers. #169 le porte, et y emploie `requetes::CarriedSecrets`, sorti d'ici.
+//!
 //! L'export et l'import de projets, en un fichier JSON (`API-30`).
 //!
 //! # Ce qui voyage, et ce qui ne voyage pas
