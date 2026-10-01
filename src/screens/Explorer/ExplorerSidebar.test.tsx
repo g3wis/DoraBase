@@ -175,7 +175,7 @@ test('l’arbre s’annonce comme tel, avec ses niveaux', () => {
   render(<Piloté initial={JUSQU_AUX_CONNEXIONS} />)
   // **« environnements » est dans le nom de l'arbre** depuis `25a` : c'est un palier, et l'annoncer
   // « Projets et bases » tairait ce qu'on parcourt.
-  expect(screen.getByRole('tree', { name: 'Dossiers et connexions' })).toBeInTheDocument()
+  expect(screen.getByRole('tree', { name: 'Dossiers et bases de données' })).toBeInTheDocument()
   const elements = screen.getAllByRole('treeitem')
   // L'arbre est aplati dans le DOM : `aria-level` porte la profondeur qu'une imbrication aurait
   // donnée gratuitement. Sans lui, un lecteur d'écran annoncerait une liste plate.
@@ -381,7 +381,7 @@ test('le verrou suit le dossier qui déclare la lecture seule, et s’entend', (
 
 test('un dossier replié dit son compte de connexions, à toute profondeur', () => {
   render(<Piloté />)
-  expect(screen.getByRole('treeitem', { name: /Atelier Nord/ })).toHaveTextContent('2 connexions')
+  expect(screen.getByRole('treeitem', { name: /Atelier Nord/ })).toHaveTextContent('2 bases')
 })
 
 // --- Le filtre ---
@@ -570,11 +570,11 @@ test('toute ligne d’arbre, dossier compris, porte son « … »', () => {
   }
 })
 
-test('« Nouvelle connexion… » part du dossier, avec son identifiant', async () => {
+test('« Nouvelle base de données… » part du dossier, avec son identifiant', async () => {
   const vues: unknown[] = []
   render(<Piloté initial={JUSQU_AUX_CONNEXIONS} onAddDatabase={(cible) => vues.push(cible)} />)
   await userEvent.click(screen.getByRole('button', { name: 'Actions de prod' }))
-  await userEvent.click(screen.getByRole('button', { name: 'Nouvelle connexion…' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Nouvelle base de données…' }))
   // **L'identifiant, jamais le nom** : deux dossiers homonymes vivent sous deux parents, et c'est
   // le cadre de la modale qui ne se redemande pas.
   expect(vues).toEqual([ID_DE_TEST.prod])
@@ -586,7 +586,7 @@ test('au clic droit sur un dossier, le même menu', async () => {
   // Une seule construction pour les deux ouvertures : deux listes d'entrées auraient divergé d'une
   // action au premier ajout.
   expect(screen.getByRole('menu', { name: 'Actions de prod' }).textContent).toContain(
-    'Nouvelle connexion…',
+    'Nouvelle base de données…',
   )
 })
 
@@ -595,7 +595,7 @@ test('sans commande reliée, l’entrée est désactivée et dit pourquoi', asyn
   await userEvent.click(screen.getByRole('button', { name: 'Actions de prod' }))
   // Présente et désactivée, jamais absente ni cliquable-inerte : la règle de `09f` et le défaut
   // n° 36. C'est le cas de la galerie, où aucune commande ne répond.
-  expect(screen.getByRole('button', { name: 'Nouvelle connexion…' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: 'Nouvelle base de données…' })).toBeDisabled()
 })
 
 /**
@@ -729,7 +729,7 @@ test('la confirmation nomme ce qui part et ce qui n’est pas touché', async ()
   // Pas d'annulation : la configuration est un fichier, la restaurer relève d'une sauvegarde.
   expect(modale).toHaveTextContent('pas d’annulation')
   // Le bouton porte le verbe du geste, jamais « OK ».
-  expect(screen.getByRole('button', { name: 'Retirer la connexion' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Retirer la base de données' })).toBeInTheDocument()
 })
 
 test('les modifications en attente perdues sont comptées dans la confirmation', async () => {
@@ -759,7 +759,7 @@ test('un mot de passe resté dans le Trousseau est dit, et la modale attend', as
   )
   await userEvent.click(screen.getByRole('button', { name: 'Actions de analytics' }))
   await userEvent.click(screen.getByRole('button', { name: 'Retirer de DoraBase…' }))
-  await userEvent.click(screen.getByRole('button', { name: 'Retirer la connexion' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Retirer la base de données' }))
 
   expect(await screen.findByRole('status')).toHaveTextContent('n’a pas pu être effacé')
   expect(screen.getByRole('dialog', { name: /Retirer analytics/ })).toBeInTheDocument()
@@ -776,7 +776,7 @@ test('un refus s’affiche dans la confirmation, qui reste ouverte', async () =>
   )
   await userEvent.click(screen.getByRole('button', { name: 'Actions de analytics' }))
   await userEvent.click(screen.getByRole('button', { name: 'Retirer de DoraBase…' }))
-  await userEvent.click(screen.getByRole('button', { name: 'Retirer la connexion' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Retirer la base de données' }))
 
   expect(await screen.findByRole('alert')).toHaveTextContent('pas pu être écrite')
   expect(screen.getByRole('dialog', { name: /Retirer analytics/ })).toBeInTheDocument()
@@ -805,7 +805,7 @@ test('le menu d’un dossier racine suit l’ordre décidé, le geste destructeu
   // lit dans le panneau lui-même.
   const attendues = [
     'Rafraîchir l’arborescence',
-    'Nouvelle connexion…',
+    'Nouvelle base de données…',
     'Nouveau dossier',
     'Renommer…',
     'Couleur et icône…',
@@ -1214,7 +1214,7 @@ test('retirer un dossier compte ses connexions et porte son propre verbe', async
   await userEvent.click(screen.getByRole('button', { name: 'Retirer de DoraBase…' }))
   const dialogue = screen.getByRole('dialog', { name: 'Retirer Atelier Nord de DoraBase' })
   expect(dialogue).toHaveTextContent(
-    'le dossier Atelier Nord, ses sous-dossiers et ses 2 connexions',
+    'le dossier Atelier Nord, ses sous-dossiers et ses 2 bases de données',
   )
   await userEvent.click(within(dialogue).getByRole('button', { name: 'Retirer le dossier' }))
   expect(cibles).toEqual([

@@ -206,7 +206,7 @@ function FieldGallery() {
                   label={mono ? 'Hôte' : 'Nom'}
                   size={size}
                   mono={mono}
-                  defaultValue={mono ? 'localhost:5432' : 'Ma connexion'}
+                  defaultValue={mono ? 'localhost:5432' : 'Ma base de données'}
                 />
                 <span className={styles.cellCaption}>
                   {size} · mono {mono ? 'oui' : 'non'}
@@ -1154,7 +1154,7 @@ function ModalGallery() {
 
       {ouvert && (
         <Modal
-          title="Nouvelle connexion"
+          title="Nouvelle base de données"
           icon="db"
           onClose={() => setOuvert(false)}
           footer={
@@ -1614,7 +1614,7 @@ function ExplorerSidebarGallery() {
         Un dépliage qui échoue le dit **sur sa ligne** et ne vide pas l’arbre — voir `cache`
         ci-dessous, hors ligne, tandis que `analytics` reste dépliée.
       </Note>
-      <Sub title="Des dossiers, trois états de chargement, deux connexions homonymes">
+      <Sub title="Des dossiers, trois états de chargement, deux bases de données homonymes">
         <div data-testid="sidebar-a4" style={{ display: 'flex', height: 420 }}>
           <ExplorerSidebar
             arbre={ARBRE_DEMO}

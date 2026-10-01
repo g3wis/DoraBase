@@ -23,9 +23,9 @@ export const preferencesFr: Dictionnaire = {
   connexions: {
     kubeconfigsTitre: 'Fichiers kubeconfig',
     kubeconfigsVide:
-      'Aucun fichier déclaré. Déclarez-en un ici pour le choisir ensuite dans une connexion Kubernetes, sans avoir à retaper son chemin.',
+      'Aucun fichier déclaré. Déclarez-en un ici pour le choisir ensuite dans une base de données jointe par Kubernetes, sans avoir à retaper son chemin.',
     kubeconfigsNote:
-      'Une application n’hérite pas du $KUBECONFIG de votre terminal : c’est pourquoi ces fichiers se déclarent. Déplacer un fichier ici suit dans toutes les connexions qui l’emploient.',
+      'Une application n’hérite pas du $KUBECONFIG de votre terminal : c’est pourquoi ces fichiers se déclarent. Déplacer un fichier ici suit dans toutes les bases de données qui l’emploient.',
     kubeconfigLibelle: 'Nom',
     kubeconfigChemin: 'Fichier',
     kubeconfigDefaut: 'Par défaut',
@@ -45,7 +45,7 @@ export const preferencesFr: Dictionnaire = {
   apparence: {
     themeTitre: 'Thème',
     accentTitre: 'Couleur d’accent',
-    accentNote: 'sert aussi à teinter la connexion active',
+    accentNote: 'sert aussi à teinter la base de données active',
   },
   themes: {
     cahier: { nom: 'Cahier', detail: 'le thème clair du handoff' },
@@ -113,7 +113,7 @@ export const preferencesFr: Dictionnaire = {
     corpsAvant:
       'Le thème, l’accent, la densité et la police reviendront aux valeurs du produit, et',
     corpsGras: 'les quatre garde-fous d’écriture seront réactivés',
-    note: 'Aucune connexion et aucune requête enregistrée n’est touchée.',
+    note: 'Aucune base de données et aucune requête enregistrée n’est touchée.',
   },
 }
 
@@ -139,9 +139,9 @@ export const preferencesEn: Dictionnaire = {
   connexions: {
     kubeconfigsTitre: 'Kubeconfig files',
     kubeconfigsVide:
-      'No file declared. Declare one here to pick it in a Kubernetes connection afterwards, without retyping its path.',
+      'No file declared. Declare one here to pick it for a database reached through Kubernetes afterwards, without retyping its path.',
     kubeconfigsNote:
-      'An application does not inherit your terminal’s $KUBECONFIG — that is why these files are declared. Moving a file here follows through in every connection that uses it.',
+      'An application does not inherit your terminal’s $KUBECONFIG — that is why these files are declared. Moving a file here follows through in every database that uses it.',
     kubeconfigLibelle: 'Name',
     kubeconfigChemin: 'File',
     kubeconfigDefaut: 'Default',
@@ -161,7 +161,7 @@ export const preferencesEn: Dictionnaire = {
   apparence: {
     themeTitre: 'Theme',
     accentTitre: 'Accent color',
-    accentNote: 'also tints the active connection',
+    accentNote: 'also tints the active database',
   },
   themes: {
     cahier: { nom: 'Notebook', detail: 'the handoff’s light theme' },
@@ -227,6 +227,6 @@ export const preferencesEn: Dictionnaire = {
     confirmer: 'Restore the original values',
     corpsAvant: 'The theme, accent, density, and font will return to the product’s values, and',
     corpsGras: 'the four write guardrails will be turned back on',
-    note: 'No connection and no saved query is touched.',
+    note: 'No database and no saved query is touched.',
   },
 }

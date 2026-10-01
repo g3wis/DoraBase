@@ -112,7 +112,7 @@ export const tableViewFr: Dictionnaire = {
     readOnlyHint: (p) => `lecture seule — ${p.raccourci} pour éditer`,
     // La lecture seule effective (#168) : la barre dit pourquoi au lieu d'inviter à `⌘E`.
     readOnlyImposed: (p) => `lecture seule — imposée par le dossier « ${p.dossier} »`,
-    readOnlyLocal: 'lecture seule — réglée sur la connexion',
+    readOnlyLocal: 'lecture seule — réglée sur la base de données',
   },
   grid: {
     removeNewRow: (p) => `Retirer la nouvelle ligne ${p.rang}`,
@@ -311,7 +311,7 @@ export const tableViewEn: Dictionnaire = {
     editingNoChange: 'editing — no changes',
     readOnlyHint: (p) => `read-only — ${p.raccourci} to edit`,
     readOnlyImposed: (p) => `read-only — imposed by the “${p.dossier}” folder`,
-    readOnlyLocal: 'read-only — set on the connection',
+    readOnlyLocal: 'read-only — set on the database',
   },
   grid: {
     removeNewRow: (p) => `Remove the new row ${p.rang}`,

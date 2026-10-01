@@ -26,7 +26,7 @@ export const shellFr: Dictionnaire = {
     imposee: (p) =>
       `Lecture seule, imposée par le dossier « ${p.dossier} » : levez-la sur ce dossier pour écrire.`,
     locale:
-      'Lecture seule, réglée sur cette connexion : décochez « Lecture seule » dans ses réglages pour écrire.',
+      'Lecture seule, réglée sur cette base de données : décochez « Lecture seule » dans ses réglages pour écrire.',
     // MongoDB et BigQuery n'ont pas de session à mettre en lecture seule : c'est DoraBase seul qui
     // refuse, et le dire évite de croire le serveur aussi protégé qu'un PostgreSQL.
     sansSession:
@@ -70,7 +70,7 @@ export const shellEn: Dictionnaire = {
   lectureSeule: {
     imposee: (p) =>
       `Read-only, imposed by the “${p.dossier}” folder: lift it on that folder to write.`,
-    locale: 'Read-only, set on this connection: untick “Read-only” in its settings to write.',
+    locale: 'Read-only, set on this database: untick “Read-only” in its settings to write.',
     sansSession: 'This engine has no read-only session: DoraBase refuses to write, not the server.',
   },
   statusBar: {

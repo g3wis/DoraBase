@@ -40,7 +40,7 @@ const traduireEnFrancais: Traduire = (cle, parametres = {}) => {
       return 'lecture seule'
     case 'explorer.arbre.connectionCount': {
       const compte = Number(parametres.count)
-      return `${compte} connexion${compte > 1 ? 's' : ''}`
+      return `${compte} base${compte > 1 ? 's' : ''}`
     }
     case 'explorer.arbre.connectingBadge':
       return '…'

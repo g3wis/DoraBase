@@ -124,7 +124,9 @@ test.describe("l'import de dossiers", () => {
     await expect(modale.getByRole('checkbox')).toHaveCount(3)
     await expect(modale.getByRole('checkbox', { name: 'Quai Sud' })).toBeVisible()
     await expect(modale.getByRole('checkbox', { name: 'Atelier Nord' })).toBeVisible()
-    await expect(modale.getByRole('checkbox', { name: 'Connexions à la racine' })).toBeVisible()
+    await expect(
+      modale.getByRole('checkbox', { name: 'Bases de données à la racine' }),
+    ).toBeVisible()
     await expect(modale).toContainText('n’a pas de nom')
     // Trois lignes retenues sur les quatre du fichier : le refusé ne compte pas.
     await expect(modale.getByRole('button', { name: 'Importer 3 éléments' })).toBeVisible()

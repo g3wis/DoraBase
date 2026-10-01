@@ -82,6 +82,6 @@ export async function ouvrirLaNouvelleConnexion(
     .locator('xpath=..')
     .getByRole('button', { name: `Actions de ${dossier}` })
     .click()
-  await page.getByRole('button', { name: /Nouvelle connexion/ }).click()
+  await page.getByRole('button', { name: /Nouvelle base de données/ }).click()
   await page.waitForSelector('[data-testid=dossier-de-la-modale]')
 }

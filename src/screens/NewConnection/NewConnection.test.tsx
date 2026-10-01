@@ -27,7 +27,7 @@ const ARBRE = arbreDeTest(trioDeTest())
 
 test('la modale s’annonce sous le titre du handoff', () => {
   monter()
-  expect(screen.getByRole('dialog', { name: 'Nouvelle connexion' })).toBeInTheDocument()
+  expect(screen.getByRole('dialog', { name: 'Nouvelle base de données' })).toBeInTheDocument()
 })
 
 // --- Sélecteur de moteur ---

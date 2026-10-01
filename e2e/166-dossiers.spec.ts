@@ -134,7 +134,7 @@ test('trois niveaux de dossiers et une connexion, créés depuis l’accueil', a
   await nommer(page, 'Niveau 3')
 
   // `A2` s'annonce par le chemin du dossier d'où part le geste, et ne le laisse pas choisir.
-  await choisir(page, 'Niveau 3', /Nouvelle connexion/)
+  await choisir(page, 'Niveau 3', /Nouvelle base de données/)
   await expect(page.getByTestId('dossier-de-la-modale')).toHaveText(
     'Racine A › Niveau 2 › Niveau 3',
   )

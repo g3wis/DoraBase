@@ -1875,7 +1875,7 @@ export function WorkbenchDemo() {
           const freres = parent?.connections ?? arbre.connections
           if (freres.some((d) => idDeConnexion(d) !== connection && d.name === nouveau)) {
             throw new Error(
-              `une connexion « ${nouveau} » est déjà déclarée dans « ${parent?.name ?? 'la racine'} »`,
+              `une base de données « ${nouveau} » est déjà déclarée dans « ${parent?.name ?? 'la racine'} »`,
             )
           }
           setArbre((precedent) =>
@@ -1892,7 +1892,7 @@ export function WorkbenchDemo() {
           const hote =
             [...ancetres].reverse().find((d) => d.valueLabels?.[requete.table] !== undefined) ??
             ancetres[0]
-          if (hote === undefined) throw new Error('rangez la connexion dans un dossier')
+          if (hote === undefined) throw new Error('rangez la base de données dans un dossier')
           const suivant = surDossier(arbre, hote.id, (d) => {
             const tables = { ...(d.valueLabels ?? {}) }
             const colonnes = { ...(tables[requete.table] ?? {}) }

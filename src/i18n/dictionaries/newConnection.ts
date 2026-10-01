@@ -3,7 +3,7 @@ import type { Dictionnaire } from '../types'
 // Rempli par l'écran « newConnection ». Voir dictionaries/index.ts pour l'assemblage.
 export const newConnectionFr: Dictionnaire = {
   title: {
-    new: 'Nouvelle connexion',
+    new: 'Nouvelle base de données',
     edit: (p) => `Modifier ${p.name}`,
   },
   failure: {
@@ -132,7 +132,7 @@ export const newConnectionFr: Dictionnaire = {
 
 export const newConnectionEn: Dictionnaire = {
   title: {
-    new: 'New connection',
+    new: 'New database',
     edit: (p) => `Edit ${p.name}`,
   },
   failure: {

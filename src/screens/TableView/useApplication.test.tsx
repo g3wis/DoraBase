@@ -68,7 +68,7 @@ test('demander écrit tout de suite, et pose le patch inverse', async () => {
 test('le refus du cœur s’affiche tel qu’il est dit', async () => {
   // Celui de la lecture seule, que le cœur prononce en nommant le dossier qui l'impose (#168).
   const refus =
-    'cette connexion est en lecture seule, imposée par le dossier « prod » : impossible d’écrire.'
+    'cette base de données est en lecture seule, imposée par le dossier « prod » : impossible d’écrire.'
   const pont: PasserelleApply = { applyChanges: () => Promise.reject({ message: refus }) }
   const { result } = renderHook(() =>
     useApplication(CLE, CIBLE, ATTENTE, COLONNES, { passerelle: pont, surSucces: () => {} }),
