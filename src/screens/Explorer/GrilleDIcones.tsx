@@ -1,4 +1,4 @@
-import { ICONES_DE_DOSSIER } from '../../data/iconesDeDossier'
+import { dessinDIcone, ICONES_DE_DOSSIER } from '../../data/iconesDeDossier'
 import { Icon } from '../../design/icons/Icon'
 import type { IconName } from '../../design/icons/names'
 import { useT } from '../../i18n/LanguageContext'
@@ -45,7 +45,7 @@ export function GrilleDIcones({ valeur, onChange, label, name }: GrilleDIconesPr
               className={styles.input}
               onChange={() => onChange(icone)}
             />
-            <Icon name={icone} size={14} strokeWidth={2} />
+            <Icon name={dessinDIcone(icone)} size={14} strokeWidth={2} />
           </label>
         )
       })}

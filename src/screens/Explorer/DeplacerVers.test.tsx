@@ -252,6 +252,17 @@ describe('« Déplacer vers… » (#167)', () => {
     expect(toutes[1]).toHaveAttribute('title', 'Déjà ici.')
   })
 
+  it('dessine une destination réglée sur « star » comme l’arbre : par l’équivalent de Lucide (#175)', () => {
+    const arbre = decor()
+    const avecEtoile: FolderTree = {
+      ...arbre,
+      folders: arbre.folders.map((f) => (f.id === 'voisin' ? { ...f, icon: 'star' } : f)),
+    }
+    monter(connexion('c-racine'), undefined, { arbre: avecEtoile })
+    const outils = destinations().toutes.find((b) => b.textContent === 'Outils')
+    expect(outils?.querySelector('use')?.getAttribute('href')).toBe('#i-lucide-star')
+  })
+
   it('dit le changement de lecture seule avant « Déplacer », et c’est ce qui confirme', async () => {
     const { onDeplacer, onClose } = monter(connexion('c-prod'))
     expect(screen.queryByRole('status')).toBeNull()

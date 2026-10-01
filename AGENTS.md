@@ -1277,8 +1277,8 @@ décisions à ne pas défaire :
   l'épaisseur vient d'un seul endroit. Leurs noms sont ceux de Lucide (`building-2`, `chart-column`),
   pour qu'une icône se retrouve dans la bibliothèque. La licence complète est dans
   `src/design/icons/LICENSE-lucide.txt`, la version en tête du groupe dans `sprite.svg`. Les 8 autres
-  viennent du sprite d'origine (`pin`, `srv`, `cloud`, `code`, `flask`, `compass`, `star`, `shield`) :
-  recopier le nuage de Lucide à côté de `cloud` ferait deux dessins pour une idée ;
+  **noms** viennent du sprite d'origine (`pin`, `srv`, `cloud`, `code`, `flask`, `compass`, `star`,
+  `shield`) ; quatre d'entre eux sont dessinés par Lucide depuis #175 — voir plus bas ;
 - **ce qui n'est pas offert : ce qui nomme déjà un palier de l'arbre.** `schema` (c'est un dossier !),
   `table`, `view`, `term` (une console), `db` (une connexion sans logo), `bag` (la racine de
   « Déplacer vers… »), `lock` / `unlock` (le verrou de la lecture seule, en bout de la même ligne).
@@ -1323,8 +1323,26 @@ décisions à ne pas défaire :
 l'épaisseur concorde, et ne peut que concorder — elle vient d'`Icon`. **La taille optique, non tout à
 fait** : les icônes de Lucide occupent leur carré de 20 unités, là où `cloud`, `code`, `star` et
 `compass` du sprite d'origine sont dessinés plus petits — dans la grille, ils paraissent d'un cran en
-retrait. Laissé tel quel : ce sont des icônes du produit, employées ailleurs, et les redessiner
-changerait ces écrans-là.
+retrait.
+
+**Ces quatre-là sont dessinés par leur équivalent de Lucide, dans la grille et sur les dossiers
+seulement** (1er octobre 2026, #175, tranché par le demandeur). Quatre points à ne pas défaire :
+
+- **le nom persisté ne change pas.** `Folder.icon` vaut toujours `cloud` : c'est la table
+  `dessinDIcone` de `src/data/iconesDeDossier.ts` qui dit quel symbole le dessine, et seuls la grille,
+  l'arbre (`arbre.ts`) et « Déplacer vers… » la consultent. Renommer l'icône offerte en `lucide-cloud`
+  aurait périmé chaque dossier déjà réglé, et une version plus ancienne l'aurait relu comme inconnu ;
+- **même source, même version** que les 48 : `lucide-static` 1.49.0 par `npm pack`, jamais installé,
+  la licence déjà en place couvrant ces quatre-là (`code` et `compass` sont même dans la liste des
+  icônes héritées de Feather). Les symboles portent le préfixe `lucide-` (`i-lucide-cloud`…), le nom
+  de Lucide étant déjà pris par le symbole d'origine ;
+- **les quatre symboles d'origine restent**, et les autres écrans ne bougent pas. À savoir : **seul
+  `code` a un autre appelant** dans `src/` (la barre d'outils de la grille, le panneau DDL) ;
+  `cloud`, `star` et `compass` ne sont plus dessinés que par la galerie, qui lit le sprite entier. La
+  décision ne les retire pas, et ce fichier ne le fait pas à sa place ;
+- **regardé à `deviceScaleFactor: 6`**, en clair et en « Nuit » : les quatre occupent désormais leur
+  carré comme leurs voisines. `flask`, `srv`, `shield` et `pin` restent du sprite d'origine ; à la loupe,
+  `flask` est le seul à paraître encore un peu plus petit, sans l'écart des quatre retirés.
 
 **Et le réglage s'est fait petit panneau sous l'icône** (30 septembre 2026, rapporté à l'usage : « pas
 de grosse fenêtre, juste une petite modale sous l'icône lorsqu'on clique dessus »). La modale de
