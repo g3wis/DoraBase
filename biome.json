@@ -53,7 +53,8 @@
         "src/domain/maj.ts",
         "src/domain/dump.ts",
         "src/domain/instances.ts",
-        "src/domain/transfert.ts"
+        "src/domain/transfert.ts",
+        "src/domain/arbre.ts"
       ],
       "formatter": {
         "enabled": false

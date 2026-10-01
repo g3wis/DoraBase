@@ -1608,6 +1608,7 @@ mod tests_kubeconfigs {
             queries: Vec::new(),
             value_labels: BTreeMap::new(),
             databases: vec![Database {
+                id: crate::config::ConnectionId::vide(),
                 name: "catalogue".into(),
                 label: None,
                 engine: Engine::PostgreSql,

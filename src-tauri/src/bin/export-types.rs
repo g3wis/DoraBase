@@ -15,13 +15,15 @@
 //!
 //! Lancé par `pnpm domain:build`, vérifié par `pnpm domain:check`.
 
+use dorabase_lib::config::requetes as arbre;
 use dorabase_lib::config::{
     ConfigLoad, Console, ConsoleRequest, CreateEnvironmentRequest, CreateProjectRequest,
     DeleteDatabaseRequest, DeleteEnvironmentRequest, DeleteEnvironmentResult, DeleteProjectRequest,
-    DeleteResult, ExportProjectsRequest, ExportReport, ImportProjectsRequest, ImportProjectsResult,
-    Project, RecolorEnvironmentRequest, RenameDatabaseRequest, RenameEnvironmentRequest,
-    RenameProjectRequest, RenameResult, ReorderEnvironmentsRequest, SaveDatabaseRequest,
-    SavedQuery, UpdateVariantRequest, ValueLabelsRequest, VisibleSchemasRequest,
+    DeleteResult, ExportProjectsRequest, ExportReport, FolderTree, ImportProjectsRequest,
+    ImportProjectsResult, LectureSeule, Project, RecolorEnvironmentRequest, RenameDatabaseRequest,
+    RenameEnvironmentRequest, RenameProjectRequest, RenameResult, ReorderEnvironmentsRequest,
+    SaveDatabaseRequest, SavedQuery, UpdateVariantRequest, ValueLabelsRequest,
+    VisibleSchemasRequest,
 };
 use dorabase_lib::dump::commands::{DumpFailure, DumpRequest, DumpVerdict};
 use dorabase_lib::dump::inspect::Inspection;
@@ -101,6 +103,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ExportReport::export_all(&config)?;
     ImportProjectsRequest::export_all(&config)?;
     ImportProjectsResult::export_all(&config)?;
+    // L'arbre de dossiers de #164 : le modèle, vers `config.ts` — `FolderTree` entraîne `Folder`,
+    // `FolderId`, `ConnectionId` et `FolderColor` —, et la lecture seule effective, que le miroir
+    // TypeScript de #168 doit rendre à l'identique.
+    FolderTree::export_all(&config)?;
+    LectureSeule::export_all(&config)?;
+    // Le contrat IPC de #165 à #169, **déclaré avant d'être branché**, vers `arbre.ts` : la plupart
+    // de ces types portent le nom de celui qu'ils remplacent, qui vit encore dans `config.ts`,
+    // `engine.ts` ou `dump.ts`. Nommés un par un, comme les gestes de `23c` : `export_all` entraîne
+    // les dépendances d'un type, jamais ses voisins.
+    arbre::ConfigLoad::export_all(&config)?;
+    arbre::DatabaseKey::export_all(&config)?;
+    arbre::ConnectionStateEntry::export_all(&config)?;
+    arbre::DumpRequest::export_all(&config)?;
+    arbre::CreateFolderRequest::export_all(&config)?;
+    arbre::CreateFolderResult::export_all(&config)?;
+    arbre::RenameFolderRequest::export_all(&config)?;
+    arbre::RecolorFolderRequest::export_all(&config)?;
+    arbre::SetFolderReadOnlyRequest::export_all(&config)?;
+    arbre::DeleteFolderRequest::export_all(&config)?;
+    arbre::DeleteResult::export_all(&config)?;
+    arbre::MoveFolderRequest::export_all(&config)?;
+    arbre::MoveDatabaseRequest::export_all(&config)?;
+    arbre::MoveResult::export_all(&config)?;
+    arbre::SaveDatabaseRequest::export_all(&config)?;
+    arbre::SaveDatabaseResult::export_all(&config)?;
+    arbre::UpdateVariantRequest::export_all(&config)?;
+    arbre::RenameDatabaseRequest::export_all(&config)?;
+    arbre::DeleteDatabaseRequest::export_all(&config)?;
+    arbre::ConsoleRequest::export_all(&config)?;
+    arbre::VisibleSchemasRequest::export_all(&config)?;
+    arbre::ValueLabelsRequest::export_all(&config)?;
+    arbre::ExportProjectsRequest::export_all(&config)?;
+    arbre::ExportReport::export_all(&config)?;
+    arbre::ImportProjectsRequest::export_all(&config)?;
+    arbre::ImportProjectsResult::export_all(&config)?;
     // La mise à jour en place. Un seul type traverse l'IPC dans ce sens : `install_update`
     // ne prend rien et ne rend rien.
     AvailableUpdate::export_all(&config)?;

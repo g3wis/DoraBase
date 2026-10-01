@@ -1299,6 +1299,7 @@ pub fn enregistrer(
     // projet entier. C'est donc `validate` du projet candidat, quelques lignes plus bas, qui refuse,
     // toujours avant d'avoir touché au magasin.
     let base = Database {
+        id: crate::config::ConnectionId::vide(),
         name: database_name.to_owned(),
         label: label.map(str::to_owned),
         engine,
@@ -2301,6 +2302,7 @@ mod tests_renommage {
                 // d'une migration complète : le décor doit rendre les deux distinguables.
                 databases: vec![
                     Database {
+                        id: crate::config::ConnectionId::vide(),
                         name: "analytics".to_owned(),
                         label: None,
                         engine: crate::config::model::Engine::PostgreSql,
@@ -2310,6 +2312,7 @@ mod tests_renommage {
                         visible_schemas: None,
                     },
                     Database {
+                        id: crate::config::ConnectionId::vide(),
                         name: "analytics".to_owned(),
                         label: None,
                         engine: crate::config::model::Engine::PostgreSql,
@@ -2319,6 +2322,7 @@ mod tests_renommage {
                         visible_schemas: None,
                     },
                     Database {
+                        id: crate::config::ConnectionId::vide(),
                         name: "shop".to_owned(),
                         label: None,
                         engine: crate::config::model::Engine::MySql,
@@ -3024,6 +3028,7 @@ mod tests_consoles {
 
     fn connexion(nom: &str, env: &str) -> Database {
         Database {
+            id: crate::config::ConnectionId::vide(),
             name: nom.to_owned(),
             label: None,
             engine: crate::config::model::Engine::PostgreSql,

@@ -7,16 +7,26 @@
 // `pub` : la macro `generate_handler!` a besoin des éléments cachés que
 // `#[tauri::command]` génère à côté de chaque fonction, et qu'un `pub use` ne réexporte
 // pas. Les commandes se réfèrent donc par `config::commands::…` dans `lib.rs`.
+/// L'arbre de dossiers de #164 : le modèle que la v7 décrira.
+mod arbre;
 pub mod commands;
 mod enregistrer;
 mod environnements;
 /// Les instances managées (`API-32`) : leur déclaration, leur secret, leur retrait.
 mod instances;
+/// La chaîne de migration du format, sortie de `store.rs` par #164.
+mod migration;
 mod model;
 mod query;
+/// Le contrat IPC de l'arbre de dossiers, déclaré par #164 et branché par #165 à #169.
+pub mod requetes;
 mod store;
 mod transfert;
 
+pub use arbre::{
+    cle_de_connexion, reference_de_connexion, tirage_du_systeme, ArbreError, ConnectionId,
+    Descendance, Folder, FolderColor, FolderId, FolderTree, LectureSeule, ValueLabels,
+};
 pub use commands::{
     create_environment, create_project, delete_environment, export_projects, import_projects,
     inspect_projects_file, load_config, recolor_environment, rename_database, rename_environment,
