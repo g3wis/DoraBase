@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react'
-import type { ConfigLoad } from '../domain/config'
-import { TRIO_DE_TEST } from '../screens/NewConnection/pourLesTests'
+import type { ConfigLoad } from '../domain/arbre'
+import { arbreDeTest, trioDeTest } from '../screens/NewConnection/pourLesTests'
 import { PREFERENCES_PAR_DEFAUT } from '../screens/Preferences/preferences'
 import { type EtatDeDemarrage, useConfiguration } from './useConfiguration'
 
@@ -9,7 +9,9 @@ function Sonde({ charger }: { charger: () => Promise<ConfigLoad> }) {
   return (
     <div>
       <span data-testid="kind">{etat.kind}</span>
-      <span data-testid="projets">{etat.kind === 'chargement' ? '' : etat.projects.length}</span>
+      <span data-testid="projets">
+        {etat.kind === 'chargement' ? '' : etat.tree.folders.length}
+      </span>
       <span data-testid="raison">
         {etat.kind === 'blocked' || etat.kind === 'injoignable' ? etat.reason : ''}
       </span>
@@ -24,19 +26,12 @@ test('l’état de départ est le chargement, pas le vide', () => {
   expect(screen.getByTestId('kind')).toHaveTextContent('chargement')
 })
 
-test('un fichier lu remplit les projets', async () => {
+test('un fichier lu remplit l’arbre', async () => {
   render(
     <Sonde
       charger={async () => ({
         kind: 'loaded',
-        projects: [
-          {
-            name: 'Halle',
-            environments: TRIO_DE_TEST,
-            databases: [],
-            queries: [],
-          },
-        ],
+        tree: arbreDeTest(trioDeTest()),
         preferences: PREFERENCES_PAR_DEFAUT,
         instances: [],
         kubeconfigs: {},

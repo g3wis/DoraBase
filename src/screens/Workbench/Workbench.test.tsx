@@ -2,12 +2,12 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
+import { surConnexion, surDossier } from '../../data/dossiers'
 import { Sprite } from '../../design/icons/Sprite'
-import type { Project } from '../../domain/config'
+import type { ConnectionStateEntry, DatabaseKey } from '../../domain/arbre'
+import type { Database, FolderTree } from '../../domain/config'
 import type {
   ConnectionState,
-  ConnectionStateEntry,
-  DatabaseKey,
   QueryResult,
   RowQuery,
   SchemaInfo,
@@ -21,7 +21,13 @@ import { LanguageProvider } from '../../i18n/LanguageContext'
 import { raccourci } from '../../shell/plateforme'
 import { auModificateur } from '../../test/raccourcis'
 import type { PasserelleExport } from '../Console/exportResultat'
-import { REGLAGES, TRIO_DE_TEST } from '../NewConnection/pourLesTests'
+import {
+  arbreDeTest,
+  connexionDeTest,
+  ID_DE_TEST,
+  REGLAGES,
+  trioDeTest,
+} from '../NewConnection/pourLesTests'
 import type { PasserelleLignes } from '../TableView/useLignes'
 import type { PasserelleArbre } from './useArbre'
 import type { PasserelleDetail } from './useDetailTable'
@@ -29,7 +35,6 @@ import { grouperParBoucle, type PasserelleStructures } from './useStructures'
 import { Workbench } from './Workbench'
 
 const variante = {
-  environment: 'prod' as const,
   host: 'localhost',
   port: 5432,
   defaultDatabase: 'analytics',
@@ -43,31 +48,16 @@ const variante = {
   tunnel: null,
 }
 
-const PROJETS: Project[] = [
-  {
-    name: 'Atelier Nord',
-    environments: TRIO_DE_TEST,
-    queries: [],
-    databases: [
-      // **Les deux connexions sont dans `prod`** : le décor mesure les onglets, la grille et les
-      // consoles, pas le palier d'environnement — `arbre.test.ts` s'en charge.
-      {
-        name: 'analytics',
-        engine: 'postgresql',
-        environment: 'prod',
-        connection: REGLAGES,
-        consoles: [],
-      },
-      {
-        name: 'shop',
-        engine: 'postgresql',
-        environment: 'prod',
-        connection: REGLAGES,
-        consoles: [],
-      },
-    ],
-  },
-]
+const ANALYTICS = 'c0000000000000a1'
+const SHOP = 'c0000000000000a2'
+
+/**
+ * **Les deux connexions sont dans `prod`**, sous-dossier en lecture seule du décor migré : le décor
+ * mesure les onglets, la grille et les consoles, pas l'imbrication — `arbre.test.ts` s'en charge.
+ */
+const PROJETS: FolderTree = arbreDeTest(
+  trioDeTest({ prod: [connexionDeTest(ANALYTICS, 'analytics'), connexionDeTest(SHOP, 'shop')] }),
+)
 
 const SCHEMAS: SchemaInfo[] = [
   {
@@ -158,7 +148,7 @@ function passerelles() {
    * elle. C'est le décor qui devient dicible, pas une assertion qui devient possible.
    */
   const ouvertes = new Map<string, ConnectionStateEntry>()
-  const identite = (cle: DatabaseKey) => `${cle.project}/${cle.environment}/${cle.database}`
+  const identite = (cle: DatabaseKey) => cle.connection
   const passerelle: PasserelleArbre = {
     openDatabase: vi.fn(async (cle) => {
       const state = {
@@ -280,26 +270,22 @@ const RESULTAT = {
  * Elle est posée sur **la connexion**, non sur le projet : c'est là qu'elle vit depuis le 20 août
  * 2026, et un décor qui la placerait ailleurs ne dirait rien de ce que l'écran doit trouver.
  */
-function avecConsole(nom: string, sql: string): Project[] {
-  return PROJETS.map((projet) => ({
-    ...projet,
-    databases: projet.databases.map((base) =>
-      base.name === 'analytics' ? { ...base, consoles: [{ name: nom, sql }] } : base,
-    ),
-  }))
+function avecConsole(nom: string, sql: string): FolderTree {
+  return surConnexion(PROJETS, ANALYTICS, (base) => ({ ...base, consoles: [{ name: nom, sql }] }))
 }
 
-const PROJETS_DEV: Project[] = PROJETS.map((projet) => ({
-  ...projet,
-  queries: [],
-  // Les connexions **déménagent en `dev`** : l'arbre les liste sous ce palier, et le drapeau
-  // `production` de `dev` étant baissé, l'écriture n'ouvre pas de confirmation.
-  databases: projet.databases.map((base) => ({
-    ...base,
-    environment: 'dev',
-    connection: { ...variante, environment: 'dev' as const },
-  })),
-}))
+/**
+ * Les connexions **déménagent en `dev`** : l'arbre les liste sous ce sous-dossier, et `dev` n'étant
+ * pas en lecture seule, l'écriture n'ouvre pas de confirmation.
+ */
+const PROJETS_DEV: FolderTree = arbreDeTest(
+  trioDeTest({
+    dev: [
+      connexionDeTest(ANALYTICS, 'analytics', { connection: variante }),
+      connexionDeTest(SHOP, 'shop', { connection: variante }),
+    ],
+  }),
+)
 
 /**
  * Le même décor que `PROJETS_DEV`, mais `analytics` y est déclarée MongoDB.
@@ -308,11 +294,9 @@ const PROJETS_DEV: Project[] = PROJETS.map((projet) => ({
  * lignes restent celles du décor générique : ce test ne porte pas sur ce que MongoDB introspecte
  * vraiment (`18d`), seulement sur le fait que `describeTable` est bien rappelée après une écriture.
  */
-const PROJETS_MONGO: Project[] = PROJETS_DEV.map((projet) => ({
-  ...projet,
-  databases: projet.databases.map((base) =>
-    base.name === 'analytics' ? { ...base, engine: 'mongodb' as const } : base,
-  ),
+const PROJETS_MONGO: FolderTree = surConnexion(PROJETS_DEV, ANALYTICS, (base) => ({
+  ...base,
+  engine: 'mongodb' as const,
 }))
 
 /**
@@ -320,29 +304,17 @@ const PROJETS_MONGO: Project[] = PROJETS_DEV.map((projet) => ({
  *
  * **Le décor doit suivre**, sans quoi deux créations de suite porteraient le même nom : le nom par
  * défaut est le premier numéro libre *dans la liste des consoles*, et une liste figée reste
- * éternellement vide. Le harnais tient donc les projets en état — la démo fait de même.
+ * éternellement vide. Le harnais tient donc l'arbre en état — la démo fait de même.
  */
 function surConsoles(
-  projets: readonly Project[],
-  project: string,
-  database: string,
-  environment: string,
-  transforme: (
-    consoles: Project['databases'][number]['consoles'],
-  ) => Project['databases'][number]['consoles'],
-): Project[] {
-  return projets.map((projet) =>
-    projet.name === project
-      ? {
-          ...projet,
-          databases: projet.databases.map((base) =>
-            base.name === database && base.environment === environment
-              ? { ...base, consoles: transforme(base.consoles) }
-              : base,
-          ),
-        }
-      : projet,
-  )
+  arbre: FolderTree,
+  connection: string,
+  transforme: (consoles: Database['consoles']) => Database['consoles'],
+): FolderTree {
+  return surConnexion(arbre, connection, (base) => ({
+    ...base,
+    consoles: transforme(base.consoles),
+  }))
 }
 
 function monter(over: Partial<Parameters<typeof Workbench>[0]> = {}) {
@@ -364,45 +336,44 @@ function monter(over: Partial<Parameters<typeof Workbench>[0]> = {}) {
   }
 
   function Pilote() {
-    const [projets, setProjets] = useState<readonly Project[]>(over.projects ?? PROJETS)
+    const [projets, setProjets] = useState<FolderTree>(over.arbre ?? PROJETS)
     return (
       <Workbench
-        projects={projets}
+        arbre={projets}
         passerelle={passerelle}
         passerelleDetail={detail}
         passerelleLignes={lignes}
         passerelleStructures={structures}
         // Les quatre gestes de console appliqués à l'état, sauf si le test fournit les siens —
         // un espion qui veut seulement constater l'appel n'a pas besoin que le décor bouge.
-        onCreateConsole={async (project, database, environment, nom) => {
+        onCreateConsole={async (connection, nom) => {
           setProjets((precedents) =>
-            surConsoles(precedents, project, database, environment, (consoles) => [
+            surConsoles(precedents, connection, (consoles) => [
               ...consoles,
               { name: nom, sql: '' },
             ]),
           )
         }}
-        onSaveConsole={async (project, database, environment, nom, sql) => {
+        onSaveConsole={async (connection, nom, sql) => {
           setProjets((precedents) =>
-            surConsoles(precedents, project, database, environment, (consoles) =>
+            surConsoles(precedents, connection, (consoles) =>
               consoles.map((console) => (console.name === nom ? { ...console, sql } : console)),
             ),
           )
         }}
-        onRenameConsole={async (project, database, environment, nom, nouveau) => {
+        onRenameConsole={async (connection, nom, nouveau) => {
           setProjets((precedents) =>
-            surConsoles(precedents, project, database, environment, (consoles) =>
+            surConsoles(precedents, connection, (consoles) =>
               consoles.map((console) =>
                 console.name === nom ? { ...console, name: nouveau } : console,
               ),
             ),
           )
         }}
-        /* **Les projets reposés, comme `App` le fait** (`onProjets={setProjects}`) : c'est ce
-           changement que l'écran suit pour redessiner, et sans lui aucune écriture de configuration
-           ne serait observable ici. Avant `{...over}`, donc un test peut le remplacer par un
-           espion. */
-        onProjets={setProjets}
+        /* **L'arbre reposé, comme `App` le fait** (`onArbre={setArbre}`) : c'est ce changement que
+           l'écran suit pour redessiner, et sans lui aucune écriture de configuration ne serait
+           observable ici. Avant `{...over}`, donc un test peut le remplacer par un espion. */
+        onArbre={setProjets}
         {...over}
       />
     )
@@ -424,9 +395,7 @@ describe('Workbench', () => {
   // décoloré et à sa phrase. L'arbre, lui, est ce qui reste — c'est là qu'on sélectionne.
   it('au montage, rien n’est sélectionné : ni bande d’onglets ni panneau de détail', () => {
     monter()
-    expect(
-      screen.getByRole('tree', { name: 'Projets, environnements et connexions' }),
-    ).toBeInTheDocument()
+    expect(screen.getByRole('tree', { name: 'Dossiers et connexions' })).toBeInTheDocument()
     expect(screen.getByText('Sélectionner une entité pour commencer')).toBeInTheDocument()
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Détail de l’objet')).not.toBeInTheDocument()
@@ -478,10 +447,7 @@ describe('Workbench', () => {
     await ouvrirLArbreJusquAuSchema(utilisateur)
 
     expect(passerelle.openDatabase).toHaveBeenCalledTimes(1)
-    expect(passerelle.listObjects).toHaveBeenCalledWith(
-      { project: 'Atelier Nord', database: 'analytics', environment: 'prod' },
-      'public',
-    )
+    expect(passerelle.listObjects).toHaveBeenCalledWith({ connection: ANALYTICS }, 'public')
     expect(await screen.findByRole('treeitem', { name: /orders/ })).toBeInTheDocument()
   })
 
@@ -527,9 +493,7 @@ describe('Workbench', () => {
     expect(screen.queryByRole('grid')).not.toBeInTheDocument()
     // La liste des objets revient, et l'écran de travail est toujours là.
     expect(screen.getByRole('table')).toBeInTheDocument()
-    expect(
-      screen.getByRole('tree', { name: 'Projets, environnements et connexions' }),
-    ).toBeInTheDocument()
+    expect(screen.getByRole('tree', { name: 'Dossiers et connexions' })).toBeInTheDocument()
   })
 
   it('la sidebar liste les colonnes de l’objet choisi, et les retire dès qu’il est ouvert', async () => {
@@ -628,7 +592,7 @@ describe('Workbench', () => {
         <Sprite />
         <LanguageProvider preferences={{ language: 'fr' }}>
           <Workbench
-            projects={PROJETS}
+            arbre={PROJETS}
             passerelle={passerelle}
             passerelleDetail={{ describeTable: vi.fn(async () => DETAIL) }}
           />
@@ -695,7 +659,7 @@ describe('la console SQL (`12a`)', () => {
     // ouverte » sur un onglet que le geste venait de mettre au premier plan.
     await waitFor(() => expect(passerelle.openDatabase).toHaveBeenCalledTimes(1))
     expect(passerelle.openDatabase).toHaveBeenCalledWith(
-      { project: 'Atelier Nord', database: 'analytics', environment: 'prod' },
+      { connection: ANALYTICS },
       'postgresql',
       REGLAGES,
     )
@@ -736,7 +700,7 @@ describe('la console SQL (`12a`)', () => {
         <Sprite />
         <LanguageProvider preferences={{ language: 'fr' }}>
           <Workbench
-            projects={PROJETS}
+            arbre={PROJETS}
             passerelle={passerelle}
             passerelleDetail={{ describeTable: vi.fn(async () => DETAIL) }}
             onCreateConsole={async () => {}}
@@ -767,7 +731,7 @@ describe('la console SQL (`12a`)', () => {
         <Sprite />
         <LanguageProvider preferences={{ language: 'fr' }}>
           <Workbench
-            projects={avecConsole('CA par jour', 'select 42')}
+            arbre={avecConsole('CA par jour', 'select 42')}
             passerelle={passerelle}
             passerelleDetail={{ describeTable: vi.fn(async () => DETAIL) }}
           />
@@ -1019,7 +983,7 @@ describe('la console SQL (`12a`)', () => {
     const utilisateur = userEvent.setup()
     const choisirDestination = vi.fn<PasserelleExport['choisirDestination']>(async () => null)
     monter({
-      projects: avecConsole('ventes du mois', 'select 1'),
+      arbre: avecConsole('ventes du mois', 'select 1'),
       passerelleExecution: PASSERELLE_SQL,
       passerelleExport: {
         choisirDestination,
@@ -1348,9 +1312,7 @@ describe('la console SQL (`12a`)', () => {
     // **Aucune modale** : nommer avant d'avoir écrit revient à demander un titre pour une page
     // blanche. Le nom par défaut suffit, et le double-clic sur la ligne renomme plus tard.
     expect(screen.queryByRole('dialog')).toBeNull()
-    await waitFor(() =>
-      expect(creer).toHaveBeenCalledWith('Atelier Nord', 'analytics', 'prod', 'console 1'),
-    )
+    await waitFor(() => expect(creer).toHaveBeenCalledWith(ANALYTICS, 'console 1'))
     // L'onglet cesse d'être un brouillon : il porte le nom de la console.
     expect(await screen.findByRole('tab', { name: /console 1/ })).toBeInTheDocument()
   })
@@ -1393,7 +1355,7 @@ describe('la console SQL (`12a`)', () => {
     const utilisateur = userEvent.setup()
     const creer = vi.fn(async () => {})
     monter({
-      projects: avecConsole('console 1', ''),
+      arbre: avecConsole('console 1', ''),
       passerelleExecution: PASSERELLE_SQL,
       onCreateConsole: creer,
     })
@@ -1407,15 +1369,13 @@ describe('la console SQL (`12a`)', () => {
 
     // « console 1 » est pris : la suivante est « console 2 », et non un homonyme que le cœur
     // refuserait.
-    await waitFor(() =>
-      expect(creer).toHaveBeenCalledWith('Atelier Nord', 'analytics', 'prod', 'console 2'),
-    )
+    await waitFor(() => expect(creer).toHaveBeenCalledWith(ANALYTICS, 'console 2'))
   })
 
   it('une console de l’arbre s’ouvre sur son texte persisté', async () => {
     const utilisateur = userEvent.setup()
     monter({
-      projects: avecConsole('CA par jour', 'select 42'),
+      arbre: avecConsole('CA par jour', 'select 42'),
       passerelleExecution: PASSERELLE_SQL,
     })
     await ouvrirLArbreJusquAuSchema(utilisateur)
@@ -1429,7 +1389,7 @@ describe('la console SQL (`12a`)', () => {
     const utilisateur = userEvent.setup()
     const ecrire = vi.fn(async () => {})
     monter({
-      projects: avecConsole('CA par jour', ''),
+      arbre: avecConsole('CA par jour', ''),
       passerelleExecution: PASSERELLE_SQL,
       onSaveConsole: ecrire,
     })
@@ -1444,22 +1404,14 @@ describe('la console SQL (`12a`)', () => {
     // par touche serait du travail disque pur pour un état que personne ne lira. Ce que ce test
     // mesure est qu'elle finit par partir, non le délai — l'affirmer figerait une constante de
     // réglage dans une assertion.
-    await waitFor(() =>
-      expect(ecrire).toHaveBeenCalledWith(
-        'Atelier Nord',
-        'analytics',
-        'prod',
-        'CA par jour',
-        'select 1',
-      ),
-    )
+    await waitFor(() => expect(ecrire).toHaveBeenCalledWith(ANALYTICS, 'CA par jour', 'select 1'))
   })
 
   it('un double-clic sur l’onglet renomme la console, comme dans l’arbre', async () => {
     const utilisateur = userEvent.setup()
     const renommer = vi.fn(async () => {})
     monter({
-      projects: avecConsole('CA par jour', 'select 42'),
+      arbre: avecConsole('CA par jour', 'select 42'),
       passerelleExecution: PASSERELLE_SQL,
       onRenameConsole: renommer,
     })
@@ -1473,19 +1425,13 @@ describe('la console SQL (`12a`)', () => {
 
     // **Une console se rencontre aux deux endroits** — la ligne d'arbre et l'onglet — et n'être
     // renommable qu'à l'un des deux obligerait à se souvenir lequel.
-    expect(renommer).toHaveBeenCalledWith(
-      'Atelier Nord',
-      'analytics',
-      'prod',
-      'CA par jour',
-      'Audit',
-    )
+    expect(renommer).toHaveBeenCalledWith(ANALYTICS, 'CA par jour', 'Audit')
   })
 
   it('le résultat de la console survit à son renommage', async () => {
     const utilisateur = userEvent.setup()
     monter({
-      projects: avecConsole('CA par jour', 'select 42'),
+      arbre: avecConsole('CA par jour', 'select 42'),
       passerelleExecution: PASSERELLE_SQL,
       onRenameConsole: async () => {},
     })
@@ -1508,7 +1454,7 @@ describe('la console SQL (`12a`)', () => {
   it('rouvrir une console déjà ouverte réactive son onglet au lieu d’en empiler un second', async () => {
     const utilisateur = userEvent.setup()
     monter({
-      projects: avecConsole('CA par jour', 'select 42'),
+      arbre: avecConsole('CA par jour', 'select 42'),
       passerelleExecution: PASSERELLE_SQL,
     })
     await ouvrirLArbreJusquAuSchema(utilisateur)
@@ -1559,7 +1505,7 @@ describe('la console SQL (`12a`)', () => {
         surEchecDeCommande: () => () => {},
         connectionStates: async () => [
           {
-            key: { project: 'Atelier Nord', database: 'analytics', environment: 'prod' as const },
+            key: { connection: ANALYTICS },
             state: {
               kind: 'connected' as const,
               serverVersion: 'PostgreSQL 17.6',
@@ -1604,7 +1550,7 @@ describe('la console SQL (`12a`)', () => {
         surEchecDeCommande: () => () => {},
         connectionStates: async () => [
           {
-            key: { project: 'Atelier Nord', database: 'analytics', environment: 'prod' as const },
+            key: { connection: ANALYTICS },
             state: {
               kind: 'connected' as const,
               serverVersion: 'PostgreSQL 17.6',
@@ -1664,7 +1610,7 @@ describe('la console SQL (`12a`)', () => {
         surEchecDeCommande: () => () => {},
         connectionStates: async () => [
           {
-            key: { project: 'Atelier Nord', database: 'analytics', environment: 'prod' as const },
+            key: { connection: ANALYTICS },
             state: {
               kind: 'connected' as const,
               serverVersion: 'PostgreSQL 17.6',
@@ -1733,7 +1679,7 @@ describe('la console SQL (`12a`)', () => {
         surEchecDeCommande: () => () => {},
         connectionStates: async () => [
           {
-            key: { project: 'Atelier Nord', database: 'analytics', environment: 'prod' as const },
+            key: { connection: ANALYTICS },
             state: {
               kind: 'connected' as const,
               serverVersion: 'PostgreSQL 17.6',
@@ -1797,7 +1743,7 @@ describe('la console SQL (`12a`)', () => {
         surEchecDeCommande: () => () => {},
         connectionStates: async () => [
           {
-            key: { project: 'Atelier Nord', database: 'analytics', environment: 'prod' as const },
+            key: { connection: ANALYTICS },
             state: {
               kind: 'connected' as const,
               serverVersion: 'PostgreSQL 17.6',
@@ -1957,7 +1903,7 @@ describe('mode édition', () => {
     const utilisateur = userEvent.setup()
     const ecrire = vi.fn(async () => ({ applied: 1, inverseSql: 'BEGIN;\nUPDATE …;\nCOMMIT;' }))
     monter({
-      projects: PROJETS_DEV,
+      arbre: PROJETS_DEV,
       passerellePreview: PREVIEW,
       passerelleApply: { applyChanges: ecrire },
     })
@@ -1977,7 +1923,7 @@ describe('mode édition', () => {
     const utilisateur = userEvent.setup()
     const ecrire = vi.fn(async () => ({ applied: 1, inverseSql: '' }))
     monter({
-      projects: PROJETS_DEV,
+      arbre: PROJETS_DEV,
       passerellePreview: PREVIEW,
       passerelleApply: { applyChanges: ecrire },
     })
@@ -2011,7 +1957,7 @@ describe('mode édition', () => {
     const utilisateur = userEvent.setup()
     const ecrire = vi.fn(async () => ({ applied: 1, inverseSql: '' }))
     monter({
-      projects: PROJETS_DEV,
+      arbre: PROJETS_DEV,
       passerellePreview: PREVIEW,
       passerelleApply: { applyChanges: ecrire },
     })
@@ -2042,7 +1988,7 @@ describe('mode édition', () => {
       inverseSql: 'BEGIN;\nUPDATE inverse;\nCOMMIT;',
     }))
     const { lignes, structures } = monter({
-      projects: PROJETS_DEV,
+      arbre: PROJETS_DEV,
 
       passerellePreview: PREVIEW,
       passerelleApply: { applyChanges: ecrire },
@@ -2077,7 +2023,7 @@ describe('mode édition', () => {
     const utilisateur = userEvent.setup()
     const ecrire = vi.fn(async () => ({ applied: 1, inverseSql: '' }))
     const { structures } = monter({
-      projects: PROJETS_MONGO,
+      arbre: PROJETS_MONGO,
       passerellePreview: PREVIEW,
       passerelleApply: { applyChanges: ecrire },
     })
@@ -2099,7 +2045,7 @@ describe('mode édition', () => {
   it('un refus s’affiche dans le panneau et ne vide pas le modèle', async () => {
     const utilisateur = userEvent.setup()
     monter({
-      projects: PROJETS_DEV,
+      arbre: PROJETS_DEV,
 
       passerellePreview: PREVIEW,
       passerelleApply: {
@@ -2306,12 +2252,12 @@ describe('mode édition', () => {
  */
 describe('renommer une connexion (`26`)', () => {
   /** Applique le renommage à l'état, comme la commande réelle rend les projets à jour. */
-  function pilote(projets?: Project[]) {
-    const renommer = vi.fn(async () => ({ missingSecrets: [], leftoverSecrets: [] }))
-    // `projects` n'est **pas** passé à vide : `monter` répand ses arguments après son propre
-    // `projects`, donc un `undefined` explicite écraserait le décor par défaut.
+  function pilote(projets?: FolderTree) {
+    const renommer = vi.fn(async () => {})
+    // `arbre` n'est **pas** passé à vide : `monter` répand ses arguments après son propre `arbre`,
+    // donc un `undefined` explicite écraserait le décor par défaut.
     monter({
-      ...(projets === undefined ? {} : { projects: projets }),
+      ...(projets === undefined ? {} : { arbre: projets }),
       passerelleExecution: PASSERELLE_SQL,
       onRenameDatabase: renommer,
     })
@@ -2337,7 +2283,7 @@ describe('renommer une connexion (`26`)', () => {
 
     await renommerAnalytics(utilisateur, 'entrepot')
 
-    expect(renommer).toHaveBeenCalledWith('Atelier Nord', 'analytics', 'prod', 'entrepot')
+    expect(renommer).toHaveBeenCalledWith(ANALYTICS, 'entrepot')
     // **Ils suivent, ils ne se ferment pas** — c'est ce qui distingue un renommage d'un retrait
     // (`08j`). Les fermer ferait perdre la place de l'utilisateur pour une correction de libellé.
     const onglet = await screen.findByRole('tab', { name: /orders/ })
@@ -2653,7 +2599,7 @@ describe('le gestionnaire de schémas', () => {
    */
   function passerelleQuiExigeLOuverture() {
     const ouvertes = new Set<string>()
-    const identite = (cle: DatabaseKey) => `${cle.project}/${cle.environment}/${cle.database}`
+    const identite = (cle: DatabaseKey) => cle.connection
     const state = {
       kind: 'connected' as const,
       serverVersion: 'PostgreSQL 17.6',
@@ -2672,13 +2618,7 @@ describe('le gestionnaire de schémas', () => {
       }),
       closeDatabase: vi.fn(async (cle: DatabaseKey) => void ouvertes.delete(identite(cle))),
       connectionStates: vi.fn(async () =>
-        [...ouvertes].map((id) => {
-          const [project, environment, database] = id.split('/')
-          return {
-            key: { project, database, environment } as DatabaseKey,
-            state,
-          } as ConnectionStateEntry
-        }),
+        [...ouvertes].map((id) => ({ key: { connection: id }, state }) as ConnectionStateEntry),
       ),
       listSchemas: vi.fn(async (cle: DatabaseKey) => {
         if (!ouvertes.has(identite(cle))) {
@@ -2844,7 +2784,7 @@ describe('la transaction manuelle de la console', () => {
   /** Le décor complet : une console ouverte, un journal, et le mode que l'exécution reçoit. */
   async function ouvrirUneConsoleAvecTransaction(
     utilisateur: ReturnType<typeof userEvent.setup>,
-    options: { projects?: Project[] } = {},
+    options: { arbre?: FolderTree } = {},
   ) {
     const factice = passerelleTransactionFactice()
     const modes: TransactionMode[] = []
@@ -2852,7 +2792,7 @@ describe('la transaction manuelle de la console', () => {
       ...options,
       /**
        * **Une écriture de console qui ne touche pas au décor**, et c'est ce qui rend ces tests
-       * concluants. Le harnais réécrit `projets` à chaque frappe enregistrée ; or `projects` est le
+       * concluants. Le harnais réécrit `projets` à chaque frappe enregistrée ; or l'arbre est le
        * témoin de configuration de `useTransaction`, donc le journal serait relu pour une raison
        * qui n'a rien à voir avec l'exécution — et le test resterait vert en retirant la relecture
        * qui la suit (constaté par sabotage, règle n° 1).
@@ -3035,11 +2975,7 @@ describe('la transaction manuelle de la console', () => {
 
     // **La connexion de la console**, non celle que l'arbre montre : une console sait sur quoi elle
     // porte, et c'est déjà ce qui décide de la clé d'exécution.
-    await waitFor(() =>
-      expect(vus.valides).toEqual([
-        { project: 'Atelier Nord', database: 'analytics', environment: 'prod' },
-      ]),
-    )
+    await waitFor(() => expect(vus.valides).toEqual([{ connection: ANALYTICS }]))
     // Et le journal est relu : le panneau retombe sur son invite plutôt que de garder une liste que
     // la validation a emportée.
     await waitFor(() => expect(panneau).toHaveTextContent(/Rien n’est encore retenu/))
@@ -3263,7 +3199,7 @@ describe('la transaction manuelle de la console', () => {
 
   it('sur une console mongo, le mode manuel est refusé avec la raison du moteur', async () => {
     const utilisateur = userEvent.setup()
-    await ouvrirUneConsoleAvecTransaction(utilisateur, { projects: PROJETS_MONGO })
+    await ouvrirUneConsoleAvecTransaction(utilisateur, { arbre: PROJETS_MONGO })
 
     const bascule = screen.getByRole('switch', { name: 'Transaction manuelle' })
     // **L'entrée reste et se désactive avec sa raison** : la cacher ferait croire qu'elle n'existe
@@ -3402,38 +3338,6 @@ describe('suivre une clé étrangère', () => {
 })
 
 /**
- * **Le câblage de l'export d'un projet** (`API-30`).
- *
- * Ce que la vitrine de la sidebar ne peut pas prouver : que l'entrée du menu atteint bien l'écran
- * qui la relaie. `ExplorerSidebar.test.tsx` monte le composant seul, avec une prop passée à la main
- * — c'est la règle n° 8, et le geste doit être exercé à travers l'assemblage.
- */
-describe('« Exporter le projet… » traverse l’écran de travail (`API-30`)', () => {
-  it('nomme le projet de la ligne, et rien d’autre', async () => {
-    const utilisateur = userEvent.setup()
-    const vus: string[] = []
-    monter({ onExportProject: (projet) => vus.push(projet) })
-    await ouvrirLesEnvironnements(utilisateur)
-
-    await utilisateur.click(screen.getByRole('button', { name: 'Actions de Atelier Nord' }))
-    await utilisateur.click(screen.getByRole('button', { name: 'Exporter le projet…' }))
-
-    expect(vus).toEqual(['Atelier Nord'])
-  })
-
-  it('se désactive quand l’écran ne la relie à rien', async () => {
-    // **Le contrôle négatif** : sans lui, une entrée toujours cliquable passerait le test précédent.
-    // Un bouton inerte mais actif se lit comme une panne (défaut n° 36).
-    const utilisateur = userEvent.setup()
-    monter()
-    await ouvrirLesEnvironnements(utilisateur)
-
-    await utilisateur.click(screen.getByRole('button', { name: 'Actions de Atelier Nord' }))
-    expect(screen.getByRole('button', { name: 'Exporter le projet…' })).toBeDisabled()
-  })
-})
-
-/**
  * Les libellés de valeurs, **depuis l'écran de travail** (`API-75`).
  *
  * `libellesDeValeurs.test.tsx` mesure la vue montée seule, avec les libellés qu'on lui donne ; ce
@@ -3450,25 +3354,23 @@ describe('les libellés de valeurs (`API-75`)', () => {
    * moins : ce qui est mesuré ici est que la grille suit ce que l'écriture rend.
    */
   function ecriture() {
-    const vues: { project: string; table: string; column: string; labels: unknown }[] = []
+    const vues: { connection: string; table: string; column: string; labels: unknown }[] = []
     return {
       vues,
       saveValueLabels: vi.fn(
         async (requete: {
-          project: string
+          connection: string
           table: string
           column: string
           labels: Record<string, string>
         }) => {
           vues.push(requete)
-          return PROJETS.map((projet) =>
-            projet.name === requete.project
-              ? {
-                  ...projet,
-                  valueLabels: { [requete.table]: { [requete.column]: requete.labels } },
-                }
-              : projet,
-          )
+          // **Le cœur range la déclaration sur le dossier racine qui porte la connexion** (#166) :
+          // c'est là que `libellesDeLaTable` ira la relire.
+          return surDossier(PROJETS, ID_DE_TEST.racine, (dossier) => ({
+            ...dossier,
+            valueLabels: { [requete.table]: { [requete.column]: requete.labels } },
+          }))
         },
       ) as unknown as Parameters<typeof Workbench>[0]['saveValueLabels'],
     }
@@ -3504,7 +3406,7 @@ describe('les libellés de valeurs (`API-75`)', () => {
     // deviné : c'est la moitié qu'aucun test de la vue seule ne peut voir.
     expect(vues).toEqual([
       {
-        project: 'Atelier Nord',
+        connection: ANALYTICS,
         table: 'orders',
         column: 'id',
         labels: { '184220': 'commande pilote' },
@@ -3525,20 +3427,25 @@ describe('les libellés de valeurs (`API-75`)', () => {
   it('lit la déclaration du projet de l’onglet, pas celle d’un voisin', async () => {
     const utilisateur = userEvent.setup()
     monter({
-      projects: [
+      arbre: {
         /* **Le voisin est déclaré en *premier*, et c'est ce qui fait mordre le test.** Avec le bon
-           projet en tête, une résolution qui prendrait « le premier projet qui déclare quelque
+           dossier en tête, une résolution qui prendrait « le premier dossier qui déclare quelque
            chose » — ou n'importe lequel — resterait verte : le décor rendait les deux
-           indiscernables (règle n° 5). Vérifié par sabotage, dans les deux ordres. */
-        {
-          name: 'Quai Sud',
-          environments: TRIO_DE_TEST,
-          queries: [],
-          databases: [],
-          valueLabels: { orders: { id: { '184220': 'la mauvaise' } } },
-        } as Project,
-        { ...PROJETS[0], valueLabels: { orders: { id: { '184220': 'la bonne' } } } } as Project,
-      ],
+           indiscernables (règle n° 5). */
+        folders: [
+          {
+            id: 'f00000000000009a',
+            name: 'Quai Sud',
+            readOnly: false,
+            valueLabels: { orders: { id: { '184220': 'la mauvaise' } } },
+          },
+          ...surDossier(PROJETS, ID_DE_TEST.racine, (dossier) => ({
+            ...dossier,
+            valueLabels: { orders: { id: { '184220': 'la bonne' } } },
+          })).folders,
+        ],
+        connections: [],
+      },
     })
     await ouvrirLArbreJusquAuSchema(utilisateur)
     const liste = await screen.findByRole('table')
@@ -3556,12 +3463,10 @@ describe('les libellés de valeurs (`API-75`)', () => {
   it('le panneau de ligne montre la même cellule que la grille', async () => {
     const utilisateur = userEvent.setup()
     monter({
-      projects: [
-        {
-          ...PROJETS[0],
-          valueLabels: { orders: { id: { '184220': 'commande pilote' } } },
-        } as Project,
-      ],
+      arbre: surDossier(PROJETS, ID_DE_TEST.racine, (dossier) => ({
+        ...dossier,
+        valueLabels: { orders: { id: { '184220': 'commande pilote' } } },
+      })),
     })
     await ouvrirLArbreJusquAuSchema(utilisateur)
     const liste = await screen.findByRole('table')

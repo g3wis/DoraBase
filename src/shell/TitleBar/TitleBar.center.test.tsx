@@ -52,7 +52,7 @@ test('avec un centre, l’indicateur de sélection y est rendu à côté du logo
   const { container } = render(
     <LanguageProvider preferences={{ language: 'fr' }}>
       <Sprite />
-      <TitleBar center={<SelectionIndicator projectName="Atelier Nord" />} />
+      <TitleBar center={<SelectionIndicator chemin={['Atelier Nord']} />} />
     </LanguageProvider>,
   )
   expect(screen.getByText('Atelier Nord')).toBeInTheDocument()
@@ -77,8 +77,8 @@ test('le parcours clavier de la barre compte un arrêt, et le centre n’en est 
       <TitleBar
         center={
           <SelectionIndicator
-            projectName="Atelier Nord"
-            environment={{ label: 'Atelier', color: 'green', production: true }}
+            chemin={['Atelier Nord', 'Atelier']}
+            couleur="green"
             breadcrumb="catalogue · public"
           />
         }
@@ -103,7 +103,7 @@ test('la barre n’a que deux zones, le centre et les actions', () => {
   const { container } = render(
     <LanguageProvider preferences={{ language: 'fr' }}>
       <Sprite />
-      <TitleBar center={<SelectionIndicator projectName="Atelier Nord" />} />
+      <TitleBar center={<SelectionIndicator chemin={['Atelier Nord']} />} />
     </LanguageProvider>,
   )
   // Deux zones exactement : centre, actions.

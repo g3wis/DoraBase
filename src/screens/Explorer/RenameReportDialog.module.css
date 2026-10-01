@@ -30,11 +30,3 @@
   font-weight: var(--weight-semibold);
   color: var(--danger-ink);
 }
-
-/* Une réserve n'est **pas** un échec : le renommage a eu lieu. L'ambre le dit, là où le rouge
- * ferait croire que le geste a échoué. */
-.reserve {
-  padding: var(--space-4) var(--space-5);
-  border-radius: var(--radius-field);
-  background: var(--warn-bg-2);
-}

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { DatabaseKey, TableSummary } from '../../domain/engine'
+import type { DatabaseKey } from '../../domain/arbre'
+import type { TableSummary } from '../../domain/engine'
 import type { PasserelleStructures, Structures } from '../../screens/Workbench/useStructures'
 import type { EntreeDeTable } from './disposition'
 
@@ -135,21 +136,19 @@ export function useDiagramme(
    * `cle` est un objet que l'écran de travail reconstruit à chaque rendu : en dépendre relancerait
    * la lecture sans fin. Le premier remède avait été d'en dériver une chaîne et de taire la règle
    * des dépendances par une suppression — deux choses de trop, une valeur artificielle et un
-   * garde-fou éteint. Quatre chaînes de caractères disent la même identité, et le compilateur comme
+   * garde-fou éteint. Deux chaînes de caractères disent la même identité, et le compilateur comme
    * Biome n'ont plus rien à croire sur parole.
    */
-  const project = cle?.project ?? null
-  const database = cle?.database ?? null
-  const environment = cle?.environment ?? null
+  const connection = cle?.connection ?? null
 
   useEffect(() => {
-    if (project === null || database === null || environment === null || schema === null) {
+    if (connection === null || schema === null) {
       setNoms([])
       setOmises([])
       setTotal(0)
       return
     }
-    const cle: DatabaseKey = { project, database, environment }
+    const cle: DatabaseKey = { connection }
 
     /**
      * **Un témoin plutôt qu'un `AbortController`** : rien n'est annulable côté IPC, et ce qu'il faut
@@ -238,7 +237,7 @@ export function useDiagramme(
     return () => {
       vivant = false
     }
-  }, [project, database, environment, schema, passerelle])
+  }, [connection, schema, passerelle])
 
   /**
    * Ce que le dessin a sous la main, **relu à chaque rendu** depuis le cache.
@@ -247,15 +246,15 @@ export function useDiagramme(
    * « Rafraîchir » — et c'est bien le cache qui est la seule vérité sur ce qui est lu.
    */
   const tables = useMemo(() => {
-    if (project === null || database === null || environment === null || schema === null) return []
-    const cible: DatabaseKey = { project, database, environment }
+    if (connection === null || schema === null) return []
+    const cible: DatabaseKey = { connection }
     return noms.flatMap((nom) => {
       const detail = structures.detail(cible, schema, nom)
       return detail ? [detail] : []
     })
     // `structures` **doit** être une dépendance : c'est son changement qui fait paraître une table
     // lue. Les quatre autres sont les coordonnées, décomposées — voir la note plus haut.
-  }, [noms, structures, project, database, environment, schema])
+  }, [noms, structures, connection, schema])
 
   return {
     tables,

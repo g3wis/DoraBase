@@ -2,20 +2,21 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { Sprite } from '../../design/icons/Sprite'
-import type { Database, Project, SecretRef, UpdateVariantRequest } from '../../domain/config'
+import type { UpdateVariantRequest } from '../../domain/arbre'
+import type { Database, FolderTree, SecretRef } from '../../domain/config'
 import { LanguageProvider } from '../../i18n/LanguageContext'
 import { emptyDraft } from './ConnectionDraft'
 import { draftToUpdateRequest } from './enregistrerLaBase'
 import { NewConnection } from './NewConnection'
-import { TRIO_DE_TEST } from './pourLesTests'
+import { arbreDeTest, trioDeTest } from './pourLesTests'
 
 // **Noms inventés.** Ce test portait les identifiants d'une base réelle du commanditaire, ce qui
 // publiait un nom d'utilisateur et un nom de base dans le dépôt. Un décor de test n'a jamais besoin
 // d'être vrai — seulement cohérent.
-const BASE: Database = {
+const BASE = {
+  id: 'c0000000000000e1',
   name: 'analytics',
   engine: 'postgresql',
-  environment: 'prod',
   connection: {
     host: 'localhost',
     port: 5432,
@@ -23,7 +24,7 @@ const BASE: Database = {
     username: 'atelier',
     // `SecretRef` est un type **nominal** (`05a`) : une chaîne ne s'y affecte pas, ce qui empêche
     // d'y mettre une valeur de secret par erreur. Le cast est donc explicite, et cantonné au test.
-    password: 'Atelier/analytics/prod' as SecretRef,
+    password: 'connexion/c0000000000000e1' as SecretRef,
     // **`verify-full`, et pas pour ce qu'il chiffre** : la base est en `prod`, et un mode qui
     // n'authentifie pas y fait passer l'enregistrement par un rappel (#87) — que ces tests, qui
     // parlent de mise à jour et de secret, n'ont pas à traverser. Le rappel a les siens.
@@ -35,18 +36,12 @@ const BASE: Database = {
     tunnel: null,
   },
   consoles: [],
-}
+} as unknown as Database
 
-const APRES: Project[] = [
-  {
-    name: 'Atelier',
-    environments: TRIO_DE_TEST,
-    databases: [BASE],
-    queries: [],
-  },
-]
+/** La connexion vit dans `Atelier Nord` › `prod` : c'est le cadre qui s'annonce en édition. */
+const APRES: FolderTree = arbreDeTest(trioDeTest({ prod: [BASE] }))
 
-function monter(over: { onUpdate?: (r: UpdateVariantRequest) => Promise<Project[]> } = {}) {
+function monter(over: { onUpdate?: (r: UpdateVariantRequest) => Promise<FolderTree> } = {}) {
   const requetes: UpdateVariantRequest[] = []
   render(
     <>
@@ -54,8 +49,8 @@ function monter(over: { onUpdate?: (r: UpdateVariantRequest) => Promise<Project[
       <LanguageProvider preferences={{ language: 'fr' }}>
         <NewConnection
           onClose={() => {}}
-          projects={[{ id: 'Atelier', name: 'Atelier', environments: TRIO_DE_TEST }]}
-          edition={{ project: 'Atelier', database: BASE }}
+          arbre={APRES}
+          edition={BASE}
           onBrowseKey={async () => null}
           onTest={async () => {
             throw new Error('non employé')
@@ -78,25 +73,12 @@ const enregistrer = () => screen.getByRole('button', { name: /Enregistrer les mo
 
 describe('draftToUpdateRequest', () => {
   it('l’identité vient de la cible, jamais du brouillon', () => {
-    // Le formulaire verrouille les trois champs d'identité, donc le brouillon ne peut pas diverger
-    // **par l'écran**. Ce test le vérifie au niveau de la fonction, où la divergence est
-    // représentable : c'est le seul endroit où la garde est observable.
-    const draft = {
-      ...emptyDraft(),
-      name: 'renommee',
-      project: 'AutreProjet',
-      environment: 'dev' as const,
-      host: 'db.nouveau',
-    }
-    const requete = draftToUpdateRequest(draft, {
-      project: 'Atelier',
-      database: 'analytics',
-      environment: 'prod',
-    })
+    // Ce test le vérifie au niveau de la fonction, où la divergence est représentable : un nom
+    // modifié dans le brouillon ne désigne aucune autre connexion (#166).
+    const draft = { ...emptyDraft(), name: 'renommee', host: 'db.nouveau' }
+    const requete = draftToUpdateRequest(draft, 'c0000000000000e1')
 
-    expect(requete.project).toBe('Atelier')
-    expect(requete.database).toBe('analytics')
-    expect(requete.environment).toBe('prod')
+    expect(requete.connection).toBe('c0000000000000e1')
     // Les réglages, eux, viennent bien du brouillon.
     expect(requete.variant.host).toBe('db.nouveau')
   })
@@ -124,20 +106,17 @@ describe('modifier une connexion (08g)', () => {
     expect(screen.getByLabelText('Mot de passe')).toHaveValue('')
   })
 
-  it('le champ d’identité restant est verrouillé, avec sa raison', () => {
-    // **Un seul champ désormais** (1er septembre 2026) : « Nom » n'est plus dans le formulaire,
-    // donc plus rien à y verrouiller. L'environnement reste la seule identité qui s'y affiche.
+  it('aucun champ d’identité ne subsiste : le groupe « Environnement » est parti', () => {
+    // Le dernier champ verrouillé du formulaire était l'environnement. La connexion se range dans
+    // un dossier, qui est le cadre de la modale (#166).
     monter()
-    expect(screen.getByRole('radio', { name: /prod/ })).toBeDisabled()
+    expect(screen.queryByRole('group', { name: 'Environnement' })).toBeNull()
   })
 
-  it('le projet de la base modifiée s’annonce en tête, et ne se choisit pas', () => {
+  it('le dossier de la connexion modifiée s’annonce en tête, et ne se choisit pas', () => {
     monter()
-    // **Deux, et non trois** (26 août 2026) : le projet était le troisième champ verrouillé de la
-    // rangée d'identité, avec sa raison en infobulle. Un champ verrouillé qui explique pourquoi il
-    // l'est reste un champ ; il est devenu ce qu'il a toujours été, le cadre du formulaire.
-    expect(screen.queryByRole('combobox', { name: 'Projet' })).toBeNull()
-    expect(screen.getByTestId('projet-de-la-modale')).toHaveTextContent('Atelier')
+    expect(screen.queryByRole('combobox', { name: /Projet|Dossier/ })).toBeNull()
+    expect(screen.getByTestId('dossier-de-la-modale')).toHaveTextContent('Atelier Nord › prod')
   })
 
   it('enregistrer envoie une mise à jour, jamais un ajout', async () => {
@@ -151,10 +130,8 @@ describe('modifier une connexion (08g)', () => {
     await waitFor(() => expect(requetes).toHaveLength(1))
     const requete = requetes[0]
     expect(requete?.variant.port).toBe(5433)
-    // L'identité vient de la **cible**, pas du brouillon : c'est elle qui désigne la variante.
-    expect(requete?.project).toBe('Atelier')
-    expect(requete?.database).toBe('analytics')
-    expect(requete?.environment).toBe('prod')
+    // L'identité vient de la **cible**, pas du brouillon : c'est elle qui désigne la connexion.
+    expect(requete?.connection).toBe('c0000000000000e1')
     // Champ vide : le secret reste en place.
     expect(requete?.password).toBeNull()
   })
@@ -173,12 +150,12 @@ describe('modifier une connexion (08g)', () => {
     const utilisateur = userEvent.setup()
     monter({
       onUpdate: async () => {
-        throw new Error('la base « analytics » n’existe pas dans le projet « Atelier »')
+        throw new Error('la connexion « c0000000000000e1 » n’existe plus')
       },
     })
 
     await utilisateur.click(enregistrer())
-    expect(await screen.findByText(/n’existe pas dans le projet/)).toBeInTheDocument()
+    expect(await screen.findByText(/n’existe plus/)).toBeInTheDocument()
   })
 
   it('un tunnel enregistré est prérempli, panneau compris', () => {
@@ -207,8 +184,8 @@ describe('modifier une connexion (08g)', () => {
         <LanguageProvider preferences={{ language: 'fr' }}>
           <NewConnection
             onClose={() => {}}
-            projects={[{ id: 'Atelier', name: 'Atelier', environments: TRIO_DE_TEST }]}
-            edition={{ project: 'Atelier', database: avecTunnel }}
+            arbre={APRES}
+            edition={avecTunnel}
             onBrowseKey={async () => null}
             onTest={async () => {
               throw new Error('non employé')

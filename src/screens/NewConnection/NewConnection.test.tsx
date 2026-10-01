@@ -6,31 +6,24 @@ import { choisirDansLaListe, optionsDeLaListe } from '../../ui/Select/pourLesTes
 import { ENGINE_ORDER, ENGINES } from './engines'
 import { SSL_MODE_ORDER } from './environments'
 import { NewConnection } from './NewConnection'
-import { TRIO_DE_TEST } from './pourLesTests'
+import { arbreDeTest, ID_DE_TEST, trioDeTest } from './pourLesTests'
 
 /**
- * Monte l'écran dans le **premier** projet de la liste, à la façon de l'application.
- *
- * **Le projet est un paramètre du cadre depuis le 26 août 2026**, plus un choix de l'écran : le
- * décor doit donc le désigner, comme le fait l'appelant réel — le menu d'un environnement, ou le
- * repli du raccourci clavier. Le déduire ici plutôt que de le répéter dans quarante appels.
+ * Monte l'écran **dans un dossier**, à la façon de l'application (#166) : le cadre est toujours
+ * désigné par l'appelant — le menu d'une ligne de dossier. Le sous-dossier `dev` du décor migré.
  */
-function monter(
-  projects: readonly {
-    id: string
-    name: string
-    environments: readonly import('../../domain/config').EnvironmentDeclaration[]
-  }[] = [],
-) {
+function monter(dossier: string | null = ID_DE_TEST.dev) {
   return render(
     <>
       <Sprite />
       <LanguageProvider preferences={{ language: 'fr' }}>
-        <NewConnection onClose={() => {}} projects={projects} projet={projects.at(0)?.name ?? ''} />
+        <NewConnection onClose={() => {}} arbre={ARBRE} dossier={dossier} />
       </LanguageProvider>
     </>,
   )
 }
+
+const ARBRE = arbreDeTest(trioDeTest())
 
 test('la modale s’annonce sous le titre du handoff', () => {
   monter()
@@ -167,34 +160,6 @@ test('un mode que le nouveau moteur exprime est **gardé**', async () => {
   expect(screen.getByRole('combobox', { name: 'Mode SSL' })).toHaveTextContent('disable')
 })
 
-test('sans aucun projet, aucun environnement n’est proposé', () => {
-  // **Ce test disait l'inverse, et il avait raison de son temps** : `A2` ouvrait sur « + Nouveau
-  // projet… », et proposait le trio que ce projet recevrait à sa création. Depuis `24c`, cet écran ne
-  // crée plus de projet : les environnements proposés sont **toujours** ceux d'un projet réellement
-  // déclaré. Sans projet, il n'y a rien à proposer — et `24d` fait en sorte qu'on n'arrive plus ici
-  // dans cet état.
-  monter()
-  const radios = screen
-    .getByRole('group', { name: 'Environnement' })
-    .querySelectorAll<HTMLInputElement>('input[type=radio]')
-  expect([...radios]).toHaveLength(0)
-})
-
-test('les environnements proposés sont **ceux du projet choisi**', async () => {
-  // La garantie de `23d` : un projet à quatre environnements en montre quatre, dont un que nulle table
-  // de constantes ne connaît.
-  const quatre = [
-    ...TRIO_DE_TEST,
-    { id: 'preprod', label: 'preprod', color: 'violet' as const, production: false },
-  ]
-  monter([{ id: 'print', name: 'Atelier Nord', environments: quatre }])
-
-  const radios = screen
-    .getByRole('group', { name: 'Environnement' })
-    .querySelectorAll<HTMLInputElement>('input[type=radio]')
-  expect([...radios].map((r) => r.value)).toEqual(['dev', 'staging', 'prod', 'preprod'])
-})
-
 // --- Valeurs par défaut ---
 
 test('le formulaire ouvre vide, pas rempli des valeurs du mockup', () => {
@@ -206,32 +171,16 @@ test('le formulaire ouvre vide, pas rempli des valeurs du mockup', () => {
   expect(screen.getByLabelText('Utilisateur')).toHaveValue('')
 })
 
-test('le projet du cadre s’annonce en tête, et l’environnement désigné est préréglé', () => {
-  render(
-    <>
-      <Sprite />
-      <LanguageProvider preferences={{ language: 'fr' }}>
-        <NewConnection
-          onClose={() => {}}
-          projects={[
-            { id: 'Comptoir Sud', name: 'Comptoir Sud', environments: TRIO_DE_TEST },
-            { id: 'Atelier Nord', name: 'Atelier Nord', environments: TRIO_DE_TEST },
-          ]}
-          projet="Atelier Nord"
-          environnement="staging"
-        />
-      </LanguageProvider>
-    </>,
-  )
-  // **Le second projet de la liste, et non le premier** : c'est celui que l'appelant désigne. Le
-  // sélecteur qui posait le premier projet de la liste n'existe plus.
-  expect(screen.getByTestId('projet-de-la-modale')).toHaveTextContent('Atelier Nord')
-  // Et `staging`, non le `dev` par défaut.
-  expect(screen.getByRole('radio', { name: 'staging' })).toBeChecked()
+test('le dossier du cadre s’annonce en tête, par son chemin', () => {
+  monter(ID_DE_TEST.staging)
+  // **Le dossier désigné, et nul autre** : il n'y a plus de sélecteur, ni de projet ni
+  // d'environnement — la connexion se range là d'où part le geste.
+  expect(screen.getByTestId('dossier-de-la-modale')).toHaveTextContent('Atelier Nord › staging')
+  expect(screen.queryByRole('group', { name: 'Environnement' })).toBeNull()
 })
 
 test('choisir un moteur amène son port', async () => {
-  monter([{ id: 'print', name: 'Atelier Nord', environments: TRIO_DE_TEST }])
+  monter()
   await userEvent.click(screen.getByRole('radio', { name: 'MySQL' }))
   expect(screen.getByLabelText('Port')).toHaveValue('3306')
   await userEvent.click(screen.getByRole('radio', { name: 'MongoDB' }))
@@ -245,7 +194,7 @@ test('un seul clic de moteur emmène le port **et** le mode SSL', async () => {
   // `setDraft` qui en oublierait un laisserait l'autre juste, donc les deux suites vertes.
   //
   // Ce test tient ce que ni l'un ni l'autre ne tient : les deux effets du même clic.
-  monter([{ id: 'print', name: 'Atelier Nord', environments: TRIO_DE_TEST }])
+  monter()
   // Un mode que MongoDB n'exprime pas, sans quoi le report n'aurait rien à faire (#87 : le défaut,
   // `verify-full`, est offert partout).
   await choisirDansLaListe('Mode SSL', 'prefer')
@@ -255,7 +204,7 @@ test('un seul clic de moteur emmène le port **et** le mode SSL', async () => {
 })
 
 test('un port saisi à la main n’est pas emporté par le moteur', async () => {
-  monter([{ id: 'print', name: 'Atelier Nord', environments: TRIO_DE_TEST }])
+  monter()
   const port = screen.getByLabelText('Port')
   await userEvent.clear(port)
   await userEvent.type(port, '6543')
@@ -267,14 +216,8 @@ test('un port saisi à la main n’est pas emporté par le moteur', async () => 
 })
 
 test('les valeurs préremplies sont celles qui sont vraies dans presque tous les cas', () => {
-  // **Monté avec un projet, depuis `24c`.** Cet écran déclare une connexion *dans un projet* : sans
-  // projet, il n'a aucun environnement à proposer, et ce test cherchait une radio « dev » qui
-  // n'existait plus. Ce n'est pas le test qui a changé d'intention, c'est l'écran qui a cessé de
-  // savoir créer un projet.
-  monter([{ id: 'print', name: 'Atelier Nord', environments: TRIO_DE_TEST }])
+  monter()
   expect(screen.getByLabelText('Port')).toHaveValue('5432')
-  // `dev` et non `prod` : ouvrir sur prod serait une invitation à l'accident.
-  expect(screen.getByRole('radio', { name: 'dev' })).toBeChecked()
   // **Le contenu du champ, et non `toHaveValue`.** Le champ n'est plus un `<select>` : il n'a pas de
   // `value`, il affiche le libellé de l'option choisie. Ce qui compte est ce que l'utilisateur lit.
   //
@@ -327,31 +270,17 @@ test('changer de moteur ne perd pas ce qui a été saisi', async () => {
   expect(screen.getByLabelText('Hôte')).toHaveValue('db.internal')
 })
 
-// --- Projets ---
+// --- Le cadre ---
 
-test('l’enregistrement est bloqué sans aucun projet, et le champ de création n’existe plus', () => {
-  monter()
-  // **`08f` avait fermé cette impasse par le sélecteur ; `24a` la ferme par un écran.** Le champ
-  // « Nom du nouveau projet » n'existe plus ici, et la garde de `08e` revient : sans projet, cet
-  // écran n'a rien où enregistrer. Le cas ne se produit plus dans l'application — `24d` renvoie vers
-  // l'étape 1 — mais un appelant qui l'oublierait verra un refus, non un enregistrement dans le vide.
+test('le dossier ne se choisit pas dans cet écran, et la racine est un cadre valide', () => {
+  monter(null)
+  // **Aucun sélecteur** : en proposer un reviendrait à offrir de déplacer une connexion, geste de
+  // #167 qui ne se confond pas avec la déclaration.
+  expect(screen.queryByRole('combobox', { name: /Projet|Dossier/ })).toBeNull()
   expect(screen.queryByLabelText('Nom du nouveau projet')).toBeNull()
-  expect(screen.getByRole('button', { name: /Enregistrer & ouvrir/ })).toBeDisabled()
-})
-
-test('le projet ne se choisit pas dans cet écran', () => {
-  monter([
-    { id: 'print', name: 'Atelier Nord', environments: TRIO_DE_TEST },
-    { id: 'web', name: 'Atelier Sud', environments: TRIO_DE_TEST },
-  ])
-  // **Deux projets déclarés, et aucun sélecteur** (26 août 2026). En proposer un revenait à offrir de
-  // déplacer une connexion d'un projet à l'autre, geste qui n'existe pas — la confirmation de
-  // suppression se garde déjà de le proposer. Le projet vient de la ligne d'arbre d'où part le geste.
-  expect(screen.queryByRole('combobox', { name: 'Projet' })).toBeNull()
-  // Le champ de création n'est pas revenu par la porte de derrière (`24c`).
-  expect(screen.queryByLabelText('Nom du nouveau projet')).not.toBeInTheDocument()
-  // Et le projet du cadre est bien celui qui s'annonce.
-  expect(screen.getByTestId('projet-de-la-modale')).toHaveTextContent('Atelier Nord')
+  expect(screen.getByTestId('dossier-de-la-modale')).toHaveTextContent('Racine')
+  // Plus de garde « sans projet » : la racine est un endroit où enregistrer.
+  expect(screen.getByRole('button', { name: /Enregistrer & ouvrir/ })).toBeEnabled()
 })
 
 // --- Pied ---
@@ -363,23 +292,11 @@ test('les trois boutons du pied sont présents', () => {
   expect(screen.getByRole('button', { name: /Enregistrer & ouvrir/ })).toBeInTheDocument()
 })
 
-// Un bouton désactivé sans explication ferait croire à un bug : les deux sont donc actifs dès
-// qu'il y a un projet où enregistrer.
-test('« Tester » et « Enregistrer » sont actifs quand un projet existe', () => {
-  monter([{ id: 'print', name: 'Atelier Nord', environments: TRIO_DE_TEST }])
+// Un bouton désactivé sans explication ferait croire à un bug : les deux sont donc actifs.
+test('« Tester » et « Enregistrer » sont actifs', () => {
+  monter()
   expect(screen.getByRole('button', { name: /Tester la connexion/ })).toBeEnabled()
   expect(screen.getByRole('button', { name: /Enregistrer & ouvrir/ })).toBeEnabled()
-})
-
-// Le trou n°4 du handoff : `A2` déclare une base *dans un projet existant*, et `⌘N` y mène
-// directement. Le bouton est donc désactivé, et le sélecteur le dit — plutôt que d'inventer un
-// formulaire de création de projet que le mockup ne montre pas.
-test('sans aucun projet, « Enregistrer » est désactivé mais « Tester » reste actif', () => {
-  monter()
-  expect(screen.getByRole('button', { name: /Enregistrer & ouvrir/ })).toBeDisabled()
-  // Tester une connexion n'exige aucun projet : c'est justement ce qu'on veut pouvoir faire
-  // avant de s'engager.
-  expect(screen.getByRole('button', { name: /Tester la connexion/ })).toBeEnabled()
 })
 
 test('« Annuler » ferme la modale', async () => {
@@ -420,18 +337,19 @@ test('le focus entre sur le premier champ, pas sur la croix', () => {
 })
 
 test('tout le formulaire est atteignable au clavier', async () => {
-  monter([{ id: 'print', name: 'Atelier Nord', environments: TRIO_DE_TEST }])
+  monter()
   const attendus = [
     'PostgreSQL', // groupe de moteurs : une seule entrée
     // **Le panneau proxy / tunnel vient en deuxième** (24 août 2026) : il précède désormais le
     // formulaire, parce que le choix du proxy change les champs qui suivent. Son en-tête est un
-    // bouton, donc il entre dans l'ordre de tabulation avant l'environnement.
+    // bouton, donc il entre dans l'ordre de tabulation avant le formulaire.
     'Proxy / tunnel',
     // **« Nom de la base » n'est plus dans le parcours** (1er septembre 2026) : le champ est
     // parti, `name` étant désormais un identifiant technique généré, jamais saisi.
     // **« Projet » n'est plus dans le parcours** (26 août 2026) : le sélecteur est parti, le projet
     // s'annonçant en tête de la modale. Une indication n'est pas un contrôle, donc elle ne tabule pas.
-    'dev', // groupe d'environnements : une seule entrée
+    // **Le groupe « Environnement » n'est plus dans le parcours** (#166) : la connexion se range
+    // dans le dossier du cadre.
     // **« Nom du nouveau projet » n'est plus dans le parcours** (`24c`) : le champ existait sous
     // l'entrée « + Nouveau projet… » du sélecteur, et les deux sont partis avec la création depuis
     // cet écran.

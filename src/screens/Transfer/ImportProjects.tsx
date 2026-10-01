@@ -1,5 +1,5 @@
 import { useId, useState } from 'react'
-import type { ImportReport, ProjectOutcome } from '../../domain/transfert'
+import type { FolderOutcome, ImportReport, ImportSelection } from '../../domain/arbre'
 import { useT } from '../../i18n/LanguageContext'
 import { Button } from '../../ui/Button/Button'
 import { Modal } from '../../ui/Modal/Modal'
@@ -11,7 +11,7 @@ type ImportProjectsProps = {
   /** Ouvre le sélecteur de source **natif** et rend le chemin choisi, ou `null`. */
   onChoisirFichier: () => Promise<string | null>
   onInspecter: (fichier: string) => Promise<ImportReport>
-  onImporter: (fichier: string, projets: string[] | null) => Promise<ImportReport>
+  onImporter: (fichier: string, selection: ImportSelection | null) => Promise<ImportReport>
 }
 
 /**
@@ -50,6 +50,13 @@ export function ImportProjects({
    */
   const retenu = (nom: string) => !ecartes.includes(nom)
 
+  /*
+   * **Portage minimal pour #166** : le rapport parle désormais de dossiers de premier niveau
+   * (`FolderOutcome`), plus une ligne pour les connexions rangées à la racine du fichier. #169 refait
+   * cette modale ; d'ici là, la ligne racine se nomme par une clé à part et se retient comme les
+   * autres.
+   */
+
   async function choisir() {
     setErreur(null)
     const choisi = await onChoisirFichier()
@@ -66,11 +73,15 @@ export function ImportProjects({
 
   async function importer() {
     if (!fichier || !apercu) return
-    const retenus = apercu.projects
-      .filter((sort) => sort.verdict.kind !== 'rejected' && retenu(sort.name))
-      .map((sort) => sort.name)
+    const retenus = apercu.folders.filter(
+      (sort) => sort.verdict.kind !== 'rejected' && retenu(nomDe(sort)),
+    )
+    const selection: ImportSelection = {
+      folders: retenus.flatMap((sort) => (sort.folder === null ? [] : [sort.folder])),
+      rootConnections: retenus.some((sort) => sort.folder === null),
+    }
     try {
-      setResultat(await onImporter(fichier, retenus))
+      setResultat(await onImporter(fichier, selection))
     } catch (cause) {
       setErreur(messageDe(cause))
     }
@@ -78,7 +89,8 @@ export function ImportProjects({
 
   const rapport = resultat ?? apercu
   const importables = apercu
-    ? apercu.projects.filter((sort) => sort.verdict.kind !== 'rejected' && retenu(sort.name)).length
+    ? apercu.folders.filter((sort) => sort.verdict.kind !== 'rejected' && retenu(nomDe(sort)))
+        .length
     : 0
 
   return (
@@ -124,23 +136,23 @@ export function ImportProjects({
           <p className={styles.avertissement}>{t('transfer.import.carriesPasswords')}</p>
         )}
 
-        {rapport !== null && rapport.projects.length === 0 && (
+        {rapport !== null && rapport.folders.length === 0 && (
           <p className={styles.reserve}>{t('transfer.import.emptyFile')}</p>
         )}
 
-        {rapport !== null && rapport.projects.length > 0 && (
+        {rapport !== null && rapport.folders.length > 0 && (
           <div className={styles.projets}>
-            {rapport.projects.map((sort) => (
+            {rapport.folders.map((sort) => (
               <Ligne
-                key={sort.name}
+                key={nomDe(sort)}
                 sort={sort}
                 fini={resultat !== null}
-                retenu={retenu(sort.name)}
+                retenu={retenu(nomDe(sort))}
                 onRetenu={(garde) =>
                   setEcartes((precedents) =>
                     garde
-                      ? precedents.filter((nom) => nom !== sort.name)
-                      : [...precedents, sort.name],
+                      ? precedents.filter((nom) => nom !== nomDe(sort))
+                      : [...precedents, nomDe(sort)],
                   )
                 }
               />
@@ -159,7 +171,7 @@ function Ligne({
   retenu,
   onRetenu,
 }: {
-  sort: ProjectOutcome
+  sort: FolderOutcome
   /** L'import a eu lieu : la ligne décrit ce qui s'est passé, et il n'y a plus rien à cocher. */
   fini: boolean
   retenu: boolean
@@ -204,10 +216,10 @@ function Ligne({
       )}
       <div className={styles.projetTexte}>
         {fini || refuse ? (
-          <span className={styles.projetNom}>{sort.name}</span>
+          <span className={styles.projetNom}>{nomDe(sort)}</span>
         ) : (
           <label className={styles.projetNom} htmlFor={identifiant}>
-            {sort.name}
+            {nomDe(sort)}
           </label>
         )}
         <span className={styles.detail}>
@@ -217,7 +229,7 @@ function Ligne({
           {!refuse &&
             sort.verdict.kind !== 'skipped' &&
             ` · ${t('transfer.import.brings', {
-              environments: sort.environmentsAdded.length,
+              environments: sort.foldersAdded.length,
               connections: sort.connectionsAdded.length,
               consoles: sort.consolesAdded.length,
             })}`}
@@ -237,9 +249,9 @@ function Ligne({
             {t('transfer.import.consolesKept', { count: sort.consolesKept.length })}
           </span>
         )}
-        {sort.environmentsKept.length > 0 && (
-          <span className={styles.reserve} title={sort.environmentsKept.join('\n')}>
-            {t('transfer.import.environmentsKept', { count: sort.environmentsKept.length })}
+        {sort.foldersKept.length > 0 && (
+          <span className={styles.reserve} title={sort.foldersKept.join('\n')}>
+            {t('transfer.import.environmentsKept', { count: sort.foldersKept.length })}
           </span>
         )}
         {sort.passwordsMissing.length > 0 && (
@@ -290,4 +302,9 @@ function Ligne({
       </div>
     </div>
   )
+}
+
+/** Le nom d'une ligne du rapport : le dossier de premier niveau, ou la ligne des connexions racine. */
+function nomDe(sort: FolderOutcome): string {
+  return sort.folder ?? '—'
 }

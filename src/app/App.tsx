@@ -1,40 +1,41 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import {
   createConsole,
+  createFolder,
   declareKubeconfig,
   deleteConsole,
+  deleteFolder,
   deleteInstance,
   listKubernetesNamespaces,
   listKubernetesResources,
+  recolorFolder,
   renameConsole,
+  renameFolder,
   saveConsole,
   saveInstance,
   saveKubeconfigs,
   savePreferences,
+  setFolderReadOnly,
 } from '../data/commandes'
+import { ARBRE_VIDE, arbreEstVide } from '../data/dossiers'
 import { useConfiguration } from '../data/useConfiguration'
 import { Sprite } from '../design/icons/Sprite'
 import type {
   Database,
-  EnvironmentId,
+  FolderId,
+  FolderTree,
   Kubeconfigs,
   ManagedInstance,
   Preferences,
-  Project,
 } from '../domain/config'
 import type { AvailableUpdate } from '../domain/maj'
 import { LanguageProvider, langueAppliquee } from '../i18n/LanguageContext'
 import { DumpDialogs, type SensDuDump } from '../screens/Dump/DumpDialogs'
+import { idDossier } from '../screens/Explorer/arbre'
 import { DeleteInstanceDialog } from '../screens/Instances/DeleteInstanceDialog'
 import { NewInstance } from '../screens/Instances/NewInstance'
-import {
-  renommerLaConnexion,
-  renommerLeProjet,
-  retirerLaConnexion,
-  retirerLeProjet,
-} from '../screens/NewConnection/enregistrerLaBase'
+import { renommerLaConnexion, retirerLaConnexion } from '../screens/NewConnection/enregistrerLaBase'
 import { NewConnection } from '../screens/NewConnection/NewConnection'
-import { ParcoursDeCreation } from '../screens/NewProject/ParcoursDeCreation'
 import { ouvrirSelecteurDeKubeconfig } from '../screens/Preferences/ouvrirSelecteurDeKubeconfig'
 import { PreferencesDialog } from '../screens/Preferences/PreferencesDialog'
 import { jetonsDe, PREFERENCES_PAR_DEFAUT, themeApplique } from '../screens/Preferences/preferences'
@@ -80,40 +81,35 @@ export function App() {
   useClicDroitDesactive()
 
   /**
-   * La déclaration d'une connexion est ouverte, et **sur quoi** (26 août 2026).
+   * La déclaration d'une connexion est ouverte, et **dans quel dossier** (26 août 2026, puis #166).
    *
-   * Un objet plutôt qu'un booléen, et ses deux champs **obligatoires** : le geste ne part plus que du
-   * menu d'une ligne d'environnement, qui sait de quel projet et de quel environnement il s'agit. Le
-   * raccourci `⇧⌘N` était le seul appelant à ne rien désigner, et il a été retiré — c'est ce qui
-   * permet au type de refuser l'ignorance plutôt que de la traiter.
+   * Un objet plutôt qu'un booléen : le geste part du menu d'une ligne de dossier, qui sait lequel.
+   * `null` dans le champ, c'est la racine — une valeur, non une ignorance.
    */
-  const [connexionOuverte, setConnexionOuverte] = useState<{
-    project: string
-    environment: EnvironmentId
-  } | null>(null)
+  const [connexionOuverte, setConnexionOuverte] = useState<{ dossier: FolderId | null } | null>(
+    null,
+  )
   /**
-   * Le parcours de création est ouvert (`24d`).
-   *
-   * **Deux états distincts, non un mode d'un seul** : « ajouter une connexion » et « nouveau projet »
-   * sont deux gestes, et les confondre ramènerait la sentinelle du sélecteur que `24c` a retirée.
-   */
-  const [projetOuvert, setProjetOuvert] = useState<{ raison?: string } | null>(null)
-  /**
-   * La base en cours de modification (`08g`), ou `null` quand la modale **crée**.
+   * La connexion en cours de modification (`08g`), ou `null` quand la modale **crée**.
    *
    * Un seul état pour les deux usages : c'est la même modale, et deux drapeaux indépendants
    * permettraient de l'ouvrir en création *et* en édition à la fois.
    */
-  const [edition, setEdition] = useState<{ project: string; database: Database } | null>(null)
+  const [edition, setEdition] = useState<Database | null>(null)
   /**
-   * Les projets connus, **relus au démarrage** depuis `09b`.
+   * L'arbre de dossiers, **relu au démarrage** depuis `09b` et reposé par chaque écriture.
    *
-   * La boucle du produit est désormais complète : saisir (`08e`), persister, relire, afficher.
-   * `load_config` existait depuis `05b` et n'était appelée par personne — une base enregistrée
-   * était bien écrite sur le disque mais jamais retrouvée au lancement suivant.
+   * La boucle du produit : saisir, persister, relire, afficher. Chaque commande de configuration rend
+   * l'arbre à jour, donc l'écran et le disque ne peuvent pas diverger.
    */
   const configuration = useConfiguration()
-  const [projects, setProjects] = useState<Project[]>([])
+  const [arbre, setArbre] = useState<FolderTree>(ARBRE_VIDE)
+  /**
+   * La ligne à passer en renommage sur place dans l'écran de travail — le dossier que l'accueil ou
+   * `⌘N` vient de créer (#166). Aucune modale ne nomme un objet à sa création : il naît « dossier
+   * N », puis se nomme là où il est.
+   */
+  const [aRenommer, setARenommer] = useState<string | undefined>(undefined)
   /**
    * Les préférences (`15a`), lues au démarrage avec les projets.
    *
@@ -123,17 +119,17 @@ export function App() {
    */
   const [preferences, setPreferences] = useState<Preferences>(PREFERENCES_PAR_DEFAUT)
   /**
-   * Les instances managées déclarées (`API-32`), lues avec les projets.
+   * Les instances managées déclarées (`API-32`), lues avec l'arbre.
    *
-   * **Le même montage que `projects`** : le disque au démarrage, les commandes ensuite, et ce sont
+   * **Le même montage que l'arbre** : le disque au démarrage, les commandes ensuite, et ce sont
    * elles qui rendent la liste à jour — donc les deux ne peuvent pas diverger. Un état séparé plutôt
-   * qu'un champ de `projects` : une instance n'appartient à aucun projet.
+   * qu'une feuille de l'arbre : une instance n'appartient à aucun dossier.
    */
   const [instances, setInstances] = useState<ManagedInstance[]>([])
   /**
-   * Les kubeconfigs déclarés (`API-70`), lus avec les projets.
+   * Les kubeconfigs déclarés (`API-70`), lus avec l'arbre.
    *
-   * **Le même montage que `projects` et `instances`** : le disque au démarrage, les commandes
+   * **Le même montage que l'arbre et les instances** : le disque au démarrage, les commandes
    * ensuite, et ce sont elles qui rendent la liste à jour. Un état à part plutôt qu'un champ de
    * `preferences` : une connexion les **référence**, donc ce sont des objets que le modèle désigne,
    * et `save_preferences` passerait par-dessus.
@@ -185,7 +181,7 @@ export function App() {
     brancherEvenementsDeMenu({
       exporter: () => setDump('export'),
       importer: () => setDump('import'),
-      exporterLesProjets: () => setTransfert({ sens: 'export', projet: null }),
+      exporterLesProjets: () => setTransfert({ sens: 'export', dossier: null }),
       importerDesProjets: () => setTransfert({ sens: 'import' }),
     })
   }, [])
@@ -196,7 +192,7 @@ export function App() {
   // deux ne peuvent pas diverger.
   useEffect(() => {
     if (configuration.kind === 'chargement') return
-    setProjects(configuration.projects)
+    setArbre(configuration.tree)
     setPreferences(configuration.preferences)
     setInstances(configuration.instances)
     setKubeconfigs(configuration.kubeconfigs)
@@ -322,20 +318,31 @@ export function App() {
     }
   }
 
-  useRaccourcisDeCreation({ nouveauProjet: () => setProjetOuvert({}) })
+  /**
+   * Crée un dossier et rend son identifiant — **le geste de la bande, des menus, de l'accueil et de
+   * `⌘N`** (#166). Une seule fonction, parce que deux voies pour un même acte en laissent une en
+   * arrière (règle n° 17).
+   */
+  const creerUnDossier = async (parent: FolderId | null): Promise<FolderId> => {
+    const issue = await createFolder({ parent })
+    setArbre(issue.tree)
+    return issue.folder
+  }
 
   /**
-   * Les projets sous la forme que les écrans de création attendent.
-   *
-   * **Calculée une fois** : l'expression était recopiée à chaque point de montage, et une recopie qui
-   * oublie un champ ne se voit qu'à l'écran concerné.
+   * Crée un dossier à la racine **et demande son renommage sur place** : c'est ce que font l'accueil
+   * et `⌘N`, qui n'ont pas la sidebar sous la main pour s'en charger.
    */
-  const projetsPourLesEcrans = projects.map((projet) => ({
-    id: projet.name,
-    name: projet.name,
-    // Ses environnements déclarés : c'est ce que `A2` propose (`23d`).
-    environments: projet.environments,
-  }))
+  const creerALaRacine = () => {
+    void creerUnDossier(null).then(
+      (cree) => setARenommer(idDossier(cree)),
+      () => {
+        // Un refus de création — un fichier en quarantaine — est déjà dit par le blocage (`09b`).
+      },
+    )
+  }
+
+  useRaccourcisDeCreation({ nouveauDossier: creerALaRacine })
 
   return (
     <LanguageProvider preferences={preferences}>
@@ -356,110 +363,68 @@ export function App() {
         <Suspense fallback={null}>
           <WorkbenchDemo />
         </Suspense>
-      ) : projects.length > 0 ? (
-        // **Un projet existe : l'écran de travail est le bon écran.** `A1` est l'écran des
-        // débuts — `07` le décrit comme « première ouverture, aucun projet » — et le laisser
-        // devant un utilisateur qui a dix bases ferait de l'accueil une impasse. C'est aussi ce
-        // qui rend `A4` atteignable : jusqu'ici, rien ne le montait.
+      ) : !arbreEstVide(arbre) ? (
+        // **L'arbre n'est pas vide : l'écran de travail est le bon écran.** `A1` est l'écran des
+        // débuts — « première ouverture, aucun dossier » —, et le laisser devant un utilisateur qui
+        // a dix bases ferait de l'accueil une impasse. Un dossier vide suffit : c'est là qu'on
+        // déclare sa première connexion.
         <>
           <Workbench
-            projects={projects}
+            arbre={arbre}
             onOpenPreferences={() => setPreferencesOuvertes(true)}
             rowHeight={preferences.rowHeight}
-            onNewDatabase={setConnexionOuverte}
-            onNewProject={() => setProjetOuvert({})}
-            onEditDatabase={(project, database) => setEdition({ project, database })}
-            // Le renommage rend les projets à jour : les reposer ici évite un second aller-retour,
-            // et supprime la fenêtre pendant laquelle l'arbre montrerait l'ancien nom.
-            // Les quatre écritures sur les consoles. Elles rendent les projets à jour, donc l'écran
-            // n'a pas à relire — et l'arbre suit immédiatement.
-            onCreateConsole={async (project, database, environment, name) => {
-              setProjects(
-                await createConsole({
-                  project,
-                  database,
-                  environment,
-                  name,
-                  sql: null,
-                  renameTo: null,
-                }),
-              )
+            onNewDatabase={(dossier) => setConnexionOuverte({ dossier })}
+            onNewFolder={creerUnDossier}
+            renommageInitial={aRenommer}
+            onRenameFolder={async (folder, name) => {
+              setArbre(await renameFolder({ folder, name }))
             }}
-            onSaveConsole={async (project, database, environment, name, sql) => {
-              setProjects(
-                await saveConsole({ project, database, environment, name, sql, renameTo: null }),
-              )
+            onRecolorFolder={async (folder, color) => {
+              setArbre(await recolorFolder({ folder, color }))
             }}
-            onDeleteConsole={async (project, database, environment, name) => {
-              setProjects(
-                await deleteConsole({
-                  project,
-                  database,
-                  environment,
-                  name,
-                  sql: null,
-                  renameTo: null,
-                }),
-              )
+            onSetFolderReadOnly={async (folder, readOnly) => {
+              setArbre(await setFolderReadOnly({ folder, readOnly }))
             }}
-            onRenameConsole={async (project, database, environment, name, renameTo) => {
-              setProjects(
-                await renameConsole({
-                  project,
-                  database,
-                  environment,
-                  name,
-                  sql: null,
-                  renameTo,
-                }),
-              )
+            onEditDatabase={setEdition}
+            // Les quatre écritures sur les consoles. Elles rendent l'arbre à jour, donc l'écran n'a
+            // pas à relire — et l'arbre suit immédiatement.
+            onCreateConsole={async (connection, name) => {
+              setArbre(await createConsole({ connection, name, sql: null, renameTo: null }))
+            }}
+            onSaveConsole={async (connection, name, sql) => {
+              setArbre(await saveConsole({ connection, name, sql, renameTo: null }))
+            }}
+            onDeleteConsole={async (connection, name) => {
+              setArbre(await deleteConsole({ connection, name, sql: null, renameTo: null }))
+            }}
+            onRenameConsole={async (connection, name, renameTo) => {
+              setArbre(await renameConsole({ connection, name, sql: null, renameTo }))
             }}
             onDelete={async (cible) => {
               const issue =
-                cible.kind === 'project'
-                  ? await retirerLeProjet({ project: cible.project })
-                  : await retirerLaConnexion({
-                      project: cible.project,
-                      database: cible.database,
-                      environment: cible.environment,
-                    })
-              setProjects(issue.projects)
+                cible.kind === 'folder'
+                  ? await deleteFolder({ folder: cible.folder })
+                  : await retirerLaConnexion({ connection: cible.connection })
+              setArbre(issue.tree)
               return issue
             }}
-            // Les cinq gestes de `23c` rendent la liste entière : la reposer ici évite un second
-            // aller-retour, et supprime la fenêtre pendant laquelle l'arbre montrerait l'ancien état.
-            onProjets={setProjects}
+            // Les écritures que l'écran de travail porte lui-même — schémas affichés, libellés de
+            // valeurs — rendent l'arbre entier : le reposer ici évite un second aller-retour.
+            onArbre={setArbre}
             instances={instances}
             onDeclareInstance={() => setInstanceOuverte({})}
             onEditInstance={(instance) => setInstanceOuverte({ instance })}
             onRemoveInstance={setInstanceARetirer}
-            /* **L'export d'un projet ouvre la même modale que celui de tous** (`API-30`), avec sa
-               portée en paramètre : c'est un seul écran, et deux modales jumelles auraient divergé
-               au premier réglage ajouté — la case des mots de passe, par exemple. */
-            onExportProject={(project) => setTransfert({ sens: 'export', projet: project })}
             /* **Le troisième chemin vers l'import**, après le menu natif et l'écran d'accueil — et
-               le seul que voit quelqu'un qui a déjà des projets. Voir `ExplorerSidebar`, qui porte
+               le seul que voit quelqu'un qui a déjà des dossiers. Voir `ExplorerSidebar`, qui porte
                la raison : un chemin unique dans un menu natif n'a été trouvé par personne. */
             onImportProjects={() => setTransfert({ sens: 'import' })}
-            onRenameProject={async (project, nom) => {
-              const issue = await renommerLeProjet({ project, name: nom })
-              setProjects(issue.projects)
-              return issue
-            }}
-            // Le renommage d'une connexion (`26`) : la liste rendue est reposée telle quelle, comme
-            // pour le projet — l'arbre montre le nouveau nom sans second aller-retour.
-            onRenameDatabase={async (project, database, environment, nouveau) => {
-              const issue = await renommerLaConnexion({
-                project,
-                database,
-                environment,
-                name: nouveau,
-              })
-              setProjects(issue.projects)
-              return issue
+            // Le renommage d'une connexion (`26`) : l'arbre rendu est reposé tel quel.
+            onRenameDatabase={async (connection, name) => {
+              setArbre(await renommerLaConnexion({ connection, name }))
             }}
           />
-          {dump && <DumpDialogs sens={dump} projects={projects} onClose={() => setDump(null)} />}
+          {dump && <DumpDialogs sens={dump} arbre={arbre} onClose={() => setDump(null)} />}
           {/* **Les deux modales d'instance, dans la branche de l'écran de travail** (`API-32`).
               Contrairement aux préférences et au parcours de création, le geste n'existe **que** là :
               la zone d'instances vit sous l'arbre, et l'écran d'accueil n'a pas de sidebar. Les
@@ -524,67 +489,38 @@ export function App() {
                 setConnexionOuverte(null)
                 setEdition(null)
               }}
-              projects={projetsPourLesEcrans}
+              arbre={arbre}
               edition={edition ?? undefined}
-              /* **Le projet est le cadre de la modale** (26 août 2026), plus un champ à choisir : il
-                 vient de la ligne d'arbre d'où part le geste, toujours. Le repli sur « le premier
-                 projet de la liste » a disparu avec `⇧⌘N`, seul chemin qui ne désignait rien : plus
-                 aucun appelant ne laisse ce cadre à deviner.
-
-                 La chaîne vide reste pour le mode **édition**, où le projet qui fait foi est celui de
-                 la base modifiée — `NewConnection` le lit sur `edition`. */
-              projet={connexionOuverte?.project ?? ''}
-              {...(connexionOuverte === null
-                ? {}
-                : { environnement: connexionOuverte.environment })}
+              /* **Le dossier est le cadre de la modale** (26 août 2026, puis #166), jamais un champ :
+                 il vient de la ligne d'arbre d'où part le geste. En édition, c'est celui qui contient
+                 la connexion modifiée — `NewConnection` le lit sur l'arbre. */
+              dossier={connexionOuverte?.dossier ?? null}
               kubeconfigs={kubeconfigs}
               onDeclareKubeconfig={declarerUnKubeconfigEtRendreSaReference}
               catalogueKubernetes={catalogueKubernetes}
-              onSaved={setProjects}
+              onSaved={setArbre}
             />
           )}
         </>
       ) : (
         <>
-          {/* **Le bouton dit « Nouveau projet », et ouvre « Nouveau projet »** (`24d`). Il ouvrait la
-              modale de connexion : ce n'était pas une erreur d'assemblage — `08f` créait le projet au
-              passage, par une entrée du sélecteur — mais le geste s'est inversé, et l'écran de
-              création existe désormais. */}
           <WelcomeScreen
-            // **`A1` mène à l'étape 1**, non à la modale de connexion (`24d`). Le bouton disait
-            // « Nouveau projet » et ouvrait « Nouvelle connexion » : ce n'était pas une erreur
-            // d'assemblage — `08f` créait le projet au passage — mais le geste s'est inversé.
-            onNewProject={() => setProjetOuvert({})}
+            // **`A1` crée un dossier** (#166) — le même geste que la bande de tête de l'arbre. Le
+            // parcours en deux étapes (projet, puis connexion) est parti avec les projets : le
+            // dossier naît « dossier 1 », l'écran de travail prend la place de l'accueil, et la
+            // ligne passe en renommage sur place.
+            onNewFolder={creerALaRacine}
             // **`A1` a un engrenage, donc il doit ouvrir quelque chose.** La modale est montée
             // au-dessus du choix de l'écran pour cette raison exactement.
             onOpenPreferences={() => setPreferencesOuvertes(true)}
             /* **L'import depuis l'écran des débuts** (`API-30`) : c'est là qu'on en a le plus besoin
-               — un second poste, aucun projet, et rien à l'écran qui dise qu'un fichier peut en
+               — un second poste, aucun dossier, et rien à l'écran qui dise qu'un fichier peut en
                apporter. La modale est la même que celle des deux autres chemins. */
             onImportProjects={() => setTransfert({ sens: 'import' })}
-            projectCount={projects.length}
-            dimmed={connexionOuverte !== null || projetOuvert !== null}
+            folderCount={arbre.folders.length}
+            dimmed={connexionOuverte !== null}
           />
         </>
-      )}
-      {/* **Monté hors des deux branches** — et c'est un défaut corrigé, non un rangement : le parcours
-          ne vivait que dans la branche `A1`, si bien que « Nouveau projet » au pied de la sidebar de
-          `A4` appelait un état que rien n'écoutait. Le geste existe sur les deux écrans (`24d`), donc
-          la modale doit vivre au-dessus du choix de l'écran — la raison même qui met les préférences
-          ici. */}
-      {projetOuvert !== null && (
-        <ParcoursDeCreation
-          depart={{
-            etape: 'projet',
-            ...(projetOuvert.raison === undefined ? {} : { raison: projetOuvert.raison }),
-          }}
-          projets={projetsPourLesEcrans}
-          kubeconfigs={kubeconfigs}
-          onDeclareKubeconfig={declarerUnKubeconfigEtRendreSaReference}
-          catalogueKubernetes={catalogueKubernetes}
-          onClose={() => setProjetOuvert(null)}
-          onProjets={setProjects}
-        />
       )}
       {/* **Au niveau de l'application, et c'est un défaut corrigé** (`API-30`, 17 septembre 2026).
           Elle était montée dans la branche de l'écran de travail, donc `transfert` se posait sans
@@ -597,12 +533,12 @@ export function App() {
       {transfert && (
         <TransferDialogs
           demande={transfert}
-          total={projects.length}
+          total={arbre.folders.length}
           onClose={() => setTransfert(null)}
-          /* Les projets rendus sont **reposés**, comme après chaque écriture de configuration :
+          /* L'arbre rendu est **reposé**, comme après chaque écriture de configuration :
              c'est ce changement qui fait relire les états du registre et purger le cache de
              l'arbre. La modale reste ouverte pour montrer son rapport. */
-          onImported={setProjects}
+          onImported={setArbre}
         />
       )}
       {/* **Au niveau de l'application, pas de l'écran de travail.** Les préférences règlent des
@@ -620,7 +556,7 @@ export function App() {
           kubeconfigs={kubeconfigs}
           onKubeconfigsChange={(suivants) => void reglerLesKubeconfigs(suivants)}
           onDeclarerKubeconfig={declarerUnKubeconfig}
-          projects={projects}
+          arbre={arbre}
           instances={instances}
           {...(majAInstaller === null
             ? {}

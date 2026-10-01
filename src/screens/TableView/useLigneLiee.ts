@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import type { DatabaseKey, Relation, Value } from '../../domain/engine'
+import type { DatabaseKey } from '../../domain/arbre'
+import type { Relation, Value } from '../../domain/engine'
 import type { PasserelleDetail } from '../Workbench/useDetailTable'
 import { champsLisibles } from './ligneLiee'
 import type { PasserelleLignes } from './useLignes'
@@ -33,28 +34,18 @@ export function useLigneLiee(
 ): Apercu | null {
   const [apercu, setApercu] = useState<Apercu | null>(null)
 
-  const project = cle?.project ?? null
-  const database = cle?.database ?? null
-  const environment = cle?.environment ?? null
+  const connection = cle?.connection ?? null
   const schemaCible = relation?.targetSchema ?? null
   const tableCible = relation?.targetTable ?? null
   const colonneCible = relation?.targetColumns[0] ?? null
 
   useEffect(() => {
-    if (
-      !project ||
-      !database ||
-      !environment ||
-      !schemaCible ||
-      !tableCible ||
-      !colonneCible ||
-      valeurDeLaCle === null
-    ) {
+    if (!connection || !schemaCible || !tableCible || !colonneCible || valeurDeLaCle === null) {
       setApercu(null)
       return
     }
     let vivant = true
-    const cleCible: DatabaseKey = { project, database, environment }
+    const cleCible: DatabaseKey = { connection }
 
     async function lire() {
       const detail = await passerelleDetail.describeTable(
@@ -105,9 +96,7 @@ export function useLigneLiee(
       vivant = false
     }
   }, [
-    project,
-    database,
-    environment,
+    connection,
     schemaCible,
     tableCible,
     colonneCible,

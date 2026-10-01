@@ -4,7 +4,7 @@ import type { ConnectionState } from '../../domain/engine'
 import { useT } from '../../i18n/LanguageContext'
 import { Badge } from '../../ui/Badge/Badge'
 import { SidebarSectionTitle } from '../../ui/SidebarSectionTitle/SidebarSectionTitle'
-import { INDENT, TreeRow } from '../../ui/TreeRow/TreeRow'
+import { indentation, TreeRow } from '../../ui/TreeRow/TreeRow'
 import { RowMenu } from '../Explorer/RowMenu'
 import styles from './InstancesPanel.module.css'
 import { nomAffiche } from './instances'
@@ -44,7 +44,7 @@ export type InstancesPanelProps = {
  * la place d'un tableau. Le déplier ici ferait entrer dans une colonne de 228 px une matrice de
  * rôles × bases.
  *
- * L'indentation reste celle d'une ligne de projet : `INDENT[0] + 16`, la reprise de la gouttière du
+ * L'indentation reste celle d'une ligne de projet : `indentation(0, 1)`, la reprise de la gouttière du
  * chevron qu'une feuille n'occupe pas — la règle de `TreeRow`. L'icône tombe donc à `x = 24`, dans
  * la **même colonne** que les lignes de projet de l'arbre du dessus. Deux listes voisines dont les
  * icônes ne s'alignent pas se lisent comme deux composants mal assemblés.
@@ -88,7 +88,7 @@ export function InstancesPanel({
                 depth={0}
                 /* **La gouttière du chevron, reprise sans chevron.** Voir l'en-tête : c'est ce qui
                    aligne l'icône `srv` sur celle des projets, une ligne au-dessus. */
-                indent={`calc(${INDENT[0]} + 16px)`}
+                indent={indentation(0, 1)}
                 icon="srv"
                 iconColor="var(--engine-pg)"
                 label={nomAffiche(instance)}

@@ -2,17 +2,14 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { Sprite } from '../../design/icons/Sprite'
-import type { ColumnInfo, DatabaseKey, RowWindow, Value } from '../../domain/engine'
+import type { DatabaseKey } from '../../domain/arbre'
+import type { ColumnInfo, RowWindow, Value } from '../../domain/engine'
 import { LanguageProvider } from '../../i18n/LanguageContext'
 import { estNumerique, rendreValeur } from './cellule'
 import { TableView } from './TableView'
 import type { PasserelleLignes } from './useLignes'
 
-const CLE: DatabaseKey = {
-  project: 'Atelier Nord',
-  database: 'analytics',
-  environment: 'prod',
-}
+const CLE: DatabaseKey = { connection: 'analytics' }
 
 const colonne = (name: string, category: ColumnInfo['category']): ColumnInfo => ({
   position: 1,

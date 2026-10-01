@@ -6,13 +6,15 @@
  * écran d'un refus que le cœur prononce aussi. Les deux gardent deux chemins différents : l'écran
  * empêche le geste, le Rust tient la garantie quand la demande ne vient pas de l'écran.
  */
+
+import { connexions } from '../../data/dossiers'
 import type {
   ConnectionSettings,
+  FolderTree,
   KubeconfigDeclaration,
   KubeconfigId,
   Kubeconfigs,
   ManagedInstance,
-  Project,
 } from '../../domain/config'
 
 /**
@@ -25,15 +27,17 @@ import type {
  */
 export function utilisationsDe(
   reference: KubeconfigId,
-  projects: readonly Project[],
+  arbre: FolderTree,
   instances: readonly ManagedInstance[],
 ): string[] {
   const etiquettes: string[] = []
-  for (const projet of projects) {
-    for (const base of projet.databases) {
-      if (referenceDe(base.connection) === reference) {
-        etiquettes.push(`${projet.name} › ${base.name} (${base.environment})`)
-      }
+  // **Par le chemin de dossiers** (#166) : « Atelier Nord › prod › analytics », l'étiquette que le
+  // cœur écrit aussi (`chemin_de`). Le triplet d'avant en est le cas migré.
+  for (const { base, ancetres } of connexions(arbre)) {
+    if (referenceDe(base.connection) === reference) {
+      etiquettes.push(
+        [...ancetres.map((ancetre) => ancetre.name), base.label?.trim() || base.name].join(' › '),
+      )
     }
   }
   for (const instance of instances) {

@@ -128,42 +128,34 @@ test('le groupe logo + indicateur est centré dans sa zone', async ({ page }) =>
 })
 
 /**
- * Le badge `PROD` suit le **drapeau**, jamais le libellé (`23g`) ni la couleur déclarée.
+ * Le badge « Lecture seule » suit le **drapeau** d'un dossier ancêtre, jamais son nom (#166).
  *
- * C'est un ajout de `25b`, assumé : ni la pastille ni le sélecteur ne l'avaient. Mais le sélecteur
- * partant, plus rien dans la barre ne dirait « vous écrivez en production » au moment où `11d`
- * applique ses garde-fous — et `23g` accroche ces garde-fous à ce drapeau précis.
+ * Le badge `PROD` est parti avec l'environnement : ce qui disait « vous écrivez en production » est
+ * désormais la lecture seule qu'un dossier impose à ce qu'il contient. Le décor marque « vitrine »
+ * en lecture seule et laisse « bac à sable » ordinaire : un écran qui relirait un nom ne marquerait
+ * ni l'une ni l'autre.
  */
-test('le badge PROD suit le drapeau de l’environnement, et lui seul', async ({ page }) => {
-  // Le décor marque « vitrine » production, et laisse « coulisses » ordinaire : un écran qui relirait
-  // un trio `prod` / `staging` / `dev` en dur ne badgerait ni l'une ni l'autre.
-  await expect(indicateurDe(page, 'vitrine')).toContainText('PROD')
-  await expect(indicateur(page)).not.toContainText('PROD')
-
-  // **`PROD` seul est un sigle**, et la pastille de couleur est `aria-hidden` : sans le texte masqué
-  // visuellement, rien n'annoncerait en clair qu'on regarde une production (`09d`).
-  await expect(indicateurDe(page, 'vitrine')).toContainText('environnement de production')
+test('le badge « Lecture seule » suit le drapeau du dossier, et lui seul', async ({ page }) => {
+  await expect(indicateurDe(page, 'vitrine')).toContainText('Lecture seule')
+  // « bac à sable » ne porte pas le drapeau : sans lui, pas de badge.
+  await expect(indicateurDe(page, 'bac à sable')).not.toContainText('Lecture seule')
 })
 
-test('le libellé d’environnement s’affiche tel qu’il est déclaré, sans capitales', async ({
-  page,
-}) => {
+test('le chemin du dossier s’affiche tel qu’il est déclaré, sans capitales', async ({ page }) => {
   const libelle = await page.evaluate(() => {
     const zone = document
       .querySelector('[data-testid=titlebar-a4]')
       ?.querySelector('[class*="center"]')
     const span = [...(zone?.querySelectorAll('span') ?? [])].find(
-      (element) => element.textContent === 'coulisses',
+      (element) => element.textContent === 'Atelier Nord › coulisses',
     )
     return span
       ? { texte: span.textContent, transformation: getComputedStyle(span).textTransform }
       : null
   })
-  // Depuis `23a` le libellé est renommable : c'est une chaîne de l'utilisateur, et « Pré-production »
-  // ne doit pas devenir « PRÉ-PRODUCTION ». Le seul mot en capitales reste `PROD`, parce que c'est une
-  // catégorie et non un nom — et l'étiquette « ENV » du sélecteur est partie avec lui : sans
-  // commutateur, il n'y a plus rien à étiqueter.
-  expect(libelle).toEqual({ texte: 'coulisses', transformation: 'none' })
+  // Un nom de dossier est une chaîne de l'utilisateur : « Pré-production » ne doit pas devenir
+  // « PRÉ-PRODUCTION ».
+  expect(libelle).toEqual({ texte: 'Atelier Nord › coulisses', transformation: 'none' })
 })
 
 test('la pastille porte la couleur déclarée de l’environnement', async ({ page }) => {
@@ -329,14 +321,15 @@ test('sans indicateur, le logo seul est centré', async ({ page }) => {
   expect(ecart).toBeLessThanOrEqual(2)
 })
 
-test('le fil d’Ariane est en mono, le nom du projet en Nunito', async ({ page }) => {
+test('le fil d’Ariane est en mono, le chemin du dossier en Nunito', async ({ page }) => {
   const polices = await page.evaluate(() => {
     const barre = document.querySelector('[data-testid=titlebar-a4]')
     const fil = [...(barre?.querySelectorAll('span') ?? [])].find((s) =>
       s.textContent?.includes('analytics · public'),
     )
+    // Le chemin du dossier, depuis #166 : « Atelier Nord › coulisses », une seule chaîne.
     const nom = [...(barre?.querySelectorAll('span') ?? [])].find(
-      (s) => s.textContent === 'Atelier Nord',
+      (s) => s.textContent === 'Atelier Nord › coulisses',
     )
     return {
       fil: fil ? getComputedStyle(fil).fontFamily : null,

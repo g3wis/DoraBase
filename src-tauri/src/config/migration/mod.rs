@@ -14,16 +14,17 @@
 //!   → v6 → v7 (`v6::vers_v7`), sur des types et non sur du JSON
 //! ```
 //!
-//! **Deux sorties, et c'est temporaire.** [`migrer_le_document`] rend encore le modèle courant — les
-//! projets —, parce que `VERSION_COURANTE` vaut 6 tant que #165 n'a pas basculé ; [`migrer_vers_la_v7`]
-//! rend l'arbre de dossiers, testé mais pas encore branché au chargement. Les deux partagent
-//! [`document_v6`] : il n'y a **qu'une** chaîne jusqu'à la v6, et c'est elle que les deux sabotages
-//! de #164 mordent. #165 retire la première sortie en branchant la seconde.
+//! **Une seule sortie** depuis #165 : [`migrer_vers_la_v7`], qui rend l'arbre de dossiers et le plan
+//! des mots de passe à déplacer. [`document_v6`] est la chaîne jusqu'à la v6, qu'elle compose.
+//!
+//! **Le fichier de transfert (`API-30`) n'y passe plus pour l'instant** : `transfert.rs` est retiré
+//! du build jusqu'à #169, qui le portera sur l'arbre — et le fera passer par la même chaîne.
 
 use super::arbre::FolderTree;
-use super::model::{Kubeconfigs, ManagedInstance, Preferences, Project};
-use super::store::VERSION_COURANTE;
+use super::model::{Kubeconfigs, ManagedInstance, Preferences};
 
+/// Le déplacement des mots de passe, l'autre moitié du cran v7 (#165).
+pub(crate) mod secrets;
 #[cfg(test)]
 mod tests;
 pub(crate) mod v1;
@@ -96,45 +97,7 @@ pub(crate) fn document_v6(
         .map_err(|erreur| format!("migration depuis la version {depuis} impossible : {erreur}"))
 }
 
-/// La chaîne de migrations elle-même, appliquée à un document **déjà analysé**.
-///
-/// **Ni chemin, ni écriture, ni sauvegarde** — et c'est ce qui la rend réemployable. Le transfert
-/// de projets (`API-30`) migre un fichier qui n'est *pas* la configuration : il n'y a rien à
-/// sauvegarder avant, puisque rien n'est réécrit, et rien à mettre en quarantaine, puisque le
-/// fichier appartient à l'utilisateur et qu'on ne fait que le lire. Ce qui doit être commun, en
-/// revanche, c'est la chaîne : deux échelles de migration pour la même forme de données
-/// divergeraient à la première montée de version (règle n° 17), et c'est le fichier de transfert —
-/// celui qui traîne dans un dossier partagé pendant des mois — qui en paierait le prix.
-///
-/// L'erreur est une **chaîne déjà formulée** : les deux causes — aucune migration connue, migration
-/// impossible — se disent différemment, et `migrer` les rendait déjà telles quelles.
-///
-/// Elle rend **tout ce que le document porte** — projets, préférences, instances managées
-/// (`API-32`) —, et non les seuls projets : c'est `migrer` qui en a besoin. Le transfert, lui, n'en
-/// garde qu'un tiers, et c'est `projets_du_document` qui le dit plutôt que cette fonction, qui n'a
-/// pas à connaître ses appelants.
-pub(crate) fn migrer_le_document(
-    valeur: serde_json::Value,
-    depuis: u32,
-) -> Result<(Vec<Project>, Preferences, Vec<ManagedInstance>, Kubeconfigs), String> {
-    // **La sortie du modèle courant, jusqu'à la bascule de #165** : la même chaîne que
-    // `migrer_vers_la_v7`, convertie vers les projets que `VERSION_COURANTE = 6` lit encore.
-    let fichier = document_v6(valeur, depuis)?;
-    Ok((
-        fichier
-            .projects
-            .into_iter()
-            .map(v6::Projet::vers_le_modele_courant)
-            .collect(),
-        fichier.preferences,
-        fichier.instances,
-        fichier.kubeconfigs,
-    ))
-}
-
 /// Ce qu'un document devient en v7 : l'arbre, ce qui l'accompagne, et les secrets à déplacer.
-// Lu par les tests seuls tant que #165 n'a pas branché `migrer_vers_la_v7`.
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug)]
 pub(crate) struct DocumentV7 {
     pub arbre: FolderTree,
@@ -146,13 +109,15 @@ pub(crate) struct DocumentV7 {
     pub secrets_a_deplacer: PlanDeSecrets,
 }
 
-/// La chaîne complète jusqu'à la v7 (#164) — **testée, pas encore branchée** : c'est #165 qui la fait
-/// appeler par `migrer` en montant `VERSION_COURANTE` à 7.
+/// La chaîne complète jusqu'à la v7 (#164), **branchée par #165** : `store::migrer` l'appelle pour
+/// tout fichier antérieur à `VERSION_COURANTE`.
+///
+/// **La seule sortie de la chaîne.** Il y en eut deux le temps de la bascule — le modèle courant par
+/// `migrer_le_document`, l'arbre par celle-ci ; la première est partie avec `Project`.
 ///
 /// **L'arbre migré est validé**, en filet : ce que les refus nommés du cran ne couvrent pas — une
 /// référence de secret restée sur l'ancien triplet, deux dossiers frères homonymes qu'un fichier
 /// écrit à la main aurait produits — doit faire échouer la lecture plutôt qu'écrire une v7 fausse.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn migrer_vers_la_v7(
     valeur: serde_json::Value,
     depuis: u32,
@@ -169,55 +134,6 @@ pub(crate) fn migrer_vers_la_v7(
         kubeconfigs: fichier.kubeconfigs,
         secrets_a_deplacer,
     })
-}
-
-/// Les projets d'un document `{ version, projects, … }` déjà analysé, migrés si sa version est
-/// antérieure à la courante.
-///
-/// **Écrite pour le transfert de projets (`API-30`)**, qui lit un fichier portant les mêmes projets
-/// que la configuration sans être la configuration : ni préférences à en tirer, ni quarantaine à
-/// prononcer sur un fichier qui n'est pas le nôtre.
-///
-/// **Le bras « rien à migrer » est ici et non dans la chaîne**, et c'est délibéré : élargir le
-/// `2..=4` de `migrer_le_document` jusqu'à `VERSION_COURANTE` en aurait fait un bras attrape-tout
-/// (règle n° 16) — le jour où la v5 → v6 demande une transformation, la plage l'avalerait en silence
-/// et lirait un fichier v5 comme s'il portait la forme v6. Séparés, l'oubli se dit : une version
-/// sans cran tombe sur « aucune migration connue ».
-///
-/// **Ce jour est arrivé** (`API-70`, v5 → v6) : la plage a été élargie à `2..=5` *avec* la
-/// transformation qui va avec, et la séparation a tenu — c'est elle qui a fait remarquer qu'il y
-/// avait un cran à écrire plutôt qu'une borne à pousser.
-///
-/// Une version **postérieure** n'est pas traitée ici : l'appelant la refuse d'abord, avec son propre
-/// message — un fichier de transfert et une configuration ne se répondent pas de la même façon.
-pub(crate) fn projets_du_document(
-    valeur: serde_json::Value,
-    version: u32,
-) -> Result<(Vec<Project>, Kubeconfigs), String> {
-    let (mut projects, kubeconfigs) = if version == VERSION_COURANTE {
-        (
-            serde_json::from_value::<Vec<Project>>(
-                valeur
-                    .get("projects")
-                    .cloned()
-                    .unwrap_or(serde_json::Value::Null),
-            )
-            .map_err(|erreur| format!("forme inattendue : {erreur}"))?,
-            // Un document déjà en v6 porte ses déclarations à la racine ; c'est l'appelant qui les
-            // lit, avec le reste de son enveloppe.
-            Kubeconfigs::default(),
-        )
-    } else {
-        let migre = migrer_le_document(valeur, version)?;
-        (migre.0, migre.3)
-    };
-
-    // **La même reprise qu'à la lecture de la configuration**, et pour la même raison : un fichier
-    // écrit avant le 20 août 2026 porte des requêtes enregistrées, que rien d'autre ne convertit en
-    // consoles. Les laisser dans `queries` les rendrait invisibles jusqu'à la relecture suivante du
-    // fichier de configuration — ou les perdrait, si le projet d'accueil a déjà une connexion.
-    crate::config::enregistrer::migrer_requetes_en_consoles(&mut projects);
-    Ok((projects, kubeconfigs))
 }
 
 /// v5 → v6 (`API-70`) : un transfert Kubernetes porte une **référence** au lieu d'un chemin.

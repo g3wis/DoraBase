@@ -52,7 +52,7 @@ async function ouvrirLInstance(page: import('@playwright/test').Page) {
 }
 
 test('les deux zones de la sidebar cohabitent, séparées par une poignée', async ({ page }) => {
-  const arbre = page.getByRole('tree', { name: 'Projets, environnements et connexions' })
+  const arbre = page.getByRole('tree', { name: 'Dossiers et connexions' })
   const instances = page.getByRole('tree', { name: 'Instances' })
 
   await expect(arbre).toBeVisible()

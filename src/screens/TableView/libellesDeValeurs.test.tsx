@@ -2,7 +2,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { Sprite } from '../../design/icons/Sprite'
-import type { ColumnInfo, DatabaseKey, RowQuery, Value } from '../../domain/engine'
+import type { DatabaseKey } from '../../domain/arbre'
+import type { ColumnInfo, RowQuery, Value } from '../../domain/engine'
 import { LanguageProvider } from '../../i18n/LanguageContext'
 import type { LibellesDeTable } from './libelles'
 import { TableView } from './TableView'
@@ -16,7 +17,7 @@ import type { PasserelleLignes } from './useLignes'
  * l'éditeur n'ont pour juge que Playwright, jsdom ne calculant aucune mise en page (règle n° 9).
  */
 
-const CLE: DatabaseKey = { project: 'Halle', database: 'analytics', environment: 'prod' }
+const CLE: DatabaseKey = { connection: 'analytics' }
 
 const colonne = (name: string, over: Partial<ColumnInfo> = {}): ColumnInfo => ({
   position: 1,

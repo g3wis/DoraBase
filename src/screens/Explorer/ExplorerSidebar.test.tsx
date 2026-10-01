@@ -2,34 +2,30 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { Sprite } from '../../design/icons/Sprite'
-import type { EnvironmentId, Project } from '../../domain/config'
+import type { ConnectionId, FolderTree } from '../../domain/config'
 import type { ColumnInfo, ConnectionState, SchemaInfo, TableSummary } from '../../domain/engine'
 import { LanguageProvider } from '../../i18n/LanguageContext'
-import { REGLAGES, TRIO_DE_TEST } from '../NewConnection/pourLesTests'
-import { type Charge, idBase, idEnvironnement, idProjet, idSchema, type Noeud } from './arbre'
+import { arbreDeTest, connexionDeTest, ID_DE_TEST, trioDeTest } from '../NewConnection/pourLesTests'
+import { type Charge, idBase, idDossier, idSchema, type Noeud } from './arbre'
 import type { CibleDeSuppression } from './DeleteConnectionDialog'
 import { ExplorerSidebar, type ExplorerSidebarProps, filtrer } from './ExplorerSidebar'
 
-const PROJETS: Project[] = [
-  {
-    name: 'Atelier Nord',
-    environments: TRIO_DE_TEST,
-    queries: [],
-    databases: [
-      // **Les deux connexions sont dans le même environnement** : le décor mesure le menu « … », le
-      // filtre et le renommage de console, pas le palier d'environnement — `arbre.test.ts` s'en
-      // charge. Les regrouper évite de déplier deux branches dans chaque test.
-      {
-        name: 'analytics',
-        engine: 'postgresql',
-        environment: 'prod',
-        connection: REGLAGES,
-        consoles: [],
-      },
-      { name: 'shop', engine: 'mysql', environment: 'prod', connection: REGLAGES, consoles: [] },
+const ANALYTICS = 'c0000000000000a1'
+const SHOP = 'c0000000000000a2'
+
+/**
+ * **Les deux connexions sont dans le même dossier** : le décor mesure le menu « … », le filtre et le
+ * renommage de console, pas l'imbrication — `arbre.test.ts` s'en charge. Les regrouper évite de
+ * déplier deux branches dans chaque test.
+ */
+const ARBRE: FolderTree = arbreDeTest(
+  trioDeTest({
+    prod: [
+      connexionDeTest(ANALYTICS, 'analytics'),
+      connexionDeTest(SHOP, 'shop', { engine: 'mysql' }),
     ],
-  },
-]
+  }),
+)
 
 const schema = (name: string, over: Partial<SchemaInfo> = {}): SchemaInfo => ({
   name,
@@ -51,13 +47,12 @@ const table = (name: string): TableSummary => ({
 
 const RIEN: Charge = { schemas: {}, objets: {}, enCours: new Set(), echecs: {} }
 
-const P = 'Atelier Nord'
-const ID_PROJET = idProjet(P)
-const ID_PROD = idEnvironnement(P, 'prod')
-const ID_ANALYTICS = idBase(P, 'prod', 'analytics')
-const ID_PUBLIC = idSchema(P, 'prod', 'analytics', 'public')
+const ID_PROJET = idDossier(ID_DE_TEST.racine)
+const ID_PROD = idDossier(ID_DE_TEST.prod)
+const ID_ANALYTICS = idBase(ANALYTICS)
+const ID_PUBLIC = idSchema(ANALYTICS, 'public')
 
-/** Le projet et son environnement `prod` dépliés : la porte d'entrée des connexions (`25a`). */
+/** Le dossier racine et son sous-dossier `prod` dépliés : la porte d'entrée des connexions. */
 const JUSQU_AUX_CONNEXIONS = [ID_PROJET, ID_PROD]
 
 /**
@@ -86,39 +81,41 @@ function Piloté({
   onToggleSpy,
   onEditDatabase,
   onRenameDatabase,
-  onEditProject,
-  onExportProject,
   onImportProjects,
   onDelete,
   modificationsEnAttenteDe,
   onRefresh,
   consoles,
   onAddDatabase,
-  onNewProject,
+  onNewFolder,
+  onRenameFolder,
+  onRecolorFolder,
+  onSetFolderReadOnly,
   onOpenPreferences,
   onOpenDiagram,
   onManageSchemas,
-  projets = PROJETS,
+  arbre = ARBRE,
 }: {
   charge?: Charge
   initial?: string[]
   etat?: ConnectionState
   onToggleSpy?: (n: Noeud) => void
-  onEditDatabase?: (project: string, database: string, environment: EnvironmentId) => void
+  onEditDatabase?: (connection: ConnectionId) => void
   onRenameDatabase?: ExplorerSidebarProps['onRenameDatabase']
-  onEditProject?: (project: string) => void
-  onExportProject?: (project: string) => void
   onImportProjects?: () => void
   onDelete?: (cible: CibleDeSuppression) => Promise<{ leftoverSecrets: string[] }>
   modificationsEnAttenteDe?: (cible: CibleDeSuppression) => number
   onRefresh?: () => void
   consoles?: ExplorerSidebarProps['consoles']
   onAddDatabase?: ExplorerSidebarProps['onAddDatabase']
-  onNewProject?: () => void
+  onNewFolder?: ExplorerSidebarProps['onNewFolder']
+  onRenameFolder?: ExplorerSidebarProps['onRenameFolder']
+  onRecolorFolder?: ExplorerSidebarProps['onRecolorFolder']
+  onSetFolderReadOnly?: ExplorerSidebarProps['onSetFolderReadOnly']
   onOpenPreferences?: () => void
   onOpenDiagram?: ExplorerSidebarProps['onOpenDiagram']
   onManageSchemas?: ExplorerSidebarProps['onManageSchemas']
-  projets?: Project[]
+  arbre?: FolderTree
 }) {
   const [deplies, setDeplies] = useState(new Set(initial))
   const [choisi, setChoisi] = useState<string | null>(null)
@@ -127,22 +124,23 @@ function Piloté({
       <Sprite />
       <LanguageProvider preferences={{ language: 'fr' }}>
         <ExplorerSidebar
-          projects={projets}
+          arbre={arbre}
           deplies={deplies}
           charge={charge}
           etatDe={() => etat}
           selectedId={choisi}
           onEditDatabase={onEditDatabase}
           onRenameDatabase={onRenameDatabase}
-          onEditProject={onEditProject}
-          onExportProject={onExportProject}
           onImportProjects={onImportProjects}
           onDelete={onDelete}
           modificationsEnAttenteDe={modificationsEnAttenteDe}
           onRefresh={onRefresh}
           consoles={consoles}
           onAddDatabase={onAddDatabase}
-          onNewProject={onNewProject}
+          onNewFolder={onNewFolder}
+          onRenameFolder={onRenameFolder}
+          onRecolorFolder={onRecolorFolder}
+          onSetFolderReadOnly={onSetFolderReadOnly}
           onOpenPreferences={onOpenPreferences}
           onOpenDiagram={onOpenDiagram}
           onManageSchemas={onManageSchemas}
@@ -168,9 +166,7 @@ test('l’arbre s’annonce comme tel, avec ses niveaux', () => {
   render(<Piloté initial={JUSQU_AUX_CONNEXIONS} />)
   // **« environnements » est dans le nom de l'arbre** depuis `25a` : c'est un palier, et l'annoncer
   // « Projets et bases » tairait ce qu'on parcourt.
-  expect(
-    screen.getByRole('tree', { name: 'Projets, environnements et connexions' }),
-  ).toBeInTheDocument()
+  expect(screen.getByRole('tree', { name: 'Dossiers et connexions' })).toBeInTheDocument()
   const elements = screen.getAllByRole('treeitem')
   // L'arbre est aplati dans le DOM : `aria-level` porte la profondeur qu'une imbrication aurait
   // donnée gratuitement. Sans lui, un lecteur d'écran annoncerait une liste plate.
@@ -221,14 +217,14 @@ test('un nœud dépliable annonce son état, une feuille non', () => {
 
 // **La contrainte transverse.** Un schéma replié ne produit aucun nœud enfant, donc l'écran n'a
 // rien à demander : c'est ce que le compteur vérifie.
-test('déplier un projet ne demande rien pour les schémas', async () => {
+test('déplier un dossier ne demande rien pour les schémas', async () => {
   const deplies: Noeud[] = []
   render(<Piloté onToggleSpy={(n) => deplies.push(n)} />)
 
   await userEvent.dblClick(screen.getByRole('treeitem', { name: /Atelier Nord/ }))
 
   expect(deplies).toHaveLength(1)
-  expect(deplies[0]?.kind).toBe('project')
+  expect(deplies[0]?.kind).toBe('folder')
   // Aucune base dépliée, donc aucune demande de schémas.
   expect(deplies.filter((n) => n.kind === 'database')).toHaveLength(0)
 })
@@ -328,24 +324,24 @@ test('une ligne de message n’est pas un nœud de l’arbre', () => {
  * les deux tables se lit comme un message mal aligné, et personne n'y pense en ajoutant un palier.
  * Le style en ligne est donc ce qui est testable ici — jsdom ne calcule pas le CSS.
  */
-test('une ligne de message est indentée par INDENT, en style en ligne', () => {
+test('une ligne de message est indentée par la règle de TreeRow, en style en ligne', () => {
   render(
     <Piloté
       initial={[...JUSQU_AUX_CONNEXIONS, ID_ANALYTICS]}
       charge={{ ...RIEN, enCours: new Set([ID_ANALYTICS]) }}
     />,
   )
-  // Un message enfant d'une connexion (palier 2) est au palier 3 : `INDENT[3]`.
+  // Un message enfant d'une connexion (niveau 2) est sous elle : `indentation(2, 1)`.
   expect(screen.getByText('Chargement…')).toHaveStyle({ paddingLeft: '52px' })
 })
 
-// **Un environnement vide le dit** (`23g`), à sa juste indentation : palier 2, donc `INDENT[2]`.
-test('un environnement déplié sans connexion le dit, aligné au palier 2', () => {
-  render(<Piloté initial={[ID_PROJET, idEnvironnement(P, 'staging')]} />)
-  const vide = screen.getByText('Aucune connexion déclarée en staging')
+// **Un dossier vide le dit**, à l'indentation de ses enfants : `staging` est au niveau 1.
+test('un dossier déplié sans contenu le dit, aligné sur ses enfants', () => {
+  render(<Piloté initial={[ID_PROJET, idDossier(ID_DE_TEST.staging)]} />)
+  const vide = screen.getByText('Dossier vide')
   expect(vide).toHaveStyle({ paddingLeft: '36px' })
   // Ce n'est pas un nœud de l'arbre : c'est un fait sur son contenu.
-  expect(screen.queryByRole('treeitem', { name: /Aucune connexion/ })).toBeNull()
+  expect(screen.queryByRole('treeitem', { name: /Dossier vide/ })).toBeNull()
 })
 
 // --- Les états de connexion ---
@@ -362,54 +358,21 @@ test('l’état d’une base est dans son nom accessible, pas seulement en coule
   ).toBeInTheDocument()
 })
 
-// --- Le palier d'environnement (`25a`) ---
+// --- Les dossiers (#166) ---
 
-/**
- * Un environnement de production **qui ne s'appelle pas « prod »**, et un qui s'appelle « prod »
- * sans l'être : la seule forme de décor qui distingue le drapeau du libellé.
- */
-const PROJET_A_DRAPEAUX: Project[] = [
-  {
-    name: P,
-    environments: [
-      { id: 'atelier', label: 'Atelier', color: 'green', production: true },
-      { id: 'prod', label: 'prod', color: 'red', production: false },
-    ],
-    queries: [],
-    databases: [
-      {
-        name: 'catalogue',
-        engine: 'postgresql',
-        environment: 'atelier',
-        connection: REGLAGES,
-        consoles: [],
-      },
-    ],
-  },
-]
-
-test('le badge PROD d’un environnement suit son drapeau, jamais son libellé', () => {
-  render(<Piloté projets={PROJET_A_DRAPEAUX} initial={[ID_PROJET]} />)
-  // « Atelier » n'a rien de « prod » dans son nom, et porte pourtant le badge.
-  expect(ligne('Atelier', '2')).toHaveTextContent('PROD')
-  // « prod » n'est pas marqué : aucun badge, sinon la garantie de `23g` serait fausse à l'écran.
-  expect(ligne('prod', '2')).not.toHaveTextContent('PROD')
+test('le verrou suit le dossier qui déclare la lecture seule, et s’entend', () => {
+  render(<Piloté initial={[ID_PROJET]} />)
+  // `prod` la déclare : sa ligne porte le verrou, et le dit dans son nom accessible.
+  const prod = screen.getByRole('treeitem', { name: 'prod · lecture seule' })
+  expect(prod.querySelector('use[href="#i-lock"]')).not.toBeNull()
+  expect(ligne('dev', '2').querySelector('use[href="#i-lock"]')).toBeNull()
+  // Le badge `PROD` des environnements est parti avec eux.
+  expect(prod).not.toHaveTextContent('PROD')
 })
 
-test('un environnement replié dit son compte de connexions', () => {
-  render(<Piloté projets={PROJET_A_DRAPEAUX} initial={[ID_PROJET]} />)
-  expect(ligne('Atelier', '2')).toHaveTextContent('1 connexion')
-  expect(ligne('prod', '2')).toHaveTextContent('0 connexion')
-})
-
-// La ligne projet a perdu son badge d'environnement : il nommait un environnement actif qui
-// n'existe plus, et l'agréger serait inventer un état composite (`09c`).
-test('la ligne projet ne porte plus de badge d’environnement', () => {
-  render(<Piloté projets={PROJET_A_DRAPEAUX} />)
-  const projet = screen.getByRole('treeitem', { name: /Atelier Nord/ })
-  expect(projet).not.toHaveTextContent('PROD')
-  // Ce qu'elle porte à la place : le compte de connexions du projet entier.
-  expect(projet).toHaveTextContent('1 connexion')
+test('un dossier replié dit son compte de connexions, à toute profondeur', () => {
+  render(<Piloté />)
+  expect(screen.getByRole('treeitem', { name: /Atelier Nord/ })).toHaveTextContent('2 connexions')
 })
 
 // --- Le filtre ---
@@ -419,23 +382,23 @@ test('la ligne projet ne porte plus de badge d’environnement', () => {
 test('le filtre garde les ancêtres d’une correspondance', () => {
   // Cinq paliers depuis `25a` : l'environnement est un ancêtre à conserver comme les autres.
   const noeuds: Noeud[] = [
-    { id: 'p', kind: 'project', depth: 0, label: 'Halle' },
-    { id: 'e', kind: 'environment', depth: 1, label: 'Atelier' },
-    { id: 'd', kind: 'database', depth: 2, label: 'analytics' },
-    { id: 's', kind: 'schema', depth: 3, label: 'public' },
-    { id: 'o', kind: 'object', depth: 4, label: 'orders' },
-    { id: 'o2', kind: 'object', depth: 4, label: 'users' },
+    { id: 'p', kind: 'folder', depth: 0, indent: '', label: 'Halle' },
+    { id: 'e', kind: 'folder', depth: 1, indent: '', label: 'Atelier' },
+    { id: 'd', kind: 'database', depth: 2, indent: '', label: 'analytics' },
+    { id: 's', kind: 'schema', depth: 3, indent: '', label: 'public' },
+    { id: 'o', kind: 'object', depth: 4, indent: '', label: 'orders' },
+    { id: 'o2', kind: 'object', depth: 4, indent: '', label: 'users' },
   ]
   expect(filtrer(noeuds, 'orders').map((n) => n.id)).toEqual(['p', 'e', 'd', 's', 'o'])
 })
 
 test('un filtre vide ne retire rien', () => {
-  const noeuds: Noeud[] = [{ id: 'p', kind: 'project', depth: 0, label: 'Halle' }]
+  const noeuds: Noeud[] = [{ id: 'p', kind: 'folder', depth: 0, indent: '', label: 'Halle' }]
   expect(filtrer(noeuds, '   ')).toHaveLength(1)
 })
 
 test('le filtre ignore la casse', () => {
-  const noeuds: Noeud[] = [{ id: 'p', kind: 'project', depth: 0, label: 'Atelier' }]
+  const noeuds: Noeud[] = [{ id: 'p', kind: 'folder', depth: 0, indent: '', label: 'Atelier' }]
   expect(filtrer(noeuds, 'ATELIER')).toHaveLength(1)
 })
 
@@ -443,8 +406,8 @@ test('le filtre ignore la casse', () => {
 // apparaître des états au lieu de données.
 test('le filtre ne fait pas correspondre les lignes de message', () => {
   const noeuds: Noeud[] = [
-    { id: 'p', kind: 'project', depth: 0, label: 'Halle' },
-    { id: 'm', kind: 'message', depth: 2, label: 'Chargement…', message: true },
+    { id: 'p', kind: 'folder', depth: 0, indent: '', label: 'Halle' },
+    { id: 'm', kind: 'message', depth: 2, indent: '', label: 'Chargement…', message: true },
   ]
   expect(filtrer(noeuds, 'chargement')).toHaveLength(0)
 })
@@ -460,17 +423,17 @@ test('le filtre affiche son compteur, et seulement quand il est actif', async ()
   render(<Piloté initial={JUSQU_AUX_CONNEXIONS} />)
   expect(screen.queryByText(/\d+\/\d+/)).not.toBeInTheDocument()
   await userEvent.type(screen.getByLabelText(/Filtrer/), 'analytics')
-  // Six lignes affichées — projet, trois environnements, deux connexions — dont trois retenues :
-  // `analytics` et ses deux ancêtres, le projet et l'environnement `prod`.
+  // Six lignes affichées — le dossier racine, trois sous-dossiers, deux connexions — dont trois
+  // retenues : `analytics` et ses deux ancêtres.
   expect(screen.getByText('3/6')).toBeInTheDocument()
 })
 
 // --- Le pied ---
 
 test('la colonne n’a plus de pied du tout', () => {
-  render(<Piloté onAddDatabase={() => {}} onNewProject={() => {}} />)
+  render(<Piloté onAddDatabase={() => {}} onNewFolder={async () => 'f-neuf'} />)
   // **Le pied a disparu le 26 août 2026.** « Ajouter une connexion » y devait deviner l'environnement
-  // et vit désormais dans le menu du palier qui le sait ; « Nouveau projet » est monté dans la bande
+  // et vit désormais dans le menu du palier qui le sait ; « Nouveau dossier » est monté dans la bande
   // d'actions. Ce test est le garde-fou du retrait : sans lui, un pied réintroduit par mégarde
   // reprendrait ses 78 px sur la hauteur de l'arbre sans que rien ne le dise.
   expect(screen.queryByRole('button', { name: /Ajouter une connexion$/ })).toBeNull()
@@ -478,9 +441,9 @@ test('la colonne n’a plus de pied du tout', () => {
 })
 
 test('la bande d’actions est en tête, avant le filtre', () => {
-  render(<Piloté onNewProject={() => {}} />)
+  render(<Piloté onNewFolder={async () => 'f-neuf'} />)
   const bande = screen.getByRole('toolbar', { name: /Actions du panneau/ })
-  const bouton = screen.getByRole('button', { name: 'Nouveau projet' })
+  const bouton = screen.getByRole('button', { name: 'Nouveau dossier' })
   expect(bande).toContainElement(bouton)
   // L'ordre du DOM est celui du parcours clavier : on agit sur le panneau avant de filtrer sa liste.
   const champ = screen.getByRole('textbox')
@@ -495,16 +458,16 @@ test('la bande d’actions est en tête, avant le filtre', () => {
  * page, donc hors de portée de jsdom (règle n° 9) —, et le reste est un test d'assemblage : la
  * vitrine ne peut pas prouver que le bouton est branché à l'écran qui monte la modale (règle n° 8).
  */
-test('le bouton des préférences suit « Nouveau projet » dans la bande, et ouvre les préférences', async () => {
+test('le bouton des préférences suit « Nouveau dossier » dans la bande, et ouvre les préférences', async () => {
   const ouvrir = vi.fn()
-  render(<Piloté onNewProject={() => {}} onOpenPreferences={ouvrir} />)
+  render(<Piloté onNewFolder={async () => 'f-neuf'} onOpenPreferences={ouvrir} />)
   const bande = screen.getByRole('toolbar', { name: /Actions du panneau/ })
   const reglages = screen.getByRole('button', { name: 'Préférences' })
   // Enfant **direct** de la bande : c'est ce qui interdit une enveloppe de rangement autour de lui,
   // dont un `margin-left: auto` le renverrait à l'autre bout sans que le DOM en dise rien.
   expect(reglages.parentElement).toBe(bande)
   expect(
-    screen.getByRole('button', { name: 'Nouveau projet' }).compareDocumentPosition(reglages),
+    screen.getByRole('button', { name: 'Nouveau dossier' }).compareDocumentPosition(reglages),
   ).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
 
   await userEvent.click(reglages)
@@ -512,9 +475,9 @@ test('le bouton des préférences suit « Nouveau projet » dans la bande, et ou
 })
 
 test('sans gestionnaire, le bouton n’est pas rendu — et la bande subsiste', () => {
-  // C'est la règle de « Nouveau projet » juste au-dessus : un contrôle qui ne fait rien est pire
+  // C'est la règle de « Nouveau dossier » juste au-dessus : un contrôle qui ne fait rien est pire
   // qu'un contrôle absent (défaut n° 36). Et le cas de la galerie, où aucune modale ne répond.
-  render(<Piloté onNewProject={() => {}} />)
+  render(<Piloté onNewFolder={async () => 'f-neuf'} />)
   expect(screen.queryByRole('button', { name: 'Préférences' })).toBeNull()
   expect(screen.getByRole('toolbar', { name: /Actions du panneau/ })).toBeInTheDocument()
 })
@@ -537,7 +500,7 @@ test('« Rafraîchir l’arborescence » vit dans le menu d’une ligne projet',
   expect(rafraichir).toHaveBeenCalledOnce()
 })
 
-test('« Nouveau projet » n’est rendu que si le geste existe, et la bande avec lui', () => {
+test('« Nouveau dossier » n’est rendu que si le geste existe, et la bande avec lui', () => {
   render(<Piloté />)
   // Sans la prop, le bouton n'est **pas rendu** — et non rendu inerte : un contrôle qui ne fait rien
   // est pire qu'un contrôle absent (défaut n° 36). C'est le cas de la galerie.
@@ -554,41 +517,67 @@ const AUCUN_RESIDU = { leftoverSecrets: [] }
 
 const TOUT_DEPLIE = [ID_PROJET, ID_PROD, ID_ANALYTICS, ID_PUBLIC]
 
-test('les lignes projet, environnement et base portent un « … »', () => {
+test('les lignes de dossier et de connexion portent un « … »', () => {
   render(
     <Piloté
       initial={TOUT_DEPLIE}
       charge={{ ...RIEN, schemas: { ...RIEN.schemas }, objets: { ...RIEN.objets } }}
     />,
   )
-  // Un projet, ses trois environnements déclarés, ses deux bases. **L'environnement en porte un
-  // depuis le 26 août 2026** : c'est de là que part la déclaration d'une connexion, le palier étant
-  // le seul endroit qui sache dans quel environnement elle se déclare.
+  // Le dossier racine, ses trois sous-dossiers, ses deux connexions : **tout dossier en porte un**,
+  // c'est de là que part la déclaration d'une connexion (#166).
   expect(screen.getByRole('button', { name: 'Actions de Atelier Nord' })).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Actions de prod' })).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Actions de analytics' })).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Actions de shop' })).toBeInTheDocument()
 })
 
-test('« Ajouter une connexion… » part de l’environnement, avec ses coordonnées', async () => {
+/**
+ * **Il n'existe pas de ligne d'arbre sans menu** (#162), et la sorte `folder` n'y fait pas
+ * exception : chaque `treeitem` a son « … » dans l'enveloppe qu'il partage avec lui. Le contrôle
+ * négatif — la ligne de message, qui n'est pas un nœud — vit plus bas, avec le clic droit.
+ */
+test('toute ligne d’arbre, dossier compris, porte son « … »', () => {
+  const charge: Charge = {
+    schemas: { [ID_ANALYTICS]: [schema('public')] },
+    objets: { [ID_PUBLIC]: [table('orders')] },
+    enCours: new Set(),
+    echecs: {},
+  }
+  render(
+    <Piloté
+      arbre={avecConsole('console 1')}
+      initial={TOUT_DEPLIE}
+      charge={charge}
+      consoles={GESTES_DE_CONSOLE}
+    />,
+  )
+  const lignes = screen.getAllByRole('treeitem')
+  // Le décor couvre les cinq sortes : dossier, connexion, console, schéma, objet.
+  expect(lignes.length).toBeGreaterThanOrEqual(9)
+  for (const ligneDArbre of lignes) {
+    const enveloppe = ligneDArbre.parentElement as HTMLElement
+    expect(within(enveloppe).getByRole('button', { name: /^Actions de / })).toBeInTheDocument()
+  }
+})
+
+test('« Nouvelle connexion… » part du dossier, avec son identifiant', async () => {
   const vues: unknown[] = []
   render(<Piloté initial={JUSQU_AUX_CONNEXIONS} onAddDatabase={(cible) => vues.push(cible)} />)
   await userEvent.click(screen.getByRole('button', { name: 'Actions de prod' }))
-  await userEvent.click(screen.getByRole('button', { name: 'Ajouter une connexion…' }))
-  // **Le couple, pas le seul projet** : une connexion appartient à un environnement d'un projet
-  // (`23b`), et c'est ce couple que l'écran de création n'aura pas à redemander. Les coordonnées
-  // viennent du nœud, jamais d'une déduction sur le libellé — deux environnements peuvent porter le
-  // même libellé dans deux projets.
-  expect(vues).toEqual([{ project: 'Atelier Nord', environment: 'prod' }])
+  await userEvent.click(screen.getByRole('button', { name: 'Nouvelle connexion…' }))
+  // **L'identifiant, jamais le nom** : deux dossiers homonymes vivent sous deux parents, et c'est
+  // le cadre de la modale qui ne se redemande pas.
+  expect(vues).toEqual([ID_DE_TEST.prod])
 })
 
-test('au clic droit sur un environnement, le même menu', async () => {
+test('au clic droit sur un dossier, le même menu', async () => {
   render(<Piloté initial={JUSQU_AUX_CONNEXIONS} onAddDatabase={() => {}} />)
   fireEvent.contextMenu(ligne('prod', '2'))
   // Une seule construction pour les deux ouvertures : deux listes d'entrées auraient divergé d'une
   // action au premier ajout.
   expect(screen.getByRole('menu', { name: 'Actions de prod' }).textContent).toContain(
-    'Ajouter une connexion…',
+    'Nouvelle connexion…',
   )
 })
 
@@ -597,7 +586,7 @@ test('sans commande reliée, l’entrée est désactivée et dit pourquoi', asyn
   await userEvent.click(screen.getByRole('button', { name: 'Actions de prod' }))
   // Présente et désactivée, jamais absente ni cliquable-inerte : la règle de `09f` et le défaut
   // n° 36. C'est le cas de la galerie, où aucune commande ne répond.
-  expect(screen.getByRole('button', { name: 'Ajouter une connexion…' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: 'Nouvelle connexion…' })).toBeDisabled()
 })
 
 /**
@@ -667,10 +656,10 @@ test('le menu d’un schéma ouvre son diagramme, avec les coordonnées de son n
   )
   await userEvent.click(screen.getByRole('button', { name: 'Actions de public' }))
   await userEvent.click(screen.getByRole('button', { name: 'Diagramme du schéma' }))
-  // Les quatre coordonnées viennent du **nœud**, jamais d'une déduction sur le libellé : deux
-  // schémas homonymes vivent dans deux connexions, et deux connexions homonymes dans deux
-  // environnements (`23b`).
-  expect(vues).toEqual([['Atelier Nord', 'analytics', 'prod', 'public']])
+  // L'identifiant de la connexion et le schéma viennent du **nœud**, jamais d'une déduction sur le
+  // libellé : deux schémas homonymes vivent dans deux connexions, et deux connexions homonymes dans
+  // deux dossiers.
+  expect(vues).toEqual([[ANALYTICS, 'public']])
 })
 
 test('sans commande, l’entrée du diagramme est désactivée et dit pourquoi', async () => {
@@ -691,9 +680,9 @@ test('« Modifier… » porte les coordonnées du nœud, pas une déduction sur 
   render(<Piloté initial={TOUT_DEPLIE} onEditDatabase={(...args) => vues.push(args)} />)
   await userEvent.click(screen.getByRole('button', { name: 'Actions de shop' }))
   await userEvent.click(screen.getByRole('button', { name: 'Modifier…' }))
-  // L'environnement vient du projet, la base de son nœud : deux bases homonymes dans deux projets
-  // seraient indiscernables sans ces coordonnées, et c'est la clé d'identité de `05a`.
-  expect(vues).toEqual([['Atelier Nord', 'shop', 'prod']])
+  // L'identifiant vient du nœud : deux connexions homonymes dans deux dossiers seraient
+  // indiscernables autrement (#166).
+  expect(vues).toEqual([[SHOP]])
 })
 
 test('le retrait se désactive quand l’écran ne le relie à rien', async () => {
@@ -732,27 +721,6 @@ test('la confirmation nomme ce qui part et ce qui n’est pas touché', async ()
   expect(modale).toHaveTextContent('pas d’annulation')
   // Le bouton porte le verbe du geste, jamais « OK ».
   expect(screen.getByRole('button', { name: 'Retirer la connexion' })).toBeInTheDocument()
-})
-
-test('retirer un projet compte ses connexions et porte son propre verbe', async () => {
-  const vues: unknown[] = []
-  render(
-    <Piloté
-      initial={TOUT_DEPLIE}
-      onDelete={async (cible) => {
-        vues.push(cible)
-        return AUCUN_RESIDU
-      }}
-    />,
-  )
-  await userEvent.click(screen.getByRole('button', { name: 'Actions de Atelier Nord' }))
-  await userEvent.click(screen.getByRole('button', { name: 'Retirer de DoraBase…' }))
-
-  const modale = screen.getByRole('dialog', { name: /Retirer Atelier Nord de DoraBase/ })
-  // Deux bases dans le décor : la confirmation compte ce qui part plutôt que de rester vague.
-  expect(modale).toHaveTextContent('ses 2 connexions déclarées')
-  await userEvent.click(screen.getByRole('button', { name: 'Retirer le projet' }))
-  expect(vues).toEqual([{ kind: 'project', project: 'Atelier Nord', connexions: 2 }])
 })
 
 test('les modifications en attente perdues sont comptées dans la confirmation', async () => {
@@ -805,70 +773,215 @@ test('un refus s’affiche dans la confirmation, qui reste ouverte', async () =>
   expect(screen.getByRole('dialog', { name: /Retirer analytics/ })).toBeInTheDocument()
 })
 
-// **Les cinq tests du dialogue de renommage sont partis avec lui** (`23e`) : `RenameProjectDialog`
-// n'existe plus, son contenu a déménagé dans `ProjectEditor`, et ses tests avec — voir
-// `ProjectEditor.test.tsx`. Ce qui reste ici est ce que la sidebar fait vraiment : appeler le geste.
-test('« Modifier le projet… » appelle le geste d’édition, sur ce projet', async () => {
-  const vus: string[] = []
-  render(<Piloté initial={TOUT_DEPLIE} onEditProject={(projet) => vus.push(projet)} />)
+// --- Le menu d'un dossier (#166) ---
+
+test('le menu d’un dossier racine suit l’ordre décidé, le geste destructeur en dernier', async () => {
+  render(
+    <Piloté
+      initial={TOUT_DEPLIE}
+      onRefresh={vi.fn()}
+      onAddDatabase={vi.fn()}
+      onNewFolder={async () => 'f-neuf'}
+      onRenameFolder={async () => {}}
+      onRecolorFolder={async () => {}}
+      onSetFolderReadOnly={async () => {}}
+      onDelete={async () => AUCUN_RESIDU}
+    />,
+  )
   await userEvent.click(screen.getByRole('button', { name: 'Actions de Atelier Nord' }))
-  await userEvent.click(screen.getByRole('button', { name: 'Modifier le projet…' }))
-
-  expect(vus).toEqual(['Atelier Nord'])
-  // **La sidebar ne monte plus la modale** : les deux points d'entrée de `23e` vivent dans l'écran de
-  // travail, et une modale montée ici serait inatteignable depuis la pastille de la barre de titre.
-  expect(screen.queryByRole('dialog')).toBeNull()
-})
-
-test('« Exporter le projet… » nomme le projet de la ligne', async () => {
-  const vus: string[] = []
-  render(<Piloté initial={TOUT_DEPLIE} onExportProject={(projet) => vus.push(projet)} />)
-  await userEvent.click(screen.getByRole('button', { name: 'Actions de Atelier Nord' }))
-  await userEvent.click(screen.getByRole('button', { name: 'Exporter le projet…' }))
-
-  // **La portée vient du nœud** (`API-30`) : c'est le palier qui la connaît, et une bande en tête de
-  // colonne aurait dû la deviner.
-  expect(vus).toEqual(['Atelier Nord'])
-  // La sidebar ne monte pas la modale : elle vit au niveau de l'application, avec celle du menu
-  // natif qui exporte tous les projets.
-  expect(screen.queryByRole('dialog')).toBeNull()
-})
-
-test('« Exporter le projet… » se place après « Modifier », avant « Retirer »', async () => {
-  render(<Piloté initial={TOUT_DEPLIE} onExportProject={vi.fn()} onRefresh={vi.fn()} />)
-  await userEvent.click(screen.getByRole('button', { name: 'Actions de Atelier Nord' }))
-
-  // **L'ordre est la décision**, pas un effet de bord : l'export ne configure rien et n'ouvre rien,
-  // il produit un fichier — donc après les entrées qui touchent la déclaration, et avant celle qui
-  // la retire. Le geste destructeur reste le dernier de la liste, partout dans le produit.
-  //
-  // Le « … » rend un `Popover` de boutons et non un `role="menu"` — celui-là est la forme du clic
-  // droit —, donc l'ordre se lit dans le panneau lui-même.
+  // **Ni « Déplacer vers… » ni « Exporter le dossier… »** : #167 et #169 les poseront. Une entrée
+  // qui n'aboutit à rien d'ici là se lirait comme une panne. Le « … » rend un `Popover` de boutons,
+  // donc l'ordre se lit dans le panneau lui-même.
   const attendues = [
     'Rafraîchir l’arborescence',
-    'Modifier le projet…',
-    'Exporter le projet…',
+    'Nouvelle connexion…',
+    'Nouveau dossier',
+    'Renommer…',
+    'Couleur…',
+    'Passer en lecture seule',
     'Retirer de DoraBase…',
   ]
   const panneau = screen.getByRole('button', { name: attendues[0] }).parentElement
   expect([...(panneau?.children ?? [])].map((entree) => entree.textContent)).toEqual(attendues)
 })
 
-test('« Exporter le projet… » se désactive quand l’écran ne la relie à rien', async () => {
-  render(<Piloté initial={TOUT_DEPLIE} />)
-  await userEvent.click(screen.getByRole('button', { name: 'Actions de Atelier Nord' }))
-  const entree = screen.getByRole('button', { name: 'Exporter le projet…' })
-  expect(entree).toBeDisabled()
-  expect(entree).toHaveAttribute(
-    'title',
-    'L’export de projet n’est pas disponible depuis cet écran.',
-  )
+test('« Rafraîchir l’arborescence » ne vit que sur les dossiers de premier niveau', async () => {
+  render(<Piloté initial={JUSQU_AUX_CONNEXIONS} onRefresh={vi.fn()} />)
+  await userEvent.click(screen.getByRole('button', { name: 'Actions de prod' }))
+  expect(screen.queryByRole('button', { name: /Rafraîchir/ })).toBeNull()
 })
 
-test('« Modifier le projet… » se désactive quand l’écran ne la relie à rien', async () => {
-  render(<Piloté initial={TOUT_DEPLIE} />)
+test('« Nouveau dossier » crée dans ce dossier, le déplie et passe la ligne en renommage', async () => {
+  const parents: (string | null)[] = []
+  function Hote() {
+    const [arbre, setArbre] = useState(ARBRE)
+    return (
+      <Piloté
+        arbre={arbre}
+        initial={[ID_PROJET]}
+        onNewFolder={async (parent) => {
+          parents.push(parent)
+          setArbre((precedent) => ({
+            ...precedent,
+            folders: precedent.folders.map((racine) => ({
+              ...racine,
+              folders: (racine.folders ?? []).map((sous) =>
+                sous.id === ID_DE_TEST.staging
+                  ? {
+                      ...sous,
+                      folders: [{ id: 'f0000000000000n1', name: 'dossier 1', readOnly: false }],
+                    }
+                  : sous,
+              ),
+            })),
+          }))
+          return 'f0000000000000n1'
+        }}
+      />
+    )
+  }
+  render(<Hote />)
+  await userEvent.click(screen.getByRole('button', { name: 'Actions de staging' }))
+  // L'entrée du menu, et non le bouton homonyme de la bande — celui-là crée à la racine.
+  const bande = screen.getByRole('toolbar', { name: 'Actions du panneau' })
+  const entree = screen
+    .getAllByRole('button', { name: 'Nouveau dossier' })
+    .find((bouton) => !bande.contains(bouton))
+  if (entree === undefined) throw new Error('aucune entrée « Nouveau dossier » dans le menu')
+  await userEvent.click(entree)
+  expect(parents).toEqual([ID_DE_TEST.staging])
+  // Le parent est déplié, et le dossier neuf attend son nom **sur place** : aucune modale ne nomme
+  // un objet à sa création.
+  // (Le focus, lui, se mesure dans un navigateur : jsdom ne le pose pas sur `select()`.)
+  expect(await screen.findByLabelText('Nouveau nom de dossier 1')).toHaveValue('dossier 1')
+})
+
+test('« Nouveau dossier » de la bande crée à la racine', async () => {
+  const parents: (string | null)[] = []
+  render(
+    <Piloté
+      onNewFolder={async (parent) => {
+        parents.push(parent)
+        return 'f0000000000000n2'
+      }}
+    />,
+  )
+  await userEvent.click(screen.getByRole('button', { name: 'Nouveau dossier' }))
+  expect(parents).toEqual([null])
+})
+
+test('« Renommer… » d’un dossier passe sa ligne en édition, et envoie son identifiant', async () => {
+  const renommes: [string, string][] = []
+  render(
+    <Piloté
+      initial={[ID_PROJET]}
+      onRenameFolder={async (folder, nom) => {
+        renommes.push([folder, nom])
+      }}
+    />,
+  )
+  await userEvent.click(screen.getByRole('button', { name: 'Actions de staging' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Renommer…' }))
+  const champ = screen.getByDisplayValue('staging')
+  await userEvent.clear(champ)
+  await userEvent.type(champ, 'recette{Enter}')
+  expect(renommes).toEqual([[ID_DE_TEST.staging, 'recette']])
+})
+
+test('un refus de renommage de dossier est dit, avec ce qui rassure', async () => {
+  render(
+    <Piloté
+      initial={[ID_PROJET]}
+      onRenameFolder={async () => {
+        throw 'un dossier « dev » existe déjà à cet endroit'
+      }}
+    />,
+  )
+  await userEvent.click(screen.getByRole('button', { name: 'Actions de staging' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Renommer…' }))
+  const champ = screen.getByDisplayValue('staging')
+  await userEvent.clear(champ)
+  await userEvent.type(champ, 'dev{Enter}')
+  const dialogue = await screen.findByRole('dialog', { name: /« dev » n’a pas pu être donné/ })
+  expect(dialogue).toHaveTextContent('existe déjà')
+  expect(dialogue).toHaveTextContent('Le nom d’avant est gardé.')
+})
+
+test('« Couleur… » ouvre le nuancier, dont une pastille recolore le dossier', async () => {
+  const recolores: [string, string | null][] = []
+  render(
+    <Piloté
+      initial={[ID_PROJET]}
+      onRecolorFolder={async (folder, couleur) => {
+        recolores.push([folder, couleur])
+      }}
+    />,
+  )
+  await userEvent.click(screen.getByRole('button', { name: 'Actions de staging' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Couleur…' }))
+  const nuancier = screen.getByRole('radiogroup', { name: 'Couleur de staging' })
+  // La couleur en place est cochée — et « aucune » est une pastille comme les autres.
+  expect(within(nuancier).getByRole('radio', { name: 'amber' })).toBeChecked()
+  await userEvent.click(within(nuancier).getByRole('radio', { name: 'aucune' }))
+  expect(recolores).toEqual([[ID_DE_TEST.staging, null]])
+})
+
+test('la lecture seule se pose et se lève depuis le menu du dossier qui la déclare', async () => {
+  const reglages: [string, boolean][] = []
+  const onSet = async (folder: string, lectureSeule: boolean) => {
+    reglages.push([folder, lectureSeule])
+  }
+  render(<Piloté initial={[ID_PROJET]} onSetFolderReadOnly={onSet} />)
+  await userEvent.click(screen.getByRole('button', { name: 'Actions de dev' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Passer en lecture seule' }))
+  await userEvent.click(screen.getByRole('button', { name: /^Actions de prod/ }))
+  await userEvent.click(screen.getByRole('button', { name: 'Lever la lecture seule' }))
+  expect(reglages).toEqual([
+    [ID_DE_TEST.dev, true],
+    [ID_DE_TEST.prod, false],
+  ])
+})
+
+test('sous un ancêtre en lecture seule, l’entrée est désactivée et nomme l’ancêtre', async () => {
+  const arbre = arbreDeTest({
+    id: 'f0000000000000c1',
+    name: 'Coffre',
+    readOnly: true,
+    folders: [{ id: 'f0000000000000c2', name: 'dedans', readOnly: false }],
+  })
+  render(
+    <Piloté
+      arbre={arbre}
+      initial={[idDossier('f0000000000000c1')]}
+      onSetFolderReadOnly={vi.fn()}
+    />,
+  )
+  await userEvent.click(screen.getByRole('button', { name: 'Actions de dedans' }))
+  const entree = screen.getByRole('button', { name: 'Passer en lecture seule' })
+  expect(entree).toBeDisabled()
+  expect(entree).toHaveAttribute('title', 'Imposée par « Coffre ».')
+})
+
+test('retirer un dossier compte ses connexions et porte son propre verbe', async () => {
+  const cibles: CibleDeSuppression[] = []
+  render(
+    <Piloté
+      onDelete={async (cible) => {
+        cibles.push(cible)
+        return AUCUN_RESIDU
+      }}
+    />,
+  )
   await userEvent.click(screen.getByRole('button', { name: 'Actions de Atelier Nord' }))
-  expect(screen.getByRole('button', { name: 'Modifier le projet…' })).toBeDisabled()
+  await userEvent.click(screen.getByRole('button', { name: 'Retirer de DoraBase…' }))
+  const dialogue = screen.getByRole('dialog', { name: 'Retirer Atelier Nord de DoraBase' })
+  expect(dialogue).toHaveTextContent(
+    'le dossier Atelier Nord, ses sous-dossiers et ses 2 connexions',
+  )
+  await userEvent.click(within(dialogue).getByRole('button', { name: 'Retirer le dossier' }))
+  expect(cibles).toEqual([
+    { kind: 'folder', folder: ID_DE_TEST.racine, nom: 'Atelier Nord', connexions: 2 },
+  ])
 })
 
 test('« Modifier… » se désactive quand l’écran ne la relie à rien', async () => {
@@ -898,7 +1011,7 @@ describe('la section contextuelle : colonnes déclarées ou schéma déduit (`13
         <Sprite />
         <LanguageProvider preferences={{ language: 'fr' }}>
           <ExplorerSidebar
-            projects={[]}
+            arbre={{ folders: [], connections: [] }}
             deplies={new Set<string>()}
             charge={RIEN}
             etatDe={() => ({ kind: 'never' })}
@@ -947,14 +1060,16 @@ describe('la section contextuelle : colonnes déclarées ou schéma déduit (`13
 
 // --- Les consoles dans l'arbre, et leur renommage sur place ---
 
-/** Le décor de `PROJETS`, avec une console sur la connexion `analytics`. */
-function avecConsole(nom: string): Project[] {
-  return PROJETS.map((projet) => ({
-    ...projet,
-    databases: projet.databases.map((base) =>
-      base.name === 'analytics' ? { ...base, consoles: [{ name: nom, sql: '' }] } : base,
-    ),
-  }))
+/** Le décor d'`ARBRE`, avec une console sur la connexion `analytics`. */
+function avecConsole(nom: string): FolderTree {
+  return arbreDeTest(
+    trioDeTest({
+      prod: [
+        connexionDeTest(ANALYTICS, 'analytics', { consoles: [{ name: nom, sql: '' }] }),
+        connexionDeTest(SHOP, 'shop', { engine: 'mysql' }),
+      ],
+    }),
+  )
 }
 
 const GESTES_DE_CONSOLE = {
@@ -966,7 +1081,7 @@ const GESTES_DE_CONSOLE = {
 test('un double-clic sur une console ouvre le champ de renommage', async () => {
   render(
     <Piloté
-      projets={avecConsole('console 1')}
+      arbre={avecConsole('console 1')}
       initial={[...JUSQU_AUX_CONNEXIONS, ID_ANALYTICS]}
       consoles={GESTES_DE_CONSOLE}
     />,
@@ -983,7 +1098,7 @@ test('« Entrée » valide le renommage, « Échap » l’abandonne', async () =
   const gestes = { ...GESTES_DE_CONSOLE, onRenommer: renommer }
   render(
     <Piloté
-      projets={avecConsole('console 1')}
+      arbre={avecConsole('console 1')}
       initial={[...JUSQU_AUX_CONNEXIONS, ID_ANALYTICS]}
       consoles={gestes}
     />,
@@ -992,7 +1107,7 @@ test('« Entrée » valide le renommage, « Échap » l’abandonne', async () =
   await userEvent.dblClick(screen.getByRole('treeitem', { name: /console 1/ }))
   await userEvent.clear(screen.getByLabelText('Nouveau nom de console 1'))
   await userEvent.type(screen.getByLabelText('Nouveau nom de console 1'), 'Audit{Enter}')
-  expect(renommer).toHaveBeenCalledWith('Atelier Nord', 'analytics', 'prod', 'console 1', 'Audit')
+  expect(renommer).toHaveBeenCalledWith(ANALYTICS, 'console 1', 'Audit')
 
   renommer.mockClear()
   await userEvent.dblClick(screen.getByRole('treeitem', { name: /console 1/ }))
@@ -1006,7 +1121,7 @@ test('un nom vide ou inchangé n’envoie rien', async () => {
   const renommer = vi.fn()
   render(
     <Piloté
-      projets={avecConsole('console 1')}
+      arbre={avecConsole('console 1')}
       initial={[...JUSQU_AUX_CONNEXIONS, ID_ANALYTICS]}
       consoles={{ ...GESTES_DE_CONSOLE, onRenommer: renommer }}
     />,
@@ -1023,7 +1138,7 @@ test('un nom vide ou inchangé n’envoie rien', async () => {
 test('les autres lignes de l’arbre ne se renomment pas au double-clic', async () => {
   render(
     <Piloté
-      projets={avecConsole('console 1')}
+      arbre={avecConsole('console 1')}
       initial={[...JUSQU_AUX_CONNEXIONS, ID_ANALYTICS]}
       consoles={GESTES_DE_CONSOLE}
     />,
@@ -1036,8 +1151,8 @@ test('les autres lignes de l’arbre ne se renomment pas au double-clic', async 
 })
 
 describe('renommer une connexion depuis sa ligne (`26`)', () => {
-  /** Le renommage réussi et muet : ni secret absent, ni résidu. */
-  const SANS_RESERVE = { missingSecrets: [], leftoverSecrets: [] }
+  /** Le renommage réussi : muet, et sans rien à rapporter depuis #166. */
+  const SANS_RESERVE = undefined
 
   test('« Renommer… » passe la ligne en édition, et n’appelle rien avant validation', async () => {
     const renommer = vi.fn().mockResolvedValue(SANS_RESERVE)
@@ -1053,7 +1168,7 @@ describe('renommer une connexion depuis sa ligne (`26`)', () => {
     expect(renommer).not.toHaveBeenCalled()
   })
 
-  test('« Entrée » envoie les coordonnées du nœud, environnement compris', async () => {
+  test('« Entrée » envoie l’identifiant du nœud', async () => {
     const renommer = vi.fn().mockResolvedValue(SANS_RESERVE)
     render(<Piloté initial={TOUT_DEPLIE} onRenameDatabase={renommer} />)
 
@@ -1062,9 +1177,8 @@ describe('renommer une connexion depuis sa ligne (`26`)', () => {
     await userEvent.clear(screen.getByLabelText('Nouveau nom de analytics'))
     await userEvent.type(screen.getByLabelText('Nouveau nom de analytics'), 'entrepot{Enter}')
 
-    // L'environnement fait partie de l'identité (`23b`) : sans lui, la commande viserait la
-    // première connexion de ce nom.
-    expect(renommer).toHaveBeenCalledWith('Atelier Nord', 'analytics', 'prod', 'entrepot')
+    // L'identifiant, jamais le nom : sans lui, la commande viserait la première connexion de ce nom.
+    expect(renommer).toHaveBeenCalledWith(ANALYTICS, 'entrepot')
   })
 
   test('« Échap » abandonne, et un nom inchangé n’envoie rien', async () => {
@@ -1112,26 +1226,7 @@ describe('renommer une connexion depuis sa ligne (`26`)', () => {
     const modale = await screen.findByRole('dialog')
     expect(modale).toHaveTextContent('déjà déclarée')
     // Le fait qui rassure, dit aussi fort que celui qui inquiète — la règle de `08j`.
-    expect(modale).toHaveTextContent('mot de passe est intact')
-  })
-
-  test('un secret introuvable et un résidu sont rapportés, le renommage ayant eu lieu', async () => {
-    const renommer = vi.fn().mockResolvedValue({
-      missingSecrets: ['Atelier Nord/analytics/prod'],
-      leftoverSecrets: ['Atelier Nord/analytics/prod'],
-    })
-    render(<Piloté initial={TOUT_DEPLIE} onRenameDatabase={renommer} />)
-
-    await userEvent.click(screen.getByRole('button', { name: 'Actions de analytics' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Renommer…' }))
-    await userEvent.clear(screen.getByLabelText('Nouveau nom de analytics'))
-    await userEvent.type(screen.getByLabelText('Nouveau nom de analytics'), 'entrepot{Enter}')
-
-    const modale = await screen.findByRole('dialog')
-    // Les taire laisserait découvrir l'un ou l'autre bien plus tard, sur un échec de connexion sans
-    // raison apparente.
-    expect(modale).toHaveTextContent('introuvable dans le Trousseau')
-    expect(modale).toHaveTextContent('n’a pas pu être effacé')
+    expect(modale).toHaveTextContent('Le nom d’avant est gardé.')
   })
 
   test('« Renommer… » se désactive quand l’écran ne la relie à rien', async () => {
@@ -1149,9 +1244,9 @@ describe('renommer une connexion depuis sa ligne (`26`)', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Actions de analytics' }))
     await userEvent.click(screen.getByRole('button', { name: 'Gérer les schémas…' }))
 
-    // **Les coordonnées viennent du nœud**, environnement compris (`23b`) : sans lui, deux
-    // connexions homonymes ouvriraient le gestionnaire de la première venue.
-    expect(vues).toEqual([['Atelier Nord', 'analytics', 'prod']])
+    // **L'identifiant vient du nœud** : deux connexions homonymes ouvriraient sinon le gestionnaire
+    // de la première venue.
+    expect(vues).toEqual([[ANALYTICS]])
   })
 
   test('hors PostgreSQL l’entrée reste, désactivée avec sa raison', async () => {
@@ -1174,12 +1269,12 @@ describe('renommer une connexion depuis sa ligne (`26`)', () => {
     expect(entree).toHaveAttribute('title', 'Cet écran n’est pas relié au gestionnaire de schémas.')
   })
 
-  test('les lignes projet, schéma et table n’offrent pas « Renommer… »', async () => {
+  test('le renommage d’une connexion ne branche pas celui d’un dossier', async () => {
     render(<Piloté initial={TOUT_DEPLIE} onRenameDatabase={vi.fn()} />)
-    // Le projet a « Modifier le projet… », qui absorbe son renommage (`23e`) ; un schéma et une
-    // table n'ont pas de menu du tout.
+    // Deux commandes, deux disponibilités : sans `onRenameFolder`, l'entrée du dossier se désactive
+    // avec sa raison, même quand celle de la connexion est branchée.
     await userEvent.click(screen.getByRole('button', { name: 'Actions de Atelier Nord' }))
-    expect(screen.queryByRole('button', { name: 'Renommer…' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Renommer…' })).toBeDisabled()
   })
 })
 
@@ -1215,8 +1310,8 @@ describe('le clic droit ouvre le même menu, au pointeur (`26`)', () => {
     clicDroit(ligne('shop', '3'))
     await userEvent.click(screen.getByRole('menuitem', { name: 'Modifier…' }))
 
-    // Les coordonnées viennent du nœud cliqué, pas de la première ligne du décor.
-    expect(vues).toEqual([['Atelier Nord', 'shop', 'prod']])
+    // L'identifiant vient du nœud cliqué, pas de la première ligne du décor.
+    expect(vues).toEqual([[SHOP]])
     expect(screen.queryByRole('menu')).toBeNull()
   })
 
@@ -1280,13 +1375,13 @@ describe('le clic droit ouvre le même menu, au pointeur (`26`)', () => {
   })
 })
 
-test('« Importer des projets… » vit dans la bande, à côté de « Nouveau projet »', async () => {
+test('« Importer des projets… » vit dans la bande, à côté de « Nouveau dossier »', async () => {
   // **Le second chemin de l'import** (`API-30`, 17 septembre 2026, à la demande) : il n'existait
   // que dans le menu natif, donc personne ne l'a trouvé. Les deux gestes de cette bande produisent
   // un projet — l'un le déclare, l'autre le reçoit —, et les voisiner est ce qui fait trouver le
   // second quand on cherchait le premier.
   const onImportProjects = vi.fn()
-  render(<Piloté onNewProject={vi.fn()} onImportProjects={onImportProjects} />)
+  render(<Piloté onNewFolder={async () => 'f-neuf'} onImportProjects={onImportProjects} />)
 
   const bande = screen.getByRole('toolbar', { name: 'Actions du panneau' })
   await userEvent.click(within(bande).getByRole('button', { name: 'Importer des projets…' }))
@@ -1298,7 +1393,7 @@ test('la bande ne rend pas l’import quand l’écran ne le relie à rien', () 
   // **Le contrôle négatif** : un bouton d'icône nue qui ne mènerait nulle part se lirait comme une
   // panne (défaut n° 36), et il n'y a rien à expliquer dans 22 px — donc on ne le rend pas, plutôt
   // que de le désactiver avec sa raison comme le fait une entrée de menu, qui a la place de la dire.
-  render(<Piloté onNewProject={vi.fn()} />)
+  render(<Piloté onNewFolder={async () => 'f-neuf'} />)
 
   expect(screen.queryByRole('button', { name: 'Importer des projets…' })).toBeNull()
 })

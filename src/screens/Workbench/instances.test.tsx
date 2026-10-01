@@ -3,10 +3,9 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { Sprite } from '../../design/icons/Sprite'
-import type { Project } from '../../domain/config'
 import { LanguageProvider } from '../../i18n/LanguageContext'
 import { instanceDeTest, passerelleDeTest } from '../Instances/pourLesTests'
-import { REGLAGES, TRIO_DE_TEST } from '../NewConnection/pourLesTests'
+import { arbreDeTest, connexionDeTest, trioDeTest } from '../NewConnection/pourLesTests'
 import { Workbench } from './Workbench'
 
 /**
@@ -21,22 +20,7 @@ import { Workbench } from './Workbench'
  * d'outils — dans les deux cas, la galerie montrait un composant correct, branché sur rien.
  */
 
-const PROJETS: Project[] = [
-  {
-    name: 'Atelier Nord',
-    environments: TRIO_DE_TEST,
-    queries: [],
-    databases: [
-      {
-        name: 'analytics',
-        engine: 'postgresql',
-        environment: 'prod',
-        connection: REGLAGES,
-        consoles: [],
-      },
-    ],
-  },
-]
+const PROJETS = arbreDeTest(trioDeTest({ prod: [connexionDeTest('c-analytics', 'analytics')] }))
 
 function monter(over: Partial<Parameters<typeof Workbench>[0]> = {}) {
   const passerelleInstances = over.passerelleInstances ?? passerelleDeTest()
@@ -45,7 +29,7 @@ function monter(over: Partial<Parameters<typeof Workbench>[0]> = {}) {
       <Sprite />
       <LanguageProvider preferences={{ language: 'fr' }}>
         <Workbench
-          projects={PROJETS}
+          arbre={PROJETS}
           instances={[instanceDeTest()]}
           passerelleInstances={passerelleInstances}
           // L'arbre n'est pas le sujet : sa passerelle par défaut ne répond pas hors de la webview,
@@ -60,12 +44,10 @@ function monter(over: Partial<Parameters<typeof Workbench>[0]> = {}) {
 }
 
 describe('la zone d’instances dans l’écran de travail', () => {
-  it('est montée dans la sidebar, sous l’arbre des projets', () => {
+  it('est montée dans la sidebar, sous l’arbre des dossiers', () => {
     monter()
     // Les deux arbres coexistent : c'est ce que « une zone et non un onglet » veut dire.
-    expect(
-      screen.getByRole('tree', { name: 'Projets, environnements et connexions' }),
-    ).toBeInTheDocument()
+    expect(screen.getByRole('tree', { name: 'Dossiers et connexions' })).toBeInTheDocument()
     expect(screen.getByRole('tree', { name: 'Instances' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^PG atelier/ })).toBeInTheDocument()
   })
@@ -146,7 +128,7 @@ describe('la zone d’instances dans l’écran de travail', () => {
             retirer
           </button>
           <Workbench
-            projects={PROJETS}
+            arbre={PROJETS}
             instances={instances}
             passerelleInstances={passerelleDeTest()}
             passerelle={passerelleDArbre()}

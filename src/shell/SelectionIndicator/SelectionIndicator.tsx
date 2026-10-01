@@ -1,22 +1,27 @@
 import { Icon } from '../../design/icons/Icon'
-import type { EnvironmentColor } from '../../domain/config'
+import type { FolderColor } from '../../domain/config'
 import type { ConnectionState } from '../../domain/engine'
 import { shellFr } from '../../i18n/dictionaries/shell'
 import { useT } from '../../i18n/LanguageContext'
 import type { Dictionnaire, Entree } from '../../i18n/types'
-import { COULEURS_D_ENVIRONNEMENT } from '../../screens/NewConnection/environments'
+import { COULEURS_DE_DOSSIER } from '../../screens/NewConnection/environments'
 import { Badge } from '../../ui/Badge/Badge'
 import styles from './SelectionIndicator.module.css'
 
 type SelectionIndicatorProps = {
-  projectName: string
   /**
-   * L'environnement de la sélection, **tel qu'il est déclaré** (`23a`).
+   * Le chemin de dossiers de la sélection, par leurs noms, du plus extérieur au plus proche (#166).
    *
-   * Absent quand la sélection ne le désigne pas — une ligne de projet, par exemple. Le libellé
-   * s'affiche alors seul, plutôt qu'accompagné d'un environnement deviné.
+   * Il remplace le projet et l'environnement : ce sont les deux premiers dossiers d'une
+   * configuration migrée. Un chemin long est **raccourci à gauche** — c'est la fin, le dossier le
+   * plus proche, qui dit où l'on est.
    */
-  environment?: { label: string; color: EnvironmentColor; production: boolean }
+  chemin: readonly string[]
+  /**
+   * La couleur du dossier coloré **le plus proche**, s'il y en a un — la pastille qui suit le
+   * chemin. Absente, aucune pastille plutôt qu'un gris inventé.
+   */
+  couleur?: FolderColor | null
   /**
    * Le fil d'Ariane de la connexion ouverte : `analytics · public`. Absent quand rien n'est ouvert.
    */
@@ -43,7 +48,7 @@ type SelectionIndicatorProps = {
 }
 
 /**
- * Ce que la barre de titre indique : le projet, l'environnement, ce qui est ouvert (`25b`).
+ * Ce que la barre de titre indique : le chemin de dossiers, ce qui est ouvert (`25b`, #166).
  *
  * # Un indicateur, plus un contrôle
  *
@@ -64,11 +69,11 @@ type SelectionIndicatorProps = {
  * découpait le menu projet (défaut du 10 août 2026), et même sans menu ce n'est pas au conteneur de
  * décider ce qu'on sacrifie.
  *
- * # Le libellé d'environnement n'est pas capitalisé
+ * # Le chemin n'est pas capitalisé
  *
- * Depuis `23a` il est renommable : c'est une chaîne de l'utilisateur, et « Pré-production » ne doit
- * pas devenir « PRÉ-PRODUCTION ». Le seul mot en capitales est `PROD`, parce que c'est une catégorie
- * et non un nom — et il suit le **drapeau**, jamais le libellé ni la couleur déclarée.
+ * Les noms de dossier sont des chaînes de l'utilisateur, et « Pré-production » ne doit pas devenir
+ * « PRÉ-PRODUCTION ». Le badge `PROD` des environnements est parti avec eux (#166) : ce qu'il
+ * signalait est désormais la lecture seule, que la puce « Lecture seule » porte.
  *
  * # Aucun rôle, et surtout pas `role="status"`
  *
@@ -83,8 +88,8 @@ type SelectionIndicatorProps = {
  * les mentions masquées visuellement, ci-dessous.
  */
 export function SelectionIndicator({
-  projectName,
-  environment,
+  chemin,
+  couleur = null,
   breadcrumb,
   connection,
   readOnly = false,
@@ -100,24 +105,21 @@ export function SelectionIndicator({
           aria-hidden="true"
         />
       )}
-      <Icon name="bag" size={12} strokeWidth={2} className={styles.bag} />
-      <span className={styles.name}>{projectName}</span>
-      {environment && (
-        <>
-          {/* La couleur **arrive de la déclaration**, non d'un attribut lu par le CSS : une table de
-              teintes par identifiant redeviendrait le trio en dur que `23a` a fait disparaître. */}
-          <span
-            className={styles.envDot}
-            style={{ background: COULEURS_D_ENVIRONNEMENT[environment.color] }}
-            aria-hidden="true"
-          />
-          <span className={styles.env}>{environment.label}</span>
-          {environment.production && (
-            <Badge tone="danger" size="xs">
-              {t('shell.selectionIndicator.prod')}
-            </Badge>
-          )}
-        </>
+      <Icon name="pin" size={12} strokeWidth={2} className={styles.bag} />
+      {/* **Raccourci à gauche** : le conteneur est en `rtl` pour que l'ellipse tombe au début, et le
+          texte lui-même est isolé en `ltr` pour que la ponctuation ne se retourne pas. Les
+          séparateurs sont du texte, donc le chemin se lit à voix haute tel qu'il s'écrit. */}
+      <span className={styles.name}>
+        <span className={styles.cheminTexte}>{chemin.join(' › ')}</span>
+      </span>
+      {couleur !== null && (
+        // La couleur **arrive de la déclaration**, non d'un attribut lu par le CSS : une table de
+        // teintes par identifiant serait une seconde source.
+        <span
+          className={styles.envDot}
+          style={{ background: COULEURS_DE_DOSSIER[couleur] }}
+          aria-hidden="true"
+        />
       )}
       {breadcrumb && <span className={styles.breadcrumb}>{breadcrumb}</span>}
       {pendingChanges > 0 && (
@@ -145,13 +147,6 @@ export function SelectionIndicator({
       {pendingChanges > 0 && (
         <span className={styles.srOnly}>
           {t('shell.selectionIndicator.pendingChanges', { count: pendingChanges })}
-        </span>
-      )}
-      {/* **« Prod » est un sigle**, et la pastille de couleur est `aria-hidden` : sans cette ligne,
-          rien n'annoncerait en clair qu'on regarde une production. */}
-      {environment?.production === true && (
-        <span className={styles.srOnly}>
-          {t('shell.selectionIndicator.productionAnnouncement')}
         </span>
       )}
     </div>

@@ -1,3 +1,4 @@
+import type { FolderId, FolderTree } from '../../domain/config'
 import { ExportProjects } from './ExportProjects'
 import { ImportProjects } from './ImportProjects'
 import * as pont from './transferCommands'
@@ -10,7 +11,9 @@ import * as pont from './transferCommands'
  * permis un import portant un nom de projet, qui ne veut rien dire : ce qu'un import verse est ce
  * que le fichier porte.
  */
-export type DemandeDeTransfert = { sens: 'export'; projet: string | null } | { sens: 'import' }
+export type DemandeDeTransfert =
+  | { sens: 'export'; dossier: { id: FolderId; nom: string } | null }
+  | { sens: 'import' }
 
 type TransferDialogsProps = {
   demande: DemandeDeTransfert
@@ -24,7 +27,7 @@ type TransferDialogsProps = {
    * registre et purger le cache de l'arbre. Une modale qui garderait la nouvelle configuration pour
    * elle laisserait l'arbre sur celle d'avant jusqu'au prochain « Rafraîchir ».
    */
-  onImported: (projects: import('../../domain/config').Project[]) => void
+  onImported: (arbre: FolderTree) => void
   /** Le pont IPC, injecté pour les tests — voir `transferCommands.ts`. */
   commandes?: typeof pont
 }
@@ -48,12 +51,12 @@ export function TransferDialogs({
   if (demande.sens === 'export') {
     return (
       <ExportProjects
-        projet={demande.projet}
+        projet={demande.dossier?.nom ?? null}
         total={total}
         onClose={onClose}
         onChoisirFichier={commandes.choisirDestination}
         onExporter={(file, includePasswords) =>
-          commandes.exporter({ file, project: demande.projet, includePasswords })
+          commandes.exporter({ file, folder: demande.dossier?.id ?? null, includePasswords })
         }
       />
     )
@@ -64,9 +67,9 @@ export function TransferDialogs({
       onClose={onClose}
       onChoisirFichier={commandes.choisirSource}
       onInspecter={commandes.inspecter}
-      onImporter={async (file, projets) => {
-        const resultat = await commandes.importer(file, projets)
-        onImported(resultat.projects)
+      onImporter={async (file, selection) => {
+        const resultat = await commandes.importer(file, selection)
+        onImported(resultat.tree)
         return resultat.report
       }}
     />

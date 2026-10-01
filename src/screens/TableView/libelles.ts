@@ -1,4 +1,5 @@
-import type { Project } from '../../domain/config'
+import { connexion } from '../../data/dossiers'
+import type { ConnectionId, FolderTree } from '../../domain/config'
 import type { Value } from '../../domain/engine'
 import { texteDeValeur } from './cellule'
 
@@ -28,10 +29,10 @@ import { texteDeValeur } from './cellule'
  * rien dans le catalogue ne dit ce que `3` veut dire. Deviner reviendrait à contredire le catalogue
  * au jugé, dans l'outil dont le métier est de montrer ce qui est stocké.
  *
- * L'écart avec l'horodatage est que la déclaration, ici, est **persistée** : elle vit dans le
- * projet, et pas dans l'état de l'écran. Ce qu'un code veut dire ne change pas d'une session à
- * l'autre, ni d'un environnement à l'autre — voir `Project::value_labels` pour la raison de la
- * poser sur le projet.
+ * L'écart avec l'horodatage est que la déclaration, ici, est **persistée** : elle vit sur un
+ * dossier (#166, sur le dossier racine issu du projet pour une configuration migrée), et pas dans
+ * l'état de l'écran. Ce qu'un code veut dire ne change pas d'une session à l'autre, ni d'un
+ * sous-dossier à l'autre.
  */
 
 /** Ce que les valeurs d'**une** colonne veulent dire : la valeur en texte, vers son libellé. */
@@ -59,7 +60,7 @@ const ENTIER = /^-?\d+$/
 export const AUCUN_LIBELLE: LibellesDeTable = Object.freeze({})
 
 /**
- * Les libellés que ce projet déclare pour cette table — `{}` quand il n'en déclare aucun.
+ * Les libellés que les dossiers de cette connexion déclarent pour cette table — `{}` sinon.
  *
  * **Un seul endroit résout la question**, et c'est celui-ci : la vue de table reçoit des libellés
  * déjà résolus, elle ne fouille pas la liste des projets. La question « que veulent dire les
@@ -73,12 +74,20 @@ export const AUCUN_LIBELLE: LibellesDeTable = Object.freeze({})
  * table est rangée.
  */
 export function libellesDeLaTable(
-  projects: readonly Project[],
-  projet: string,
+  arbre: FolderTree,
+  connection: ConnectionId,
   table: string,
 ): LibellesDeTable {
-  const declaration = projects.find((candidat) => candidat.name === projet)
-  return declaration?.valueLabels?.[table] ?? AUCUN_LIBELLE
+  // **Le dossier le plus proche qui déclare la table l'emporte entièrement** (#164,
+  // `FolderTree::libelles_de`) — aucune fusion entre ancêtres. Une fusion créerait un objet neuf à
+  // chaque appel, donc rouvrirait la boucle de rendu qu'`AUCUN_LIBELLE` existe pour fermer : la
+  // valeur rendue est toujours un objet **de l'arbre**, stable tant que l'arbre l'est.
+  const ancetres = connexion(arbre, connection)?.ancetres ?? []
+  for (let rang = ancetres.length - 1; rang >= 0; rang -= 1) {
+    const declares = ancetres[rang]?.valueLabels?.[table]
+    if (declares !== undefined) return declares
+  }
+  return AUCUN_LIBELLE
 }
 
 /**

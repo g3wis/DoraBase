@@ -1,7 +1,12 @@
 import { open, save } from '@tauri-apps/plugin-dialog'
 import { exportProjects, importProjects, inspectProjectsFile } from '../../data/commandes'
-import type { ExportProjectsRequest, ImportProjectsResult } from '../../domain/config'
-import type { ExportReport, ImportReport } from '../../domain/transfert'
+import type {
+  ExportProjectsRequest,
+  ExportReport,
+  ImportProjectsResult,
+  ImportReport,
+  ImportSelection,
+} from '../../domain/arbre'
 
 /**
  * Le pont des deux modales de transfert de projets (`API-30`).
@@ -27,8 +32,11 @@ export function inspecter(file: string): Promise<ImportReport> {
   return inspectProjectsFile(file)
 }
 
-export function importer(file: string, projects: string[] | null): Promise<ImportProjectsResult> {
-  return importProjects({ file, projects })
+export function importer(
+  file: string,
+  selection: ImportSelection | null,
+): Promise<ImportProjectsResult> {
+  return importProjects({ file, selection })
 }
 
 /**

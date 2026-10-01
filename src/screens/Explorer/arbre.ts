@@ -1,10 +1,19 @@
+import { connexionsDescendantes, idDeConnexion } from '../../data/dossiers'
 import type { IconName } from '../../design/icons/names'
-import type { Engine, EnvironmentId, Project } from '../../domain/config'
+import type {
+  ConnectionId,
+  Database,
+  Engine,
+  Folder,
+  FolderId,
+  FolderTree,
+} from '../../domain/config'
 import type { ConnectionState, SchemaInfo, TableSummary } from '../../domain/engine'
 import type { useT } from '../../i18n/LanguageContext'
 import { formatRowCount } from '../../ui/format'
+import { indentation } from '../../ui/TreeRow/TreeRow'
 import { ENGINES } from '../NewConnection/engines'
-import { COULEURS_D_ENVIRONNEMENT } from '../NewConnection/environments'
+import { COULEURS_DE_DOSSIER } from '../NewConnection/environments'
 
 /**
  * `aplatir` est une fonction pure, pas un composant : elle ne peut pas appeler `useT()`
@@ -14,11 +23,9 @@ import { COULEURS_D_ENVIRONNEMENT } from '../NewConnection/environments'
 type Traduire = ReturnType<typeof useT>
 
 /**
- * Le repli par défaut de `t`, en français — les mêmes chaînes que celles que ce fichier portait
- * en dur avant le 26 août 2026. **Optionnel plutôt qu'obligatoire** : `arbre.test.ts` appelle
- * `aplatir` à 32 endroits sans se soucier de la langue, et les y faire tous passer un `t` de
- * complaisance n'aurait rien testé de plus — seul `ExplorerSidebar` a besoin de la vraie
- * traduction, et c'est lui qui la passe.
+ * Le repli par défaut de `t`, en français. **Optionnel plutôt qu'obligatoire** : `arbre.test.ts`
+ * appelle `aplatir` partout sans se soucier de la langue, et seul `ExplorerSidebar` a besoin de la
+ * vraie traduction, et c'est lui qui la passe.
  */
 const traduireEnFrancais: Traduire = (cle, parametres = {}) => {
   switch (cle) {
@@ -26,14 +33,14 @@ const traduireEnFrancais: Traduire = (cle, parametres = {}) => {
       return 'Chargement…'
     case 'explorer.arbre.noObjects':
       return 'Aucun objet'
-    case 'explorer.arbre.noConnectionsIn':
-      return `Aucune connexion déclarée en ${parametres.label}`
+    case 'explorer.arbre.emptyFolder':
+      return 'Dossier vide'
+    case 'explorer.arbre.readOnly':
+      return 'lecture seule'
     case 'explorer.arbre.connectionCount': {
       const compte = Number(parametres.count)
       return `${compte} connexion${compte > 1 ? 's' : ''}`
     }
-    case 'explorer.arbre.prodBadge':
-      return 'PROD'
     case 'explorer.arbre.connectingBadge':
       return '…'
     case 'explorer.arbre.connectedBadge':
@@ -56,9 +63,8 @@ const traduireEnFrancais: Traduire = (cle, parametres = {}) => {
 /**
  * L'aplatissement de l'arbre de `A4`, en fonction **pure**.
  *
- * `TreeRow` de `04` est purement présentationnelle : « elle ne connaît ni ses enfants, ni son
- * état d'ouverture, ni le modèle de données », et `04` a écarté toute récursion tant qu'aucun
- * écran n'en imposait la forme. `A4` l'impose : voici cette forme, isolée du rendu pour être
+ * `TreeRow` est purement présentationnelle : « elle ne connaît ni ses enfants, ni son état
+ * d'ouverture, ni le modèle de données ». Voici la forme de l'arbre, isolée du rendu pour être
  * testable sans DOM.
  */
 
@@ -77,307 +83,255 @@ export type Charge = {
   echecs: Readonly<Record<string, string>>
 }
 
-export type NoeudKind =
-  | 'project'
-  | 'environment'
-  | 'database'
-  | 'console'
-  | 'schema'
-  | 'object'
-  | 'message'
+export type NoeudKind = 'folder' | 'database' | 'console' | 'schema' | 'object' | 'message'
 
 export type Noeud = {
   /** Identité stable, employée pour le dépliage, la sélection et la clé de rendu. */
   id: string
   kind: NoeudKind
-  depth: 0 | 1 | 2 | 3 | 4
+  /**
+   * Le **niveau logique**, sans limite (#166) : `aria-level = depth + 1`, et la pile du filtre s'en
+   * sert pour retrouver les ancêtres. **Ce n'est pas l'indentation** — voir `indent`.
+   */
+  depth: number
+  /**
+   * L'indentation visuelle, calculée par `indentation()` de `TreeRow`. Séparée de `depth` parce que
+   * ce qui est sous une connexion avance de +16 et non de +14 : faire porter les deux par un seul
+   * nombre obligeait le filtre à connaître la règle de dessin.
+   */
+  indent: string
   label: string
   /** Chevron : absent pour une feuille, `closed` ou `open` pour un nœud dépliable. */
   chevron?: 'open' | 'closed'
-  /**
-   * Le glyphe de la ligne, **typé sur le sprite** et non sur `string`.
-   *
-   * Il valait `string`, et `ExplorerSidebar` le passait à `TreeRow` avec un `as never` pour forcer le
-   * passage. Le compilateur ne pouvait donc rien dire — et il avait quelque chose à dire : les lignes
-   * de schéma demandaient `'folder'`, un nom que le sprite ne porte pas (c'est `'schema'`), donc
-   * elles n'affichaient **aucune** icône. Constaté à l'écran en ajoutant le palier d'environnement.
-   */
+  /** Le glyphe de la ligne, **typé sur le sprite** et non sur `string`. */
   icon?: IconName
   iconColor?: string
   meta?: string
   metaVariant?: 'mono' | 'caps'
-  /** Le badge `PROD` d'un environnement, ou l'état d'une connexion. */
+  /** L'état d'une connexion. */
   badge?: { text: string; tone: 'danger' | 'warn' | 'success' | 'muted' }
   /** Nom accessible complet, quand le libellé seul ne suffit pas. */
   announce?: string
   /** Une ligne de message — chargement, échec, vide — non sélectionnable. */
   message?: boolean
   /**
-   * Le nombre de connexions que ce nœud représente : celles du projet, celles de l'environnement.
-   * Sert à la confirmation de retrait de `08j`, qui compte ce qui part.
+   * Le nombre de connexions que ce nœud représente — celles d'un dossier, **à toute profondeur**.
+   * Sert à la confirmation de retrait, qui compte ce qui part.
    */
   connexions?: number
-  /** Les coordonnées, pour que l'écran sache quoi demander au dépliage. */
-  project?: string
-  database?: string
-  environment?: EnvironmentId
+  /** Le dossier, pour un nœud `folder`. */
+  folder?: FolderId
+  /** La connexion, pour tout nœud qui en dépend : `database`, `console`, `schema`, `object`. */
+  connection?: ConnectionId
+  /**
+   * Vrai quand **ce dossier-ci** déclare la lecture seule — le verrou de fin de ligne. Un dossier
+   * qui ne fait que l'hériter ne porte pas le verrou : c'est l'ancêtre qui la déclare qui le porte,
+   * pour qu'on sache où aller la lever.
+   */
+  readOnly?: boolean
+  /**
+   * Le nom du dossier ancêtre qui impose la lecture seule à celui-ci, s'il y en a un. C'est la raison
+   * que donne l'entrée « Passer en lecture seule » quand elle est désactivée.
+   */
+  imposeePar?: string
   schema?: string
   /** Le nom de la console, pour un nœud `console` — distinct de `label`, qui peut être décoré. */
   console?: string
   /**
-   * Le nom de l'objet, pour un nœud `object` (#162).
-   *
-   * **Il vaut `label` aujourd'hui, et c'est précisément pourquoi il existe.** « Copier le nom »
-   * rend une chaîne que l'utilisateur va coller dans une requête : elle doit être le nom que le
-   * serveur connaît, pas ce que la ligne donne à lire. Les nœuds `console` et `database` portent
-   * déjà cette distinction — le second l'a apprise en faisant voyager `label` comme identité vers
-   * les commandes IPC (`27a`), vrai tant que `label === name` et faux au premier libellé libre.
-   *
-   * **Ce que les tests gardent, et ce qu'ils ne gardent pas.** `arbre.test.ts` garde que ce champ
-   * vient de `objet.name`. Personne ne garde qu'`entreesDe` le lise **lui** plutôt que `label` :
-   * mesuré par sabotage, l'échange reste vert, et il le restera tant que les deux valeurs seront
-   * égales par construction — aucun décor honnête ne peut les distinguer. C'est une précaution de
-   * nommage, pas une garantie : le jour où un libellé d'objet se décore, c'est ce champ qu'il faut
-   * vérifier, et un test devient alors possible.
+   * Le nom de l'objet, pour un nœud `object` (#162) — le nom que le serveur connaît, que « Copier le
+   * nom » rend. Il vaut `label` aujourd'hui, et c'est précisément pourquoi il existe : le jour où un
+   * libellé d'objet se décore, c'est ce champ qu'il faut vérifier.
    */
   object?: string
   /**
-   * Le moteur, sur un nœud `database` (`API-33`).
-   *
-   * **Le nœud le portait déjà, mais seulement en couleur et en glyphe** — `iconColor` et `icon` en
-   * sont dérivés. Une icône ne se relit pas : le menu de la ligne doit dire « Gérer les schémas… »
-   * cliquable sous PostgreSQL et désactivé avec sa raison ailleurs, et déduire le moteur d'un nom
-   * d'icône aurait fait dépendre une décision d'un détail de rendu.
+   * Le nom technique de la connexion (`Database.name`), sur un nœud `database` — ce que
+   * « Renommer… » édite, jamais le libellé d'affichage (`27a`).
+   */
+  database?: string
+  /**
+   * Le moteur, sur un nœud `database` (`API-33`) : le menu dit « Gérer les schémas… » cliquable
+   * sous PostgreSQL et désactivé avec sa raison ailleurs, et une icône ne se relit pas.
    */
   engine?: Engine
 }
 
-/** L'identité d'un nœud. Stable, et **dérivée du chemin** : deux nœuds homonymes de branches
- * différentes ne se confondent pas. */
-export function idProjet(project: string): string {
-  return `p:${project}`
-}
-/**
- * L'identité d'un environnement déclaré (`25a`).
+/*
+ * **Les identités de nœud, et aucune n'est composée de noms** (#166).
  *
- * Le préfixe compte autant que le chemin : `enfantsDe` en dérive la profondeur des lignes de message,
- * et les cinq lettres — `p`, `e`, `d`, `s`, `o`, plus `c` pour les consoles — sont donc réservées.
- */
-export function idEnvironnement(project: string, environment: EnvironmentId): string {
-  return `e:${project}/${environment}`
-}
-/**
- * L'identité d'une connexion, **environnement compris** (`25a`).
+ * Elles l'étaient — `d:projet/environnement/base` —, et un renommage changeait donc l'identité de
+ * tout ce qui était dessous : il fallait réindexer le dépliage, la sélection, les onglets et les
+ * consoles ouvertes (`idApresRenommage`), et un nom de projet préfixe d'un autre (« Halle » et
+ * « Halles ») rendait la purge ambiguë. Les identifiants de dossier et de connexion sont figés à la
+ * création et ne contiennent jamais de `/` : un renommage ne touche plus à aucune identité.
  *
- * Il en était absent, et la justification était explicite : l'arbre ne montrait que les connexions de
- * l'environnement actif, donc deux connexions homonymes de deux environnements n'étaient jamais
- * listées ensemble. Le palier d'environnement annule cette prémisse. Sans l'identifiant dans la clé,
- * deux `analytics` — l'une en dev, l'autre en production — partageraient leur dépliage, leur
- * sélection, leur clé de rendu React, et surtout leur entrée dans `charge.schemas` : la structure d'un
- * serveur s'afficherait sous la ligne d'un autre.
+ * Les lettres `f`, `d`, `c`, `s`, `o` sont réservées.
  */
-export function idBase(project: string, environment: EnvironmentId, database: string): string {
-  return `d:${project}/${environment}/${database}`
+export function idDossier(folder: FolderId): string {
+  return `f:${folder}`
 }
-export function idSchema(
-  project: string,
-  environment: EnvironmentId,
-  database: string,
-  schema: string,
-): string {
-  return `s:${project}/${environment}/${database}/${schema}`
+export function idBase(connection: ConnectionId): string {
+  return `d:${connection}`
 }
-export function idObjet(
-  project: string,
-  environment: EnvironmentId,
-  database: string,
-  schema: string,
-  objet: string,
-): string {
-  return `o:${project}/${environment}/${database}/${schema}/${objet}`
+export function idConsole(connection: ConnectionId, console: string): string {
+  return `c:${connection}/${console}`
 }
-export function idConsole(
-  project: string,
-  environment: EnvironmentId,
-  database: string,
-  console: string,
-): string {
-  return `c:${project}/${environment}/${database}/${console}`
+export function idSchema(connection: ConnectionId, schema: string): string {
+  return `s:${connection}/${schema}`
+}
+export function idObjet(connection: ConnectionId, schema: string, objet: string): string {
+  return `o:${connection}/${schema}/${objet}`
 }
 
 /**
- * Aplatit les projets en une liste de nœuds, selon ce qui est déplié et chargé.
+ * Aplatit l'arbre de dossiers en une liste de nœuds, selon ce qui est déplié et chargé.
  *
- * **Le dépliage est paresseux** : un schéma replié ne produit aucun nœud enfant, donc l'écran
- * n'a rien à demander. C'est la contrainte transverse appliquée à l'arbre — demander tous les
- * objets de tous les schémas de toutes les bases au chargement serait exactement ce que `06c` a
- * découpé pour éviter.
+ * **Récursif, et sans profondeur maximale** (#166). Un dossier contient des sous-dossiers puis des
+ * connexions, dans l'ordre déclaré ; la racine aussi. Le dépliage reste paresseux : un nœud replié
+ * ne produit aucun enfant, donc l'écran n'a rien à demander.
  */
 export function aplatir(
-  projects: readonly Project[],
+  arbre: FolderTree,
   deplies: Deplies,
   charge: Charge,
-  etats: (project: string, database: string, environment: EnvironmentId) => ConnectionState,
+  etats: (connection: ConnectionId) => ConnectionState,
   t: Traduire = traduireEnFrancais,
 ): Noeud[] {
   const noeuds: Noeud[] = []
+  const contexte: Contexte = { deplies, charge, etats, t, noeuds }
+  for (const dossier of arbre.folders) noeudsDeDossier(dossier, 0, null, contexte)
+  for (const base of arbre.connections) noeudsDeConnexion(base, 0, contexte)
+  return noeuds
+}
 
-  for (const projet of projects) {
-    const idP = idProjet(projet.name)
-    const projetDeplie = deplies.has(idP)
+type Contexte = {
+  deplies: Deplies
+  charge: Charge
+  etats: (connection: ConnectionId) => ConnectionState
+  t: Traduire
+  noeuds: Noeud[]
+}
 
-    noeuds.push({
-      id: idP,
-      kind: 'project',
-      depth: 0,
-      label: projet.name,
-      chevron: projetDeplie ? 'open' : 'closed',
-      icon: 'bag',
-      iconColor: 'var(--accent-deep)',
-      // Un projet replié annonce son contenu : c'est ce que le mockup montre pour les voisins.
-      //
-      // **« n connexions » et non « n bases »** : depuis `23b` la connexion est l'unité — une base ne
-      // porte plus de variantes. « n environnements » ne dirait pas si l'un d'eux contient quoi que
-      // ce soit, et un projet à environnements vides mérite de le dire.
-      meta: projetDeplie ? undefined : compteDeConnexions(t, projet.databases.length),
-      metaVariant: 'caps',
-      project: projet.name,
-      // Combien de connexions déclarées : la confirmation de retrait (`08j`) les compte, et un menu
-      // qui recalculerait ce nombre à partir des projets aurait besoin de la liste entière.
-      connexions: projet.databases.length,
-    })
+function noeudsDeDossier(
+  dossier: Folder,
+  niveau: number,
+  imposeePar: string | null,
+  contexte: Contexte,
+): void {
+  const { deplies, t, noeuds } = contexte
+  const id = idDossier(dossier.id)
+  const deplie = deplies.has(id)
+  const compte = connexionsDescendantes(dossier).length
+  const sous = dossier.folders ?? []
+  const bases = dossier.connections ?? []
 
-    if (!projetDeplie) continue
-
+  noeuds.push({
+    id,
+    kind: 'folder',
+    depth: niveau,
+    indent: indentation(niveau),
+    label: dossier.name,
+    chevron: deplie ? 'open' : 'closed',
     /*
-     * **Les environnements déclarés du projet, tous, dans leur ordre déclaré** (`25a`).
-     *
-     * L'arbre ne montrait que les connexions de l'environnement *actif* du projet, et un sélecteur de
-     * la barre de titre changeait lequel. Cela demandait de basculer un réglage global pour regarder
-     * une connexion voisine, et faisait de l'environnement une propriété du projet là où `23b` en
-     * avait fait une propriété de la connexion. C'est désormais un palier, et chaque environnement se
-     * déplie indépendamment des autres.
+     * **`pin` pour tous les dossiers**, racine comprise. Le `bag` des projets et la goutte des
+     * environnements disaient deux paliers d'un modèle qui n'en a plus qu'un : deux glyphes pour un
+     * seul concept ne diraient rien de plus. `pin` a été choisi pour l'environnement parce qu'« un
+     * lieu où vivent des connexions » se lit sans légende, et c'est exactement ce qu'est un dossier —
+     * sa goutte n'a de voisin nulle part dans l'arbre, là où `srv` se confondait avec le `db` de la
+     * connexion à 13 px.
      */
-    for (const declaration of projet.environments) {
-      const idE = idEnvironnement(projet.name, declaration.id)
-      const environnementDeplie = deplies.has(idE)
-      const connexions = projet.databases.filter((base) => base.environment === declaration.id)
+    icon: 'pin',
+    // Sans couleur, la teinte des projets d'avant : un dossier racine migré ne change pas d'aspect.
+    iconColor: dossier.color ? COULEURS_DE_DOSSIER[dossier.color] : 'var(--accent-deep)',
+    // Un dossier replié annonce combien de connexions il porte, **à toute profondeur** : « n
+    // sous-dossiers » ne dirait pas s'il y a quoi que ce soit dedans.
+    meta: deplie ? undefined : t('explorer.arbre.connectionCount', { count: compte }),
+    metaVariant: 'caps',
+    // **La lecture seule s'entend, pas seulement se voit** : le verrou est un glyphe, et un glyphe
+    // n'a pas de nom accessible — l'état entre donc dans l'annonce de la ligne.
+    ...(dossier.readOnly
+      ? { readOnly: true, announce: `${dossier.name} · ${t('explorer.arbre.readOnly')}` }
+      : {}),
+    ...(imposeePar === null ? {} : { imposeePar }),
+    folder: dossier.id,
+    connexions: compte,
+  })
 
-      noeuds.push({
-        id: idE,
-        kind: 'environment',
-        depth: 1,
-        label: declaration.label,
-        chevron: environnementDeplie ? 'open' : 'closed',
-        // **Une icône teintée, pas un disque plein.** Le disque de 7 px du sélecteur y était la
-        // vignette de valeur d'un champ ; ici, tous les paliers portent une icône de 13 px en tête de
-        // ligne, et un disque casserait la colonne que l'indentation aligne. Il n'aurait de surcroît
-        // que la couleur pour dire ce qu'il dit, ce que `09d` refuse pour ses états de connexion.
-        //
-        // **`pin` et non `srv`.** `srv` — deux baies empilées — disait mieux ce qu'est un
-        // environnement, mais à 13 px il ne se distinguait pas du `db` de la connexion juste en
-        // dessous : deux paliers voisins portaient le même glyphe à bandes horizontales, constaté à
-        // l'écran. La goutte de `pin` n'a de voisin nulle part dans l'arbre, et « un lieu où vivent
-        // des connexions » se lit sans légende. Une icône qui dit juste et qu'on confond n'apprend
-        // rien.
-        icon: 'pin',
-        iconColor: COULEURS_D_ENVIRONNEMENT[declaration.color],
-        meta: environnementDeplie ? undefined : compteDeConnexions(t, connexions.length),
-        metaVariant: 'caps',
-        // **Le drapeau, jamais le libellé** (`23g`) — et jamais la couleur déclarée non plus : un
-        // environnement marqué production que l'utilisateur a coloré en vert porterait un badge vert,
-        // et le badge d'alerte cesserait d'alerter. La couleur voyage par `iconColor`, le drapeau par
-        // ce badge : deux canaux pour deux informations, plutôt qu'un pixel pour les deux.
-        badge: declaration.production
-          ? { text: t('explorer.arbre.prodBadge'), tone: 'danger' }
-          : undefined,
-        project: projet.name,
-        environment: declaration.id,
-        connexions: connexions.length,
-      })
+  if (!deplie) return
 
-      if (!environnementDeplie) continue
-
-      // **Un environnement vide le dit** (`23g`) : un nœud déplié sans enfant se lit comme un
-      // chargement en cours — le doute du défaut de `06d`. Ici rien ne charge, la liste vient de la
-      // configuration, donc le vide est un fait et non une attente.
-      if (connexions.length === 0) {
-        noeuds.push(
-          message(
-            `${idE}:vide`,
-            2,
-            t('explorer.arbre.noConnectionsIn', { label: declaration.label }),
-          ),
-        )
-        continue
-      }
-
-      for (const base of connexions) {
-        const idB = idBase(projet.name, base.environment, base.name)
-        const baseDepliee = deplies.has(idB)
-        const etat = etats(projet.name, base.name, base.environment)
-        // **Affichage seulement** : `label`, s'il est renseigné, remplace `name` partout où
-        // l'arbre le montre. `database`, quelques lignes plus bas, reste `base.name` — c'est
-        // l'identité, envoyée aux commandes IPC, et elle ne doit jamais suivre le libellé.
-        const libelle = base.label?.trim() || base.name
-
-        noeuds.push({
-          id: idB,
-          kind: 'database',
-          depth: 2,
-          label: libelle,
-          chevron: baseDepliee ? 'open' : 'closed',
-          icon: ENGINES[base.engine].icon ?? 'db',
-          iconColor: `var(--engine-${abregeMoteur(base.engine)})`,
-          badge: badgeEtat(t, etat),
-          // L'état est **dans le nom accessible**, pas seulement dans une couleur : un point vert
-          // et un point rouge sont indiscernables pour une part des utilisateurs.
-          announce: `${libelle} · ${resumeEtat(t, etat)}`,
-          project: projet.name,
-          database: base.name,
-          environment: base.environment,
-          engine: base.engine,
-        })
-
-        if (!baseDepliee) continue
-
-        /*
-         * **Les consoles viennent avant les schémas, et sans chargement.**
-         *
-         * Elles sont déjà dans la configuration — aucun aller-retour vers le serveur ne les produit —
-         * donc elles s'affichent dès le dépliage, y compris pendant que l'introspection travaille ou
-         * après son échec. C'est voulu : une console est un texte qu'on a écrit, et le rendre
-         * dépendant d'une connexion qui répond en ferait perdre l'accès au pire moment.
-         *
-         * En tête plutôt qu'en pied : ce sont les nœuds dont le nombre est connu et petit, là où les
-         * schémas peuvent en aligner des dizaines. Les mettre après les aurait noyées.
-         */
-        for (const console of base.consoles) {
-          noeuds.push({
-            id: idConsole(projet.name, base.environment, base.name, console.name),
-            kind: 'console',
-            depth: 3,
-            label: console.name,
-            icon: 'term',
-            iconColor: 'var(--ink-3)',
-            project: projet.name,
-            database: base.name,
-            environment: base.environment,
-            console: console.name,
-          })
-        }
-
-        const enfants = enfantsDe(idB, charge, t, () =>
-          (charge.schemas[idB] ?? []).flatMap((schema) =>
-            noeudsDeSchema(projet.name, base.name, base.environment, schema, deplies, charge, t),
-          ),
-        )
-        noeuds.push(...enfants)
-      }
-    }
+  // **Un dossier vide le dit** : un nœud déplié sans enfant se lit comme un chargement en cours. Ici
+  // rien ne charge — la liste vient de la configuration —, donc le vide est un fait.
+  if (sous.length === 0 && bases.length === 0) {
+    noeuds.push(
+      message(`${id}:vide`, niveau + 1, indentation(niveau + 1), t('explorer.arbre.emptyFolder')),
+    )
+    return
   }
 
-  return noeuds
+  // Ce qui est imposé à ce dossier l'est à ses enfants ; ce qu'il déclare aussi. Le plus extérieur
+  // gagne, comme `ancetreEnLectureSeule` : c'est celui qu'il faut aller lever.
+  const imposeAuxEnfants = imposeePar ?? (dossier.readOnly ? dossier.name : null)
+  for (const enfant of sous) noeudsDeDossier(enfant, niveau + 1, imposeAuxEnfants, contexte)
+  for (const base of bases) noeudsDeConnexion(base, niveau + 1, contexte)
+}
+
+function noeudsDeConnexion(base: Database, niveau: number, contexte: Contexte): void {
+  const { deplies, charge, etats, t, noeuds } = contexte
+  const connection = idDeConnexion(base)
+  const id = idBase(connection)
+  const deplie = deplies.has(id)
+  const etat = etats(connection)
+  // **Affichage seulement** : `label`, s'il est renseigné, remplace `name` partout où l'arbre le
+  // montre. `database` reste `base.name` — c'est ce que « Renommer… » édite.
+  const libelle = base.label?.trim() || base.name
+
+  noeuds.push({
+    id,
+    kind: 'database',
+    depth: niveau,
+    indent: indentation(niveau),
+    label: libelle,
+    chevron: deplie ? 'open' : 'closed',
+    icon: ENGINES[base.engine].icon ?? 'db',
+    iconColor: `var(--engine-${abregeMoteur(base.engine)})`,
+    badge: badgeEtat(t, etat),
+    // L'état est **dans le nom accessible**, pas seulement dans une couleur : un point vert et un
+    // point rouge sont indiscernables pour une part des utilisateurs.
+    announce: `${libelle} · ${resumeEtat(t, etat)}`,
+    connection,
+    database: base.name,
+    engine: base.engine,
+    connexions: 1,
+  })
+
+  if (!deplie) return
+
+  /*
+   * **Les consoles viennent avant les schémas, et sans chargement.** Elles sont déjà dans la
+   * configuration, donc elles s'affichent dès le dépliage, y compris pendant que l'introspection
+   * travaille ou après son échec : une console est un texte qu'on a écrit, et le rendre dépendant
+   * d'une connexion qui répond en ferait perdre l'accès au pire moment.
+   */
+  for (const console of base.consoles) {
+    noeuds.push({
+      id: idConsole(connection, console.name),
+      kind: 'console',
+      depth: niveau + 1,
+      indent: indentation(niveau, 1),
+      label: console.name,
+      icon: 'term',
+      iconColor: 'var(--ink-3)',
+      connection,
+      console: console.name,
+    })
+  }
+
+  noeuds.push(
+    ...enfantsDe(id, niveau + 1, indentation(niveau, 1), charge, t, () =>
+      (charge.schemas[id] ?? []).flatMap((schema) =>
+        noeudsDeSchema(connection, niveau, schema, deplies, charge, t),
+      ),
+    ),
+  )
 }
 
 /**
@@ -420,27 +374,25 @@ export function schemasAffiches(
 }
 
 function noeudsDeSchema(
-  project: string,
-  database: string,
-  environment: EnvironmentId,
+  connection: ConnectionId,
+  niveauDeLaConnexion: number,
   schema: SchemaInfo,
   deplies: Deplies,
   charge: Charge,
   t: Traduire,
 ): Noeud[] {
-  const id = idSchema(project, environment, database, schema.name)
+  const id = idSchema(connection, schema.name)
   const deplie = deplies.has(id)
 
   const tete: Noeud = {
     id,
     kind: 'schema',
-    depth: 3,
+    depth: niveauDeLaConnexion + 1,
+    indent: indentation(niveauDeLaConnexion, 1),
     label: schema.name,
     chevron: deplie ? 'open' : 'closed',
     icon: 'schema',
-    project,
-    database,
-    environment,
+    connection,
     schema: schema.name,
   }
 
@@ -448,23 +400,20 @@ function noeudsDeSchema(
 
   return [
     tete,
-    ...enfantsDe(id, charge, t, () =>
+    ...enfantsDe(id, niveauDeLaConnexion + 2, indentation(niveauDeLaConnexion, 2), charge, t, () =>
       (charge.objets[id] ?? []).map((objet) => ({
-        id: idObjet(project, environment, database, schema.name, objet.name),
+        id: idObjet(connection, schema.name, objet.name),
         kind: 'object' as const,
-        depth: 4 as const,
+        depth: niveauDeLaConnexion + 2,
+        indent: indentation(niveauDeLaConnexion, 2),
         label: objet.name,
         object: objet.name,
         icon: objet.kind === 'view' ? 'view' : 'table',
         iconColor: objet.kind === 'view' ? 'var(--violet)' : 'var(--success)',
-        // `RowCount` distingue `estimated` de `exact` **au niveau du type** (`06c`) : le mockup
-        // n'affiche qu'un nombre, mais l'information est là et `09f` en aura besoin pour ne pas
-        // présenter une estimation comme un fait exact.
+        // `RowCount` distingue `estimated` de `exact` **au niveau du type** (`06c`).
         meta: formatRowCount(objet.rows),
         metaVariant: 'mono' as const,
-        project,
-        database,
-        environment,
+        connection,
         schema: schema.name,
       })),
     ),
@@ -474,37 +423,37 @@ function noeudsDeSchema(
 /**
  * Les enfants d'un nœud déplié, ou la ligne de message qui en tient lieu.
  *
- * **Un dépliage qui échoue le dit sur sa ligne et ne vide pas l'arbre** : une erreur de réseau
- * sur un schéma ne doit pas faire disparaître les autres. D'où une ligne de message enfant,
- * plutôt qu'une bannière ou un état global.
+ * **Un dépliage qui échoue le dit sur sa ligne et ne vide pas l'arbre** : une erreur de réseau sur
+ * un schéma ne doit pas faire disparaître les autres.
+ *
+ * **La profondeur du message est reçue, non déduite** (#166) : elle se lisait dans le préfixe de
+ * l'identité du parent (`d:` au palier 2, `s:` au palier 3), ce qu'un arbre sans profondeur fixe ne
+ * permet plus. Le message prend le niveau et l'indentation de ses frères.
  */
-function enfantsDe(id: string, charge: Charge, t: Traduire, contenu: () => Noeud[]): Noeud[] {
-  // La profondeur du message se lit dans le **préfixe** de l'identité du parent : `d:` est une
-  // connexion au palier 2, donc ses messages sont au palier 3 ; `s:` est un schéma au palier 3.
-  const profondeur = (id.startsWith('d:') ? 3 : 4) as 3 | 4
-
+function enfantsDe(
+  id: string,
+  profondeur: number,
+  indent: string,
+  charge: Charge,
+  t: Traduire,
+  contenu: () => Noeud[],
+): Noeud[] {
   if (charge.echecs[id]) {
-    return [message(`${id}:echec`, profondeur, charge.echecs[id] as string)]
+    return [message(`${id}:echec`, profondeur, indent, charge.echecs[id] as string)]
   }
   if (charge.enCours.has(id)) {
-    return [message(`${id}:chargement`, profondeur, t('explorer.arbre.loading'))]
+    return [message(`${id}:chargement`, profondeur, indent, t('explorer.arbre.loading'))]
   }
 
   const enfants = contenu()
-  // Vide **chargé** n'est pas vide **non chargé** : un schéma sans table est un état normal, et
-  // ne rien afficher laisserait croire que le dépliage n'a pas abouti.
+  // Vide **chargé** n'est pas vide **non chargé** : un schéma sans table est un état normal.
   return enfants.length > 0
     ? enfants
-    : [message(`${id}:vide`, profondeur, t('explorer.arbre.noObjects'))]
+    : [message(`${id}:vide`, profondeur, indent, t('explorer.arbre.noObjects'))]
 }
 
-function message(id: string, depth: 2 | 3 | 4, label: string): Noeud {
-  return { id, kind: 'message', depth, label, message: true }
-}
-
-/** « 3 connexions », « 1 connexion », « 0 connexion » — le zéro prend le singulier, en français. */
-function compteDeConnexions(t: Traduire, compte: number): string {
-  return t('explorer.arbre.connectionCount', { count: compte })
+function message(id: string, depth: number, indent: string, label: string): Noeud {
+  return { id, kind: 'message', depth, indent, label, message: true }
 }
 
 /**

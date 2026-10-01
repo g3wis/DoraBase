@@ -107,11 +107,6 @@ export type ConnectionState = { "kind": "never" } | { "kind": "connecting" } | {
 tunnelLocalPort: number | null, } | { "kind": "offline", reason: string, };
 
 /**
- * Un état de connexion, avec la base qu'il concerne.
- */
-export type ConnectionStateEntry = { key: DatabaseKey, state: ConnectionState, };
-
-/**
  * Ce que `A2` affiche après un test réussi.
  *
  * Distinct de `ConnectionProbe` : il porte en plus l'avertissement TLS, qui n'est pas une
@@ -135,15 +130,6 @@ tunnelLocalPort: number | null,
 tlsUnverified: boolean, };
 
 export type ConstraintInfo = { name: string, definition: string, };
-
-/**
- * Désigne une base dans un projet, pour un environnement.
- *
- * **Trois chaînes plutôt qu'une clé préformée.** Envoyer `"Halle/analytics/dev"` depuis le
- * front demanderait au JavaScript de connaître la convention de composition, donc de la
- * dupliquer — le même piège que la référence de secret de `08e`, tranché de la même façon.
- */
-export type DatabaseKey = { project: string, database: string, environment: string, };
 
 /**
  * Un échec côté moteur.

@@ -14,9 +14,11 @@ import styles from './SchemaManager.module.css'
 
 /** Le cadre de la modale : ce que la bande d'en-tête annonce, et ce que le pied nomme. */
 export type CibleDeSchemas = {
-  projet: string
-  /** Le **libellé** de l'environnement, pas son identifiant : c'est ce qui s'affiche. */
-  environnement: string
+  /**
+   * Le chemin de dossiers de la connexion, par leurs noms (#166) — c'est ce qui s'affiche, et le
+   * triplet `projet · environnement` d'avant en est le cas migré.
+   */
+  chemin: readonly string[]
   /** Le libellé de la connexion, tel que l'arbre le montre. */
   base: string
 }
@@ -74,7 +76,7 @@ type Lecture =
  *
  * # Ce que la modale ne nomme pas
  *
- * Le triplet `projet · environnement · connexion` s'annonce **dans la bande d'en-tête**, par le prop
+ * Le chemin `dossier · sous-dossier · connexion` s'annonce **dans la bande d'en-tête**, par le prop
  * `contexte` : c'est le cadre de cet écran, pas un de ses champs — la leçon du projet dans `A2`.
  */
 export function SchemaManager({
@@ -272,10 +274,7 @@ export function SchemaManager({
       icon="schema"
       onClose={onClose}
       contexte={
-        <span className={styles.contexte}>
-          {cible.projet} <span aria-hidden="true">·</span> {cible.environnement}{' '}
-          <span aria-hidden="true">·</span> {cible.base}
-        </span>
+        <span className={styles.contexte}>{[...cible.chemin, cible.base].join(' · ')}</span>
       }
       footer={
         <div className={styles.pied}>

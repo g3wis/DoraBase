@@ -3,7 +3,8 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { Sprite } from '../../design/icons/Sprite'
-import type { ColumnInfo, DatabaseKey, RowQuery, Value } from '../../domain/engine'
+import type { DatabaseKey } from '../../domain/arbre'
+import type { ColumnInfo, RowQuery, Value } from '../../domain/engine'
 import { LanguageProvider } from '../../i18n/LanguageContext'
 import { auModificateur } from '../../test/raccourcis'
 import type { EnAttente, Modification, ModificationDeCellule } from './modifications'
@@ -18,7 +19,7 @@ function cellule(modification: Modification | undefined): ModificationDeCellule 
   return modification
 }
 
-const CLE: DatabaseKey = { project: 'Halle', database: 'analytics', environment: 'prod' }
+const CLE: DatabaseKey = { connection: 'analytics' }
 
 const colonne = (name: string, over: Partial<ColumnInfo> = {}): ColumnInfo => ({
   position: 1,

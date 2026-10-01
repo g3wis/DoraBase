@@ -80,11 +80,7 @@ test('un transfert Kubernetes enregistré revient en brouillon, absences compris
       },
     },
   }
-  const draft = draftDepuisLaVariante(
-    'atelier',
-    { ...baseMongo('disable'), connection: variante },
-    variante,
-  )
+  const draft = draftDepuisLaVariante({ ...baseMongo('disable'), connection: variante }, variante)
 
   expect(draft.tunnel?.proxy).toEqual({
     kind: 'kubernetes',
@@ -112,11 +108,7 @@ test('un kubeconfig et un espace de noms enregistrés reviennent tels quels', ()
       },
     },
   }
-  const draft = draftDepuisLaVariante(
-    'atelier',
-    { ...baseMongo('disable'), connection: variante },
-    variante,
-  )
+  const draft = draftDepuisLaVariante({ ...baseMongo('disable'), connection: variante }, variante)
   expect(draft.tunnel?.proxy).toEqual({
     kind: 'kubernetes',
     // Le `~` revient **tel qu'il a été enregistré** : le développer ici afficherait un chemin
@@ -148,12 +140,12 @@ function varianteEnregistree(sslMode: SslMode): ConnectionSettings {
 
 function baseMongo(sslMode: SslMode): Database {
   return {
+    id: 'c-ventes',
     name: 'ventes',
     engine: 'mongodb',
-    environment: 'dev',
     connection: varianteEnregistree(sslMode),
     consoles: [],
-  }
+  } as unknown as Database
 }
 
 test('une connexion MongoDB enregistrée en « prefer » s’ouvre sur « require »', () => {
@@ -161,17 +153,13 @@ test('une connexion MongoDB enregistrée en « prefer » s’ouvre sur « requir
   // sans le dire.** Il ne figure plus dans la liste : sans ce report, la liste déroulante afficherait
   // un champ **vide** — sa valeur n'étant aucune de ses options —, ce qui est le piège du sélecteur
   // contrôlé déjà rencontré sur le projet. `require` est ce qui s'appliquait déjà ; l'écran le dit.
-  const draft = draftDepuisLaVariante('atelier', baseMongo('prefer'), varianteEnregistree('prefer'))
+  const draft = draftDepuisLaVariante(baseMongo('prefer'), varianteEnregistree('prefer'))
   expect(draft.sslMode).toBe('require')
 })
 
 test('un mode que le moteur exprime est repris tel quel', () => {
   // Contrôle négatif : sans lui, le report se lirait « toute connexion s’ouvre sur require ».
-  const draft = draftDepuisLaVariante(
-    'atelier',
-    baseMongo('disable'),
-    varianteEnregistree('disable'),
-  )
+  const draft = draftDepuisLaVariante(baseMongo('disable'), varianteEnregistree('disable'))
   expect(draft.sslMode).toBe('disable')
 })
 
@@ -179,11 +167,7 @@ test('une connexion enregistrée sans base d’authentification garde le champ v
   // **Le préremplissage ne vaut que pour un brouillon neuf.** Écrire `admin` ici changerait le
   // comportement d'une connexion qui marche, au premier enregistrement — et sans que personne l'ait
   // demandé.
-  const draft = draftDepuisLaVariante(
-    'atelier',
-    baseMongo('disable'),
-    varianteEnregistree('disable'),
-  )
+  const draft = draftDepuisLaVariante(baseMongo('disable'), varianteEnregistree('disable'))
   expect(draft.sslMode).toBe('disable')
   expect(draft.authDatabase).toBe('')
 })

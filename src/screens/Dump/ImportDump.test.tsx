@@ -5,7 +5,7 @@ import type { DumpAvailability, Inspection } from '../../domain/dump'
 import { LanguageProvider } from '../../i18n/LanguageContext'
 import { ImportDump } from './ImportDump'
 
-const CIBLE = { projet: 'Boutique', base: 'commandes', environnement: 'staging' }
+const CIBLE = { chemin: 'Boutique › staging', base: 'commandes' }
 const FICHIER = '/Users/x/dump.sql'
 
 const PSQL_PRET: DumpAvailability = {
@@ -52,7 +52,7 @@ function monter(options: Partial<Parameters<typeof ImportDump>[0]> = {}) {
   )
 }
 
-test('nomme projet, base, environnement et fichier avant de laisser confirmer', () => {
+test('nomme le chemin, la connexion et le fichier avant de laisser confirmer', () => {
   monter({ inspection: inspection('pgDump') })
 
   // L'erreur que la modale empêche est de se tromper de cible : c'est nommer la cible qui

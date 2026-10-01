@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { ConfigLoad } from '../domain/config'
+import type { ConfigLoad } from '../domain/arbre'
 import type { RowQuery } from '../domain/engine'
-import { TRIO_DE_TEST } from '../screens/NewConnection/pourLesTests'
+import { arbreDeTest, trioDeTest } from '../screens/NewConnection/pourLesTests'
 import { PREFERENCES_PAR_DEFAUT } from '../screens/Preferences/preferences'
 import {
   connectionStates,
@@ -25,38 +25,31 @@ const REQUETE: RowQuery = {
 /** Le seul appel que le double laisse passer, pour distinguer « échec » de « passage ». */
 const loadConfigVerte = () => invoke('toujours_vert')
 
-// --- Les quatre issues de `load_config` ---
+// --- Les cinq issues de `load_config` ---
 
-test('un fichier absent donne un état neuf sans projet', () => {
+test('un fichier absent donne un état neuf, un arbre vide', () => {
   expect(interpreter({ kind: 'fresh' })).toEqual({
     kind: 'fresh',
-    projects: [],
+    tree: { folders: [], connections: [] },
     preferences: PREFERENCES_PAR_DEFAUT,
     instances: [],
     kubeconfigs: {},
   })
 })
 
-test('un fichier lu rend ses projets', () => {
-  const projets = [
-    {
-      name: 'Halle',
-      environments: TRIO_DE_TEST,
-      databases: [],
-      queries: [],
-    },
-  ]
+test('un fichier lu rend son arbre', () => {
+  const arbre = arbreDeTest(trioDeTest())
   expect(
     interpreter({
       kind: 'loaded',
-      projects: projets,
+      tree: arbre,
       preferences: PREFERENCES_PAR_DEFAUT,
       instances: [],
       kubeconfigs: {},
     }),
   ).toEqual({
     kind: 'loaded',
-    projects: projets,
+    tree: arbre,
     preferences: PREFERENCES_PAR_DEFAUT,
     instances: [],
     kubeconfigs: {},
@@ -87,26 +80,31 @@ test('un fichier trop récent est bloqué, avec les deux versions', () => {
   expect(etat.kind === 'blocked' && etat.reason).toContain('version 1')
 })
 
-test('les deux issues bloquantes ne rendent aucun projet', () => {
-  // Rendre des projets partiels laisserait croire que la lecture a marché à moitié.
+// **La cinquième issue** (#164) : les mots de passe n'ont pas pu suivre la migration v7. Écrire
+// maintenant figerait des connexions dont le secret est resté sous l'ancienne référence.
+test('une migration des secrets refusée bloque, avec sa raison', () => {
+  const etat = interpreter({ kind: 'secretsMigrationFailed', reason: 'Trousseau verrouillé' })
+  expect(etat.kind).toBe('blocked')
+  expect(etat.kind === 'blocked' && etat.reason).toBe('Trousseau verrouillé')
+})
+
+test('les issues bloquantes ne rendent aucun dossier', () => {
+  // Rendre un arbre partiel laisserait croire que la lecture a marché à moitié.
   for (const issue of [
     { kind: 'unreadable', reason: 'x', quarantinedTo: 'y' },
     { kind: 'tooNew', found: 9, supported: 1 },
+    { kind: 'secretsMigrationFailed', reason: 'z' },
   ] as ConfigLoad[]) {
-    expect(interpreter(issue).projects).toEqual([])
+    expect(interpreter(issue).tree).toEqual({ folders: [], connections: [] })
   }
 })
 
 // --- Les clés ---
 
-test('la clé envoyée à Rust reste en trois chaînes', () => {
-  // Composer côté front dupliquerait la convention. Le front envoie les trois morceaux ;
-  // `registry::cle` les assemble.
-  expect(databaseKey('Halle', 'analytics', 'dev')).toEqual({
-    project: 'Halle',
-    database: 'analytics',
-    environment: 'dev',
-  })
+test('la clé envoyée à Rust est l’identifiant de la connexion, et rien d’autre', () => {
+  // Composer côté front dupliquerait la convention : c'est `cle_de_connexion` qui en dérive la clé
+  // du registre (#166).
+  expect(databaseKey('c0000000000000a1')).toEqual({ connection: 'c0000000000000a1' })
 })
 
 // --- Les états ---
@@ -114,7 +112,7 @@ test('la clé envoyée à Rust reste en trois chaînes', () => {
 // Une base absente de la table est `never`, pas `offline` : afficher en rouge une base qu'on n'a
 // pas ouverte serait faux. C'est la décision du 7 août sur l'arbre lisible sans réseau.
 test('une base inconnue est « jamais tentée », pas « hors ligne »', () => {
-  expect(etatDe([], 'Halle', 'analytics', 'dev')).toEqual({ kind: 'never' })
+  expect(etatDe([], 'c0000000000000a1')).toEqual({ kind: 'never' })
 })
 
 test('un état connu est rendu tel quel', () => {
@@ -123,27 +121,25 @@ test('un état connu est rendu tel quel', () => {
     serverVersion: 'PostgreSQL 17.6',
     tunnelLocalPort: null,
   }
-  const entrees = [
-    { key: { project: 'Halle', database: 'analytics', environment: 'dev' }, state: etat },
-  ]
-  expect(etatDe(entrees, 'Halle', 'analytics', 'dev')).toEqual(etat)
+  const entrees = [{ key: { connection: 'c0000000000000a1' }, state: etat }]
+  expect(etatDe(entrees, 'c0000000000000a1')).toEqual(etat)
 })
 
-// Deux environnements de la même base sont deux connexions distinctes — c'est ce que le triplet
-// exprime, et ce qu'une clé indexée par le seul nom de base aurait confondu.
-test('deux environnements de la même base ont deux états distincts', () => {
+// Deux connexions homonymes sont deux connexions distinctes — c'est ce que l'identifiant exprime, et
+// ce qu'une clé indexée par le nom aurait confondu.
+test('deux connexions homonymes ont deux états distincts', () => {
   const entrees = [
     {
-      key: { project: 'Halle', database: 'analytics', environment: 'dev' },
+      key: { connection: 'c0000000000000d1' },
       state: { kind: 'connected' as const, serverVersion: 'PG', tunnelLocalPort: null },
     },
     {
-      key: { project: 'Halle', database: 'analytics', environment: 'prod' },
+      key: { connection: 'c0000000000000d3' },
       state: { kind: 'offline' as const, reason: 'hôte injoignable' },
     },
   ]
-  expect(etatDe(entrees, 'Halle', 'analytics', 'dev').kind).toBe('connected')
-  expect(etatDe(entrees, 'Halle', 'analytics', 'prod').kind).toBe('offline')
+  expect(etatDe(entrees, 'c0000000000000d1').kind).toBe('connected')
+  expect(etatDe(entrees, 'c0000000000000d3').kind).toBe('offline')
 })
 
 // --- L'annonce d'un échec de commande (8 septembre 2026) ---
@@ -163,7 +159,7 @@ test('une commande qui échoue est annoncée aux abonnés', async () => {
   const vues: number[] = []
   const desabonner = surEchecDeCommande(() => vues.push(1))
 
-  await expect(readRows(databaseKey('Halle', 'analytics', 'dev'), REQUETE)).rejects.toThrow()
+  await expect(readRows(databaseKey('c0000000000000a1'), REQUETE)).rejects.toThrow()
   expect(vues).toHaveLength(1)
 
   // Une commande qui réussit n'annonce rien : l'annonce dit un échec, pas un passage.
@@ -173,7 +169,7 @@ test('une commande qui échoue est annoncée aux abonnés', async () => {
   // Et le désabonnement rend vraiment le silence — sans quoi un arbre démonté continuerait de
   // relire les états, indéfiniment.
   desabonner()
-  await expect(listSchemas(databaseKey('Halle', 'analytics', 'dev'))).rejects.toThrow()
+  await expect(listSchemas(databaseKey('c0000000000000a1'))).rejects.toThrow()
   expect(vues).toHaveLength(1)
 })
 

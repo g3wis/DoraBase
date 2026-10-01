@@ -288,28 +288,15 @@ mod tests {
 
 // --- Le câblage de `09b` : ouverture et introspection ------------------------------------
 
-use crate::engine::registry::{cle, ConnectionRegistry, ConnectionState, Reprise};
+use crate::engine::registry::{ConnectionRegistry, ConnectionState, Reprise};
 use crate::engine::{RowQuery, RowWindow, SchemaInfo, TableDetail, TableSummary, Value};
 
-/// Désigne une base dans un projet, pour un environnement.
+/// Désigne une connexion : son identifiant stable, **et rien d'autre** (#165). Le type vit dans le
+/// contrat (`config::requetes`), réexporté ici pour les vingt commandes qui le prennent.
 ///
-/// **Trois chaînes plutôt qu'une clé préformée.** Envoyer `"Halle/analytics/dev"` depuis le
-/// front demanderait au JavaScript de connaître la convention de composition, donc de la
-/// dupliquer — le même piège que la référence de secret de `08e`, tranché de la même façon.
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "engine.ts")]
-pub struct DatabaseKey {
-    pub project: String,
-    pub database: String,
-    pub environment: String,
-}
-
-impl DatabaseKey {
-    fn cle(&self) -> String {
-        cle(&self.project, &self.database, &self.environment)
-    }
-}
+/// Le cœur en dérive la clé du registre (`DatabaseKey::cle`) : le front n'a aucune convention à
+/// connaître, comme il n'en avait aucune avec le triplet.
+pub use crate::config::requetes::{ConnectionStateEntry, DatabaseKey};
 
 /// Ouvre une connexion, en relisant le mot de passe depuis le magasin.
 ///
@@ -374,45 +361,66 @@ pub async fn close_database(
     Ok(())
 }
 
-/// Un état de connexion, avec la base qu'il concerne.
-#[derive(Debug, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "engine.ts")]
-pub struct ConnectionStateEntry {
-    pub key: DatabaseKey,
-    pub state: ConnectionState,
-}
-
 /// Les états de toutes les connexions connues, pour peupler l'arbre en une fois.
 ///
-/// **Une liste de triplets, et non une table indexée par la clé composée.** Le registre
-/// s'indexe bien par `projet/base/environnement`, mais rendre cette chaîne au front l'obligerait
-/// à savoir la recomposer pour s'y retrouver — donc à dupliquer la convention, et une convention
-/// dupliquée diverge. Une première version le faisait ; le test qui devait vérifier l'accord des
-/// deux implémentations a montré qu'il valait mieux n'en avoir qu'une.
+/// **Une liste d'identifiants, et non une table indexée par la clé du registre** : rendre
+/// `connexion/<id>` au front l'obligerait à connaître la convention pour s'y retrouver — donc à la
+/// dupliquer, et une convention dupliquée diverge.
 ///
-/// Une base absente de la liste est `Never` — l'état de départ, que `09d` doit distinguer de
-/// `Offline`.
+/// **Les entrées d'instance (`instance/<id>`) n'y figurent pas** : elles ont leur propre commande,
+/// `instance_state`. Le découpage se fait par le **préfixe** `connexion/` depuis #165 — le nombre de
+/// segments ne distingue plus rien, les deux espaces en ayant deux.
+///
+/// Une connexion absente de la liste est `Never` — l'état de départ, distinct d'`Offline`.
 #[tauri::command]
 pub async fn connection_states(
     registry: tauri::State<'_, ConnectionRegistry>,
 ) -> Result<Vec<ConnectionStateEntry>, EngineError> {
-    Ok(registry
-        .etats()
-        .await
+    Ok(entrees_d_etat(registry.etats().await))
+}
+
+/// La décomposition des clés du registre, à part pour se tester sans Tauri.
+fn entrees_d_etat(
+    etats: impl IntoIterator<Item = (String, ConnectionState)>,
+) -> Vec<ConnectionStateEntry> {
+    etats
         .into_iter()
         .filter_map(|(identite, state)| {
-            // La clé est décomposée ici : le registre la garde composée pour son propre index,
-            // et c'est la seule frontière où elle se défait.
-            let mut morceaux = identite.splitn(3, '/');
-            let key = DatabaseKey {
-                project: morceaux.next()?.to_owned(),
-                database: morceaux.next()?.to_owned(),
-                environment: morceaux.next()?.to_owned(),
-            };
-            Some(ConnectionStateEntry { key, state })
+            // La clé est décomposée ici : le registre la garde composée pour son propre index, et
+            // c'est la seule frontière où elle se défait.
+            let id = identite.strip_prefix("connexion/")?;
+            Some(ConnectionStateEntry {
+                key: DatabaseKey {
+                    connection: crate::config::ConnectionId::brut(id),
+                },
+                state,
+            })
         })
-        .collect())
+        .collect()
+}
+
+#[cfg(test)]
+mod tests_etats {
+    use super::*;
+
+    #[test]
+    fn les_etats_decomposent_connexion_et_ignorent_instance() {
+        let entrees = entrees_d_etat(vec![
+            (
+                "connexion/8c1e4f0a9b27d315".to_owned(),
+                ConnectionState::Never,
+            ),
+            ("instance/pg-prod".to_owned(), ConnectionState::Never),
+            // Une clé qui n'a pas le préfixe n'est pas une connexion : une ancienne clé triplet ne
+            // doit pas se glisser dans la liste sous un identifiant inventé.
+            ("Halle/analytics/dev".to_owned(), ConnectionState::Never),
+        ]);
+        let ids: Vec<_> = entrees
+            .iter()
+            .map(|entree| entree.key.connection.as_str().to_owned())
+            .collect();
+        assert_eq!(ids, vec!["8c1e4f0a9b27d315".to_owned()]);
+    }
 }
 
 /// Les schémas d'une base ouverte, **catalogue compris et marqué** (`API-33`).
@@ -644,9 +652,8 @@ pub async fn read_rows(
     // table ne contient aucune ligne » sur une table pleine ne disait pas si la commande était
     // appelée, ce qu'elle demandait, ni ce qu'elle rendait.
     log::info!(
-        "read_rows ← {}/{} · {}.{} (limit {:?}, {} filtre(s), {} tri(s))",
-        key.project,
-        key.database,
+        "read_rows ← {} · {}.{} (limit {:?}, {} filtre(s), {} tri(s))",
+        key.connection,
         query.schema,
         query.table,
         query.limit,

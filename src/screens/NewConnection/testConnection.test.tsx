@@ -4,7 +4,7 @@ import { Sprite } from '../../design/icons/Sprite'
 import type { ConnectionRequest, ConnectionTest } from '../../domain/engine'
 import { LanguageProvider } from '../../i18n/LanguageContext'
 import { NewConnection } from './NewConnection'
-import { TRIO_DE_TEST } from './pourLesTests'
+import { arbreDeTest, ID_DE_TEST, trioDeTest } from './pourLesTests'
 import { codeDe, messageDe } from './testerLaConnexion'
 
 const REUSSI: ConnectionTest = {
@@ -14,9 +14,7 @@ const REUSSI: ConnectionTest = {
   tlsUnverified: false,
 }
 
-// Un projet par défaut : sans aucun projet, « Enregistrer & ouvrir » est désactivé (`08e`),
-// ce qui masquerait l'effet du test de connexion sur ce bouton.
-const PROJETS = [{ id: 'print', name: 'Atelier Nord', environments: TRIO_DE_TEST }]
+const ARBRE = arbreDeTest(trioDeTest())
 
 function monter(onTest: (request: ConnectionRequest) => Promise<ConnectionTest>) {
   return render(
@@ -25,10 +23,9 @@ function monter(onTest: (request: ConnectionRequest) => Promise<ConnectionTest>)
       <LanguageProvider preferences={{ language: 'fr' }}>
         <NewConnection
           onClose={() => {}}
-          projects={PROJETS}
-          // Le cadre : depuis le 26 août 2026, c'est l'appelant qui désigne le projet, et sans lui
-          // l'enregistrement est refusé — ce qui masquerait ce que ce fichier mesure.
-          projet={PROJETS[0]?.name ?? ''}
+          arbre={ARBRE}
+          // Le cadre : c'est l'appelant qui désigne le dossier (#166).
+          dossier={ID_DE_TEST.dev}
           onBrowseKey={async () => null}
           onTest={onTest}
         />

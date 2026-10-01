@@ -1,5 +1,4 @@
 import { expect, test } from '@playwright/test'
-import { deplierUnEnvironnement } from './pourLesTests'
 
 /**
  * Le transfert de projets (`API-30`).
@@ -29,46 +28,9 @@ import { deplierUnEnvironnement } from './pourLesTests'
  * de bout en bout, sont le même cas resté ouvert.
  */
 
-test.describe("l'export d'un projet", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto('/?demo')
-    await deplierUnEnvironnement(page)
-    // Le survol est obligatoire : le « … » d'une ligne est en `visibility: hidden` hors survol.
-    await page.getByRole('treeitem', { name: /Atelier Nord/ }).hover()
-    await page.getByRole('button', { name: 'Actions de Atelier Nord' }).click()
-    await page.getByRole('button', { name: 'Exporter le projet…' }).click()
-    await page.getByRole('dialog', { name: 'Exporter les projets' }).waitFor()
-    await page.evaluate(() => document.fonts.ready)
-  })
-
-  test('le menu de la ligne ouvre la modale, sur ce projet', async ({ page }) => {
-    const modale = page.getByRole('dialog', { name: 'Exporter les projets' })
-
-    // **La portée est nommée** : c'est la seule chose qui distingue l'export d'un projet de celui de
-    // toute la configuration, et elle vient du nœud d'où part le geste.
-    await expect(modale).toContainText('Atelier Nord')
-    await expect(modale.getByRole('switch', { name: 'Inclure les mots de passe' })).toHaveAttribute(
-      'aria-checked',
-      'false',
-    )
-  })
-
-  test("l'avertissement des mots de passe paraît avant le choix du fichier", async ({ page }) => {
-    const modale = page.getByRole('dialog', { name: 'Exporter les projets' })
-    await expect(modale).toContainText('sans mot de passe')
-
-    await modale.getByRole('switch', { name: 'Inclure les mots de passe' }).click()
-
-    // **Avant le geste, pas après** : une confirmation arriverait une fois le fichier choisi.
-    await expect(modale).toContainText('ne se reprend pas')
-    // Et le bloc reste dans la modale, malgré deux lignes de texte de plus.
-    await attendreQueRienNeDeborde(page, 'Exporter les projets')
-  })
-
-  test('la modale tient dans la fenêtre, et rien ne franchit ses bords', async ({ page }) => {
-    await mesurerLaCoquille(page, 'Exporter les projets')
-  })
-})
+/* **L'export d'un projet depuis le menu de sa ligne est parti avec les projets** (#166) : le menu
+   d'un dossier ne porte pas encore « Exporter le dossier… », qui revient avec #169. Les trois tests
+   de ce bloc reviendront avec lui. */
 
 test.describe("l'import de projets", () => {
   test.beforeEach(async ({ page }) => {
@@ -102,7 +64,7 @@ test.describe("l'import de projets", () => {
     await expect(modale.getByRole('checkbox')).toHaveCount(2)
     await expect(modale.getByRole('checkbox', { name: 'Quai Sud' })).toBeVisible()
     await expect(modale.getByRole('checkbox', { name: 'Atelier Nord' })).toBeVisible()
-    await expect(modale).toContainText('au moins un environnement')
+    await expect(modale).toContainText('porte deux sous-dossiers')
     // Deux projets retenus sur les trois du fichier : le refusé ne compte pas.
     await expect(modale.getByRole('button', { name: 'Importer 2 projets' })).toBeVisible()
   })
@@ -115,7 +77,7 @@ test.describe("l'import de projets", () => {
     await expect(modale).toContainText('attendent leur mot de passe')
     await expect(modale.getByText(/déjà déclarées ici/)).toHaveAttribute(
       'title',
-      'analytics (prod)',
+      'Atelier Nord › prod › analytics',
     )
   })
 

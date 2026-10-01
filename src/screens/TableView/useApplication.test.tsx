@@ -1,5 +1,6 @@
 import { act, renderHook } from '@testing-library/react'
-import type { ApplyOutcome, ColumnInfo, DatabaseKey, UpdatePlan } from '../../domain/engine'
+import type { DatabaseKey } from '../../domain/arbre'
+import type { ApplyOutcome, ColumnInfo, UpdatePlan } from '../../domain/engine'
 import type { EnAttente } from './modifications'
 import { type PasserelleApply, useApplication } from './useApplication'
 
@@ -40,18 +41,10 @@ const ATTENTE: EnAttente = [
 const CIBLE = { schema: 'atelier', table: 'fiches' }
 
 /** Une connexion dans un environnement **nommé « atelier »** — le nom ne dit rien du drapeau. */
-const CLE_ATELIER: DatabaseKey = {
-  project: 'Halle Sud',
-  database: 'catalogue',
-  environment: 'atelier',
-}
+const CLE_ATELIER: DatabaseKey = { connection: 'catalogue' }
 
 /** Une connexion dans un environnement **nommé « prod »** — le nom ne dit rien du drapeau. */
-const CLE_PROD: DatabaseKey = {
-  project: 'Halle Sud',
-  database: 'catalogue',
-  environment: 'prod',
-}
+const CLE_PROD: DatabaseKey = { connection: 'catalogue' }
 
 function passerelle(): PasserelleApply & { plans: UpdatePlan[] } {
   const plans: UpdatePlan[] = []

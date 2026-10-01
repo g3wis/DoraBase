@@ -27,11 +27,10 @@
   color: var(--ink-4);
 }
 
-/* Même style que l'étiquette de `Field` : la variante d'environnement est un `RadioGroup`,
- * qui n'a pas d'étiquette visible à lui, mais doit s'aligner sur ses voisins de rangée.
+/* Même style que l'étiquette de `Field`, pour une étiquette que `Field` ne pose pas lui-même.
  *
- * `display: block` est **explicite** parce que cette classe habille tantôt un `<div>` (la
- * variante d'environnement), tantôt un `<label>` (le port local mappé). Un `<label>` est
+ * `display: block` est **explicite** parce que cette classe peut habiller un `<label>` (le port
+ * local mappé). Un `<label>` est
  * inline par défaut : sa boîte de ligne diffère de celle d'un bloc, ce qui décalait tout ce
  * qui suit de deux pixels et a fait échouer la capture de référence. */
 .label {
@@ -49,31 +48,6 @@
   grid-template-columns: 1fr 1fr;
   gap: 12px 18px;
   padding: var(--space-8);
-}
-
-/* Rangée 1, pleine largeur : nom · projet · variante d'environnement.
- *
- * `align-items: end` est structurel, pas cosmétique : les trois cellules ont des étiquettes
- * de hauteurs différentes (une ligne pour « Projet », une pour « Variante d'environnement »
- * qui peut passer à deux si la fenêtre rétrécit). Sans lui, les champs se décaleraient
- * verticalement les uns par rapport aux autres. */
-/*
- * La rangée d'identité : l'environnement, seul depuis le retrait du champ « Nom » (1er septembre
- * 2026).
- *
- * **Pleine largeur, `grid-column: 1 / -1`** : un champ qui ne s'apparie plus prend la rangée
- * entière plutôt que de rester seul avec un trou à sa droite — la règle du formulaire d'`A2`
- * (voir AGENTS.md). Le nom de la base n'est plus saisi ici : c'est un identifiant technique
- * calculé par `draftToSaveRequest`.
- */
-.rowIdentity {
-  grid-column: 1 / -1;
-}
-
-/* Le champ « Nom du nouveau projet » (08f), sur sa propre rangée pleine largeur. Le handoff ne
-   le maquette pas : il n'a pas de sélecteur de création. */
-.newProjectRow {
-  grid-column: 1 / -1;
 }
 
 /* Le port est collé à l'hôte : gap 8px, contre les 18px de la grille principale. */
@@ -97,48 +71,6 @@
   align-items: flex-end;
   gap: var(--space-8);
   padding-bottom: var(--space-2);
-}
-
-/* --- L'habillage propre à `prod` ---
- *
- * Le rouge est une propriété de **prod**, pas de « actif » : le handoff le décrit ainsi, et
- * le mockup ne montre `dev` ou `staging` qu'inactifs. `RadioGroup` applique l'accent
- * générique à l'option active ; cette classe le remplace pour `prod`, sélectionné ou non.
- *
- * La bordure passe à 1.5px. C'est pour cela que `RadioGroup` est en `border-box` : en
- * `content-box`, ce bouton serait plus large et plus haut d'un pixel que ses deux voisins,
- * dans une rangée où ils se touchent. */
-/* Le remplissage des variantes d'environnement est de 10px, contre 12px pour le sélecteur de
- * moteur, et leur rayon de 8px contre 9px. Deux écarts d'un ou deux pixels, voulus par le
- * design : la rangée de trois doit tenir à côté de deux autres champs. Les uniformiser
- * effacerait une intention.
- *
- * **La classe est doublée**, pour la même raison que `.envDanger` plus bas — et cette fois le
- * défaut a été *constaté*, pas seulement prévu. `RadioGroup.module.css` pose `padding: 0 12px`
- * et `font-size: 12px` sur `.option` ; deux règles à une classe se départagent par leur ordre
- * dans la feuille finale, que rien ne garantit entre deux modules. Éditer ce fichier a suffi à
- * inverser le gagnant : les boutons d'environnement ont changé de largeur d'un build à l'autre,
- * ce qu'une capture de référence a attrapé. La spécificité (0,2,0) tranche définitivement. */
-.envOption.envOption {
-  padding: 0 10px;
-  border-radius: var(--radius-field);
-  font-size: var(--text-dense);
-}
-
-/* **La classe est doublée pour gagner en spécificité.**
- *
- * `RadioGroup` applique sa propre classe `.active` à l'option sélectionnée, avec le fond
- * accent. Ici il faut la battre — sans quoi `prod` sélectionné deviendrait orange. Deux
- * règles à une classe se départagent par leur **ordre dans la feuille finale**, que rien ne
- * garantit entre deux modules CSS ; et `:global(.active)` ne peut pas viser une classe
- * hachée par un autre module. Doubler le sélecteur porte la spécificité à (0,2,0) et tranche
- * sans dépendre de l'ordre ni du nom de l'autre classe. */
-.envDanger.envDanger {
-  border: 1.5px solid var(--danger);
-  background: var(--danger-bg);
-  color: var(--danger-ink);
-  font-weight: var(--weight-bold);
-  box-shadow: none;
 }
 
 /* --- L'œil du champ mot de passe ---
@@ -404,44 +336,21 @@
 }
 
 /*
- * La ligne « le projet est créé » de l'étape 2 (`24c`).
+ * Le dossier, dans la bande d'en-tête de la modale (26 août 2026, puis #166).
  *
- * Pleine largeur **sous** la rangée de boutons : le pied est en `flex-wrap: wrap`, et un
- * `flex-basis: 100%` la fait passer à la ligne sans qu'il faille l'envelopper. Le `wrap` du pied
- * n'est pas un détail : sans lui, ce `flex-basis` n'allait à la ligne nulle part — il se contentait
- * d'écraser ses voisins, et la phrase s'empilait en colonne à droite des boutons. En encre
- * secondaire — elle informe, elle n'instruit pas.
- */
-.projetCree {
-  flex-basis: 100%;
-  /* **Aucune marge, et c'est un retrait.** La phrase portait la sienne parce que le pied n'avait pas
-   * de remplissage vertical ; il en a un désormais, et l'écart avec la rangée de boutons vient du
-   * `gap` du pied, qui vaut aussi entre les lignes d'un `flex-wrap`. Deux sources pour un même écart
-   * l'auraient doublé. */
-  margin: 0;
-  font-family: var(--font-ui);
-  font-size: var(--text-label);
-  font-weight: var(--weight-medium);
-  line-height: var(--leading-ui);
-  color: var(--ink-meta);
-}
-
-/*
- * Le projet, dans la bande d'en-tête de la modale (26 août 2026).
- *
- * Il occupait une piste de 196px dans la rangée d'identité du formulaire, sous une étiquette
- * « Projet » — soit la facture d'un champ pour ce qui est le **cadre** du formulaire. En tête, il n'a
- * plus besoin d'étiquette : sa place et son glyphe le disent.
+ * C'était le projet, et avant lui un champ « Projet » du formulaire — la facture d'un champ pour ce
+ * qui est le **cadre** du formulaire. En tête, il n'a pas besoin d'étiquette : sa place et son glyphe
+ * le disent. Le chemin entier s'y écrit (« Atelier Nord › prod »), ou « Racine ».
  *
  * **Aucun curseur de pointeur, aucun survol, aucune bordure.** C'est un constat, pas un contrôle : les
  * quatre marques que ce produit pose sur ce qui se clique sont absentes, et c'est le message. Le fond
  * discret suffit à le détacher du titre sans en faire une pastille cliquable.
  */
-.projetDuTitre {
+.dossierDuTitre {
   display: flex;
   align-items: center;
-  /* **`0 1 auto` et `min-width: 0`**, sinon un nom de projet long pousse la croix de fermeture hors
-     de la bande : rien ne borne un nom de projet, et la seule commande de sortie de la modale ne doit
+  /* **`0 1 auto` et `min-width: 0`**, sinon un chemin long pousse la croix de fermeture hors
+     de la bande : rien ne borne un chemin, et la seule commande de sortie de la modale ne doit
      pas dépendre de sa longueur. C'est au nom de céder, par l'ellipse. */
   flex: 0 1 auto;
   min-width: 0;
@@ -454,14 +363,14 @@
   color: var(--ink-2);
 }
 
-.projetDuTitreNom {
+.dossierDuTitreNom {
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
-.projetIcone {
+.dossierIcone {
   flex: none;
   color: var(--accent-deep);
 }

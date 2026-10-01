@@ -5,7 +5,7 @@ import type { DumpAvailability } from '../../domain/dump'
 import { LanguageProvider } from '../../i18n/LanguageContext'
 import { ExportDump } from './ExportDump'
 
-const CIBLE = { projet: 'Boutique', base: 'commandes', environnement: 'staging' }
+const CIBLE = { chemin: 'Boutique › staging', base: 'commandes' }
 
 function verdict(kind: DumpAvailability['kind']): DumpAvailability {
   switch (kind) {
@@ -85,12 +85,12 @@ test('seul le verdict ready propose de choisir un fichier', () => {
   expect(screen.queryByRole('button', { name: /Choisir le fichier/ })).not.toBeInTheDocument()
 })
 
-test('la modale nomme projet, base et environnement', () => {
+test('la modale nomme le chemin de dossiers et la connexion', () => {
   monter(verdict('ready'))
   const dialogue = screen.getByRole('dialog')
-  // Les trois séparés par des espaces explicites : deux contenus côte à côte se
-  // concatènent **sans** espace dans le nom accessible comme dans le texte.
-  expect(dialogue).toHaveTextContent('Boutique · commandes · staging')
+  // Séparés par des espaces explicites : deux contenus côte à côte se concatènent **sans** espace
+  // dans le nom accessible comme dans le texte.
+  expect(dialogue).toHaveTextContent('Boutique › staging · commandes')
 })
 
 test('la progression est affichée en octets, jamais en pourcentage', async () => {

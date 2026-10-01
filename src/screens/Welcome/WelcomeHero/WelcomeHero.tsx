@@ -5,7 +5,7 @@ import { Button } from '../../../ui/Button/Button'
 import styles from './WelcomeHero.module.css'
 
 type WelcomeHeroProps = {
-  onNewProject: () => void
+  onNewFolder: () => void
   /**
    * Ouvre l'import de projets (`API-30`, 17 septembre 2026, à la demande).
    *
@@ -25,7 +25,7 @@ type WelcomeHeroProps = {
   onImportProjects?: () => void
 }
 
-export function WelcomeHero({ onNewProject, onImportProjects }: WelcomeHeroProps) {
+export function WelcomeHero({ onNewFolder, onImportProjects }: WelcomeHeroProps) {
   const t = useT()
   return (
     <div className={styles.root}>
@@ -37,9 +37,9 @@ export function WelcomeHero({ onNewProject, onImportProjects }: WelcomeHeroProps
         <h1 className={styles.title}>{t('welcome.hero.title')}</h1>
         <p className={styles.subtitle}>{t('welcome.hero.subtitle')}</p>
         <div className={styles.actions}>
-          <Button variant="dark" size="xl" shortcut={raccourci('N')} onClick={onNewProject}>
+          <Button variant="dark" size="xl" shortcut={raccourci('N')} onClick={onNewFolder}>
             <Icon name="plus" size={15} strokeWidth={2.2} />
-            {t('welcome.hero.newProject')}
+            {t('welcome.hero.newFolder')}
           </Button>
           {onImportProjects && (
             <Button variant="secondary" size="xl" onClick={onImportProjects}>

@@ -1,15 +1,13 @@
-import type { EnvironmentColor, EnvironmentDeclaration, SslMode } from '../../domain/config'
+import type { FolderColor, SslMode } from '../../domain/config'
 
 /**
- * La couleur d'un environnement, en jeton de la palette.
+ * La pastille d'un dossier, en jeton de la palette (#166).
  *
- * **Ce fichier portait le trio `dev` / `staging` / `prod` en dur**, typé `Record<EnvironmentId, …>`
- * pour qu'ajouter un environnement en Rust casse la compilation ici. C'était juste tant que les
- * environnements étaient une énumération ; depuis `23a`, chaque projet déclare les siens, et une table
- * en dur serait une seconde source — celle qu'on oublie de corriger. Ne reste donc que la traduction
- * d'une couleur déclarée en jeton, qui n'appartient à aucun projet.
+ * **Anciennement `COULEURS_D_ENVIRONNEMENT`**, aux mêmes cinq clés : `FolderColor` a repris les
+ * valeurs d'`EnvironmentColor`, et un sous-dossier migré depuis un environnement garde donc sa
+ * teinte au pixel. Une couleur libre finirait par produire des pastilles indistinguables.
  */
-export const COULEURS_D_ENVIRONNEMENT: Record<EnvironmentColor, string> = {
+export const COULEURS_DE_DOSSIER: Record<FolderColor, string> = {
   green: 'var(--success)',
   amber: 'var(--warn)',
   red: 'var(--danger)',
@@ -17,34 +15,13 @@ export const COULEURS_D_ENVIRONNEMENT: Record<EnvironmentColor, string> = {
   violet: 'var(--violet)',
 }
 
-/**
- * L'habillage d'alerte suit le **drapeau de production**, jamais le libellé.
- *
- * Un environnement nommé « live » et marqué production porte le fond rouge pâle et l'icône
- * d'avertissement que le handoff décrivait pour `prod` ; un environnement nommé « prod » que
- * l'utilisateur n'a pas marqué ne les porte pas. Accrocher une garantie à une chaîne de caractères la
- * rendrait fausse au premier renommage.
- */
-export function estSensible(declaration: EnvironmentDeclaration): boolean {
-  return declaration.production
-}
-
-/**
- * Le trio d'un projet neuf, **côté écran**.
- *
- * Le même que `EnvironmentDeclaration::trio_par_defaut` en Rust, et c'est une duplication assumée : un
- * projet qui n'existe pas encore n'a pas d'environnements à proposer, et `A2` doit tout de même
- * afficher ce qu'il recevra (`23d`). L'aller-retour par une commande IPC pour lire trois constantes
- * serait un appel réseau pour une valeur figée.
- *
- * **Ce n'est pas la source de vérité** : dès que le projet existe, ce sont ses déclarations qui
- * s'affichent. Si les deux divergeaient, l'écran montrerait trois environnements et le disque en
- * porterait d'autres — un test de `23d` compare donc les deux listes.
- */
-export const TRIO_PAR_DEFAUT: readonly EnvironmentDeclaration[] = [
-  { id: 'dev', label: 'dev', color: 'green', production: false },
-  { id: 'staging', label: 'staging', color: 'amber', production: false },
-  { id: 'prod', label: 'prod', color: 'red', production: true },
+/** Les cinq couleurs, dans l'ordre où la rangée de pastilles les propose. */
+export const ORDRE_DES_COULEURS: readonly FolderColor[] = [
+  'green',
+  'amber',
+  'red',
+  'slate',
+  'violet',
 ]
 
 /**

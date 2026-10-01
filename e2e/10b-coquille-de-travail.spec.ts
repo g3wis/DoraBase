@@ -233,9 +233,7 @@ test('fermer le dernier onglet laisse l’écran de travail debout', async ({ pa
   // **L'arbre nommé, non « un arbre »** : depuis `API-32` la sidebar en porte deux — les projets, et
   // les instances managées sous eux. Un `getByRole('tree')` nu désigne les deux, et Playwright
   // refuse alors d'agir.
-  await expect(
-    page.getByRole('tree', { name: 'Projets, environnements et connexions' }),
-  ).toBeVisible()
+  await expect(page.getByRole('tree', { name: 'Dossiers et connexions' })).toBeVisible()
   await expect(page.getByRole('table')).toBeVisible()
 })
 

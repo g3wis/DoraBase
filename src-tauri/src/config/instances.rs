@@ -11,14 +11,13 @@ use crate::secrets::{Secret, SecretError, SecretStore};
 
 /// La référence sous laquelle ranger le mot de passe admin d'une instance.
 ///
-/// **Deux segments là où une connexion en a trois** (`projet/base/environnement`), et c'est ce qui
-/// rend les deux espaces disjoints sans convention de plus : un identifiant d'instance ne contient
-/// ni `/` ni espace — `InstanceId` le dérive comme `EnvironmentId`, en n'y laissant que des lettres,
-/// des chiffres et des tirets —, donc `instance/<id>` ne peut pas s'écrire comme un triplet.
+/// **Un préfixe à soi**, disjoint de `connexion/<id>` (#165) : un identifiant ne contient ni `/` ni
+/// espace — `InstanceId` et `ConnectionId` n'y laissent que des lettres, des chiffres et des
+/// tirets —, donc les deux espaces ne peuvent pas se rencontrer.
 ///
 /// Dérivée de l'identifiant, donc **stable et prévisible** : rouvrir la même instance retrouve son
-/// secret sans qu'aucune table de correspondance soit persistée. C'est l'arbitrage de `reference_de`,
-/// pour la même raison.
+/// secret sans qu'aucune table de correspondance soit persistée. C'est l'arbitrage de
+/// `reference_de_connexion`, pour la même raison.
 pub fn reference_de_instance(id: &InstanceId) -> SecretRef {
     SecretRef::new(format!("instance/{id}"))
 }
@@ -461,13 +460,12 @@ mod tests {
         let reference = reference_de_instance(&InstanceId::brut("pg-prod"));
         assert_eq!(reference.as_str(), "instance/pg-prod");
         assert_eq!(reference.as_str().matches('/').count(), 1);
-        assert_eq!(
-            crate::config::reference_de("Halle", "analytics", "prod")
-                .as_str()
-                .matches('/')
-                .count(),
-            2
-        );
+        // Depuis #165, une connexion a deux segments aussi : c'est le **préfixe** qui sépare les
+        // deux espaces, et un identifiant de connexion ne peut pas valoir `instance`.
+        let connexion =
+            crate::config::reference_de_connexion(&crate::config::ConnectionId::brut("pg-prod"));
+        assert_ne!(connexion, reference);
+        assert!(connexion.as_str().starts_with("connexion/"));
     }
 
     #[test]

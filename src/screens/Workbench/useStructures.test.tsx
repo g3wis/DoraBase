@@ -1,5 +1,6 @@
 import { act, render } from '@testing-library/react'
-import type { DatabaseKey, SchemaInfo, TableDetail, TableSummary } from '../../domain/engine'
+import type { DatabaseKey } from '../../domain/arbre'
+import type { SchemaInfo, TableDetail, TableSummary } from '../../domain/engine'
 import {
   cleDeStructure,
   type PasserelleStructures,
@@ -7,7 +8,7 @@ import {
   useStructures,
 } from './useStructures'
 
-const CLE: DatabaseKey = { project: 'Atelier Nord', database: 'analytics', environment: 'prod' }
+const CLE: DatabaseKey = { connection: 'analytics' }
 
 const schema = (name: string, over: Partial<SchemaInfo> = {}): SchemaInfo => ({
   name,
@@ -145,7 +146,7 @@ test('vider oublie aussi les objets par schéma', async () => {
 })
 
 test('oublier une connexion emporte les objets de ses schémas, et pas ceux de sa voisine', async () => {
-  const dev: DatabaseKey = { ...CLE, environment: 'dev' }
+  const dev: DatabaseKey = { connection: 'analytics-dev' }
   const { passerelle } = passerelleDe({ atelier: [objet('commandes')] })
   const vu = monter(passerelle)
 
@@ -294,7 +295,7 @@ test('oublier retire une seule table, et laisse ses voisines', async () => {
 })
 
 test('deux connexions homonymes ne partagent pas leurs structures', () => {
-  const dev: DatabaseKey = { ...CLE, environment: 'dev' }
+  const dev: DatabaseKey = { connection: 'analytics-dev' }
   // L'identité porte l'environnement (`23b`) : sans lui, la structure de `dev` s'afficherait pour
   // `prod`, sur un serveur qui n'est pas le même.
   expect(cleDeStructure(CLE, 'atelier', 'commandes')).not.toBe(
@@ -303,7 +304,7 @@ test('deux connexions homonymes ne partagent pas leurs structures', () => {
 })
 
 test('oublier une connexion emporte ses structures, et pas celles de sa voisine', async () => {
-  const dev: DatabaseKey = { ...CLE, environment: 'dev' }
+  const dev: DatabaseKey = { connection: 'analytics-dev' }
   const { passerelle } = passerelleDe({ atelier: [objet('commandes')] })
   const vu = monter(passerelle)
 

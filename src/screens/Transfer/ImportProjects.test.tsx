@@ -2,16 +2,21 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, test, vi } from 'vitest'
 import { Sprite } from '../../design/icons/Sprite'
-import type { ImportReport, ProjectOutcome } from '../../domain/transfert'
+import type { FolderOutcome, ImportReport, ImportSelection } from '../../domain/arbre'
 import { LanguageProvider } from '../../i18n/LanguageContext'
 import { ImportProjects } from './ImportProjects'
 
-function sort(name: string, patch: Partial<ProjectOutcome> = {}): ProjectOutcome {
+/**
+ * **Portage minimal pour #166** : le rapport parle désormais de dossiers de premier niveau. #169
+ * refait la modale et ses tests ; ceux-ci gardent que ce qui marchait marche encore.
+ */
+function sort(name: string, patch: Partial<FolderOutcome> = {}): FolderOutcome {
   return {
-    name,
+    folder: name,
     verdict: { kind: 'created' },
-    environmentsAdded: [],
-    environmentsKept: [],
+    foldersAdded: [],
+    foldersKept: [],
+    readOnlyFromFile: [],
     connectionsAdded: [],
     connectionsKept: [],
     connectionsRejected: [],
@@ -27,8 +32,8 @@ function sort(name: string, patch: Partial<ProjectOutcome> = {}): ProjectOutcome
   }
 }
 
-function rapport(projects: ProjectOutcome[], patch: Partial<ImportReport> = {}): ImportReport {
-  return { version: 5, secrets: 'none', projects, ...patch }
+function rapport(folders: FolderOutcome[], patch: Partial<ImportReport> = {}): ImportReport {
+  return { version: 7, secrets: 'none', folders, ...patch }
 }
 
 function Piloté({
@@ -38,7 +43,7 @@ function Piloté({
 }: {
   onChoisirFichier?: () => Promise<string | null>
   onInspecter?: (fichier: string) => Promise<ImportReport>
-  onImporter?: (fichier: string, projets: string[] | null) => Promise<ImportReport>
+  onImporter?: (fichier: string, selection: ImportSelection | null) => Promise<ImportReport>
 }) {
   return (
     <>
@@ -72,7 +77,7 @@ test('le fichier est inspecté avant que l’import soit proposé', async () => 
               verdict: { kind: 'merged' },
               connectionsAdded: ['catalogue (dev)'],
               consolesAdded: ['catalogue (dev) › exploration'],
-              environmentsAdded: ['dev'],
+              foldersAdded: ['dev'],
             }),
           ]),
         )
@@ -95,7 +100,7 @@ test('le fichier est inspecté avant que l’import soit proposé', async () => 
 })
 
 test('décocher un projet le retire de l’appel', async () => {
-  const appels: (string[] | null)[] = []
+  const appels: (ImportSelection | null)[] = []
   render(
     <Piloté
       onInspecter={() => Promise.resolve(rapport([sort('Atelier Nord'), sort('Quai Sud')]))}
@@ -114,7 +119,7 @@ test('décocher un projet le retire de l’appel', async () => {
 
   await userEvent.click(screen.getByRole('button', { name: 'Importer 1 projet' }))
 
-  expect(appels).toEqual([['Atelier Nord']])
+  expect(appels).toEqual([{ folders: ['Atelier Nord'], rootConnections: false }])
 })
 
 test('tout décocher désactive le bouton avec sa raison', async () => {
@@ -173,7 +178,7 @@ test('ce qui n’arrivera pas est dit, avec sa liste en infobulle', async () => 
               verdict: { kind: 'merged' },
               connectionsKept: ['catalogue (dev)'],
               consolesKept: ['catalogue (dev) › exploration'],
-              environmentsKept: ['prod'],
+              foldersKept: ['prod'],
               passwordsMissing: ['catalogue (dev)'],
               localPaths: ['journal (dev) : /Users/alice/journal.db'],
               connectionsRejected: ['fantome (nulle-part)'],

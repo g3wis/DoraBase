@@ -4,14 +4,14 @@ import { raccourci } from '../plateforme'
 import styles from './StatusBar.module.css'
 
 type StatusBarProps = {
-  projectCount: number
+  folderCount: number
 }
 
-export function StatusBar({ projectCount }: StatusBarProps) {
+export function StatusBar({ folderCount }: StatusBarProps) {
   const t = useT()
   return (
     <div className={styles.root}>
-      <span>{t('shell.statusBar.projectCount', { count: projectCount })}</span>
+      <span>{t('shell.statusBar.folderCount', { count: folderCount })}</span>
       <span>·</span>
       <span>{t('shell.statusBar.paletteHint', { raccourci: raccourci('K') })}</span>
       <span className={styles.spacer} />

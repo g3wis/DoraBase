@@ -1,29 +1,19 @@
 import { expect, test } from '@playwright/test'
+import { ouvrirLaNouvelleConnexion } from './pourLesTests'
 
 // `08b` est presque entièrement une spec de **mise en page**, donc presque entièrement hors de
 // portée de Vitest : jsdom ne calcule aucun layout, et une grille dont les colonnes ne
 // s'alignent pas y passe tous les tests unitaires. Les mesures ci-dessous sont la vérification
 // principale de cette spec, pas un complément.
 //
-// **L'écran est atteint par les deux étapes du parcours** (`24d`). Le bouton de `A1` ouvrait
-// directement cette modale, du temps où elle savait créer un projet au passage (`08f`) ; il ouvre
-// maintenant l'étape 1, et `A2` est l'étape 2. Le chemin a changé, les mesures non — et c'est
-// précisément ce que ce passage vérifie en s'y rendant.
+// **L'écran est atteint par le menu d'un dossier** (#166). Les deux étapes du parcours (`24d`) sont
+// parties avec les projets ; le chemin a changé, les mesures non — et c'est précisément ce que ce
+// passage vérifie en s'y rendant.
 test.beforeEach(async ({ page }) => {
-  // **Par la démo, où le parcours répond.** `create_project` est une commande Tauri : sur `/`, l'étape 1
-  // refuse hors de la webview, et l'étape 2 — c'est-à-dire cet écran — serait inatteignable. La démo
-  // fournit sa propre création (`24d`), donc les deux étapes s'enchaînent.
+  // **Par la démo**, où `save_database` répond : sur `/`, aucune commande Tauri ne répond hors de la
+  // webview, et l'arbre serait vide.
   await page.goto('/?demo')
-  await page.getByRole('button', { name: /Nouveau projet/ }).click()
-  // Étape 1 : un nom suffit, les environnements arrivant préremplis du trio de `23a`.
-  // **Un nom que le décor ne porte pas.** Le projet de la démo s'appelle « Atelier Nord » depuis la
-  // relecture du 19 août 2026 ; créer un homonyme fait refuser la création — à juste titre — et le
-  // bouton « Continuer » reste désactivé. Vingt-quatre tests sont tombés d'un coup sur ce point, tous
-  // pour la même raison.
-  await page.getByLabel('Nom du projet').fill('Comptoir Sud')
-  await page.getByRole('button', { name: /Continuer/ }).click()
-  // Étape 2 : la modale de connexion, projet imposé.
-  await page.waitForSelector('[data-testid=projet-de-la-modale]')
+  await ouvrirLaNouvelleConnexion(page)
   await page.evaluate(() => document.fonts.ready)
 })
 
@@ -107,33 +97,33 @@ test('les colonnes de la grille s’alignent d’une rangée à l’autre', asyn
   expect(droite[0]).not.toBe(gauche[0])
 })
 
-test('le projet s’annonce dans la bande d’en-tête, pas dans le formulaire', async ({ page }) => {
+test('le dossier s’annonce dans la bande d’en-tête, pas dans le formulaire', async ({ page }) => {
   // **La piste de 196px a disparu de la rangée d'identité** (26 août 2026) : elle portait le projet,
   // monté depuis dans l'en-tête. Ce qui se mesure ici est qu'il est bien *là* et pas *ici* — un
   // sélecteur laissé dans le formulaire, même désactivé, rendrait le geste ambigu.
-  const boiteIndication = await page.getByTestId('projet-de-la-modale').boundingBox()
+  const boiteIndication = await page.getByTestId('dossier-de-la-modale').boundingBox()
   const boiteEnTete = await page.locator('[role=dialog] > div').first().boundingBox()
   // Dans la bande de 44px de l'en-tête, et non ailleurs dans la coquille.
   expect(boiteIndication?.y ?? 0).toBeGreaterThanOrEqual(boiteEnTete?.y ?? 0)
   expect((boiteIndication?.y ?? 0) + (boiteIndication?.height ?? 0)).toBeLessThanOrEqual(
     (boiteEnTete?.y ?? 0) + (boiteEnTete?.height ?? 0),
   )
-  // Et la rangée d'identité ne le contient plus.
-  const dansLaRangee = await page.evaluate(
+  // Et le corps de la modale ne le contient pas : la rangée d'identité est partie avec le groupe
+  // « Environnement » (#166), donc c'est le corps entier qu'on interroge.
+  const dansLeCorps = await page.evaluate(
     () =>
-      document
-        .querySelector('[class*=rowIdentity]')
-        ?.querySelector('[data-testid=projet-de-la-modale]') !== null,
+      document.querySelector('[data-testid=modal-body] [data-testid=dossier-de-la-modale]') !==
+      null,
   )
-  expect(dansLaRangee).toBe(false)
+  expect(dansLeCorps).toBe(false)
 })
 
-test('un nom de projet long ne pousse pas la croix hors de la bande', async ({ page }) => {
+test('un chemin de dossier long ne pousse pas la croix hors de la bande', async ({ page }) => {
   // **Rien ne borne un nom de projet**, et la croix est la seule commande de sortie visible de la
   // modale : la faire dépendre de la longueur d'un nom serait un piège. Le nom est allongé de force,
   // comme le faisait le test du pied de sidebar — mesurer le nom du jour ne mesure que sa brièveté.
   await page.evaluate(() => {
-    const nom = document.querySelector('[data-testid=projet-de-la-modale] span')
+    const nom = document.querySelector('[data-testid=dossier-de-la-modale] span')
     // Démesuré volontairement : la modale fait 820 px, et un nom de soixante caractères y tient
     // encore. Ce qui se mesure est la mise en page sous contrainte, pas la brièveté du nom du jour.
     if (nom) nom.textContent = 'Atelier Nord de la Vitrine Sud '.repeat(12)
@@ -145,7 +135,7 @@ test('un nom de projet long ne pousse pas la croix hors de la bande', async ({ p
   )
   // Et c'est le nom qui a cédé, par l'ellipse : il est coupé, non replié.
   const coupe = await page.evaluate(() => {
-    const nom = document.querySelector('[data-testid=projet-de-la-modale] span') as HTMLElement
+    const nom = document.querySelector('[data-testid=dossier-de-la-modale] span') as HTMLElement
     return { coupe: nom.scrollWidth > nom.clientWidth, replie: nom.scrollHeight > nom.clientHeight }
   })
   expect(coupe.coupe).toBe(true)
@@ -174,49 +164,6 @@ test('le select occupe toute la hauteur de sa boîte, donc tout le champ est cli
   // 32 px de boîte moins les 2 px de bordure : le select remplit les 30 px intérieurs.
   expect(mesures?.boite).toBe(32)
   expect(mesures?.select).toBe(30)
-})
-
-test('les trois boutons d’environnement ont la même boîte, prod compris', async ({ page }) => {
-  const boites = await page.evaluate(() => {
-    const groupe = [...document.querySelectorAll('fieldset')].find((f) =>
-      f.querySelector('input[value=prod]'),
-    )
-    return [...(groupe?.querySelectorAll('label') ?? [])].map((l) => {
-      const r = l.getBoundingClientRect()
-      return { hauteur: Math.round(r.height) }
-    })
-  })
-
-  // `prod` porte une bordure de 1.5 px là où ses voisins en ont 1. En `content-box`, il
-  // serait plus haut d'un pixel — visible dans une rangée de trois boutons collés. C'est la
-  // raison d'être du `border-box` de `RadioGroup`.
-  expect(boites).toHaveLength(3)
-  expect(new Set(boites.map((b) => b.hauteur))).toHaveProperty('size', 1)
-})
-
-// **Portée à la modale.** Le décor est la démo depuis `24d`, et sa barre de titre porte un sélecteur
-// d'environnement dont la valeur est aussi « prod » : une recherche à l'échelle de la page en trouve
-// deux, et le mode strict de Playwright refuse — à juste titre.
-test('prod garde son habillage rouge même sélectionné', async ({ page }) => {
-  // C'est le `<label>` qu'on clique, pas l'`<input>` : celui-ci est masqué visuellement et en
-  // `pointer-events: none`, comme il doit l'être. Un vrai utilisateur clique le libellé.
-  const modale = page.getByRole('dialog')
-  await modale.getByText('prod', { exact: true }).click()
-  await expect(modale.getByRole('radio', { name: 'prod' })).toBeChecked()
-
-  const couleurs = await page.evaluate(() => {
-    const input = document.querySelector<HTMLInputElement>('input[value=prod]')
-    const label = input?.closest('label')
-    if (!label) return null
-    const style = getComputedStyle(label)
-    return { fond: style.backgroundColor, bordure: style.borderTopColor }
-  })
-
-  // `RadioGroup` met le fond accent sur l'option active. Ici il faut qu'il perde : le rouge
-  // est une propriété de *prod*, pas de *actif*. Sans le sélecteur doublé qui gagne en
-  // spécificité, `prod` sélectionné deviendrait orange.
-  expect(couleurs?.fond).toBe('rgb(252, 233, 228)') // --danger-bg
-  expect(couleurs?.bordure).toBe('rgb(217, 67, 47)') // --danger
 })
 
 test('le sélecteur de moteur tient sur une seule ligne', async ({ page }) => {
@@ -490,7 +437,7 @@ test('le panneau est à égale distance du moteur et du formulaire', async ({ pa
     const panneau = [...document.querySelectorAll('section')].find((s) =>
       s.textContent?.includes('Proxy / tunnel'),
     )
-    const premierChamp = document.querySelector('[class*=rowIdentity]')
+    const premierChamp = document.querySelector('[class*=rowHost]')
     if (!moteur || !panneau || !premierChamp) return null
     return {
       avant: Math.round((haut(panneau) ?? 0) - (bas(moteur) ?? 0)),
@@ -577,39 +524,6 @@ test('la modale reste dans la fenêtre avec le panneau déplié', async ({ page 
   expect(etat.hauteurModale).toBeGreaterThan(500)
 })
 
-// **Ce test existe parce que le défaut s'est produit.** `.envOption` (ce fichier) et `.option`
-// (`RadioGroup.module.css`) sont deux règles à une classe qui posent toutes deux `padding` et
-// `font-size` sur les boutons d'environnement. Leur gagnant dépendait de l'ordre des feuilles
-// dans le bundle : éditer `NewConnection.module.css` a suffi à l'inverser, et les boutons ont
-// changé de largeur d'un build à l'autre. Une capture de référence l'a attrapé ; ce test le
-// nomme, pour que la prochaine fois l'échec dise *quoi* est cassé.
-test('les boutons d’environnement gardent leur remplissage propre, quel que soit l’ordre du CSS', async ({
-  page,
-}) => {
-  const styles = await page.evaluate(() => {
-    const groupe = [...document.querySelectorAll('fieldset')].find((f) =>
-      f.querySelector('input[value=prod]'),
-    )
-    const moteur = [...document.querySelectorAll('fieldset')].find((f) =>
-      f.querySelector('input[value=postgresql]'),
-    )
-    const lire = (el: Element | null | undefined) => {
-      if (!el) return null
-      const s = getComputedStyle(el)
-      return { padding: s.paddingLeft, police: s.fontSize, rayon: s.borderTopLeftRadius }
-    }
-    return {
-      env: lire(groupe?.querySelector('label')),
-      moteur: lire(moteur?.querySelector('label')),
-    }
-  })
-
-  // Les valeurs du mockup : 10px/11.5px/8px pour l'environnement, 12px/12px/9px pour le moteur.
-  // Les uniformiser effacerait une intention du design.
-  expect(styles.env).toEqual({ padding: '10px', police: '11.5px', rayon: '8px' })
-  expect(styles.moteur).toEqual({ padding: '12px', police: '12px', rayon: '9px' })
-})
-
 // --- Le pied, quand le test a répondu (08d + 24c) ---------------------------------------
 
 // **Le pied porte trois choses à la fois** : la rangée de boutons, le verdict du test, et la phrase
@@ -652,26 +566,11 @@ async function pied(page: import('@playwright/test').Page) {
   })
 }
 
-test('la phrase du projet créé passe sous la rangée de boutons', async ({ page }) => {
+test('le pied garde du souffle entre le filet et les boutons', async ({ page }) => {
+  // La phrase « le projet est créé » de `24c` est partie avec les projets (#166) : le pied ne se
+  // replie plus, mais ce qui se mesure reste qu'il y a un écart entre le filet et la rangée.
   const mesures = await pied(page)
-  // Sous les boutons, et non à leur droite : c'est la seule façon dont elle ne les rétrécit pas.
-  expect(mesures?.constat?.y).toBeGreaterThanOrEqual(mesures?.boutonTester?.bas ?? 0)
-  // Sur une seule ligne à cette largeur — sinon c'est qu'elle n'a pas la largeur du pied.
-  expect(mesures?.constat?.hauteur).toBeLessThan(20)
-})
-
-test('le pied replié garde du souffle entre le filet et les boutons', async ({ page }) => {
-  // **Le cas du pied qui se replie**, celui de l'étape 2 : une rangée de boutons *plus* la phrase du
-  // projet créé. La hauteur minimale de 57px protégeait le pied à une ligne et lui seul — dès que le
-  // contenu la dépassait, la rangée venait s'appuyer sur le filet du dessus, et la phrase sur le bord
-  // bas de la modale. C'est un remplissage qu'il fallait, pas une hauteur.
-  const mesures = await pied(page)
-  // Le filet fait 1px et vit dans la boîte (`border-box`) : le premier bouton commence donc au moins
-  // un remplissage plus bas. Le seuil est délibérément bas — ce qui est mesuré, c'est qu'il y a un
-  // écart, pas sa valeur exacte, qui appartient à l'échelle d'espacement.
   expect(mesures?.boutonTester?.y ?? 0).toBeGreaterThanOrEqual(6)
-  // Et autant sous la phrase : sans elle, le remplissage n'aurait été qu'un demi-remède.
-  expect((mesures?.hauteur ?? 0) - (mesures?.constat?.bas ?? 0)).toBeGreaterThanOrEqual(6)
 })
 
 test('le verdict d’un test réussi tient sur une ligne, sans écraser les boutons', async ({
@@ -701,10 +600,7 @@ test('le verdict d’un test réussi tient sur une ligne, sans écraser les bout
     })
   })
   await page.goto('/?demo')
-  await page.getByRole('button', { name: /Nouveau projet/ }).click()
-  await page.getByLabel('Nom du projet').fill('Comptoir Sud')
-  await page.getByRole('button', { name: /Continuer/ }).click()
-  await page.waitForSelector('[data-testid=projet-de-la-modale]')
+  await ouvrirLaNouvelleConnexion(page)
   await page.getByRole('button', { name: /Tester la connexion/ }).click()
   await page.waitForSelector('[class*=testOk]')
   await page.evaluate(() => document.fonts.ready)
@@ -718,7 +614,7 @@ test('le verdict d’un test réussi tient sur une ligne, sans écraser les bout
   const centres = mesures?.centresDesBoutons ?? []
   expect(centres).toHaveLength(3)
   expect(Math.max(...centres) - Math.min(...centres)).toBeLessThan(4)
-  // Une rangée de boutons plus la phrase de `24c`, pas davantage.
+  // Une rangée de boutons, pas davantage.
   expect(mesures?.hauteur).toBeLessThan(90)
   expect(mesures?.verdict?.droite ?? 0).toBeLessThan(mesures?.largeur ?? 0)
 })
@@ -810,7 +706,7 @@ test('la modale A2 n’est pas surlignée en rouge sous la sous-modale', async (
       (d) => d.getAttribute('aria-label') === 'Nouvelle connexion',
     )
     if (!a2) return null
-    // Aucune bordure rouge dans A2 **sauf** celle de `prod`, qui est là de toute façon.
+    // Aucune bordure rouge dans A2 : le groupe « Environnement » et son `prod` sont partis (#166).
     return [...a2.querySelectorAll('input, select, [class*=wrap]')].filter((el) => {
       const c = getComputedStyle(el).borderTopColor
       return c === 'rgb(217, 67, 47)' || c === 'rgb(176, 51, 31)'
@@ -842,20 +738,11 @@ test('esc ferme la sous-modale sans fermer A2', async ({ page }) => {
 
 // --- Enregistrement (08e) ---------------------------------------------------------------
 
-// Sans aucun projet, `A2` ne peut rien enregistrer : elle déclare une base *dans un projet
-// existant*, et le handoff ne maquette pas le parcours d'un utilisateur qui n'en a aucun.
-// Ce que le handoff ne maquettait pas : le parcours d'un utilisateur sans aucun projet.
-// **Ce test a disparu avec la sentinelle** (`24c`). Il vérifiait que sans projet, `A2` proposait
-// « + Nouveau projet… » et attendait un nom avant d'activer « Enregistrer ». Cet écran ne crée plus de
-// projet : la garantie a déménagé dans `NewProject.test.tsx`, où le nom vide désactive « Continuer » en
-// disant pourquoi.
-
 test('le bouton désactivé porte l’habillage du handoff, pas seulement l’attribut', async ({
   page,
 }) => {
-  // **L'état désactivé se produit, il ne s'attend plus.** Ce bouton était désactivé faute de nom de
-  // projet — l'écran ouvrait sur « + Nouveau projet… » (`08f`). Depuis `24c`, l'étape 2 arrive avec un
-  // projet : il est actif. La cause de désactivation qui reste est l'échec du test de connexion, et
+  // **L'état désactivé se produit, il ne s'attend plus.** La modale arrive avec son dossier, donc le
+  // bouton est actif ; la cause de désactivation qui reste est l'échec du test de connexion, et
   // c'est elle que ce test provoque — la commande Tauri ne répond pas hors de la webview.
   await page.getByRole('button', { name: /Tester la connexion/ }).click()
   await expect(page.getByRole('button', { name: /Enregistrer & ouvrir/ })).toBeDisabled()
@@ -912,7 +799,7 @@ test.describe('sur une fenêtre trop courte pour la modale', () => {
     expect(mesures?.contenuDuCorps).toBeGreaterThan(mesures?.visibleDuCorps as number)
     // L'en-tête garde ses 44px (filet compris) : c'est le corps qui cède, pas lui.
     expect(mesures?.hauteurEntete).toBe(45)
-    // Le pied garde sa hauteur : c'est le corps qui cède, pas lui. `A2` en « projet imposé »
+    // Le pied garde sa hauteur : c'est le corps qui cède, pas lui. `A2`
     // porte une seconde ligne sous les boutons, d'où la hauteur **minimale** et non une égalité.
     expect(mesures?.hauteurPied).toBeGreaterThanOrEqual(57)
     // Et rien n'est reporté sur la racine, qui ne défile pas.

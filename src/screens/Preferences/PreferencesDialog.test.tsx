@@ -2,7 +2,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { Sprite } from '../../design/icons/Sprite'
-import type { Kubeconfigs, ManagedInstance, Preferences, Project } from '../../domain/config'
+import type { FolderTree, Kubeconfigs, ManagedInstance, Preferences } from '../../domain/config'
 import type { AvailableUpdate } from '../../domain/maj'
 import { LanguageProvider } from '../../i18n/LanguageContext'
 import { PreferencesDialog } from './PreferencesDialog'
@@ -20,7 +20,7 @@ function monter(
   // déclaré, et la plupart des tests d'ici ne touchent pas cette section.
   kube: {
     kubeconfigs?: Kubeconfigs
-    projects?: Project[]
+    arbre?: FolderTree
     instances?: ManagedInstance[]
   } = {},
 ) {
@@ -29,7 +29,7 @@ function monter(
   const onKubeconfigsChange = vi.fn()
   const onDeclarerKubeconfig = vi.fn(async () => {})
   const kubeconfigs = kube.kubeconfigs ?? {}
-  const projects = kube.projects ?? []
+  const arbre = kube.arbre ?? { folders: [], connections: [] }
   const instances = kube.instances ?? []
   render(
     <>
@@ -48,7 +48,7 @@ function monter(
           kubeconfigs={kubeconfigs}
           onKubeconfigsChange={onKubeconfigsChange}
           onDeclarerKubeconfig={onDeclarerKubeconfig}
-          projects={projects}
+          arbre={arbre}
           instances={instances}
         />
       </LanguageProvider>
@@ -372,24 +372,34 @@ describe('la section « Connexions » — les kubeconfigs déclarés (`API-70`)'
   }
 
   /** Une connexion qui vise le cluster `prod`. */
-  const PROJETS = [
-    {
-      name: 'Halle',
-      environments: [],
-      queries: [],
-      databases: [
-        {
-          name: 'catalogue',
-          engine: 'postgresql',
-          environment: 'prod',
-          consoles: [],
-          connection: {
-            tunnel: { localPort: null, proxy: { kind: 'kubernetes', kubeconfig: 'prod' } },
+  const PROJETS = {
+    folders: [
+      {
+        id: 'f-racine',
+        name: 'Halle',
+        readOnly: false,
+        folders: [
+          {
+            id: 'f-prod',
+            name: 'prod',
+            readOnly: true,
+            connections: [
+              {
+                id: 'c-catalogue',
+                name: 'catalogue',
+                engine: 'postgresql',
+                consoles: [],
+                connection: {
+                  tunnel: { localPort: null, proxy: { kind: 'kubernetes', kubeconfig: 'prod' } },
+                },
+              },
+            ],
           },
-        },
-      ],
-    },
-  ] as unknown as Project[]
+        ],
+      },
+    ],
+    connections: [],
+  } as unknown as FolderTree
 
   async function allerAuxConnexions(kube: Parameters<typeof monter>[2]) {
     const rendu = monter(PREFERENCES_PAR_DEFAUT, {}, kube)
@@ -422,7 +432,7 @@ describe('la section « Connexions » — les kubeconfigs déclarés (`API-70`)'
   })
 
   it('grise le retrait d’une déclaration employée, et la raison nomme la connexion', async () => {
-    await allerAuxConnexions({ kubeconfigs: DEUX, projects: PROJETS })
+    await allerAuxConnexions({ kubeconfigs: DEUX, arbre: PROJETS })
 
     const [employee, libre] = screen.getAllByRole('button', { name: 'Retirer' })
     if (!employee || !libre) throw new Error('la liste doit porter deux déclarations')
@@ -431,7 +441,7 @@ describe('la section « Connexions » — les kubeconfigs déclarés (`API-70`)'
     expect(employee).toHaveAttribute('aria-disabled', 'true')
     expect(libre).toHaveAttribute('aria-disabled', 'false')
     // La raison nomme *quoi changer d'abord* — un « impossible » nu enverrait chercher soi-même.
-    expect(employee.getAttribute('title')).toContain('Halle › catalogue (prod)')
+    expect(employee.getAttribute('title')).toContain('Halle › prod › catalogue')
     // **`aria-disabled`, jamais `disabled`** : un bouton désactivé ne reçoit ni focus ni survol,
     // donc son infobulle serait inatteignable (piège n° 3).
     expect(employee).not.toBeDisabled()
@@ -442,7 +452,7 @@ describe('la section « Connexions » — les kubeconfigs déclarés (`API-70`)'
     // différence de `disabled`. Sans la garde dans le gestionnaire, le bouton retirerait quand même.
     const { onKubeconfigsChange } = await allerAuxConnexions({
       kubeconfigs: DEUX,
-      projects: PROJETS,
+      arbre: PROJETS,
     })
 
     const [employee] = screen.getAllByRole('button', { name: 'Retirer' })

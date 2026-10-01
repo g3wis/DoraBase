@@ -2,14 +2,8 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { Sprite } from '../../design/icons/Sprite'
-import type {
-  ColumnInfo,
-  DatabaseKey,
-  Relation,
-  RowQuery,
-  TableDetail,
-  Value,
-} from '../../domain/engine'
+import type { DatabaseKey } from '../../domain/arbre'
+import type { ColumnInfo, Relation, RowQuery, TableDetail, Value } from '../../domain/engine'
 import { LanguageProvider } from '../../i18n/LanguageContext'
 import type { PasserelleDetail } from '../Workbench/useDetailTable'
 import type { Echelle } from './horodatage'
@@ -17,7 +11,7 @@ import { RowPanel } from './RowPanel'
 import type { CibleDuSaut } from './saut'
 import type { PasserelleLignes } from './useLignes'
 
-const CLE: DatabaseKey = { project: 'Halle', database: 'analytics', environment: 'prod' }
+const CLE: DatabaseKey = { connection: 'analytics' }
 
 const colonne = (name: string, over: Partial<ColumnInfo> = {}): ColumnInfo => ({
   position: 1,

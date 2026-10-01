@@ -71,12 +71,11 @@ test('les deux connexions de l’environnement sont sous lui, et pas ailleurs', 
   expect(paliers).toEqual(['2', '3', '3'])
 })
 
-test('un projet sans connexion le dit plutôt que de paraître vide', async ({ page }) => {
-  // « Outils internes » n'a aucune connexion : un projet vide est un état normal depuis `08f`, et il
-  // le dit désormais sur la ligne de chacun de ses environnements — un nœud déplié sans enfant se
-  // lirait comme un chargement en cours (`23g`).
+test('un dossier sans connexion le dit plutôt que de paraître vide', async ({ page }) => {
+  // « Outils internes » › `dev` n'a aucune connexion : un dossier déplié sans enfant se lirait comme
+  // un chargement en cours (`23g`), donc il le dit (#166).
   await deplierUnEnvironnement(page, 'dev', 'Outils internes')
-  await expect(page.getByText('Aucune connexion déclarée en dev')).toBeVisible()
+  await expect(page.getByText('Dossier vide')).toBeVisible()
 })
 
 test('la modale désigne la connexion dont on a ouvert le menu, pas sa voisine', async ({

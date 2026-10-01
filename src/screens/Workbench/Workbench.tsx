@@ -3,14 +3,26 @@ import {
   rowAsInsert as rowAsInsertTauri,
   saveValueLabels as saveValueLabelsTauri,
 } from '../../data/commandes'
-import type { Database, EnvironmentId, ManagedInstance, Project } from '../../domain/config'
+import {
+  ancetreEnLectureSeule,
+  connexion,
+  connexionsDescendantes,
+  couleurLaPlusProche,
+  dossier,
+  idDeConnexion,
+  libelleDeConnexion,
+} from '../../data/dossiers'
+import type { DatabaseKey } from '../../domain/arbre'
 import type {
-  ConnectionState,
-  DatabaseKey,
-  RowWindow,
-  TableSummary,
-  Value,
-} from '../../domain/engine'
+  ConnectionId,
+  Database,
+  Folder,
+  FolderColor,
+  FolderId,
+  FolderTree,
+  ManagedInstance,
+} from '../../domain/config'
+import type { ConnectionState, RowWindow, TableSummary, Value } from '../../domain/engine'
 import { useT } from '../../i18n/LanguageContext'
 import { modificateurActif } from '../../shell/plateforme'
 import { SelectionIndicator } from '../../shell/SelectionIndicator/SelectionIndicator'
@@ -44,7 +56,6 @@ import type { CibleDeSuppression } from '../Explorer/DeleteConnectionDialog'
 import { DetailPanel } from '../Explorer/DetailPanel'
 import { ExplorerSidebar } from '../Explorer/ExplorerSidebar'
 import { ObjectTable } from '../Explorer/ObjectTable'
-import { type GestesEnvironnement, ProjectEditor } from '../Explorer/ProjectEditor'
 import { InstancesPanel } from '../Instances/InstancesPanel'
 import { InstanceView } from '../Instances/InstanceView'
 import { PASSERELLE_INSTANCES, type PasserelleInstances } from '../Instances/instanceCommands'
@@ -72,7 +83,6 @@ import {
   type Dialecte,
   type EtatOnglets,
   fermer,
-  idApresRenommage,
   idDeConsolePersistee,
   idOnglet,
   libelleDeConsole,
@@ -81,8 +91,6 @@ import {
   ouvrirConsole,
   ouvrirDiagramme,
   ouvrirInstance,
-  reindexerParConnexion,
-  renommerLaConnexion,
   renommerLaConsole,
   reordonner,
   sansLOngletDInstance,
@@ -109,7 +117,7 @@ type WorkbenchProps = {
    * Absent, le bouton n'est pas rendu du tout : un carré grisé annoncerait un réglage inatteignable.
    */
   onOpenPreferences?: () => void
-  projects: readonly Project[]
+  arbre: FolderTree
   passerelle?: PasserelleArbre
   passerelleDetail?: PasserelleDetail
   /** Le pont du préchauffage des structures. Injectable, comme les autres. */
@@ -118,66 +126,37 @@ type WorkbenchProps = {
   /** Injectable comme les autres commandes : le pont ne répond pas hors de la webview (`08d`). */
   rowAsInsert?: typeof rowAsInsertTauri
   /**
-   * Déclarer une connexion. **La cible traverse, et elle est obligatoire** (26 août 2026) : le menu
-   * d'une ligne d'environnement sait de quel projet et de quel environnement il s'agit, et c'est le
-   * seul chemin — l'écran de création n'a donc rien à redemander ni à deviner.
+   * Déclarer une connexion **dans un dossier** (#166). La cible traverse, et elle est obligatoire :
+   * le menu d'une ligne de dossier sait lequel, et c'est le seul chemin.
    */
-  onNewDatabase?: (cible: { project: string; environment: EnvironmentId }) => void
-  /** Ouvre l'étape 1 du parcours de création, depuis le pied de la sidebar (`24d`). */
-  onNewProject?: () => void
-  /** Ouvre `A2` en mode édition sur cette base (`08g`). */
-  onEditDatabase?: (project: string, database: Database) => void
+  onNewDatabase?: (dossier: FolderId) => void
   /**
-   * Les projets à jour, après un geste de la modale d'édition (`23e`).
-   *
-   * **Une seule prop pour les cinq gestes** : chacun rend la liste entière, et c'est l'appelant qui la
-   * tient. Cinq props jumelles se seraient désynchronisées, et l'écran n'a pas à savoir lequel des cinq
-   * a parlé.
+   * Crée un dossier — à la racine ou dans un autre — et rend son identifiant, pour que la ligne passe
+   * en renommage sur place. Absent, ni la bande ni les menus ne le proposent.
    */
-  onProjets?: (projects: Project[]) => void
+  onNewFolder?: (parent: FolderId | null) => Promise<FolderId>
+  /** La ligne à passer en renommage — le dossier que l'accueil ou `⌘N` vient de créer. */
+  renommageInitial?: string
+  onRenameFolder?: (dossier: FolderId, nom: string) => Promise<void>
+  onRecolorFolder?: (dossier: FolderId, couleur: FolderColor | null) => Promise<void>
+  onSetFolderReadOnly?: (dossier: FolderId, lectureSeule: boolean) => Promise<void>
+  /** Ouvre `A2` en mode édition sur cette connexion (`08g`). */
+  onEditDatabase?: (database: Database) => void
   /**
-   * Les cinq gestes de `23c`, pour la modale d'édition. Absents, ce sont les commandes réelles.
-   *
-   * **Transmis, non réimplémentés** : la démo les fournit contre son état local, faute de pont Tauri en
-   * Chromium — c'est ce qui rend `23e` mesurable par Playwright.
+   * L'arbre à jour, après une écriture que l'écran de travail porte lui-même — schémas affichés,
+   * libellés de valeurs. C'est l'appelant qui le tient.
    */
-  gestesEnvironnement?: GestesEnvironnement
+  onArbre?: (arbre: FolderTree) => void
   /**
-   * Renomme un projet (`08i`). Ouvre aussi la modale d'édition (`23e`) : sa présence est ce qui rend
-   * l'entrée « Modifier le projet… » cliquable, le renommage étant le seul geste de cet écran qui
-   * demande une commande que la modale ne porte pas elle-même.
-   */
-  onRenameProject?: (
-    project: string,
-    nom: string,
-  ) => Promise<{ missingSecrets: string[]; leftoverSecrets: string[] }>
-  /**
-   * Ouvre l'export de **ce projet** (`API-30`), depuis le menu de sa ligne d'arbre.
-   *
-   * **Relayé, pas traité ici** : la modale vit au niveau de l'application, avec celle du menu natif
-   * qui exporte tous les projets — les deux portées sont un seul écran, et le monter en deux
-   * endroits aurait fait deux états à tenir en phase. Absent, l'entrée est désactivée avec sa raison.
-   */
-  onExportProject?: (project: string) => void
-  /**
-   * Ouvre l'import de projets (`API-30`), depuis la bande en tête de l'arbre.
-   *
-   * **Relayé, pas traité ici**, comme l'export : la modale vit au niveau de l'application, où vivent
-   * aussi les deux entrées du menu natif. Absent, le bouton n'est pas rendu.
+   * Ouvre l'import de projets (`API-30`), depuis la bande en tête de l'arbre. **Relayé** : la modale
+   * vit au niveau de l'application, avec les deux entrées du menu natif.
    */
   onImportProjects?: () => void
   /**
-   * Renomme une connexion (`26`). Absent, l'entrée « Renommer… » de l'arbre est désactivée.
-   *
-   * **Rejette avec le refus du cœur** — un nom déjà pris dans cet environnement — et la sidebar
-   * l'affiche : c'est elle qui porte le geste, donc elle qui doit porter son refus.
+   * Renomme une connexion (`26`). **Rejette avec le refus du cœur**, et la sidebar l'affiche. Rien
+   * d'autre à rapporter depuis #166 : le nom n'est dans aucune identité.
    */
-  onRenameDatabase?: (
-    project: string,
-    database: string,
-    environment: EnvironmentId,
-    nouveau: string,
-  ) => Promise<{ missingSecrets: string[]; leftoverSecrets: string[] }>
+  onRenameDatabase?: (connection: ConnectionId, nouveau: string) => Promise<void>
   /** Le pont vers `preview_updates` (`11c`). Injectable : il ne répond pas hors de la webview. */
   passerellePreview?: PasserellePreview
   /** Le pont vers `apply_changes` (`11d`), la seule commande qui **écrit**. */
@@ -229,44 +208,21 @@ type WorkbenchProps = {
   onDeclareInstance?: () => void
   onEditInstance?: (instance: ManagedInstance) => void
   onRemoveInstance?: (instance: ManagedInstance) => void
-  /** Retirer une déclaration de connexion, ou un projet (`08j`). */
+  /** Retirer une déclaration de connexion, ou un dossier entier (`08j`). */
   onDelete?: (cible: CibleDeSuppression) => Promise<{ leftoverSecrets: string[] }>
   /**
    * Crée une console sur une connexion. Absent, l'entrée de menu est désactivée avec sa raison.
    *
-   * Les quatre gestes portent l'identité complète de la connexion — projet, base, environnement —
-   * parce qu'une console appartient à une connexion et qu'`analytics` en dev et `analytics` en prod
-   * sont deux connexions (`23b`).
+   * Les quatre gestes désignent la connexion **par son identifiant** (#166) : deux connexions
+   * homonymes vivent dans deux dossiers.
    */
-  onCreateConsole?: (
-    project: string,
-    database: string,
-    environment: EnvironmentId,
-    nom: string,
-  ) => Promise<void>
+  onCreateConsole?: (connection: ConnectionId, nom: string) => Promise<void>
   /** Écrit le texte d'une console. */
-  onSaveConsole?: (
-    project: string,
-    database: string,
-    environment: EnvironmentId,
-    nom: string,
-    sql: string,
-  ) => Promise<void>
+  onSaveConsole?: (connection: ConnectionId, nom: string, sql: string) => Promise<void>
   /** Retire une console. */
-  onDeleteConsole?: (
-    project: string,
-    database: string,
-    environment: EnvironmentId,
-    nom: string,
-  ) => Promise<void>
+  onDeleteConsole?: (connection: ConnectionId, nom: string) => Promise<void>
   /** Renomme une console. */
-  onRenameConsole?: (
-    project: string,
-    database: string,
-    environment: EnvironmentId,
-    ancien: string,
-    nouveau: string,
-  ) => Promise<void>
+  onRenameConsole?: (connection: ConnectionId, ancien: string, nouveau: string) => Promise<void>
 }
 
 /**
@@ -281,7 +237,7 @@ type WorkbenchProps = {
 export function Workbench({
   rowHeight,
   onOpenPreferences,
-  projects,
+  arbre,
   passerelle = PASSERELLE_TAURI,
   passerelleDetail = PASSERELLE_DETAIL,
   passerelleStructures = PASSERELLE_STRUCTURES,
@@ -289,14 +245,15 @@ export function Workbench({
   rowAsInsert = rowAsInsertTauri,
   saveValueLabels = saveValueLabelsTauri,
   onNewDatabase,
-  onNewProject,
+  onNewFolder,
+  renommageInitial,
+  onRenameFolder,
+  onRecolorFolder,
+  onSetFolderReadOnly,
   onEditDatabase,
-  onRenameProject,
-  onExportProject,
   onImportProjects,
   onRenameDatabase,
-  onProjets,
-  gestesEnvironnement,
+  onArbre,
   onDelete,
   onCreateConsole,
   onSaveConsole,
@@ -333,7 +290,7 @@ export function Workbench({
     rechargerLesSchemas,
     rafraichir,
   } = useArbre(
-    projects,
+    arbre,
     passerelle,
     structures.prechauffer,
     // Le schéma qu'on vient de déplier passe **devant** le reste de la file : c'est le geste
@@ -351,30 +308,14 @@ export function Workbench({
     structures.vider()
     rafraichir()
   }, [structures, rafraichir])
-  // Le projet dont on édite les environnements (`23e`). **Ici, et non dans la sidebar** : les deux
-  // points d'entrée — le « … » de l'arbre et la pastille de la barre de titre — vivent tous deux dans
-  // cet écran, et une modale montée dans la sidebar serait inatteignable depuis la pastille. C'est le
-  // défaut n° 89, dont la leçon est appliquée d'emblée cette fois.
-  // **Le projet lui-même, non son nom.** Le nom seul suffisait jusqu'à ce que cette modale sache
-  // renommer : pendant le renommage, la liste porte le nouveau nom et l'état encore l'ancien, si bien
-  // qu'une recherche par nom ne trouve rien le temps d'un rendu — et la modale se démontait, perdant
-  // son compte rendu (« un mot de passe était introuvable »). L'objet gardé ici sert de **repli** pour
-  // ce seul rendu ; la liste chargée reste la source dès qu'elle a suivi.
-  const [aEditer, setAEditer] = useState<Project | null>(null)
   /**
    * La connexion dont le gestionnaire de schémas est ouvert (`API-33`), ou `null`.
    *
-   * Les **coordonnées**, jamais la déclaration : celle-ci est relue à chaque rendu depuis `projects`,
-   * de sorte qu'un enregistrement — qui repose `projects` — ne laisse pas la modale montrer la
-   * préférence d'avant. C'est ce que `projetAEditer` fait déjà pour la modale de projet.
+   * **L'identifiant, jamais la déclaration** : celle-ci est relue à chaque rendu dans l'arbre, de
+   * sorte qu'un enregistrement — qui repose l'arbre — ne laisse pas la modale montrer la préférence
+   * d'avant.
    */
-  const [schemasAGerer, setSchemasAGerer] = useState<{
-    project: string
-    database: string
-    environment: EnvironmentId
-  } | null>(null)
-  const ouvrirLEditionDe = (nom: string) =>
-    setAEditer(projects.find((projet) => projet.name === nom) ?? null)
+  const [schemasAGerer, setSchemasAGerer] = useState<ConnectionId | null>(null)
   const [selection, setSelection] = useState<Noeud | null>(null)
   const [etatOnglets, setEtatOnglets] = useState(AUCUN_ONGLET)
   const [type, setType] = useState<TypeObjet>('tables')
@@ -531,62 +472,40 @@ export function Workbench({
     diagramme?.schema ?? null,
     structures,
     passerelleStructures,
-    diagramme
-      ? charge.objets[
-          idSchema(
-            diagramme.key.project,
-            diagramme.key.environment,
-            diagramme.key.database,
-            diagramme.schema,
-          )
-        ]
-      : undefined,
+    diagramme ? charge.objets[idSchema(diagramme.key.connection, diagramme.schema)] : undefined,
   )
 
   // Le contexte du **centre** : le schéma de l'onglet actif, sinon celui que la sidebar désigne.
   // Distinct de la barre de titre, qui suit la base ouverte — `09e` a posé la distinction, et
   // elle ne devient visible qu'ici, avec plusieurs onglets.
-  // **Le contexte porte l'environnement**, et il le portait déjà sans le garder : les deux branches
-  // le reçoivent — `table.key` depuis `12a`, le nœud d'arbre depuis `23b` — et toutes deux le
-  // jetaient. L'écran le relisait alors sur `projetActif.activeEnvironment`, un réglage global du
-  // projet, ce qui suffisait tant que l'arbre ne montrait qu'un environnement à la fois. Depuis
-  // `25a` il en montre tous : c'est la sélection qui dit lequel, et rien d'autre.
+  // **La connexion par son identifiant** (#166) : c'est la sélection qui dit laquelle, et rien
+  // d'autre — deux connexions homonymes vivent dans deux dossiers.
   const contexte = table
-    ? {
-        project: table.key.project,
-        database: table.key.database,
-        environment: table.key.environment,
-        schema: table.schema,
-      }
-    : selection?.schema && selection.project && selection.database && selection.environment
-      ? {
-          project: selection.project,
-          database: selection.database,
-          environment: selection.environment,
-          schema: selection.schema,
-        }
+    ? { connection: table.key.connection, schema: table.schema }
+    : selection?.schema && selection.connection
+      ? { connection: selection.connection, schema: selection.schema }
       : null
 
   /**
-   * Ce que la barre de titre **indique** (`25b`) : le projet et l'environnement de la sélection.
+   * Ce que la barre de titre **indique** (`25b`) : la connexion de ce qu'on regarde, ou le dossier
+   * sélectionné.
    *
-   * Plus large que `contexte`, qui exige un schéma : sélectionner un projet, un environnement ou une
-   * connexion doit déjà s'afficher. Plus étroit que l'ancien `projetActif`, qui retombait sur
-   * `projects[0]` — cette retombée faisait annoncer un projet que personne n'avait désigné, et c'est
-   * exactement ce que « rien de sélectionné, indicateur vide » supprime.
+   * Plus large que `contexte`, qui exige un schéma : sélectionner un dossier ou une connexion doit
+   * déjà s'afficher. Rien de sélectionné, indicateur vide — aucune retombée sur « le premier ».
    */
-  const indication: { project: string; environment: EnvironmentId | null } | null = table
-    ? { project: table.key.project, environment: table.key.environment }
+  const indication: { connection: ConnectionId } | { folder: FolderId } | null = table
+    ? { connection: table.key.connection }
     : consoleActive
-      ? { project: consoleActive.key.project, environment: consoleActive.key.environment }
+      ? { connection: consoleActive.key.connection }
       : // Un diagramme appartient à une connexion comme une console : la barre de titre doit
-        // l'annoncer, sans quoi elle indiquerait le projet de la dernière ligne cliquée dans
-        // l'arbre pendant qu'on regarde le schéma d'une autre.
+        // l'annoncer, sans quoi elle indiquerait la dernière ligne cliquée dans l'arbre.
         diagramme
-        ? { project: diagramme.key.project, environment: diagramme.key.environment }
-        : selection?.project
-          ? { project: selection.project, environment: selection.environment ?? null }
-          : null
+        ? { connection: diagramme.key.connection }
+        : selection?.connection
+          ? { connection: selection.connection }
+          : selection?.folder
+            ? { folder: selection.folder }
+            : null
 
   /**
    * Il n'y a rien à montrer : aucun onglet ouvert, et aucun schéma en vue.
@@ -602,48 +521,42 @@ export function Workbench({
    */
   const rienAMontrer = actif === null && contexte === null
 
-  const projetIndique = projects.find((p) => p.name === indication?.project) ?? null
-  /** La déclaration de l'environnement indiqué, seule source du drapeau `production` (`23g`). */
-  const environnementIndique =
-    projetIndique?.environments.find((declaration) => declaration.id === indication?.environment) ??
-    null
+  /**
+   * Le chemin de dossiers de ce qu'on regarde, et les dossiers qui le portent — la barre de titre,
+   * et la **lecture seule imposée**, la plus simple qui soit : un dossier contenant la connexion est
+   * en lecture seule. Elle tient lieu du drapeau `production` des environnements jusqu'à #168, et le
+   * décor migré marque justement `prod` : les garde-fous s'allument au même endroit qu'avant.
+   */
+  const ancetresIndiques: readonly Folder[] =
+    indication === null
+      ? []
+      : 'connection' in indication
+        ? (connexion(arbre, indication.connection)?.ancetres ?? [])
+        : (() => {
+            const situe = dossier(arbre, indication.folder)
+            return situe ? [...situe.ancetres, situe.dossier] : []
+          })()
+  const lectureSeuleIndiquee = ancetreEnLectureSeule(ancetresIndiques) !== null
 
   /**
-   * Le dialecte que la base parle (`13a`).
-   *
-   * **Dérivé du moteur déclaré, jamais choisi.** Une console mongo sur une base PostgreSQL n'aurait
-   * rien à interroger, et l'inverse non plus : le bouton « Nouvelle console » ouvre donc la console
-   * de la base sur laquelle on est, sans poser la question.
+   * Le moteur déclaré d'une connexion, **par son identifiant** (#166).
    */
   const moteurDe = useCallback(
-    (nomProjet: string, nomBase: string, environnement: EnvironmentId) =>
-      // **L'environnement fait partie de l'identité de la connexion** (`23b`) : chercher par le seul
-      // nom rendait le moteur de la première homonyme — le dialecte de la console d'`analytics` en dev
-      // pour la console d'`analytics` en prod. `useArbre.baseDeclaree` filtrait déjà correctement ;
-      // cette fonction était en retard.
-      projects
-        .find((p) => p.name === nomProjet)
-        ?.databases.find((d) => d.name === nomBase && d.environment === environnement)?.engine,
-    [projects],
+    (connection: ConnectionId) => connexion(arbre, connection)?.base.engine,
+    [arbre],
   )
 
   /**
-   * Le dialecte que la base parle (`13a`), **dérivé du moteur déclaré** — voir `moteurDe`.
-   *
-   * Le tri par nom et par environnement vit là-haut : deux fonctions qui cherchaient la même
-   * déclaration en auraient laissé une en arrière au premier écart (règle n° 17), et c'est déjà
-   * arrivé une fois sur l'environnement.
+   * Le dialecte que la base parle (`13a`), **dérivé du moteur déclaré, jamais choisi** : une console
+   * mongo sur une base PostgreSQL n'aurait rien à interroger.
    */
   const dialecteDe = useCallback(
-    (nomProjet: string, nomBase: string, environnement: EnvironmentId): Dialecte =>
-      moteurDe(nomProjet, nomBase, environnement) === 'mongodb' ? 'mongo' : 'sql',
+    (connection: ConnectionId): Dialecte => (moteurDe(connection) === 'mongodb' ? 'mongo' : 'sql'),
     [moteurDe],
   )
 
   const objets: readonly TableSummary[] = contexte
-    ? (charge.objets[
-        idSchema(contexte.project, contexte.environment, contexte.database, contexte.schema)
-      ] ?? [])
+    ? (charge.objets[idSchema(contexte.connection, contexte.schema)] ?? [])
     : []
 
   const visibles = useMemo(
@@ -655,13 +568,7 @@ export function Workbench({
     [objets, filtre, type],
   )
 
-  const cle: DatabaseKey | null = contexte
-    ? {
-        project: contexte.project,
-        database: contexte.database,
-        environment: contexte.environment,
-      }
-    : null
+  const cle: DatabaseKey | null = contexte ? { connection: contexte.connection } : null
 
   // L'exécution des requêtes de console (`12c`). Elle vit ici parce que la confirmation est une
   // sous-modale de l'écran, comme celle de `11d` — et **au-dessus des renommages**, qui appellent
@@ -712,15 +619,8 @@ export function Workbench({
    *
    * Déclaré avant `useExecution`, qui en tire le découpage d'une suite d'instructions (#156).
    */
-  const moteurConsole =
-    consoleActive === null
-      ? undefined
-      : moteurDe(
-          consoleActive.key.project,
-          consoleActive.key.database,
-          consoleActive.key.environment,
-        )
-  const transaction = useTransaction(passerelleTransaction, consoleDeTransaction, projects)
+  const moteurConsole = consoleActive === null ? undefined : moteurDe(consoleActive.key.connection)
+  const transaction = useTransaction(passerelleTransaction, consoleDeTransaction, arbre)
   const execution = useExecution(
     cleConsole,
     passerelleExecution ?? PASSERELLE_EXECUTION,
@@ -735,9 +635,7 @@ export function Workbench({
    * Le moteur de la base ouverte, pour l'édition de document en JSON (`18g`) — **dérivé de la
    * déclaration**, comme `dialecteDe`, jamais deviné depuis le contenu de l'écran.
    */
-  const moteurActuel = contexte
-    ? moteurDe(contexte.project, contexte.database, contexte.environment)
-    : undefined
+  const moteurActuel = contexte ? moteurDe(contexte.connection) : undefined
 
   /**
    * Pourquoi la bascule « Transaction manuelle » ne peut pas bouger, quand elle ne peut pas
@@ -769,18 +667,10 @@ export function Workbench({
 
   /**
    * Le libellé d'affichage de la base ouverte (27 août 2026), pour le fil d'Ariane du centre, la
-   * barre de titre et la confirmation d'exécution — **jamais** `contexte.database` telle quelle,
-   * qui reste l'identité (`table.key.database`, les comparaisons d'onglets…). Même dérivation que
-   * `moteurActuel` : depuis la déclaration, jamais devinée depuis ce que l'écran montre.
+   * barre de titre et la confirmation d'exécution. Même dérivation que `moteurActuel` : depuis la
+   * déclaration, jamais devinée depuis ce que l'écran montre.
    */
-  const libelleActuel = contexte
-    ? projects
-        .find((p) => p.name === contexte.project)
-        ?.databases.find(
-          (d) => d.name === contexte.database && d.environment === contexte.environment,
-        )
-        ?.label?.trim() || contexte.database
-    : undefined
+  const libelleActuel = contexte ? libelleDeConnexion(arbre, contexte.connection) : undefined
 
   // Le détail sert deux endroits : le panneau droit de `A4` (l'objet sélectionné) et la section
   // « Colonnes de *table* » de la sidebar (la table de l'onglet actif). Une seule lecture, deux
@@ -879,20 +769,13 @@ export function Workbench({
    * un nom que le disque ne connaît plus.
    */
   const renommerUneConsole = useCallback(
-    async (
-      project: string,
-      database: string,
-      environment: EnvironmentId,
-      nom: string,
-      nouveau: string,
-    ) => {
+    async (connection: ConnectionId, nom: string, nouveau: string) => {
       if (onRenameConsole === undefined) return
-      await onRenameConsole(project, database, environment, nom, nouveau)
-      setEtatOnglets((etat) =>
-        renommerLaConsole(etat, { project, database, environment }, nom, nouveau),
-      )
-      const ancienId = idDeConsolePersistee({ project, database, environment }, nom)
-      const nouvelId = idDeConsolePersistee({ project, database, environment }, nouveau)
+      await onRenameConsole(connection, nom, nouveau)
+      const key = { connection }
+      setEtatOnglets((etat) => renommerLaConsole(etat, key, nom, nouveau))
+      const ancienId = idDeConsolePersistee(key, nom)
+      const nouvelId = idDeConsolePersistee(key, nouveau)
       setTextes((precedent) => {
         const texte = precedent[ancienId]
         if (texte === undefined) return precedent
@@ -902,91 +785,25 @@ export function Workbench({
       // **Le résultat suit le nom, comme le texte** : son identité en dérive, et le laisser sous
       // l'ancienne clé viderait la grille sur un renommage.
       execution.reindexer((id) => (id === ancienId ? nouvelId : id))
-      // **La transaction suit aussi** (`API-38`), et c'est celle dont l'oubli coûte le plus cher :
-      // le cœur garde l'origine des instructions déjà jouées, donc un jeton laissé sous l'ancien
-      // nom rendrait à cette console ses propres instructions comme **étrangères** — panneau vide,
-      // et un « Valider » qui emporte ce qu'elle ne voit plus.
+      // **La transaction suit aussi** (`API-38`) : un jeton laissé sous l'ancien nom rendrait à cette
+      // console un panneau vide, et un « Valider » qui emporte ce qu'elle ne voit plus.
       transaction.reindexer((id) => (id === ancienId ? nouvelId : id))
       setConsolesOuvertes((precedent) => {
         if (!(ancienId in precedent)) return precedent
         const { [ancienId]: _oubliee, ...reste } = precedent
-        return { ...reste, [nouvelId]: { project, database, environment, nom: nouveau } }
+        return { ...reste, [nouvelId]: { connection, nom: nouveau } }
       })
     },
     [onRenameConsole, execution.reindexer, transaction.reindexer],
   )
 
-  /**
-   * Renomme une connexion, et fait suivre tout ce qui portait son nom (`26`).
-   *
-   * **L'écran de travail est le seul à pouvoir le faire.** La sidebar porte le geste, mais elle ne
-   * connaît pas les onglets ; le cœur déplace le secret et ferme la connexion, mais il ne sait rien
-   * de ce qui est ouvert. Cinq tables indexées par identité d'onglet vivent ici, et en oublier une
-   * casse quelque chose de visible : le texte d'une console, son dernier résultat, ses modifications
-   * en attente, son mode édition, et l'association qui dit où écrire.
-   *
-   * **Le refus n'est pas capturé** : il remonte à la sidebar, qui a ouvert le champ de saisie et sait
-   * l'afficher. Le capturer ici renommerait sans rien renommer, en silence.
+  /*
+   * **Renommer une connexion ne demande plus rien à cet écran** (#166). Il fallait réindexer cinq
+   * tables indexées par identité d'onglet — texte, résultat, modifications en attente, mode édition,
+   * association à la console —, parce que ces identités portaient le nom de la connexion, et relâcher
+   * la sélection de l'arbre. Elles portent désormais son identifiant : le renommage ne touche à
+   * aucune, et le cœur ne ferme plus la connexion. Le geste passe donc tout droit à la sidebar.
    */
-  const renommerUneConnexion = useCallback(
-    async (
-      project: string,
-      database: string,
-      environment: EnvironmentId,
-      nouveau: string,
-    ): Promise<{ missingSecrets: string[]; leftoverSecrets: string[] }> => {
-      if (onRenameDatabase === undefined) {
-        return { missingSecrets: [], leftoverSecrets: [] }
-      }
-      const issue = await onRenameDatabase(project, database, environment, nouveau)
-      const key = { project, database, environment }
-
-      // **Les structures partent avec l'ancienne clé** : le cœur vient de fermer cette
-      // connexion, et ce qui reste en mémoire sous son ancien nom ne sera plus jamais lu — sauf par
-      // une connexion homonyme recréée plus tard, qui lirait la structure d'une autre base. La file
-      // de préchauffage en cours est annulée dans le même geste.
-      structures.oublierLaConnexion(key)
-
-      setEtatOnglets((etat) => renommerLaConnexion(etat, key, nouveau))
-      setTextes((precedent) => reindexerParConnexion(precedent, key, nouveau))
-      setAttentes((precedent) => reindexerParConnexion(precedent, key, nouveau))
-      execution.reindexer((id) => idApresRenommage(id, key, nouveau))
-      transaction.reindexer((id) => idApresRenommage(id, key, nouveau))
-      setOngletsEnEdition(
-        (precedent) => new Set([...precedent].map((id) => idApresRenommage(id, key, nouveau))),
-      )
-      // **La sélection de l'arbre est relâchée** si elle visait cette connexion ou l'un de ses
-      // descendants. Les identités de l'arbre portent le nom de la base (`d:projet/env/base`) :
-      // celles-là n'existent plus. Les réécrire aurait gardé le surlignage, mais aussi les schémas
-      // déjà chargés — sur une connexion que le cœur vient de **fermer**. Une ligne repliée et une
-      // sélection relâchée disent la vérité ; un arbre qui montre le contenu d'une connexion fermée,
-      // non.
-      setSelection((precedent) =>
-        precedent !== null &&
-        precedent.project === project &&
-        precedent.database === database &&
-        precedent.environment === environment
-          ? null
-          : precedent,
-      )
-      // **La valeur bouge autant que la clé** : elle porte le nom de la connexion, et c'est elle que
-      // la frappe suivante enverra à `save_console`.
-      setConsolesOuvertes((precedent) =>
-        Object.fromEntries(
-          Object.entries(precedent).map(([id, ouverte]) => [
-            idApresRenommage(id, key, nouveau),
-            ouverte.project === project &&
-            ouverte.database === database &&
-            ouverte.environment === environment
-              ? { ...ouverte, database: nouveau }
-              : ouverte,
-          ]),
-        ),
-      )
-      return issue
-    },
-    [onRenameDatabase, structures, execution.reindexer, transaction.reindexer],
-  )
 
   /**
    * Crée une console sous un nom par défaut, et rend ce nom.
@@ -1001,18 +818,18 @@ export function Workbench({
    * « console 3 » à côté d'une « console 1 » solitaire.
    */
   const creerUneConsole = useCallback(
-    async (project: string, database: string, environment: EnvironmentId, sql = '') => {
+    async (connection: ConnectionId, sql = '') => {
       if (onCreateConsole === undefined) return undefined
       const pris = new Set(
-        consolesDe(projects, { project, database, environment }).map((console) => console.name),
+        (connexion(arbre, connection)?.base.consoles ?? []).map((console) => console.name),
       )
       let numero = 1
       while (pris.has(`console ${numero}`)) numero += 1
       const nom = `console ${numero}`
 
-      await onCreateConsole(project, database, environment, nom)
+      await onCreateConsole(connection, nom)
       if (sql !== '' && onSaveConsole) {
-        await onSaveConsole(project, database, environment, nom, sql)
+        await onSaveConsole(connection, nom, sql)
       }
 
       /* **Créer ouvre.** Le pied de la sidebar ne porte plus de bouton « Nouvelle console » depuis le
@@ -1027,27 +844,18 @@ export function Workbench({
 
          **Après `onCreateConsole`, non avant** : on n'ouvre pas la connexion d'une console dont la
          création a échoué. Ce n'est pas ce qui décide de la course, en revanche — `onCreateConsole`
-         réécrit `projects`, ce changement fait relire le registre, et cette lecture peut partir avant
+         réécrit l'arbre, ce changement fait relire le registre, et cette lecture peut partir avant
          l'ouverture pour revenir après elle. C'est `useArbre.ouverturesAbouties` qui l'empêche de
          reprendre les schémas obtenus entre-temps, et l'ordre ici n'y changerait rien. */
-      void assurerLOuverture({ project, database, environment })
-      setEtatOnglets((etat) =>
-        ouvrirConsole(
-          etat,
-          { project, database, environment },
-          dialecteDe(project, database, environment),
-          nom,
-        ),
-      )
-      const id = idDeConsolePersistee({ project, database, environment }, nom)
-      setConsolesOuvertes((precedent) => ({
-        ...precedent,
-        [id]: { project, database, environment, nom },
-      }))
+      const key = { connection }
+      void assurerLOuverture(key)
+      setEtatOnglets((etat) => ouvrirConsole(etat, key, dialecteDe(connection), nom))
+      const id = idDeConsolePersistee(key, nom)
+      setConsolesOuvertes((precedent) => ({ ...precedent, [id]: { connection, nom } }))
       setTextes((precedent) => ({ ...precedent, [id]: sql }))
       return nom
     },
-    [onCreateConsole, onSaveConsole, projects, dialecteDe, assurerLOuverture],
+    [onCreateConsole, onSaveConsole, arbre, dialecteDe, assurerLOuverture],
   )
   /**
    * Quelle console **persistée** chaque onglet ouvre, par identité d'onglet.
@@ -1059,9 +867,7 @@ export function Workbench({
    * onglets sont ouverts sur deux connexions.
    */
   const [consolesOuvertes, setConsolesOuvertes] = useState<
-    Readonly<
-      Record<string, { project: string; database: string; environment: EnvironmentId; nom: string }>
-    >
+    Readonly<Record<string, { connection: ConnectionId; nom: string }>>
   >({})
   /**
    * Les colonnes des tables **déjà lues**, accumulées.
@@ -1116,12 +922,7 @@ export function Workbench({
    * l'appelant : voir `assurerLOuverture` dans `creerUneConsole`.
    */
   const schemasDeLaConnexion = useMemo(
-    () =>
-      cleConsole
-        ? (charge.schemas[
-            idBase(cleConsole.project, cleConsole.environment, cleConsole.database)
-          ] ?? [])
-        : [],
+    () => (cleConsole ? (charge.schemas[idBase(cleConsole.connection)] ?? []) : []),
     [charge.schemas, cleConsole],
   )
 
@@ -1141,10 +942,7 @@ export function Workbench({
     if (!cleConsole) return {}
     const par: Record<string, readonly string[]> = {}
     for (const schema of schemasDeLaConnexion) {
-      const objetsDeLArbre =
-        charge.objets[
-          idSchema(cleConsole.project, cleConsole.environment, cleConsole.database, schema.name)
-        ]
+      const objetsDeLArbre = charge.objets[idSchema(cleConsole.connection, schema.name)]
       const objetsDuSchema = objetsDeLArbre ?? structures.objetsDuSchema(cleConsole, schema.name)
       if (objetsDuSchema) par[schema.name] = objetsDuSchema.map((objet) => objet.name)
     }
@@ -1196,10 +994,9 @@ export function Workbench({
   const [textes, setTextes] = useState<Readonly<Record<string, string>>>({})
   const application = useApplication(cle, table, attente, detail?.columns ?? [], {
     passerelle: passerelleApply ?? PASSERELLE_APPLY,
-    // **Le drapeau de la déclaration, non l'identifiant** (`23g`) : la confirmation d'écriture doit
-    // s'ouvrir pour un environnement nommé « live » et marqué production, et rester fermée pour un
-    // « prod » que l'utilisateur n'a pas marqué.
-    production: environnementIndique?.production ?? false,
+    // **La lecture seule imposée par un dossier, en attendant #168** : elle tient lieu du drapeau
+    // `production` des environnements. Le drapeau, jamais le nom du dossier (`23g`).
+    production: lectureSeuleIndiquee,
     // **Après le succès, la grille est relue et le modèle vidé.** Les valeurs écrites peuvent
     // différer de celles saisies — un `trigger`, une valeur par défaut, une troncature — et
     // afficher la saisie donnerait un écran qui ne reflète plus la base. Vider le modèle fait
@@ -1304,11 +1101,7 @@ export function Workbench({
     setEtatOnglets((etat) =>
       ouvrir(etat, {
         sorte: 'table',
-        key: {
-          project: contexte.project,
-          database: contexte.database,
-          environment: contexte.environment,
-        },
+        key: { connection: contexte.connection },
         schema: contexte.schema,
         table: objet.name,
         kind: objet.kind === 'view' ? 'view' : 'table',
@@ -1350,13 +1143,7 @@ export function Workbench({
             : (id, nouveau) => {
                 const ouverte = consolesOuvertes[id]
                 if (ouverte === undefined) return
-                void renommerUneConsole(
-                  ouverte.project,
-                  ouverte.database,
-                  ouverte.environment,
-                  ouverte.nom,
-                  nouveau,
-                )
+                void renommerUneConsole(ouverte.connection, ouverte.nom, nouveau)
               }
         }
       />
@@ -1400,13 +1187,7 @@ export function Workbench({
               clearTimeout(ecrituresEnAttente.current[id])
               ecrituresEnAttente.current[id] = setTimeout(() => {
                 delete ecrituresEnAttente.current[id]
-                void onSaveConsole(
-                  console.project,
-                  console.database,
-                  console.environment,
-                  console.nom,
-                  texte,
-                )
+                void onSaveConsole(console.connection, console.nom, texte)
               }, DELAI_ECRITURE)
             }
           }}
@@ -1462,10 +1243,10 @@ export function Workbench({
             onCreateConsole === undefined || consolesOuvertes[idOnglet(consoleActive)] !== undefined
               ? undefined
               : async (sql) => {
-                  const { project, database, environment } = cleConsole
-                  const nom = await creerUneConsole(project, database, environment, sql)
+                  const { connection } = cleConsole
+                  const nom = await creerUneConsole(connection, sql)
                   if (nom === undefined) return
-                  const id = idDeConsolePersistee({ project, database, environment }, nom)
+                  const id = idDeConsolePersistee(cleConsole, nom)
                   const brouillon = idOnglet(consoleActive)
                   setEtatOnglets((etat) => baptiserLeBrouillon(etat, brouillon, nom))
                   // **Le baptême change l'identité de l'onglet** — du numéro au nom (voir
@@ -1475,7 +1256,7 @@ export function Workbench({
                   transaction.reindexer((autre) => (autre === brouillon ? id : autre))
                   setConsolesOuvertes((precedent) => ({
                     ...precedent,
-                    [id]: { project, database, environment, nom },
+                    [id]: { connection, nom },
                   }))
                   setTextes((precedent) => ({ ...precedent, [id]: sql }))
                 }
@@ -1520,7 +1301,7 @@ export function Workbench({
         <TableView
           // Une instance par onglet : changer de table remonte la vue, donc remet
           // filtres et tri à zéro sans effet de nettoyage.
-          key={`${table.key.project}/${table.key.database}/${table.schema}.${table.table}`}
+          key={`${table.key.connection}/${table.schema}.${table.table}`}
           cle={cle}
           schema={table.schema}
           table={table.table}
@@ -1561,18 +1342,17 @@ export function Workbench({
           /* **Résolus ici, une fois** (`API-75`) : la déclaration vit sur le projet, et c'est cet
              écran qui tient la configuration. `libellesDeLaTable` est le seul endroit qui réponde
              à « que veulent dire les entiers de cette table ? ». */
-          libelles={libellesDeLaTable(projects, table.key.project, table.table)}
+          libelles={libellesDeLaTable(arbre, table.key.connection, table.table)}
           onLibelles={async (colonne, valeurs) => {
-            const suivants = await saveValueLabels({
-              project: table.key.project,
+            const suivant = await saveValueLabels({
+              connection: table.key.connection,
               table: table.table,
               column: colonne,
               labels: valeurs,
             })
-            /* **Reposer les projets est ce qui réaffiche la grille** : les libellés viennent de
-               `projects`, donc la vue les relit au rendu suivant sans relire une seule ligne — la
-               lecture n'a pas changé, seul l'affichage a. */
-            onProjets?.(suivants)
+            /* **Reposer l'arbre est ce qui réaffiche la grille** : les libellés en viennent, donc la
+               vue les relit au rendu suivant sans relire une seule ligne. */
+            onArbre?.(suivant)
           }}
         />
       ) : (
@@ -1600,77 +1380,43 @@ export function Workbench({
     </div>
   )
 
-  const projetAEditer =
-    aEditer === null ? null : (projects.find((projet) => projet.name === aEditer.name) ?? aEditer)
-
   /**
-   * Ce que le gestionnaire de schémas a besoin de savoir, **relu dans `projects`** (`API-33`).
+   * Ce que le gestionnaire de schémas a besoin de savoir, **relu dans l'arbre** (`API-33`).
    *
-   * La déclaration porte la préférence enregistrée, et l'environnement déclaré porte son libellé et
-   * son drapeau de production. Les trois viennent donc de la configuration à chaque rendu : garder
-   * une copie dans l'état de la modale l'aurait laissée afficher la préférence d'avant
-   * l'enregistrement, et le libellé d'avant un renommage d'environnement.
+   * La déclaration porte la préférence enregistrée, et ses dossiers le chemin qui s'affiche. Les deux
+   * viennent donc de la configuration à chaque rendu : garder une copie dans l'état de la modale
+   * l'aurait laissée afficher la préférence d'avant l'enregistrement.
    */
   const connexionDesSchemas = (() => {
     if (schemasAGerer === null) return null
-    const projet = projects.find((candidat) => candidat.name === schemasAGerer.project)
-    // **Le couple nom + environnement** (`23b`) : `analytics` peut être déclarée en dev et en prod,
-    // et le seul nom en désignerait une au hasard.
-    const base = projet?.databases.find(
-      (candidate) =>
-        candidate.name === schemasAGerer.database &&
-        candidate.environment === schemasAGerer.environment,
-    )
-    const environnement = projet?.environments.find(
-      (declaration) => declaration.id === schemasAGerer.environment,
-    )
+    const situee = connexion(arbre, schemasAGerer)
     // La connexion a pu être retirée pendant que la modale était ouverte : rien à régler alors.
-    if (!projet || !base) return null
-    const cleDesSchemas: DatabaseKey = {
-      project: schemasAGerer.project,
-      database: schemasAGerer.database,
-      environment: schemasAGerer.environment,
+    if (situee === null) return null
+    const cleDesSchemas: DatabaseKey = { connection: schemasAGerer }
+    return {
+      base: situee.base,
+      chemin: situee.ancetres.map((ancetre) => ancetre.name),
+      lectureSeule: ancetreEnLectureSeule(situee.ancetres) !== null,
+      cle: cleDesSchemas,
     }
-    return { projet, base, environnement, cle: cleDesSchemas }
   })()
 
   return (
     <div className={styles.root}>
-      {/* La modale d'édition de projet (`23e`). Montée une fois pour les deux points d'entrée. */}
-      {projetAEditer !== null && onRenameProject !== undefined && (
-        <ProjectEditor
-          projet={projetAEditer}
-          onClose={() => setAEditer(null)}
-          onProjets={(suivants) => onProjets?.(suivants)}
-          {...gestesEnvironnement}
-          onRenameProject={async (nom) => {
-            const issue = await onRenameProject(projetAEditer.name, nom)
-            // Le projet a changé de nom : l'état qui le désignait par l'ancien ne trouverait plus
-            // rien, et la modale se fermerait d'elle-même sans que l'utilisateur l'ait demandé.
-            setAEditer({ ...projetAEditer, name: nom })
-            return issue
-          }}
-        />
-      )}
-      {/* Le gestionnaire de schémas (`API-33`), monté au niveau de l'écran comme la modale de
-          projet : son point d'entrée est le menu d'une ligne d'arbre, mais elle ne vit pas dans
+      {/* Le gestionnaire de schémas (`API-33`), monté au niveau de l'écran : son point d'entrée est le menu d'une ligne d'arbre, mais elle ne vit pas dans
           l'arbre — elle lit la base et écrit la configuration. */}
       {connexionDesSchemas !== null && (
         <SchemaManager
           cible={{
-            projet: connexionDesSchemas.projet.name,
-            // Le **libellé** de l'environnement, qui peut diverger de son identifiant depuis `23b` :
-            // c'est ce qui s'affiche partout ailleurs dans l'arbre.
-            environnement:
-              connexionDesSchemas.environnement?.label ?? connexionDesSchemas.base.environment,
-            // Et le libellé de la connexion, pour la même raison (`27a`) : `label` s'il est
+            chemin: connexionDesSchemas.chemin,
+            // Le libellé de la connexion, pour la même raison (`27a`) : `label` s'il est
             // renseigné, `name` sinon — la règle d'`arbre.ts`.
             base: connexionDesSchemas.base.label?.trim() || connexionDesSchemas.base.name,
           }}
           affiches={connexionDesSchemas.base.visibleSchemas ?? null}
-          // **Le drapeau de la déclaration, jamais le libellé** (`23g`), comme pour la confirmation
-          // d'écriture : un environnement nommé « live » et marqué production porte le rappel.
-          production={connexionDesSchemas.environnement?.production ?? false}
+          // **La lecture seule imposée par un dossier**, en attendant #168 — le drapeau, jamais le
+          // nom (`23g`), comme pour la confirmation d'écriture.
+          production={connexionDesSchemas.lectureSeule}
           onClose={() => setSchemasAGerer(null)}
           onLire={async () => {
             /* **Ouvrir avant de lire, et l'attendre.** Le menu d'une connexion est atteignable dès
@@ -1693,16 +1439,13 @@ export function Workbench({
             )
           }}
           onEnregistrer={async (schemas) => {
-            const suivants = await passerelleSchemas.saveVisibleSchemas({
-              project: connexionDesSchemas.projet.name,
-              // **`database`, jamais `label`** (`27a`) : c'est l'identité que la commande attend.
-              database: connexionDesSchemas.base.name,
-              environment: connexionDesSchemas.base.environment,
+            const suivant = await passerelleSchemas.saveVisibleSchemas({
+              connection: connexionDesSchemas.cle.connection,
               schemas: [...schemas],
             })
-            onProjets?.(suivants)
-            /* La liste **qu'on vient d'enregistrer**, non celle que `projects` porte : celui-ci ne
-               sera reposé qu'au rendu suivant, et le filtre appliqué serait celui d'avant. */
+            onArbre?.(suivant)
+            /* La liste **qu'on vient d'enregistrer**, non celle que l'arbre porte : celui-ci ne sera
+               reposé qu'au rendu suivant, et le filtre appliqué serait celui d'avant. */
             await rechargerLesSchemas(connexionDesSchemas.cle, schemas)
           }}
         />
@@ -1718,22 +1461,11 @@ export function Workbench({
           indication === null ? undefined : (
             <SelectionIndicator
               pendingChanges={attente.length}
-              projectName={indication.project}
-              environment={
-                environnementIndique === null
-                  ? undefined
-                  : {
-                      label: environnementIndique.label,
-                      color: environnementIndique.color,
-                      production: environnementIndique.production,
-                    }
-              }
+              chemin={ancetresIndiques.map((ancetre) => ancetre.name)}
+              couleur={couleurLaPlusProche(ancetresIndiques)}
+              readOnly={lectureSeuleIndiquee}
               breadcrumb={contexte ? `${libelleActuel} · ${contexte.schema}` : undefined}
-              connection={
-                contexte
-                  ? etatDeBase(contexte.project, contexte.database, contexte.environment)
-                  : undefined
-              }
+              connection={contexte ? etatDeBase(contexte.connection) : undefined}
             />
           )
         }
@@ -1754,11 +1486,10 @@ export function Workbench({
              validation. */
           dansUneTransaction={transaction.mode(consoleDeTransaction) === 'manual'}
           cible={contexte ? `${libelleActuel} · ${contexte.schema}` : '—'}
-          // **Le drapeau de production, non le libellé** (`23g`) : un environnement nommé « live » et
-          // marqué production doit porter l'encart rouge, et un environnement nommé « prod » que
-          // l'utilisateur n'a pas marqué ne doit pas. Comparer une chaîne rendrait la garantie fausse
-          // au premier renommage.
-          production={environnementIndique?.production ?? false}
+          // **Le drapeau, non le nom** (`23g`) : la lecture seule imposée par un dossier, en attendant
+          // la lecture seule effective de #168. Comparer une chaîne rendrait la garantie fausse au
+          // premier renommage.
+          production={lectureSeuleIndiquee}
           enCours={execution.enCours}
           onClose={execution.annulerLaConfirmation}
           onConfirmer={execution.executer}
@@ -1770,9 +1501,8 @@ export function Workbench({
         <CommitConfirm
           validation={transaction.aValider}
           cible={libelleActuel ?? '—'}
-          // **Le drapeau de la déclaration, jamais le libellé** (`23g`), comme les deux autres
-          // confirmations : un environnement nommé « live » et marqué production porte l'encart.
-          production={environnementIndique?.production ?? false}
+          // **Le drapeau, jamais le nom** (`23g`), comme les deux autres confirmations.
+          production={lectureSeuleIndiquee}
           enCours={transaction.enCours}
           onClose={transaction.annulerLaValidation}
           onConfirmer={() => {
@@ -1837,7 +1567,7 @@ export function Workbench({
                   // l'ouverture d'un onglet. Le `SplitPane` la rend de toute façon réglable, ce
                   // qu'un mockup figé ne peut pas exprimer. Écart consigné dans `AGENTS.md`.
                   width="fill"
-                  projects={projects}
+                  arbre={arbre}
                   deplies={deplies}
                   charge={charge}
                   etatDe={etatDeBase}
@@ -1847,183 +1577,124 @@ export function Workbench({
                       ? { table: table.table, schema: table.schema, compte: attente.length }
                       : undefined
                   }
-                  // Le « … » d'une ligne de base mène à la même modale que le menu de la pastille
-                  // (`08g`) : deux chemins vers un seul écran, et c'est voulu — l'arbre est là où
-                  // l'utilisateur regarde ses bases, la pastille là où il regarde son projet.
-                  // La sidebar nomme la base ; le projet, lui, connaît son objet `Database`.
-                  onEditDatabase={(nomProjet, nomBase, environnement) => {
-                    const base = projects
-                      .find((projet) => projet.name === nomProjet)
-                      ?.databases.find(
-                        (declaration) =>
-                          declaration.name === nomBase && declaration.environment === environnement,
-                      )
-                    if (base) onEditDatabase?.(nomProjet, base)
+                  // Le « … » d'une connexion mène à la modale de `08g`. La sidebar nomme la
+                  // connexion par son identifiant ; l'écran retrouve sa déclaration dans l'arbre.
+                  onEditDatabase={(connection) => {
+                    const base = connexion(arbre, connection)?.base
+                    if (base) onEditDatabase?.(base)
                   }}
                   /* **Ouvrir un diagramme ouvre sa connexion**, comme ouvrir une console (1er
-                 septembre 2026). Le menu d'un schéma n'est atteignable que si la ligne de la base
-                 est dépliée, donc la connexion répondait — mais « répondait » n'est pas « répond » :
-                 six commandes de configuration en ferment sans que l'arbre se replie, et le
-                 diagramme se serait alors ouvert sur une toile vide. C'est le quatrième point
-                 d'ouverture, et il suit la même règle que les trois autres. */
-                  onOpenDiagram={(project, database, environment, schema) => {
-                    void assurerLOuverture({ project, database, environment })
-                    setEtatOnglets((etat) =>
-                      ouvrirDiagramme(etat, { project, database, environment }, schema),
-                    )
+                     septembre 2026) : « répondait » n'est pas « répond », et le diagramme se serait
+                     sinon ouvert sur une toile vide. */
+                  onOpenDiagram={(connection, schema) => {
+                    void assurerLOuverture({ connection })
+                    setEtatOnglets((etat) => ouvrirDiagramme(etat, { connection }, schema))
                   }}
-                  /* **Le gestionnaire de schémas part du menu de la connexion** (`API-33`), comme la
-                 création d'une console : le geste part du palier qui connaît son contexte. La
-                 sidebar nomme la connexion ; l'écran, lui, retrouve sa déclaration. */
-                  onManageSchemas={(project, database, environment) =>
-                    setSchemasAGerer({ project, database, environment })
-                  }
-                  onRenameDatabase={
-                    onRenameDatabase === undefined ? undefined : renommerUneConnexion
-                  }
-                  onEditProject={onRenameProject === undefined ? undefined : ouvrirLEditionDe}
-                  /* **L'export d'un projet part du menu de sa ligne** (`API-30`) : c'est le
-                     palier qui connaît la portée. L'écran de travail ne fait que le relayer — la
-                     modale vit au niveau de l'application, avec celle qui exporte *tous* les
-                     projets, parce que les deux portées sont un seul écran. */
-                  onExportProject={onExportProject}
+                  /* **Le gestionnaire de schémas part du menu de la connexion** (`API-33`) : le
+                     geste part du palier qui connaît son contexte. */
+                  onManageSchemas={setSchemasAGerer}
+                  onRenameDatabase={onRenameDatabase}
+                  onNewFolder={onNewFolder}
+                  renommageInitial={renommageInitial}
+                  onRenameFolder={onRenameFolder}
+                  onRecolorFolder={onRecolorFolder}
+                  onSetFolderReadOnly={onSetFolderReadOnly}
                   onImportProjects={onImportProjects}
                   consoles={
                     onCreateConsole === undefined
                       ? undefined
                       : {
-                          onCreer: (project, database, environment) => {
-                            void creerUneConsole(project, database, environment)
+                          onCreer: (connection) => {
+                            void creerUneConsole(connection)
                           },
-                          onRenommer: (project, database, environment, nom, nouveau) => {
-                            void renommerUneConsole(project, database, environment, nom, nouveau)
+                          onRenommer: (connection, nom, nouveau) => {
+                            void renommerUneConsole(connection, nom, nouveau)
                           },
-                          onRetirer: (project, database, environment, nom) => {
+                          onRetirer: (connection, nom) => {
                             if (onDeleteConsole === undefined) return
-                            void onDeleteConsole(project, database, environment, nom)
+                            void onDeleteConsole(connection, nom)
                             // L'onglet ouvert sur cette console se ferme avec elle : le laisser
                             // écrirait dans une console retirée à la frappe suivante.
                             setConsolesOuvertes((precedent) =>
                               Object.fromEntries(
                                 Object.entries(precedent).filter(
                                   ([, ouverte]) =>
-                                    !(
-                                      ouverte.project === project &&
-                                      ouverte.database === database &&
-                                      ouverte.environment === environment &&
-                                      ouverte.nom === nom
-                                    ),
+                                    !(ouverte.connection === connection && ouverte.nom === nom),
                                 ),
                               ),
                             )
                           },
                         }
                   }
-                  // **Retirer une base ferme ses onglets**, et l'écran de travail est le seul à pouvoir
-                  // le faire : un onglet survivant lirait une base dont la déclaration est partie.
+                  // **Retirer ferme les onglets de ce qui part**, et l'écran de travail est le seul à
+                  // pouvoir le faire : un onglet survivant lirait une base dont la déclaration est
+                  // partie. Pour un dossier, **toutes ses connexions descendantes** — comptées sur
+                  // l'arbre d'avant le retrait, qui les contient encore.
                   onDelete={
                     onDelete === undefined
                       ? undefined
                       : async (cible) => {
+                          const visees = connexionsVisees(arbre, cible)
                           const issue = await onDelete(cible)
-                          setEtatOnglets((etat) => sansLesOngletsDe(etat, cible))
+                          setEtatOnglets((etat) => sansLesOngletsDe(etat, visees))
                           setAttentes((precedent) =>
                             Object.fromEntries(
-                              Object.entries(precedent).filter(([id]) => !viseeParLId(cible, id)),
+                              Object.entries(precedent).filter(([id]) => !viseeParLId(visees, id)),
                             ),
                           )
                           return issue
                         }
                   }
                   // Ce qui serait perdu, compté **avant** de le perdre : la confirmation le dit.
-                  modificationsEnAttenteDe={(cible) =>
-                    Object.entries(attentes)
-                      .filter(([id]) => viseeParLId(cible, id))
+                  modificationsEnAttenteDe={(cible) => {
+                    const visees = connexionsVisees(arbre, cible)
+                    return Object.entries(attentes)
+                      .filter(([id]) => viseeParLId(visees, id))
                       .reduce((total, [, enAttente]) => total + enAttente.length, 0)
-                  }
+                  }}
                   selectedId={selection?.id ?? null}
                   onSelect={(noeud) => {
                     setSelection(noeud)
                     // **Sélectionner charge ce qu'on va regarder**, le dépliage n'étant plus le geste du
                     // clic : un schéma sélectionné mais jamais déplié montrerait sinon une liste d'objets
-                    // vide dans `A4`. Sur une connexion, cela ouvre la connexion — ce que le clic simple
-                    // faisait déjà quand il dépliait, et ce qui rend vraie la pastille d'état de sa ligne.
-                    // Sans effet sur ce qui est déjà chargé.
+                    // vide dans `A4`. Sans effet sur ce qui est déjà chargé.
                     charger(noeud)
                     // Une **feuille** de l'arbre est un objet : la sélectionner l'ouvre. Un simple
-                    // clic suffit, parce qu'une feuille n'a pas d'autre geste — pas de dépliage à
-                    // distinguer. Dans la liste du centre, où sélectionner remplit le panneau de
-                    // détail, il faut au contraire un double-clic.
-                    // **Aucun repli sur un environnement d'écran** : ces gardes portaient
-                    // `noeud.environment ?? environnement`, donc un nœud sans environnement ouvrait la
-                    // connexion d'un environnement arbitraire — sur le mauvais serveur, sans le dire.
-                    // Tout nœud d'objet en porte un ; l'exiger le prouve au compilateur.
-                    if (
-                      noeud.kind === 'object' &&
-                      noeud.project &&
-                      noeud.database &&
-                      noeud.schema &&
-                      noeud.environment
-                    ) {
+                    // clic suffit, parce qu'une feuille n'a pas d'autre geste.
+                    if (noeud.kind === 'object' && noeud.connection && noeud.schema) {
+                      const { connection, schema } = noeud
                       setEtatOnglets((etat) =>
                         ouvrir(etat, {
                           sorte: 'table',
-                          key: {
-                            project: noeud.project as string,
-                            database: noeud.database as string,
-                            environment: noeud.environment as EnvironmentId,
-                          },
-                          schema: noeud.schema as string,
+                          key: { connection },
+                          schema,
                           table: noeud.label,
                           kind: noeud.icon === 'view' ? 'view' : 'table',
                         }),
                       )
                     }
                     /* **Un clic sur une console l'ouvre**, comme un clic sur une table ouvre la table.
-                   L'onglet est relié à la console : il porte son texte et lui renvoie chaque
-                   frappe. Rouvrir une console déjà ouverte réactive son onglet plutôt que d'en
-                   créer un second — c'est `ouvrirConsole` qui le garantit, par l'identité qu'on
-                   lui donne. */
+                       Rouvrir une console déjà ouverte réactive son onglet plutôt que d'en créer un
+                       second — c'est `ouvrirConsole` qui le garantit. */
                     if (
                       noeud.kind === 'console' &&
-                      noeud.project &&
-                      noeud.database &&
-                      noeud.environment &&
+                      noeud.connection &&
                       noeud.console !== undefined
                     ) {
-                      const identite = {
-                        project: noeud.project,
-                        database: noeud.database,
-                        environment: noeud.environment,
-                        nom: noeud.console,
-                      }
+                      const identite = { connection: noeud.connection, nom: noeud.console }
                       const texte =
-                        projects
-                          .find((projet) => projet.name === identite.project)
-                          ?.databases.find(
-                            (base) =>
-                              base.name === identite.database &&
-                              base.environment === identite.environment,
-                          )
-                          ?.consoles.find((console) => console.name === identite.nom)?.sql ?? ''
-                      /* **Le clic ouvre la connexion autant que la console.** Elle l'est déjà quand la
-                     ligne de la base a été dépliée — c'est ce qui a fait paraître la console —, mais
-                     pas quand cette ouverture a **échoué** : les consoles s'affichent malgré l'échec,
-                     délibérément, et le clic doit donc retenter plutôt qu'ouvrir un onglet inerte. */
-                      void assurerLOuverture({
-                        project: identite.project,
-                        database: identite.database,
-                        environment: identite.environment,
-                      })
+                        connexion(arbre, identite.connection)?.base.consoles.find(
+                          (console) => console.name === identite.nom,
+                        )?.sql ?? ''
+                      /* **Le clic ouvre la connexion autant que la console** : les consoles
+                         s'affichent malgré un échec d'ouverture, délibérément, et le clic doit donc
+                         retenter plutôt qu'ouvrir un onglet inerte. */
+                      void assurerLOuverture({ connection: identite.connection })
                       setEtatOnglets((etat) => {
                         const suivant = ouvrirConsole(
                           etat,
-                          {
-                            project: identite.project,
-                            database: identite.database,
-                            environment: identite.environment,
-                          },
-                          dialecteDe(identite.project, identite.database, identite.environment),
+                          { connection: identite.connection },
+                          dialecteDe(identite.connection),
                           identite.nom,
                         )
                         const id = suivant.actif as string
@@ -2035,7 +1706,6 @@ export function Workbench({
                   }}
                   onToggle={basculer}
                   onAddDatabase={onNewDatabase}
-                  onNewProject={onNewProject}
                   onOpenPreferences={onOpenPreferences}
                   onRefresh={rafraichirTout}
                   // **La section décrit ce qu'on regarde sans l'avoir ouvert, et rien d'autre**
@@ -2224,7 +1894,7 @@ export function Workbench({
                                   const suivant = ouvrirConsole(
                                     etat,
                                     cle,
-                                    dialecteDe(cle.project, cle.database, cle.environment),
+                                    dialecteDe(cle.connection),
                                   )
                                   // Le DDL entre dans la console **qui vient d'être ouverte**, pas
                                   // dans celle qui était active : écraser le texte d'une console où
@@ -2246,11 +1916,9 @@ export function Workbench({
                       <PendingPanel
                         attente={attente}
                         table={`${table.schema}.${table.table}`}
-                        // **La déclaration, non l'identifiant** : l'encart rouge suit le drapeau
-                        // `production` (`23g`), et le comparer à la chaîne « prod » le rendait faux
-                        // pour un environnement nommé autrement — et faussement vrai pour un « prod »
-                        // que l'utilisateur n'avait pas marqué.
-                        production={environnementIndique?.production ?? false}
+                        // **Le drapeau, non le nom** (`23g`) : l'encart rouge suit la lecture seule
+                        // imposée par un dossier, en attendant #168.
+                        production={lectureSeuleIndiquee}
                         sql={sqlPrevu.sql}
                         erreurSql={sqlPrevu.erreur}
                         onRetirer={(cleLigne, column) =>
@@ -2397,31 +2065,32 @@ function comptes(objets: readonly TableSummary[]): Record<TypeObjet, number> {
   }
 }
 
-/** L'état des onglets débarrassé de ceux qui lisaient la cible du retrait. */
-function sansLesOngletsDe(etat: EtatOnglets, cible: CibleDeSuppression): EtatOnglets {
+/** L'état des onglets débarrassé de ceux qui lisaient une connexion retirée. */
+function sansLesOngletsDe(
+  etat: EtatOnglets,
+  visees: { connexions: ReadonlySet<ConnectionId> },
+): EtatOnglets {
   return etat.onglets
     .map(idOnglet)
-    .filter((id) => viseeParLId(cible, id))
+    .filter((id) => viseeParLId(visees, id))
     .reduce(fermer, etat)
 }
 
 /**
- * Les consoles d'une connexion, pour les tests d'homonymie des deux modales.
- *
- * **Lue depuis `projects` à chaque appel**, et non mémorisée : la liste change sous nos pieds à
- * chaque création, et une copie figée validerait un nom déjà pris.
+ * Les connexions qu'un retrait emporte : la connexion visée, ou **toutes** celles d'un dossier, à
+ * toute profondeur (#166). Calculées sur l'arbre d'**avant** le retrait, qui les contient encore.
  */
-function consolesDe(
-  projects: readonly Project[],
-  cible: { project: string; database: string; environment: EnvironmentId },
-): readonly { name: string }[] {
-  return (
-    projects
-      .find((projet) => projet.name === cible.project)
-      ?.databases.find(
-        (base) => base.name === cible.database && base.environment === cible.environment,
-      )?.consoles ?? []
-  )
+function connexionsVisees(
+  arbre: FolderTree,
+  cible: CibleDeSuppression,
+): { connexions: ReadonlySet<ConnectionId> } {
+  if (cible.kind === 'database') return { connexions: new Set([cible.connection]) }
+  const situe = dossier(arbre, cible.folder)
+  return {
+    connexions: new Set(
+      situe === null ? [] : connexionsDescendantes(situe.dossier).map(idDeConnexion),
+    ),
+  }
 }
 
 /**

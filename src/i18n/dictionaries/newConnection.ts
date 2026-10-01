@@ -21,11 +21,9 @@ export const newConnectionFr: Dictionnaire = {
         "Le port est choisi par l'application à l'ouverture du proxy Cloud SQL, et lu sur ce que le proxy annonce. Une valeur saisie ici ne serait pas employée.",
       passwordCloudSql:
         "L'authentification est celle de Cloud SQL IAM : le proxy présente un jeton à la place d'un mot de passe. L'utilisateur est un principal IAM — une adresse.",
-      lock: 'Ces champs identifient la connexion : les changer déplacerait son mot de passe et fermerait sa connexion.',
       hostKubernetes:
         "Une base qui vit dans un cluster n'a pas d'adresse joignable depuis ce poste : c'est la ressource déclarée dans le panneau « Proxy / tunnel » qui la désigne. La connexion se fait sur le bout local du transfert de port, d'où 127.0.0.1.",
     },
-    environmentLabel: 'Environnement',
     hostLabel: 'Hôte',
     portLabel: 'Port',
     defaultDatabaseLabel: {
@@ -106,21 +104,16 @@ export const newConnectionFr: Dictionnaire = {
     tlsUnverified: ' · TLS non vérifié',
     unsupported: (p) => `${p.engine} n’a pas encore d’adaptateur`,
     cancel: 'Annuler',
-    later: 'Plus tard',
     saveEdit: 'Enregistrer les modifications',
     saveNew: 'Enregistrer & ouvrir',
-    projectCreatedPrefix: 'Le projet',
-    projectCreatedSuffix:
-      'est créé. Vous pouvez déclarer sa première connexion maintenant, ou plus tard depuis la sidebar.',
   },
-  stepper: {
-    project: 'PROJET',
-    connection: 'CONNEXION',
+  frame: {
+    root: 'Racine',
   },
   tlsConfirm: {
     title: 'Mode SSL non vérifié en production',
     badge: 'PROD',
-    environment: (p) => `L’environnement « ${p.name} » est marqué production.`,
+    folder: (p) => `Le dossier « ${p.name} » est en lecture seule.`,
     instance: 'Cette instance est marquée production.',
     body: (p) =>
       `Le mode « ${p.mode} » ne vérifie pas l’identité du serveur : un intermédiaire sur le réseau peut lire et modifier ce qui passe, mots de passe compris.`,
@@ -156,11 +149,9 @@ export const newConnectionEn: Dictionnaire = {
         'The port is chosen by the application when it opens the Cloud SQL proxy, and read from what the proxy announces. A value entered here would not be used.',
       passwordCloudSql:
         'Authentication is Cloud SQL IAM: the proxy presents a token instead of a password. The user is an IAM principal — an email address.',
-      lock: 'These fields identify the connection: changing them would move its password and close the open connection.',
       hostKubernetes:
         'A database living in a cluster has no address reachable from this machine: the resource declared in the “Proxy / tunnel” panel is what locates it. The connection is made to the local end of the port forward, hence 127.0.0.1.',
     },
-    environmentLabel: 'Environment',
     hostLabel: 'Host',
     portLabel: 'Port',
     defaultDatabaseLabel: {
@@ -239,21 +230,16 @@ export const newConnectionEn: Dictionnaire = {
     tlsUnverified: ' · TLS unverified',
     unsupported: (p) => `${p.engine} has no adapter yet`,
     cancel: 'Cancel',
-    later: 'Later',
     saveEdit: 'Save changes',
     saveNew: 'Save & open',
-    projectCreatedPrefix: 'The project',
-    projectCreatedSuffix:
-      'has been created. You can declare its first connection now, or later from the sidebar.',
   },
-  stepper: {
-    project: 'PROJECT',
-    connection: 'CONNECTION',
+  frame: {
+    root: 'Root',
   },
   tlsConfirm: {
     title: 'Unverified SSL mode in production',
     badge: 'PROD',
-    environment: (p) => `The “${p.name}” environment is marked production.`,
+    folder: (p) => `The “${p.name}” folder is read-only.`,
     instance: 'This instance is marked production.',
     body: (p) =>
       `The “${p.mode}” mode does not verify the server’s identity: anyone on the network path can read and alter the traffic, passwords included.`,

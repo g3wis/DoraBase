@@ -4,7 +4,6 @@ import { dumpEn, dumpFr } from './dump'
 import { explorerEn, explorerFr } from './explorer'
 import { instancesEn, instancesFr } from './instances'
 import { newConnectionEn, newConnectionFr } from './newConnection'
-import { newProjectEn, newProjectFr } from './newProject'
 import { preferencesEn, preferencesFr } from './preferences'
 import { schemasEn, schemasFr } from './schemas'
 import { shellEn, shellFr } from './shell'
@@ -24,7 +23,6 @@ export const DICTIONNAIRES = {
     preferences: preferencesFr,
     welcome: welcomeFr,
     newConnection: newConnectionFr,
-    newProject: newProjectFr,
     explorer: explorerFr,
     tableView: tableViewFr,
     console: consoleFr,
@@ -41,7 +39,6 @@ export const DICTIONNAIRES = {
     preferences: preferencesEn,
     welcome: welcomeEn,
     newConnection: newConnectionEn,
-    newProject: newProjectEn,
     explorer: explorerEn,
     tableView: tableViewEn,
     console: consoleEn,

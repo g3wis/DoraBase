@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import type { Project } from '../../domain/config'
+import type { Folder, FolderTree } from '../../domain/config'
 import type { Value } from '../../domain/engine'
+import { connexionDeTest } from '../NewConnection/pourLesTests'
 import {
   libellesDeLaTable,
   libellesDepuisLesLignes,
@@ -8,62 +9,81 @@ import {
   valeurLibellee,
 } from './libelles'
 
-/** Un projet minimal qui porte des libellés — seul `valueLabels` compte ici. */
-function projet(nom: string, valueLabels: Project['valueLabels']): Project {
-  return { name: nom, environments: [], databases: [], queries: [], valueLabels }
+const ANALYTICS = 'c0000000000000b1'
+
+/**
+ * Un dossier racine qui porte des libellés, et un sous-dossier `prod` qui range la connexion — la
+ * forme migrée, où les libellés d'un projet vivent sur son dossier racine (#164).
+ */
+function arbre(
+  valueLabels: Folder['valueLabels'],
+  sous: Folder['valueLabels'] = undefined,
+): FolderTree {
+  return {
+    folders: [
+      {
+        id: 'f-racine',
+        name: 'Halle',
+        readOnly: false,
+        ...(valueLabels === undefined ? {} : { valueLabels }),
+        folders: [
+          {
+            id: 'f-prod',
+            name: 'prod',
+            readOnly: true,
+            ...(sous === undefined ? {} : { valueLabels: sous }),
+            connections: [connexionDeTest(ANALYTICS, 'analytics')],
+          },
+        ],
+      },
+    ],
+    connections: [],
+  }
 }
 
 const ETATS = { '0': 'en attente', '3': 'expédiée' }
 
 describe('libellesDeLaTable', () => {
-  it('rend les libellés que le projet déclare pour cette table', () => {
-    const projets = [projet('Halle', { orders: { status: ETATS } })]
-    expect(libellesDeLaTable(projets, 'Halle', 'orders')).toEqual({ status: ETATS })
+  it('rend les libellés qu’un dossier de la connexion déclare pour cette table', () => {
+    expect(libellesDeLaTable(arbre({ orders: { status: ETATS } }), ANALYTICS, 'orders')).toEqual({
+      status: ETATS,
+    })
   })
 
   /**
-   * **Trois absences, un seul résultat.** Aucune ne doit lever : un projet retiré pendant qu'un
-   * onglet est ouvert, une table jamais libellée, et une configuration écrite avant `API-75` — qui
-   * n'a pas le champ du tout, `serde` l'omettant à l'écriture (`skip_serializing_if`).
+   * **Trois absences, un seul résultat.** Aucune ne doit lever : une connexion retirée pendant qu'un
+   * onglet est ouvert, une table jamais libellée, et une configuration sans le champ du tout.
    */
   it('rend une table vide quand rien ne la déclare', () => {
-    const projets = [projet('Halle', { orders: { status: ETATS } })]
-    expect(libellesDeLaTable(projets, 'Halle', 'users')).toEqual({})
-    expect(libellesDeLaTable(projets, 'Ailleurs', 'orders')).toEqual({})
-    const sansLeChamp = { ...projet('Halle', {}), valueLabels: undefined }
-    expect(libellesDeLaTable([sansLeChamp], 'Halle', 'orders')).toEqual({})
+    const a = arbre({ orders: { status: ETATS } })
+    expect(libellesDeLaTable(a, ANALYTICS, 'users')).toEqual({})
+    expect(libellesDeLaTable(a, 'c-ailleurs', 'orders')).toEqual({})
+    expect(libellesDeLaTable(arbre(undefined), ANALYTICS, 'orders')).toEqual({})
   })
 
   /**
-   * **La même absence rend le même objet**, et ce n'est pas de la coquetterie.
-   *
-   * `libelles` entre dans les dépendances de l'effet qui remonte la lecture au panneau de ligne :
-   * un `{}` neuf à chaque appel le fait repartir, il pose un état, l'écran se rend à nouveau, et la
-   * boucle ne s'arrête jamais — **sur toute table qui ne déclare rien**, c'est-à-dire le cas
-   * courant. Le défaut a été trouvé en écrivant le test d'assemblage, qui s'est mis à **ne plus
-   * finir** ; celui-ci le garde sans dépendre d'un rendu, et il est le seul qui puisse le dire
-   * avant qu'un écran ne tourne (le piège de `10d`).
+   * **La même absence rend le même objet**, et ce n'est pas de la coquetterie : `libelles` entre dans
+   * les dépendances de l'effet qui remonte la lecture au panneau de ligne, et un `{}` neuf à chaque
+   * appel ferait tourner la boucle de rendu sans fin (le piège de `10d`).
    */
   it('rend la même table vide d’un appel à l’autre', () => {
-    const projets = [projet('Halle', {})]
-    expect(libellesDeLaTable(projets, 'Halle', 'orders')).toBe(
-      libellesDeLaTable(projets, 'Halle', 'users'),
-    )
+    const a = arbre({})
+    expect(libellesDeLaTable(a, ANALYTICS, 'orders')).toBe(libellesDeLaTable(a, ANALYTICS, 'users'))
   })
 
   /**
-   * **Le projet désigne, pas la connexion ni l'environnement.** C'est l'arbitrage d'`API-75` : deux
-   * projets qui déclarent la même table ne partagent rien, et l'un ne peut pas rendre les libellés
-   * de l'autre.
+   * **Le dossier le plus proche qui déclare la table l'emporte entièrement** (#164) — aucune fusion,
+   * qui créerait un objet neuf à chaque appel et rouvrirait la boucle de rendu.
    */
-  it('ne franchit pas la frontière d’un projet', () => {
-    const projets = [
-      projet('Halle', { orders: { status: { '3': 'expédiée' } } }),
-      projet('Quai Sud', { orders: { status: { '3': 'partie' } } }),
-    ]
-    expect(libellesDeLaTable(projets, 'Quai Sud', 'orders')).toEqual({
-      status: { '3': 'partie' },
-    })
+  it('le dossier le plus proche l’emporte, sans fusion', () => {
+    const a = arbre(
+      { orders: { status: { '3': 'expédiée' }, kind: { '1': 'retrait' } } },
+      { orders: { status: { '3': 'partie' } } },
+    )
+    const rendu = libellesDeLaTable(a, ANALYTICS, 'orders')
+    expect(rendu).toEqual({ status: { '3': 'partie' } })
+    // Et c'est l'objet de l'arbre, pas une copie : stable tant que l'arbre l'est.
+    expect(rendu).toBe(libellesDeLaTable(a, ANALYTICS, 'orders'))
   })
 })
 

@@ -5,7 +5,7 @@ import { WelcomeHero } from './WelcomeHero/WelcomeHero'
 import styles from './WelcomeScreen.module.css'
 
 type WelcomeScreenProps = {
-  onNewProject: () => void
+  onNewFolder: () => void
   /**
    * Ouvre les préférences (26 août 2026).
    *
@@ -19,7 +19,7 @@ type WelcomeScreenProps = {
   onOpenPreferences: () => void
   /** Ouvre l'import de projets (`API-30`) — voir `WelcomeHero`, qui porte la raison. */
   onImportProjects?: () => void
-  projectCount: number
+  folderCount: number
   /** Vrai quand une modale bloque la fenêtre : la barre de titre se ternit (`08b`). */
   dimmed?: boolean
 }
@@ -32,20 +32,20 @@ type WelcomeScreenProps = {
  * `⇧⌘N` a été retiré (26 août 2026).
  */
 export function WelcomeScreen({
-  onNewProject,
+  onNewFolder,
   onOpenPreferences,
   onImportProjects,
-  projectCount,
+  folderCount,
   dimmed = false,
 }: WelcomeScreenProps) {
   return (
     <div className={styles.root}>
       <TitleBar dimmed={dimmed} onOpenPreferences={onOpenPreferences} />
       <div className={styles.body}>
-        <ProjectSidebar onNewProject={onNewProject} />
-        <WelcomeHero onNewProject={onNewProject} onImportProjects={onImportProjects} />
+        <ProjectSidebar onNewFolder={onNewFolder} />
+        <WelcomeHero onNewFolder={onNewFolder} onImportProjects={onImportProjects} />
       </div>
-      <StatusBar projectCount={projectCount} />
+      <StatusBar folderCount={folderCount} />
     </div>
   )
 }

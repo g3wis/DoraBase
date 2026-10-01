@@ -29,11 +29,10 @@
 /* Une ligne de message — chargement, échec, vide. Alignée sur l'indentation de son niveau, pour
  * qu'elle se lise comme un enfant du nœud déplié et non comme un état global de la sidebar.
  *
- * **L'indentation vient d'`INDENT`, exportée par `TreeRow`, et non plus d'une table ici.** Trois
- * règles `[data-depth]` recopiaient les mêmes 36 et 52 px. Un palier ajouté d'un côté et pas de
- * l'autre se lit comme un message mal aligné, et personne n'y pense — c'est exactement ce qui
- * serait arrivé au cinquième palier de `25a`. Une seule table, en TypeScript, appliquée en style
- * en ligne comme `TreeRow` le fait pour ses propres lignes. */
+ * **L'indentation vient d'`indentation()`, exportée par `TreeRow`, et non d'une table ici.** Trois
+ * règles `[data-depth]` recopiaient les mêmes 36 et 52 px ; un palier ajouté d'un côté et pas de
+ * l'autre se lit comme un message mal aligné. Une seule règle, en TypeScript, appliquée en style en
+ * ligne comme `TreeRow` le fait pour ses propres lignes. */
 .message {
   margin: 0;
   padding: 0 var(--space-5) 0 0;
@@ -59,4 +58,11 @@
 .colonnes {
   flex: none;
   padding-top: var(--space-2);
+}
+
+/* Le verrou d'un dossier en lecture seule (#166) : l'encre des métadonnées, pour qu'il se lise comme
+ * un état de la ligne et non comme une action. `flex: none` — un glyphe ne se rétrécit pas. */
+.verrou {
+  flex: none;
+  color: var(--ink-3);
 }

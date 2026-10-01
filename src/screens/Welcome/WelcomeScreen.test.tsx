@@ -8,9 +8,9 @@ function monter(props: Partial<Parameters<typeof WelcomeScreen>[0]> = {}) {
   return render(
     <LanguageProvider preferences={{ language: 'fr' }}>
       <WelcomeScreen
-        onNewProject={() => {}}
+        onNewFolder={() => {}}
         onOpenPreferences={() => {}}
-        projectCount={0}
+        folderCount={0}
         {...props}
       />
     </LanguageProvider>,
@@ -18,12 +18,12 @@ function monter(props: Partial<Parameters<typeof WelcomeScreen>[0]> = {}) {
 }
 
 test('les deux boutons appellent le même callback', async () => {
-  const onNewProject = vi.fn()
-  monter({ onNewProject })
-  const boutons = screen.getAllByRole('button', { name: /nouveau projet/i })
+  const onNewFolder = vi.fn()
+  monter({ onNewFolder })
+  const boutons = screen.getAllByRole('button', { name: /nouveau dossier/i })
   expect(boutons).toHaveLength(2)
   for (const b of boutons) await userEvent.click(b)
-  expect(onNewProject).toHaveBeenCalledTimes(2)
+  expect(onNewFolder).toHaveBeenCalledTimes(2)
 })
 
 // **Les deux tests de `⌘N` ont déménagé** dans `src/app/useRaccourcisDeCreation.test.tsx` (`24d`), avec
@@ -31,19 +31,19 @@ test('les deux boutons appellent le même callback', async () => {
 // le clavier, donc il n'a plus rien à en dire — et un test qui frapperait `⌘N` ici passerait au vert
 // sans que le raccourci existe nulle part.
 test('cet écran n’écoute plus le clavier', async () => {
-  const onNewProject = vi.fn()
-  monter({ onNewProject })
+  const onNewFolder = vi.fn()
+  monter({ onNewFolder })
   await userEvent.keyboard(auModificateur('n'))
   await userEvent.keyboard('n')
-  expect(onNewProject).not.toHaveBeenCalled()
+  expect(onNewFolder).not.toHaveBeenCalled()
 })
 
-test('assemble la barre de titre, la barre d’état et le compteur de projets', () => {
-  const { container } = monter({ projectCount: 2 })
+test('assemble la barre de titre, la barre d’état et le compteur de dossiers', () => {
+  const { container } = monter({ folderCount: 2 })
   // La barre de titre, désignée par sa zone de glissement : elle ne porte plus le mot « DoraBase »
   // depuis `API-47`, son logo étant passé au centre.
   expect(container.querySelector('[data-tauri-drag-region]')).toBeInTheDocument()
-  expect(screen.getByText('2 projets')).toBeInTheDocument()
+  expect(screen.getByText('2 dossiers')).toBeInTheDocument()
 })
 
 /*

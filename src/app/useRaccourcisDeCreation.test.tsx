@@ -4,8 +4,14 @@ import { expect, test, vi } from 'vitest'
 import { auModificateur } from '../test/raccourcis'
 import { useRaccourcisDeCreation } from './useRaccourcisDeCreation'
 
-function Ecran({ nouveauProjet, modale = false }: { nouveauProjet: () => void; modale?: boolean }) {
-  useRaccourcisDeCreation({ nouveauProjet })
+function Ecran({
+  nouveauDossier,
+  modale = false,
+}: {
+  nouveauDossier: () => void
+  modale?: boolean
+}) {
+  useRaccourcisDeCreation({ nouveauDossier })
   return (
     <>
       <input aria-label="Requête" />
@@ -15,48 +21,48 @@ function Ecran({ nouveauProjet, modale = false }: { nouveauProjet: () => void; m
 }
 
 function monter(modale = false) {
-  const nouveauProjet = vi.fn()
-  render(<Ecran nouveauProjet={nouveauProjet} modale={modale} />)
-  return { nouveauProjet }
+  const nouveauDossier = vi.fn()
+  render(<Ecran nouveauDossier={nouveauDossier} modale={modale} />)
+  return { nouveauDossier }
 }
 
 test('⌘N ouvre « Nouveau projet », et consomme la frappe', async () => {
-  const { nouveauProjet } = monter()
+  const { nouveauDossier } = monter()
   const consomme = await enConsommant(() => userEvent.keyboard(auModificateur('n')))
-  expect(nouveauProjet).toHaveBeenCalledTimes(1)
+  expect(nouveauDossier).toHaveBeenCalledTimes(1)
   // Sans `preventDefault`, le navigateur ouvre une fenêtre par-dessus la modale qu'on vient d'ouvrir.
   expect(consomme).toBe(true)
 })
 
 test('⇧⌘N ne déclenche plus rien, et n’est plus consommé', async () => {
-  const { nouveauProjet } = monter()
+  const { nouveauDossier } = monter()
   // **Le raccourci a été retiré le 26 août 2026.** Il ouvrait « Ajouter une connexion », mais un
   // raccourci clavier ne désigne aucune ligne d'arbre : il fallait deviner le projet, donc retomber
   // sur le premier de la liste. Le geste part désormais du menu d'une ligne d'environnement.
   const consomme = await enConsommant(() => userEvent.keyboard(auModificateur('{Shift>}N{/Shift}')))
-  expect(nouveauProjet).not.toHaveBeenCalled()
+  expect(nouveauDossier).not.toHaveBeenCalled()
   // **Et il n'est pas avalé** : reprendre une frappe pour ne rien en faire est un raccourci mort. La
   // même règle que pour les deux refus — modale ouverte, zone de saisie.
   expect(consomme).toBe(false)
 })
 
 test('« n » seul ne déclenche rien', async () => {
-  const { nouveauProjet } = monter()
+  const { nouveauDossier } = monter()
   await userEvent.keyboard('n')
-  expect(nouveauProjet).not.toHaveBeenCalled()
+  expect(nouveauDossier).not.toHaveBeenCalled()
 })
 
 test('rien pendant qu’une modale est ouverte', async () => {
-  const { nouveauProjet } = monter(true)
+  const { nouveauDossier } = monter(true)
   await userEvent.keyboard(auModificateur('n'))
-  expect(nouveauProjet).not.toHaveBeenCalled()
+  expect(nouveauDossier).not.toHaveBeenCalled()
 })
 
 test('rien depuis une zone de saisie', async () => {
-  const { nouveauProjet } = monter()
+  const { nouveauDossier } = monter()
   await userEvent.click(screen.getByLabelText('Requête'))
   await userEvent.keyboard(auModificateur('n'))
-  expect(nouveauProjet).not.toHaveBeenCalled()
+  expect(nouveauDossier).not.toHaveBeenCalled()
 })
 
 /**

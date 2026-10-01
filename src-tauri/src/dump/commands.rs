@@ -12,7 +12,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tauri::{Emitter, Manager};
 use tokio::sync::Mutex;
 use ts_rs::TS;
@@ -21,9 +21,9 @@ use super::discover::{analyser_version, decouvrir};
 use super::postgres::PostgresDumpTool;
 use super::run::{exporter, importer, Annulation, DumpError};
 use super::{Cible, DumpAvailability, Version};
-use crate::config::{ConnectionSettings, Engine};
+use crate::config::ConnectionSettings;
 use crate::engine::commands::DatabaseKey;
-use crate::engine::registry::{cle, ConnectionRegistry, ConnectionState};
+use crate::engine::registry::{ConnectionRegistry, ConnectionState};
 use crate::secrets::Secret;
 
 /// L'événement de progression, en **octets écrits**. Sans total ni pourcentage : la taille
@@ -106,17 +106,9 @@ impl DumpState {
     }
 }
 
-/// La requête d'export ou d'import, telle que le front la fournit.
-#[derive(Debug, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "dump.ts")]
-pub struct DumpRequest {
-    pub key: DatabaseKey,
-    pub variant: ConnectionSettings,
-    pub engine: Engine,
-    /// Le chemin choisi dans le sélecteur natif — destination à l'export, source à l'import.
-    pub file: String,
-}
+/// La requête d'export ou d'import : celle du contrat (`config::requetes`), désignée par
+/// l'identifiant de la connexion (#165).
+pub use crate::config::requetes::DumpRequest;
 
 /// Où se connecter, et quelle version de serveur juger.
 ///
@@ -131,7 +123,7 @@ pub async fn cible_et_version(
     variante: &ConnectionSettings,
     secret: Option<&Secret>,
 ) -> Result<(Cible, Version), DumpFailure> {
-    let identite = cle(&key.project, &key.database, &key.environment);
+    let identite = key.cle();
     let etat = registre.etat(&identite).await;
 
     // Tout ce qui ne dépend pas du chemin — direct ou tunnelé — est pris une fois ici. Le
@@ -172,9 +164,9 @@ pub async fn cible_et_version(
         )),
         // Fermée, tunnelée : refus explicite, **avant** de lancer quoi que ce soit.
         (_, true) => Err(DumpFailure::locale(format!(
-            "la base « {} » passe par un tunnel SSH : il faut l'ouvrir dans l'arbre avant \
+            "la connexion « {} » passe par un tunnel SSH : il faut l'ouvrir dans l'arbre avant \
              d'exporter ou d'importer, le tunnel ne vit que tant qu'elle est ouverte",
-            key.database
+            key.connection
         ))),
         // Fermée, directe : la version du serveur manque, donc on la demande. C'est le seul
         // aller-retour réseau de cette fonction, et il évite d'exiger une base ouverte là
@@ -234,7 +226,7 @@ pub async fn dump_availability(
 ) -> Result<DumpVerdict, DumpFailure> {
     log::info!(
         "dump_availability ← {} ({}) {}",
-        request.key.database,
+        request.key.connection,
         if import { "import" } else { "export" },
         request.variant.host
     );
@@ -280,11 +272,7 @@ pub async fn start_export(
     registry: tauri::State<'_, ConnectionRegistry>,
     dumps: tauri::State<'_, DumpState>,
 ) -> Result<u64, DumpFailure> {
-    let identite = cle(
-        &request.key.project,
-        &request.key.database,
-        &request.key.environment,
-    );
+    let identite = request.key.cle();
     let fichier = PathBuf::from(&request.file);
     log::info!("start_export ← {identite} vers {}", fichier.display());
 
@@ -342,7 +330,7 @@ pub async fn cancel_export(
     key: DatabaseKey,
     dumps: tauri::State<'_, DumpState>,
 ) -> Result<bool, DumpFailure> {
-    let identite = cle(&key.project, &key.database, &key.environment);
+    let identite = key.cle();
     let annule = dumps.annuler(&identite).await;
     log::info!("cancel_export ← {identite} : {annule}");
     Ok(annule)
@@ -356,11 +344,7 @@ pub async fn start_import(
     registry: tauri::State<'_, ConnectionRegistry>,
     dumps: tauri::State<'_, DumpState>,
 ) -> Result<(), DumpFailure> {
-    let identite = cle(
-        &request.key.project,
-        &request.key.database,
-        &request.key.environment,
-    );
+    let identite = request.key.cle();
     let fichier = PathBuf::from(&request.file);
     log::info!("start_import ← {identite} depuis {}", fichier.display());
 
@@ -498,9 +482,7 @@ mod tests {
 
     fn cle_de_test() -> DatabaseKey {
         DatabaseKey {
-            project: "Boutique".into(),
-            database: "commandes".into(),
-            environment: "staging".into(),
+            connection: crate::config::ConnectionId::brut("commandes"),
         }
     }
 

@@ -6,40 +6,49 @@ import { cx } from '../cx'
 import styles from './TreeRow.module.css'
 
 /**
- * Indentation par palier, relevée dans le mockup A5 : 8, 22, 36, 52 — écarts 14, 14 puis **16**.
+ * L'indentation d'une ligne d'arbre, **par une règle** et non plus par une table (#166).
  *
- * `8 + depth * 14` ne la reproduit pas, et cette table a longtemps porté la mention « aucune
- * formule ne les reproduit ». C'était vrai de cette formule-là. Mais le mockup obéit bien à une
- * règle, lisible sur l'**abscisse des icônes** plutôt que sur le padding : 24, 38, 52, 52 — écarts
- * 14, 14, **0**. Le « +16 » du dernier palier vaut exactement `chevron (11) + gap (5)` : ce n'est pas
- * un supplément d'indentation, c'est la reprise de la gouttière qu'une feuille sans chevron
- * n'occupe pas. D'où deux cadences : **+14** d'un nœud dépliable au suivant, **+16** vers une feuille.
+ * ```
+ * indentation = 8 + 14 × (niveau du dossier ou de la connexion) + 16 × (paliers sous la connexion)
+ * ```
  *
- * Le cinquième palier de `25a` va d'un schéma (qui a un chevron) à un objet (qui n'en a pas) : c'est
- * un pas de **+16**, soit 68. Les quatre premières valeurs ne bougent pas — elles sont mesurées
- * contre le mockup, et `e2e/a4-sidebar.spec.ts` les vérifie.
+ * Une table de cinq valeurs relevées dans le mockup A5 a longtemps vécu ici — 8, 22, 36, 52, 68 —,
+ * avec la consigne de ne jamais la remplacer par un calcul : `8 + depth * 14` donnait 50 au quatrième
+ * palier, pas 52. **Cette règle-ci est la loi que la table mettait au jour**, et elle la reproduit au
+ * pixel. Le mockup obéit à deux cadences, lisibles sur l'abscisse des icônes plutôt que sur le
+ * padding : **+14** d'un nœud dépliable au suivant, et **+16** vers ce qui est sous la connexion — le
+ * « +16 » vaut `chevron (11) + gap (5)`, la reprise de la gouttière qu'une feuille n'occupe pas.
  *
- * **Exportée**, parce que les lignes de message de l'arbre doivent s'aligner sur les mêmes paliers.
- * `ExplorerSidebar.module.css` en tenait une copie en CSS, et un palier de retard entre les deux
- * tables se lit comme un message mal aligné — ce que personne ne pense à vérifier en ajoutant un
- * palier.
+ * - forme migrée (dossier racine, sous-dossier, connexion) : 8, 22, 36, puis 52 pour une console ou
+ *   un schéma et 68 pour un objet — **exactement la table d'avant**, que `e2e/a4-sidebar.spec.ts`
+ *   mesure contre le mockup ;
+ * - trois dossiers : 8, 22, 36, puis 50 pour la connexion, 66 et 82 dessous.
+ *
+ * La table ne pouvait pas survivre aux dossiers : elle avait cinq cases, et un arbre de dossiers n'a
+ * pas de profondeur maximale.
+ *
+ * **Exportée**, parce que les lignes de message de l'arbre et la liste d'instances doivent s'aligner
+ * sur les mêmes paliers : une copie en CSS avait déjà pris un palier de retard.
  */
-export const INDENT = ['8px', '22px', '36px', '52px', '68px'] as const
-
-export type TreeDepth = 0 | 1 | 2 | 3 | 4
+export function indentation(niveau: number, sousLaConnexion = 0): string {
+  return `${8 + 14 * niveau + 16 * sousLaConnexion}px`
+}
 
 type TreeRowProps = {
-  depth: TreeDepth
   /**
-   * L'indentation, quand elle ne suit pas le palier (`API-32`).
+   * Le **niveau logique** de la ligne, sans limite (#166) — celui qu'`aria-level` annonce et que
+   * `data-depth` expose. Ce n'est pas l'indentation : une console et un schéma sont au même niveau
+   * logique qu'une connexion enfant, mais indentés de +16.
+   */
+  depth: number
+  /**
+   * L'indentation, toujours calculée par `indentation()` chez l'appelant qui connaît la forme de
+   * son arbre. Absente, la ligne suit la cadence des nœuds dépliables : `indentation(depth)`.
    *
-   * **Une exception, pas un second système.** `INDENT` reste la règle : elle est mesurée sur le
-   * mockup, et un écran qui poserait ses propres valeurs ferait diverger deux tables comme la CSS
-   * l'avait déjà fait. Le cas qui l'a fait naître est la liste d'instances, une liste **de feuilles**
-   * posée sous l'arbre : sans chevron, ses icônes tombent 16 px à gauche de celles des projets, dans
-   * la même colonne visuelle et à un palier apparent d'écart. La valeur qu'elle passe est
-   * `INDENT[0] + 16` — c'est-à-dire exactement la cadence « vers une feuille » que cette table
-   * décrit, appliquée depuis le palier 0.
+   * Le premier appelant qui l'a demandée est la liste d'instances (`API-32`), une liste **de
+   * feuilles** posée sous l'arbre : sans chevron, ses icônes tomberaient 16 px à gauche de celles
+   * des dossiers. Elle passe `indentation(0, 1)` — la cadence « vers une feuille » appliquée depuis
+   * le niveau 0.
    */
   indent?: string
   label: string
@@ -208,7 +217,7 @@ export function TreeRow({
       // `aria-*` — sont communs aux deux, et cette branche n'est pas interactive de toute façon.
       <div
         className={className}
-        style={{ paddingLeft: indent ?? INDENT[depth] }}
+        style={{ paddingLeft: indent ?? indentation(depth) }}
         data-depth={depth}
         {...(rest as HTMLAttributes<HTMLDivElement>)}
       >
@@ -221,7 +230,7 @@ export function TreeRow({
     <button
       type="button"
       className={className}
-      style={{ paddingLeft: indent ?? INDENT[depth] }}
+      style={{ paddingLeft: indent ?? indentation(depth) }}
       data-depth={depth}
       {...rest}
       // **La cible du clic départage les deux gestes.** Un `<button>` dans un `<button>` serait

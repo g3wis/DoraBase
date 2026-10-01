@@ -3,8 +3,8 @@
 //!
 //! # Pourquoi des types dédiés
 //!
-//! Les crans v0 à v5 produisaient le modèle courant, `Project`. Dès que `Project` disparaît — c'est la
-//! bascule de #165 —, ils ne compileraient plus. Décrire la v6 à part la laisse vivre aussi longtemps
+//! Les crans v0 à v5 produisaient le modèle courant, `Project`. `Project` a disparu avec la bascule
+//! de #165 : sans cette forme figée, ils ne compileraient plus. Décrire la v6 à part la laisse vivre aussi longtemps
 //! qu'un fichier v6 peut traîner quelque part, et mourir avec le dernier cran qui la lit : c'est la
 //! raison de `mod v1`, appliquée à la forme suivante.
 //!
@@ -30,8 +30,8 @@ use crate::config::arbre::{
     reference_de_connexion, ConnectionId, Folder, FolderColor, FolderId, FolderTree, ValueLabels,
 };
 use crate::config::model::{
-    ConnectionSettings, Console, Database, Engine, EnvironmentColor, EnvironmentDeclaration,
-    EnvironmentId, Kubeconfigs, ManagedInstance, Preferences, Project, SavedQuery, SecretRef,
+    ConnectionSettings, Console, Database, Engine, Kubeconfigs, ManagedInstance, Preferences,
+    SavedQuery, SecretRef,
 };
 
 /// Un fichier v6 — les champs qui entourent les projets passent tels quels en v7.
@@ -63,7 +63,7 @@ pub struct Projet {
 /// Un environnement déclaré par un projet v6.
 ///
 /// **L'identifiant en chaîne, la couleur en `FolderColor`** : ni `EnvironmentId` ni
-/// `EnvironmentColor` ne survivent à #165, et `FolderColor` porte les mêmes cinq valeurs
+/// `EnvironmentColor` n'ont survécu à #165, et `FolderColor` porte les mêmes cinq valeurs
 /// `kebab-case`, donc le même JSON.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -90,6 +90,17 @@ pub struct Base {
     pub visible_schemas: Option<Vec<String>>,
 }
 
+/// La référence qu'une connexion v6 recevait à sa création : `projet/base/environnement`.
+///
+/// **Figée ici avec la forme qu'elle décrivait**, et plus employée nulle part pour écrire : la
+/// migration part de la référence que le fichier **porte**, jamais de celle-ci (voir
+/// [`PlanDeSecrets`]). Elle ne sert qu'aux décors qui fabriquent un fichier v6 tel qu'une version
+/// antérieure l'aurait écrit.
+#[cfg(test)]
+pub(crate) fn reference_v6(projet: &str, base: &str, environnement: &str) -> SecretRef {
+    SecretRef::new(format!("{projet}/{base}/{environnement}"))
+}
+
 /// Les références de mots de passe que la migration change : `(ancienne, nouvelle)`.
 ///
 /// **L'ancienne est celle que le fichier porte, jamais une référence recalculée depuis le triplet.**
@@ -104,8 +115,6 @@ pub struct Base {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PlanDeSecrets(pub Vec<(SecretRef, SecretRef)>);
 
-// Lu par les tests seuls tant que #165 ne déplace pas les secrets.
-#[cfg_attr(not(test), allow(dead_code))]
 impl PlanDeSecrets {
     pub fn est_vide(&self) -> bool {
         self.0.is_empty()
@@ -113,55 +122,6 @@ impl PlanDeSecrets {
 
     pub fn couples(&self) -> &[(SecretRef, SecretRef)] {
         &self.0
-    }
-}
-
-impl Projet {
-    /// **Temporaire, jusqu'à la bascule de #165** : la chaîne rend encore le modèle courant, que
-    /// `VERSION_COURANTE = 6` lit. La conversion est mécanique — la v6 *est* la forme courante —, et
-    /// l'identifiant de connexion reste vide, comme pour tout fichier v6 relu aujourd'hui.
-    pub fn vers_le_modele_courant(self) -> Project {
-        Project {
-            name: self.name,
-            environments: self
-                .environments
-                .into_iter()
-                .map(|environnement| EnvironmentDeclaration {
-                    id: EnvironmentId::brut(environnement.id),
-                    label: environnement.label,
-                    color: couleur_courante(environnement.color),
-                    production: environnement.production,
-                })
-                .collect(),
-            databases: self
-                .databases
-                .into_iter()
-                .map(|base| Database {
-                    id: ConnectionId::vide(),
-                    name: base.name,
-                    label: base.label,
-                    engine: base.engine,
-                    environment: EnvironmentId::brut(base.environment),
-                    connection: base.connection,
-                    consoles: base.consoles,
-                    visible_schemas: base.visible_schemas,
-                })
-                .collect(),
-            queries: self.queries,
-            value_labels: self.value_labels,
-        }
-    }
-}
-
-/// `FolderColor` vers `EnvironmentColor` : un `match` exhaustif, pour que l'ajout d'une couleur d'un
-/// côté ne compile pas sans l'autre.
-fn couleur_courante(couleur: FolderColor) -> EnvironmentColor {
-    match couleur {
-        FolderColor::Green => EnvironmentColor::Green,
-        FolderColor::Amber => EnvironmentColor::Amber,
-        FolderColor::Red => EnvironmentColor::Red,
-        FolderColor::Slate => EnvironmentColor::Slate,
-        FolderColor::Violet => EnvironmentColor::Violet,
     }
 }
 
@@ -305,9 +265,6 @@ pub fn vers_v7(mut projets: Vec<Projet>) -> (FolderTree, PlanDeSecrets) {
                 name: base.name,
                 label: base.label,
                 engine: base.engine,
-                // **Gardé jusqu'à la bascule de #165**, qui retire le champ du modèle : il ne sert
-                // plus à rien ranger, mais le type l'exige encore.
-                environment: EnvironmentId::brut(environnement.clone()),
                 connection,
                 consoles: base.consoles,
                 visible_schemas: base.visible_schemas,

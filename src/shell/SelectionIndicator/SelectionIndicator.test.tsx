@@ -21,14 +21,11 @@ const CONNECTEE: ConnectionState = {
   tunnelLocalPort: null,
 }
 
-/** Un environnement de production **qui ne s'appelle pas « prod »** : le drapeau seul décide. */
-const ATELIER = { label: 'Atelier', color: 'green', production: true } as const
-
 function monter(props: Partial<Parameters<typeof SelectionIndicator>[0]> = {}) {
   return render(
     <LanguageProvider preferences={{ language: 'fr' }}>
       <Sprite />
-      <SelectionIndicator projectName="Atelier Nord" {...props} />
+      <SelectionIndicator chemin={['Atelier Nord']} {...props} />
     </LanguageProvider>,
   )
 }
@@ -40,7 +37,9 @@ function monter(props: Partial<Parameters<typeof SelectionIndicator>[0]> = {}) {
  * est destiné par ARIA à un ensemble de *contrôles* — il n'y en a plus ici. Reste du texte, lu dans
  * l'ordre du document. Faute de rôle, les tests l'atteignent par son contenu.
  */
-const racine = () => screen.getByText('Atelier Nord').parentElement as HTMLElement
+const racine = () =>
+  // Le texte du chemin, dans sa boîte raccourcie, dans la racine.
+  screen.getByText('Atelier Nord').parentElement?.parentElement as HTMLElement
 
 // --- Un indicateur, plus un contrôle ---
 
@@ -53,7 +52,7 @@ const racine = () => screen.getByText('Atelier Nord').parentElement as HTMLEleme
  * l'arbitrage que `24` a déjà rendu contre un `Chip` inerte.
  */
 test('l’indicateur ne porte aucun élément focalisable', async () => {
-  monter({ environment: ATELIER, breadcrumb: 'catalogue · public', connection: CONNECTEE })
+  monter({ couleur: 'green', breadcrumb: 'catalogue · public', connection: CONNECTEE })
 
   expect(screen.queryByRole('button')).toBeNull()
   expect(screen.queryByRole('combobox')).toBeNull()
@@ -78,84 +77,51 @@ test('l’indicateur n’est pas une région live', () => {
   expect(racine()).not.toHaveAttribute('aria-live')
 })
 
-test('le nom du projet est visible', () => {
+test('le chemin de dossiers est visible', () => {
   monter()
   expect(screen.getByText('Atelier Nord')).toBeInTheDocument()
 })
 
-// --- L'environnement ---
+// --- Le chemin de dossiers (#166) ---
+
+test('le chemin s’écrit en entier, séparé par des chevrons, sans capitales', () => {
+  monter({ chemin: ['Atelier Nord', 'Pré-production'] })
+  expect(screen.getByText('Atelier Nord › Pré-production')).toBeInTheDocument()
+  expect(screen.queryByText(/PRÉ-PRODUCTION/)).toBeNull()
+})
 
 /*
- * **Le libellé s'affiche tel qu'il est déclaré.**
- *
- * Depuis `23a` il est renommable : c'est une chaîne de l'utilisateur, et « Pré-production » ne doit
- * pas devenir « PRÉ-PRODUCTION ». Le CSS ne portant pas dans jsdom, ce qui est testable ici est le
- * **texte rendu** — une capitalisation faite en JavaScript se verrait.
+ * **Raccourci à gauche** : c'est la fin du chemin — le dossier le plus proche — qui dit où l'on est.
+ * jsdom ne calcule aucune ellipse ; ce qui se vérifie ici est la déclaration qui la place à gauche.
  */
-test('le libellé d’environnement n’est pas capitalisé', () => {
-  monter({ environment: { label: 'Pré-production', color: 'amber', production: false } })
-  expect(screen.getByText('Pré-production')).toBeInTheDocument()
-  expect(screen.queryByText('PRÉ-PRODUCTION')).toBeNull()
+test('le chemin est raccourci par la gauche', () => {
+  monter({ chemin: ['un', 'deux', 'trois'] })
+  const texte = screen.getByText('un › deux › trois')
+  expect(texte.className).toMatch(/cheminTexte/)
+  expect(texte.parentElement?.className).toMatch(/name/)
 })
 
-// L'étiquette « ENV » du sélecteur disparaît avec lui : sans commutateur, il n'y a rien à étiqueter.
-test('aucune étiquette « ENV » ne subsiste', () => {
-  monter({ environment: ATELIER })
-  expect(racine().textContent?.toLowerCase()).not.toContain('env ')
-})
-
-// **La couleur vient de la déclaration, non d'un attribut lu par le CSS** (`23a`) : une table de
-// teintes par identifiant redeviendrait le trio en dur que `23a` a fait disparaître.
-test('la pastille prend la couleur déclarée de l’environnement', () => {
-  const { container, unmount } = monter({ environment: ATELIER })
+// **La couleur vient de la déclaration, non d'un attribut lu par le CSS** : une table de teintes par
+// identifiant serait une seconde source.
+test('la pastille prend la couleur du dossier coloré le plus proche', () => {
+  const { container, unmount } = monter({ couleur: 'green' })
   expect((container.querySelector('span[style]') as HTMLElement).style.background).toContain(
     '--success',
   )
   unmount()
 
-  const rouge = monter({ environment: { label: 'vitrine', color: 'red', production: false } })
+  const rouge = monter({ couleur: 'red' })
   expect((rouge.container.querySelector('span[style]') as HTMLElement).style.background).toContain(
     '--danger',
   )
 })
 
 test('la pastille de couleur est décorative', () => {
-  const { container } = monter({ environment: ATELIER })
+  const { container } = monter({ couleur: 'green' })
   expect(container.querySelector('span[style]')).toHaveAttribute('aria-hidden', 'true')
 })
 
-/*
- * **Le badge suit le drapeau, jamais le libellé ni la couleur** (`23g`).
- *
- * `PROD` est un ajout de `25b`, assumé : le sélecteur parti, plus rien dans la barre ne dit « vous
- * écrivez en production » à l'instant où `11d` applique ses garde-fous.
- */
-test('un environnement marqué production porte PROD, quel que soit son libellé', () => {
-  monter({ environment: ATELIER })
-  expect(screen.getByText('PROD')).toBeInTheDocument()
-})
-
-test('un environnement nommé « prod » mais non marqué ne porte pas le badge', () => {
-  monter({ environment: { label: 'prod', color: 'red', production: false } })
-  expect(screen.queryByText('PROD')).toBeNull()
-})
-
-/*
- * **`PROD` est un sigle**, et la pastille de couleur est `aria-hidden` : sans texte masqué
- * visuellement, rien n'annoncerait en clair qu'on regarde une production. `09d` interdit que la
- * couleur porte seule.
- */
-test('le fait « production » est annoncé en clair, pas seulement par le sigle', () => {
-  monter({ environment: ATELIER })
-  expect(racine()).toHaveTextContent('environnement de production')
-})
-
-test('hors production, rien n’est annoncé', () => {
-  monter({ environment: { label: 'Atelier', color: 'green', production: false } })
-  expect(racine()).not.toHaveTextContent('environnement de production')
-})
-
-test('sans environnement, aucune pastille ni badge', () => {
+test('sans dossier coloré, aucune pastille — et plus aucun badge PROD', () => {
   const { container } = monter()
   expect(container.querySelector('span[style]')).toBeNull()
   expect(screen.queryByText('PROD')).toBeNull()
@@ -175,7 +141,7 @@ test('sans connexion ouverte, aucun fil d’Ariane', () => {
 
 // --- Le point d'état ---
 
-// Un projet n'a pas d'état de connexion — ses connexions en ont. Sans connexion ouverte, **aucun
+// Un dossier n'a pas d'état de connexion — ses connexions en ont. Sans connexion ouverte, **aucun
 // point** plutôt qu'un point gris inventé.
 test('sans connexion ouverte, aucun point d’état', () => {
   const { container } = monter()

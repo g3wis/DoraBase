@@ -1,30 +1,16 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, test, vi } from 'vitest'
-import type { Project } from '../../domain/config'
 import { LanguageProvider } from '../../i18n/LanguageContext'
-import { REGLAGES, TRIO_DE_TEST } from '../NewConnection/pourLesTests'
+import { arbreDeTest, connexionDeTest, trioDeTest } from '../NewConnection/pourLesTests'
 import { DumpDialogs } from './DumpDialogs'
 import type * as pont from './dumpCommands'
 
-const PROJET_UNIQUE: Project[] = [
-  {
-    name: 'Atelier Nord',
-    environments: TRIO_DE_TEST,
-    queries: [],
-    databases: [
-      {
-        name: 'commandes',
-        engine: 'postgresql',
-        // Une connexion appartient à **un** environnement depuis `23b`, et c'est le sien
-        // qui entre dans la clé — il n'y a plus d'environnement actif depuis `25c`.
-        environment: 'staging',
-        connection: REGLAGES,
-        consoles: [],
-      },
-    ],
-  },
-]
+const PROJET_UNIQUE = arbreDeTest(
+  trioDeTest({ staging: [connexionDeTest('c-commandes', 'commandes')] }),
+)
+
+const VIDE = { folders: [], connections: [] }
 
 /**
  * Monte la modale sous le contexte de langue, en **français figé** : les assertions portent
@@ -59,7 +45,7 @@ function commandes(surcharges: Partial<typeof pont> = {}): typeof pont {
 }
 
 test('sans cible unique, la modale le dit au lieu de choisir', () => {
-  monter(<DumpDialogs sens="export" projects={[]} onClose={() => {}} commandes={commandes()} />)
+  monter(<DumpDialogs sens="export" arbre={VIDE} onClose={() => {}} commandes={commandes()} />)
   expect(screen.getByRole('dialog', { name: /Aucune base/i })).toBeInTheDocument()
 })
 
@@ -67,24 +53,19 @@ test('sans cible unique, aucun verdict n’est même demandé', () => {
   // Sonder un serveur pour une base qu'on ne saurait pas nommer serait un aller-retour
   // réseau pour rien.
   const pontSimule = commandes()
-  monter(<DumpDialogs sens="export" projects={[]} onClose={() => {}} commandes={pontSimule} />)
+  monter(<DumpDialogs sens="export" arbre={VIDE} onClose={() => {}} commandes={pontSimule} />)
   expect(pontSimule.dumpAvailability).not.toHaveBeenCalled()
 })
 
 test('avec une cible unique, le verdict est demandé et la modale d’export s’ouvre', async () => {
   const pontSimule = commandes()
   monter(
-    <DumpDialogs
-      sens="export"
-      projects={PROJET_UNIQUE}
-      onClose={() => {}}
-      commandes={pontSimule}
-    />,
+    <DumpDialogs sens="export" arbre={PROJET_UNIQUE} onClose={() => {}} commandes={pontSimule} />,
   )
 
   expect(await screen.findByRole('dialog', { name: /Exporter un dump/i })).toBeInTheDocument()
   expect(pontSimule.dumpAvailability).toHaveBeenCalledWith(
-    expect.objectContaining({ key: expect.objectContaining({ database: 'commandes' }) }),
+    expect.objectContaining({ key: { connection: 'c-commandes' } }),
     'export',
   )
 })
@@ -92,12 +73,7 @@ test('avec une cible unique, le verdict est demandé et la modale d’export s�
 test('le sens import demande le verdict de psql, pas celui de pg_dump', async () => {
   const pontSimule = commandes()
   monter(
-    <DumpDialogs
-      sens="import"
-      projects={PROJET_UNIQUE}
-      onClose={() => {}}
-      commandes={pontSimule}
-    />,
+    <DumpDialogs sens="import" arbre={PROJET_UNIQUE} onClose={() => {}} commandes={pontSimule} />,
   )
 
   await screen.findByRole('dialog')
@@ -109,12 +85,7 @@ test('choisir un fichier à importer lance l’inspection avant toute confirmati
   const utilisateur = userEvent.setup()
   const pontSimule = commandes()
   monter(
-    <DumpDialogs
-      sens="import"
-      projects={PROJET_UNIQUE}
-      onClose={() => {}}
-      commandes={pontSimule}
-    />,
+    <DumpDialogs sens="import" arbre={PROJET_UNIQUE} onClose={() => {}} commandes={pontSimule} />,
   )
 
   await utilisateur.click(await screen.findByRole('button', { name: /Choisir un fichier/ }))
@@ -132,12 +103,7 @@ test('l’export passe le chemin choisi à start_export', async () => {
   const utilisateur = userEvent.setup()
   const pontSimule = commandes()
   monter(
-    <DumpDialogs
-      sens="export"
-      projects={PROJET_UNIQUE}
-      onClose={() => {}}
-      commandes={pontSimule}
-    />,
+    <DumpDialogs sens="export" arbre={PROJET_UNIQUE} onClose={() => {}} commandes={pontSimule} />,
   )
 
   await utilisateur.click(await screen.findByRole('button', { name: /Choisir le fichier/ }))
@@ -154,12 +120,7 @@ test('un verdict qui échoue est rendu, et non tu', async () => {
     }),
   })
   monter(
-    <DumpDialogs
-      sens="export"
-      projects={PROJET_UNIQUE}
-      onClose={() => {}}
-      commandes={pontSimule}
-    />,
+    <DumpDialogs sens="export" arbre={PROJET_UNIQUE} onClose={() => {}} commandes={pontSimule} />,
   )
 
   expect(await screen.findByText(/tunnel SSH/)).toBeInTheDocument()
@@ -170,12 +131,7 @@ test('le transport rendu par le cœur est dit dans la modale, à l’export comm
   // phrase vient du verdict, pas de la variante, que ce décor règle sur autre chose.
   for (const sens of ['export', 'import'] as const) {
     const { unmount } = monter(
-      <DumpDialogs
-        sens={sens}
-        projects={PROJET_UNIQUE}
-        onClose={() => {}}
-        commandes={commandes()}
-      />,
+      <DumpDialogs sens={sens} arbre={PROJET_UNIQUE} onClose={() => {}} commandes={commandes()} />,
     )
     expect(await screen.findByText(/autorités du système \(verify-full\)/)).toBeInTheDocument()
     unmount()
@@ -190,12 +146,7 @@ test('sans transport — un moteur sans outil — la modale ne dit rien du trans
     })),
   })
   monter(
-    <DumpDialogs
-      sens="export"
-      projects={PROJET_UNIQUE}
-      onClose={() => {}}
-      commandes={pontSimule}
-    />,
+    <DumpDialogs sens="export" arbre={PROJET_UNIQUE} onClose={() => {}} commandes={pontSimule} />,
   )
   await screen.findByText(/pas d'outil local/)
   expect(screen.queryByText(/^Transport/)).not.toBeInTheDocument()

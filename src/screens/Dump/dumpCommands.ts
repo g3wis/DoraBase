@@ -1,8 +1,8 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { open, save } from '@tauri-apps/plugin-dialog'
-import type { DumpRequest, DumpVerdict, Inspection } from '../../domain/dump'
-import type { DatabaseKey } from '../../domain/engine'
+import type { DatabaseKey, DumpRequest } from '../../domain/arbre'
+import type { DumpVerdict, Inspection } from '../../domain/dump'
 
 /**
  * Le pont vers les commandes de dump.

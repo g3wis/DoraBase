@@ -17,14 +17,10 @@ use crate::engine::{
 };
 use crate::secrets::Secret;
 
-/// L'identité d'une connexion : projet / base / environnement.
-///
-/// **La même clé que la référence de secret de `08e`**, et ce n'est pas un hasard : c'est
-/// l'identité d'une connexion. La réemployer évite deux conventions à garder cohérentes, et
-/// permet de retrouver le mot de passe d'une connexion depuis sa seule clé.
-pub fn cle(project: &str, database: &str, environment: &str) -> String {
-    format!("{project}/{database}/{environment}")
-}
+// **La clé d'une connexion est `config::cle_de_connexion`** (#165) : `connexion/<id>`, la même
+// convention que la référence de son secret. Le registre ne compose aucune clé lui-même — il en
+// reçoit, et celles des instances managées (`instance/<id>`) vivent dans le même espace sans s'y
+// confondre.
 
 /// L'état d'une base, tel que l'arbre de `09d` l'affiche.
 ///
@@ -1079,11 +1075,12 @@ mod tests {
 
     #[test]
     fn la_cle_est_celle_de_la_reference_de_secret() {
-        // `08e` dérive la référence d'un secret du même triplet. Deux conventions divergentes
+        // La référence d'un secret dérive du même identifiant (#165). Deux conventions divergentes
         // obligeraient à traduire de l'une à l'autre, et une traduction se désynchronise.
+        let id = crate::config::ConnectionId::brut("8c1e4f0a9b27d315");
         assert_eq!(
-            cle("Halle", "analytics", "prod"),
-            crate::config::reference_de("Halle", "analytics", "prod").as_str()
+            crate::config::cle_de_connexion(&id),
+            crate::config::reference_de_connexion(&id).as_str()
         );
     }
 
@@ -1203,7 +1200,7 @@ mod tests_transaction {
         };
 
         let registre = ConnectionRegistry::new();
-        let cle = cle("Atelier", "jetons", "dev");
+        let cle = crate::config::cle_de_connexion(&crate::config::ConnectionId::brut("jetons"));
         registre
             .ouvrir(
                 &cle,
@@ -1813,7 +1810,7 @@ mod tests_transaction {
     #[tokio::test]
     async fn sur_une_connexion_fermee_tout_est_refuse_clairement() {
         let registre = ConnectionRegistry::new();
-        let cle = cle("Atelier", "jetons", "dev");
+        let cle = crate::config::cle_de_connexion(&crate::config::ConnectionId::brut("jetons"));
         // L'exécution parle de la **connexion** : c'est elle qui manque, et le message dit la
         // manœuvre — ouvrir la base.
         let sans_connexion = registre

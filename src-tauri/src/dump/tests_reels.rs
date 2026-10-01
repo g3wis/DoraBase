@@ -344,11 +344,9 @@ async fn un_dump_passe_par_le_bastion() {
     // il n'est pas celui de la base.
     let registre = crate::engine::registry::ConnectionRegistry::new();
     let key = crate::engine::commands::DatabaseKey {
-        project: "Bastion".into(),
-        database: "dorabase_test".into(),
-        environment: "dev".into(),
+        connection: crate::config::ConnectionId::brut("bastion"),
     };
-    let identite = crate::engine::registry::cle(&key.project, &key.database, &key.environment);
+    let identite = key.cle();
     registre
         .ouvrir(
             &identite,
