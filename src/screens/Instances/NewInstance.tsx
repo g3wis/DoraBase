@@ -336,7 +336,7 @@ export function NewInstance({
       {confirmationTlsOuverte && ssl !== 'verify-ca' && ssl !== 'verify-full' && (
         <ConfirmationTls
           mode={ssl}
-          rappel={t('newConnection.tlsConfirm.instance')}
+          cible={{ kind: 'instance' }}
           onConfirmer={() => void enregistrer(true)}
           onClose={() => setConfirmationTlsOuverte(false)}
         />

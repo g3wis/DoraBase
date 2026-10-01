@@ -515,9 +515,7 @@ export function NewConnection({
         draft.sslMode !== 'verify-full' && (
           <ConfirmationTls
             mode={draft.sslMode}
-            rappel={t('newConnection.tlsConfirm.folder', {
-              name: dossierEnLectureSeule?.name ?? '',
-            })}
+            cible={{ kind: 'folder', name: dossierEnLectureSeule?.name ?? '' }}
             onConfirmer={() => void enregistrer(true)}
             onClose={() => setConfirmationTlsOuverte(false)}
           />
