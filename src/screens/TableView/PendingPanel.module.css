@@ -304,7 +304,8 @@
   color: var(--ink-on-accent);
 }
 
-.appliquer:disabled {
+.appliquer:disabled,
+.appliquer[aria-disabled="true"] {
   cursor: default;
   opacity: 0.5;
 }

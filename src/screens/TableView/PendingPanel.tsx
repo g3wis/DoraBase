@@ -41,6 +41,17 @@ type PendingPanelProps = {
   onCopierLePatch?: () => void
   /** Écarte le rapport d'écriture et revient à la lecture. */
   onEcarterLePatch?: () => void
+  /**
+   * La raison de la lecture seule effective, quand la connexion y est passée **avec des
+   * modifications en attente** (#167) — un déplacement sous un dossier en lecture seule, ou le
+   * dossier qui y passe.
+   *
+   * **Les modifications restent** : les jeter en silence ferait perdre un travail que rien n'a
+   * demandé de perdre, et la lecture seule peut se lever. « Appliquer » est désactivé **avec sa
+   * raison**, en `aria-disabled` — un `disabled` rendrait l'infobulle inatteignable (piège n° 3) —,
+   * et « Tout annuler » reste là.
+   */
+  lectureSeule?: string | null
 }
 
 /**
@@ -68,6 +79,7 @@ export function PendingPanel({
   patchInverse = null,
   onCopierLePatch,
   onEcarterLePatch,
+  lectureSeule = null,
 }: PendingPanelProps) {
   const t = useT()
   // **Deux états pour un panneau** : ce qui attend d'être écrit, et ce qui vient de l'être. Le
@@ -276,12 +288,14 @@ export function PendingPanel({
             <button
               type="button"
               className={styles.appliquer}
-              onClick={onAppliquer}
-              disabled={onAppliquer === undefined || enCours}
+              onClick={lectureSeule === null ? onAppliquer : undefined}
+              disabled={lectureSeule === null && (onAppliquer === undefined || enCours)}
+              aria-disabled={lectureSeule !== null || undefined}
               title={
-                onAppliquer === undefined
+                lectureSeule ??
+                (onAppliquer === undefined
                   ? t('tableView.pendingPanel.applyDisabledReason')
-                  : undefined
+                  : undefined)
               }
             >
               <Icon name="check" size={12} strokeWidth={2.6} />

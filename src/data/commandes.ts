@@ -13,6 +13,9 @@ import type {
   ImportProjectsRequest,
   ImportProjectsResult,
   ImportReport,
+  MoveDatabaseRequest,
+  MoveFolderRequest,
+  MoveResult,
   RecolorFolderRequest,
   RenameFolderRequest,
   SetFolderReadOnlyRequest,
@@ -368,6 +371,22 @@ export async function recolorFolder(request: RecolorFolderRequest): Promise<Fold
 /** Passe un dossier en lecture seule, ou la lève. Elle s'impose à tous ses descendants. */
 export async function setFolderReadOnly(request: SetFolderReadOnlyRequest): Promise<FolderTree> {
   return appeler<FolderTree>('set_folder_read_only', { request })
+}
+
+/**
+ * Range un dossier ailleurs, ou le réordonne parmi ses frères (#167).
+ *
+ * **Une question n'est pas un refus** : si le déplacement change la lecture seule d'une connexion et
+ * que `confirmed` est faux, la promesse se résout en `confirmationRequired` et rien ne bouge. Seules
+ * les connexions dont la lecture seule change sont fermées ; les autres restent ouvertes.
+ */
+export async function moveFolder(request: MoveFolderRequest): Promise<MoveResult> {
+  return appeler<MoveResult>('move_folder', { request })
+}
+
+/** Range une connexion ailleurs, ou la réordonne (#167). Mêmes règles que `moveFolder`. */
+export async function moveDatabase(request: MoveDatabaseRequest): Promise<MoveResult> {
+  return appeler<MoveResult>('move_database', { request })
 }
 
 /**

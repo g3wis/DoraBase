@@ -95,6 +95,7 @@ function Piloté({
   onOpenPreferences,
   onOpenDiagram,
   onManageSchemas,
+  onMove,
   arbre = ARBRE,
 }: {
   charge?: Charge
@@ -117,6 +118,7 @@ function Piloté({
   onOpenPreferences?: () => void
   onOpenDiagram?: ExplorerSidebarProps['onOpenDiagram']
   onManageSchemas?: ExplorerSidebarProps['onManageSchemas']
+  onMove?: ExplorerSidebarProps['onMove']
   arbre?: FolderTree
 }) {
   const [deplies, setDeplies] = useState(new Set(initial))
@@ -147,6 +149,7 @@ function Piloté({
           onOpenPreferences={onOpenPreferences}
           onOpenDiagram={onOpenDiagram}
           onManageSchemas={onManageSchemas}
+          onMove={onMove}
           onSelect={(n) => setChoisi(n.id)}
           onToggle={(n) => {
             onToggleSpy?.(n)
@@ -793,10 +796,9 @@ test('le menu d’un dossier racine suit l’ordre décidé, le geste destructeu
     />,
   )
   await userEvent.click(screen.getByRole('button', { name: 'Actions de Atelier Nord' }))
-  // **« Exporter le dossier… » (#169) après la lecture seule, avant « Retirer… »**, et pas encore
-  // « Déplacer vers… » : #167 la posera juste avant « Retirer… ». Une entrée qui n'aboutit à rien
-  // d'ici là se lirait comme une panne. Le « … » rend un `Popover` de boutons, donc l'ordre se lit
-  // dans le panneau lui-même.
+  // **« Exporter le dossier… » (#169) après la lecture seule**, puis « Déplacer vers… » (#167) juste
+  // avant « Retirer… », qui reste le dernier. Le « … » rend un `Popover` de boutons, donc l'ordre se
+  // lit dans le panneau lui-même.
   const attendues = [
     'Rafraîchir l’arborescence',
     'Nouvelle connexion…',
@@ -805,6 +807,7 @@ test('le menu d’un dossier racine suit l’ordre décidé, le geste destructeu
     'Couleur…',
     'Passer en lecture seule',
     'Exporter le dossier…',
+    'Déplacer vers…',
     'Retirer de DoraBase…',
   ]
   const panneau = screen.getByRole('button', { name: attendues[0] }).parentElement
@@ -1321,6 +1324,7 @@ describe('le clic droit ouvre le même menu, au pointeur (`26`)', () => {
       'Gérer les schémas…',
       'Renommer…',
       'Modifier…',
+      'Déplacer vers…',
       'Retirer de DoraBase…',
     ])
   })
@@ -1439,4 +1443,33 @@ test('la bande ne rend pas l’import quand l’écran ne le relie à rien', () 
   render(<Piloté onNewFolder={async () => 'f-neuf'} />)
 
   expect(screen.queryByRole('button', { name: 'Importer des dossiers…' })).toBeNull()
+})
+
+// --- Déplacer (#167) ---
+
+describe('« Déplacer vers… » depuis le menu (#167)', () => {
+  test('le menu d’une connexion ouvre la modale, et le déplacement part vers le cœur', async () => {
+    const onMove = vi.fn<NonNullable<ExplorerSidebarProps['onMove']>>(async () => ({
+      kind: 'moved',
+      tree: ARBRE,
+    }))
+    render(<Piloté initial={TOUT_DEPLIE} onMove={onMove} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Actions de analytics' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Déplacer vers…' }))
+    const modale = screen.getByRole('dialog')
+    await userEvent.click(within(modale).getByRole('button', { name: 'Racine' }))
+    await userEvent.click(within(modale).getByRole('button', { name: 'Déplacer' }))
+    expect(onMove).toHaveBeenCalledWith(
+      { kind: 'database', connection: ANALYTICS },
+      { destination: null, index: null },
+      expect.any(Boolean),
+    )
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  test('sans `onMove`, l’entrée est désactivée avec sa raison', async () => {
+    render(<Piloté initial={TOUT_DEPLIE} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Actions de analytics' }))
+    expect(screen.getByRole('button', { name: 'Déplacer vers…' })).toBeDisabled()
+  })
 })

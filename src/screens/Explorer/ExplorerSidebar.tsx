@@ -1,6 +1,19 @@
-import { type ReactNode, useEffect, useMemo, useState } from 'react'
-import { dossier } from '../../data/dossiers'
+import {
+  type ReactNode,
+  type PointerEvent as ReactPointerEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
+import {
+  type ArriveeDuDeplacement,
+  dossier,
+  type EffetSurLaLectureSeule,
+  type SujetDuDeplacement,
+} from '../../data/dossiers'
 import { Icon } from '../../design/icons/Icon'
+import type { MoveResult } from '../../domain/arbre'
 import type { ConnectionId, FolderColor, FolderId, FolderTree } from '../../domain/config'
 import type { ColumnInfo, ConnectionState } from '../../domain/engine'
 import { useT } from '../../i18n/LanguageContext'
@@ -14,10 +27,20 @@ import { SidebarFilterBar } from '../../ui/SidebarFilterBar/SidebarFilterBar'
 import { SidebarSectionTitle } from '../../ui/SidebarSectionTitle/SidebarSectionTitle'
 import { SidebarToolbar, SidebarToolbarButton } from '../../ui/SidebarToolbar/SidebarToolbar'
 import { TreeRow } from '../../ui/TreeRow/TreeRow'
+import { vitesseAuBord } from '../../ui/VirtualGrid/defilementAuBord'
 import { aplatir, type Charge, type Deplies, idDossier, type Noeud } from './arbre'
 import { CouleurDialog } from './CouleurDialog'
 import { type CibleDeSuppression, DeleteConnectionDialog } from './DeleteConnectionDialog'
+import { DeplacerVers } from './DeplacerVers'
 import styles from './ExplorerSidebar.module.css'
+import {
+  arriveeDuDepot,
+  arriveeSansEffet,
+  type CibleDuDepot,
+  nomDuSujet,
+  positionDansLaLigne,
+  sujetDe,
+} from './glissement'
 import { type RapportDeRenommage, RenameReportDialog } from './RenameReportDialog'
 import { RowMenu } from './RowMenu'
 
@@ -105,6 +128,21 @@ export type ExplorerSidebarProps = {
    */
   onExportFolder?: (folder: FolderId, nom: string) => void
   /**
+   * Déplace un dossier ou une connexion (#167) — depuis « Déplacer vers… » ou un glisser-déposer.
+   *
+   * **Rend l'issue du cœur, et ne rejette que sur un refus** : une question sur la lecture seule
+   * (`confirmationRequired`) n'est pas un échec, c'est ce qui ouvre la modale en confirmation.
+   * L'appelant repose l'arbre quand l'issue est `moved`.
+   *
+   * Absent, l'entrée de menu est désactivée avec sa raison et aucune ligne ne se glisse — le cas de
+   * la galerie.
+   */
+  onMove?: (
+    sujet: SujetDuDeplacement,
+    arrivee: ArriveeDuDeplacement,
+    confirmed: boolean,
+  ) => Promise<MoveResult>
+  /**
    * Retirer la déclaration d'une connexion, ou un dossier entier (`08j`).
    *
    * Une seule prop pour les deux : la cible dit lequel, et deux props jumelles se seraient
@@ -180,6 +218,7 @@ export function ExplorerSidebar({
   onRenameDatabase,
   onImportProjects,
   onExportFolder,
+  onMove,
   onDelete,
   modificationsEnAttenteDe,
   columns,
@@ -226,6 +265,26 @@ export function ExplorerSidebar({
     null,
   )
   const demanderLeRetrait = onDelete === undefined ? undefined : setARetirer
+  /**
+   * « Déplacer vers… » ouverte (#167) : depuis le menu, rien de choisi ; depuis un dépôt dont le cœur
+   * a posé une question, l'arrivée du dépôt et la question.
+   */
+  const [aDeplacer, setADeplacer] = useState<{
+    sujet: SujetDuDeplacement
+    arrivee?: ArriveeDuDeplacement
+    question?: EffetSurLaLectureSeule
+  } | null>(null)
+  /** La ligne saisie pendant un glissement, et ce que le pointeur désigne. */
+  const [glissement, setGlissement] = useState<{
+    id: string
+    cible: CibleDuDepot | null
+  } | null>(null)
+  /**
+   * Un glissement vient de finir : le `click` que le navigateur émet au relâchement doit être avalé,
+   * sans quoi lâcher une ligne la sélectionnerait — un effet de bord sur un geste qui la range.
+   */
+  const clicAAvaler = useRef(false)
+  const arbreDom = useRef<HTMLDivElement>(null)
 
   const noeuds = useMemo(
     () => aplatir(arbre, deplies, charge, etatDe, t),
@@ -277,6 +336,7 @@ export function ExplorerSidebar({
       refuserLaLectureSeule: (nom: string, refus: unknown) =>
         setRapport({ nom, refus: messageDuRefus(refus), sorte: 'lectureSeule' }),
       onExportFolder,
+      demanderLeDeplacement: onMove === undefined ? undefined : (sujet) => setADeplacer({ sujet }),
       demanderLeRetrait,
       onRefresh,
       consoles,
@@ -328,6 +388,179 @@ export function ExplorerSidebar({
     }
   }
 
+  /**
+   * Le sujet rejoint un dossier replié : le déplier, sans quoi il disparaîtrait sous la main — au
+   * glisser-déposer comme depuis la modale.
+   */
+  function deplierLHote(destination: FolderId | null) {
+    const hote = destination === null ? undefined : noeuds.find((n) => n.folder === destination)
+    if (hote?.chevron === 'closed') onToggle(hote)
+  }
+
+  /**
+   * Envoie un dépôt au cœur, **sans confirmation** : s'il change la lecture seule, la réponse est une
+   * question, et c'est « Déplacer vers… », préremplie, qui la pose — un seul chemin porte la règle
+   * (règle n° 17). Un refus n'a pas d'autre endroit où se dire que le rapport.
+   */
+  function deposer(
+    sujet: SujetDuDeplacement,
+    arrivee: ArriveeDuDeplacement,
+    deplier: FolderId | null,
+  ) {
+    if (onMove === undefined) return
+    const nom = nomDuSujet(arbre, sujet)
+    void onMove(sujet, arrivee, false).then(
+      (issue) => {
+        if (issue.kind === 'confirmationRequired') {
+          setADeplacer({
+            sujet,
+            arrivee,
+            question: {
+              becomesReadOnly: issue.becomesReadOnly,
+              leavesReadOnly: issue.leavesReadOnly,
+              folders: issue.folders,
+            },
+          })
+          return
+        }
+        deplierLHote(deplier)
+      },
+      (refus: unknown) => setRapport({ nom, refus: messageDuRefus(refus), sorte: 'deplacement' }),
+    )
+  }
+
+  /**
+   * Ce que le pointeur désigne en `(x, y)` : la bande de la racine, une ligne et sa position, ou rien.
+   *
+   * **`elementFromPoint`, jamais la cible de l'événement** : la ligne saisie capte le pointeur, donc
+   * tous les événements lui reviennent — leurs coordonnées, elles, restent exactes. C'est le patron de
+   * `VirtualGrid::debuterLeReordonnancement`.
+   */
+  function cibleSousLePointeur(
+    x: number,
+    y: number,
+    sujet: SujetDuDeplacement,
+  ): CibleDuDepot | null {
+    const sous = document.elementFromPoint(x, y)
+    if (sous?.closest('[data-depot-racine]')) return { kind: 'racine' }
+    const ligne = sous?.closest<HTMLElement>('[data-noeud]')
+    const noeud = ligne ? visibles.find((n) => n.id === ligne.dataset.noeud) : undefined
+    if (ligne == null || noeud === undefined) return null
+    const bords = ligne.getBoundingClientRect()
+    const cible: CibleDuDepot = {
+      kind: 'ligne',
+      noeud,
+      position: positionDansLaLigne(y, bords.top, bords.height, noeud.kind),
+    }
+    return arriveeDuDepot(arbre, sujet, cible) === null ? null : cible
+  }
+
+  /**
+   * Le glissement d'une ligne de dossier ou de connexion (#167), **aux événements pointeur** — jamais
+   * `draggable`, que WKWebView ne délivre pas de façon fiable (`VirtualGrid`, 2 septembre 2026).
+   *
+   * **Il ne s'arme qu'au-delà de quatre pixels** : en deçà, c'est un clic, et la ligne se sélectionne
+   * comme avant. Une fois armé, la ligne capte le pointeur, la bande de tête devient la zone « à la
+   * racine », et la sidebar défile d'elle-même près de ses bords — la règle de `defilementAuBord`,
+   * appliquée à l'axe vertical.
+   */
+  function debuterLeGlissement(evenement: ReactPointerEvent<HTMLElement>, noeud: Noeud) {
+    // `ctrl` compris : sur macOS, `ctrl`+clic est le clic secondaire et arrive avec `button === 0`.
+    if (onMove === undefined || evenement.button !== 0 || evenement.ctrlKey) return
+    if (enRenommage === noeud.id) return
+    const saisi = sujetDe(noeud)
+    if (saisi === null) return
+    // Une constante typée : les fonctions imbriquées ne voient pas le rétrécissement de `saisi`.
+    const sujet: SujetDuDeplacement = saisi
+    const ligne = evenement.currentTarget
+    const departX = evenement.clientX
+    const departY = evenement.clientY
+    let arme = false
+    let derniereX = departX
+    let derniereY = departY
+    let trame: number | null = null
+    let cible: CibleDuDepot | null = null
+
+    const suivre = () => {
+      cible = cibleSousLePointeur(derniereX, derniereY, sujet)
+      setGlissement({ id: noeud.id, cible })
+    }
+
+    // Un pas de défilement par trame, tant que le pointeur reste dans la marge d'un bord : une souris
+    // posée contre le bord n'émet plus de `pointermove`, et c'est là qu'on veut avancer.
+    const defilerAuBord = () => {
+      trame = null
+      const zone = arbreDom.current?.parentElement
+      if (zone == null) return
+      const bords = zone.getBoundingClientRect()
+      const vitesse = vitesseAuBord(derniereY, bords.top, bords.bottom)
+      if (vitesse === 0) return
+      const avant = zone.scrollTop
+      zone.scrollTop = avant + vitesse
+      if (zone.scrollTop === avant) return
+      suivre()
+      trame = requestAnimationFrame(defilerAuBord)
+    }
+
+    const terminer = () => {
+      window.removeEventListener('pointermove', onMove_)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onCancel)
+      if (trame !== null) cancelAnimationFrame(trame)
+      document.body.classList.remove(styles.pendantLeGlissement as string)
+      setGlissement(null)
+    }
+
+    function onMove_(mouvement: PointerEvent) {
+      derniereX = mouvement.clientX
+      derniereY = mouvement.clientY
+      if (!arme) {
+        if (Math.hypot(derniereX - departX, derniereY - departY) < 4) return
+        arme = true
+        ligne.setPointerCapture?.(mouvement.pointerId)
+        document.body.classList.add(styles.pendantLeGlissement as string)
+      }
+      suivre()
+      if (trame === null) trame = requestAnimationFrame(defilerAuBord)
+    }
+
+    function onUp(relache: PointerEvent) {
+      terminer()
+      if (!arme) return
+      // Le `click` du relâchement part dans la même tâche : au-delà, le drapeau ne doit pas avaler
+      // le clic suivant, qui n'aurait rien à voir — celui d'une ligne relâchée hors de la capture.
+      clicAAvaler.current = true
+      setTimeout(() => {
+        clicAAvaler.current = false
+      }, 0)
+      // Relue une dernière fois, aux coordonnées du relâchement : l'indicateur ne fait que suivre.
+      const finale = cibleSousLePointeur(relache.clientX, relache.clientY, sujet) ?? cible
+      const sens = finale === null ? null : arriveeDuDepot(arbre, sujet, finale)
+      if (sens === null || arriveeSansEffet(arbre, sujet, sens.arrivee)) return
+      deposer(sujet, sens.arrivee, sens.deplier)
+    }
+
+    function onCancel() {
+      terminer()
+    }
+
+    window.addEventListener('pointermove', onMove_)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onCancel)
+  }
+
+  /** L'indicateur de dépôt d'une ligne, pendant un glissement. */
+  const depotSur = (noeud: Noeud): string | undefined => {
+    const cible = glissement?.cible
+    if (cible?.kind !== 'ligne' || cible.noeud.id !== noeud.id) return undefined
+    // Une connexion lâchée sur un dossier y entre quelle que soit la position : l'indicateur le dit.
+    const sujet = visibles.find((n) => n.id === glissement?.id)
+    if (noeud.kind === 'folder' && sujet?.kind === 'database') return 'dedans'
+    return cible.position
+  }
+
+  const depotALaRacine = glissement?.cible?.kind === 'racine'
+
   return (
     <>
       {rapport !== null && (
@@ -348,6 +581,21 @@ export function ExplorerSidebar({
           couleur={couleurDe(arbre, dossierAColorer.folder)}
           onRecolorer={(couleur) => onRecolorFolder(dossierAColorer.folder as FolderId, couleur)}
           onClose={() => setAColorer(null)}
+        />
+      )}
+      {aDeplacer !== null && onMove !== undefined && (
+        <DeplacerVers
+          arbre={arbre}
+          sujet={aDeplacer.sujet}
+          nom={nomDuSujet(arbre, aDeplacer.sujet)}
+          {...(aDeplacer.arrivee === undefined ? {} : { arrivee: aDeplacer.arrivee })}
+          question={aDeplacer.question ?? null}
+          onDeplacer={async (arrivee, confirmed) => {
+            const issue = await onMove(aDeplacer.sujet, arrivee, confirmed)
+            if (issue.kind === 'moved') deplierLHote(arrivee.destination)
+            return issue
+          }}
+          onClose={() => setADeplacer(null)}
         />
       )}
       {aRetirer !== null && onDelete !== undefined && (
@@ -371,17 +619,31 @@ export function ExplorerSidebar({
 
              **`plus`** : ce bouton ne désigne pas un dossier, il **en crée un**. Une icône nue sans
              « + » se lirait comme un raccourci vers un dossier déjà là. */
-          (onNewFolder || onImportProjects || onOpenPreferences) && (
-            <SidebarToolbar>
-              {creerUnDossier && (
-                <SidebarToolbarButton
-                  icon="plus"
-                  label={t('explorer.sidebar.newFolder')}
-                  title={t('explorer.sidebar.newFolderTitle', { raccourci: raccourci('N') })}
-                  onClick={() => creerUnDossier(null)}
-                />
-              )}
-              {/* **L'import, juste après la création** (`API-30`, 17 septembre 2026, à la demande).
+          /* **Pendant un glissement, la bande devient la zone « à la racine »** (#167). La racine n'a
+             pas de ligne — elle n'est pas un dossier —, donc il lui fallait un endroit où déposer, et
+             la bande de tête est celui que le pointeur atteint sans défiler. Mêmes cotes que la
+             bande, pour que rien ne saute quand elle change de rôle. */
+          glissement !== null ? (
+            <div
+              className={styles.depotRacine}
+              data-depot-racine=""
+              data-actif={depotALaRacine || undefined}
+            >
+              <Icon name="bag" size={13} strokeWidth={1.8} />
+              {t('explorer.sidebar.dropAtRoot')}
+            </div>
+          ) : (
+            (onNewFolder || onImportProjects || onOpenPreferences) && (
+              <SidebarToolbar>
+                {creerUnDossier && (
+                  <SidebarToolbarButton
+                    icon="plus"
+                    label={t('explorer.sidebar.newFolder')}
+                    title={t('explorer.sidebar.newFolderTitle', { raccourci: raccourci('N') })}
+                    onClick={() => creerUnDossier(null)}
+                  />
+                )}
+                {/* **L'import, juste après la création** (`API-30`, 17 septembre 2026, à la demande).
                   Les deux gestes de cette bande produisent la même chose — un projet —, par deux
                   moyens : l'un le déclare, l'autre le reçoit d'un fichier. Les voisiner est ce qui
                   fait trouver le second quand on cherchait le premier.
@@ -395,15 +657,15 @@ export function ExplorerSidebar({
                   **Et il porte un `title`** : les deux autres actions de cette bande sont des
                   gestes qu'on devine, celui-ci nomme un format de fichier. Le nom accessible seul
                   ne se lit pas au survol. */}
-              {onImportProjects && (
-                <SidebarToolbarButton
-                  icon="ul"
-                  label={t('transfer.import.menu')}
-                  title={t('transfer.import.menu')}
-                  onClick={onImportProjects}
-                />
-              )}
-              {/* **Les préférences, à gauche avec le reste** (`API-46`, à la demande, second tour).
+                {onImportProjects && (
+                  <SidebarToolbarButton
+                    icon="ul"
+                    label={t('transfer.import.menu')}
+                    title={t('transfer.import.menu')}
+                    onClick={onImportProjects}
+                  />
+                )}
+                {/* **Les préférences, à gauche avec le reste** (`API-46`, à la demande, second tour).
                   Une fin de bande poussée à droite a existé une demi-heure : elle disait « ce qui crée
                   d'un côté, ce qui configure de l'autre », un rangement que les menus tiennent bien
                   mais qui, dans 22 px de haut, ne se lisait pas comme une séparation — juste comme une
@@ -415,14 +677,15 @@ export function ExplorerSidebar({
                   curseurs, la seule forme de ce sprite qui reste lisible à cette taille. Elle est
                   employée **partout où les préférences se nomment**, jamais ici seulement : le même
                   bouton ne peut pas changer de dessin selon l'écran. */}
-              {onOpenPreferences && (
-                <SidebarToolbarButton
-                  icon="slid"
-                  label={t('explorer.sidebar.preferences')}
-                  onClick={onOpenPreferences}
-                />
-              )}
-            </SidebarToolbar>
+                {onOpenPreferences && (
+                  <SidebarToolbarButton
+                    icon="slid"
+                    label={t('explorer.sidebar.preferences')}
+                    onClick={onOpenPreferences}
+                  />
+                )}
+              </SidebarToolbar>
+            )
           )
         }
         filter={
@@ -439,7 +702,12 @@ export function ExplorerSidebar({
         {/* `role="tree"` et `treeitem` : l'arbre est aplati dans le DOM, donc `aria-level` porte la
           profondeur qu'une imbrication aurait donnée gratuitement. Sans lui, un lecteur d'écran
           annoncerait une liste plate de vingt éléments sans hiérarchie. */}
-        <div role="tree" aria-label={t('explorer.sidebar.treeLabel')} className={styles.tree}>
+        <div
+          ref={arbreDom}
+          role="tree"
+          aria-label={t('explorer.sidebar.treeLabel')}
+          className={styles.tree}
+        >
           {visibles.length === 0 && filtre !== '' && (
             <p className={styles.vide}>{t('explorer.sidebar.noMatch', { filtre })}</p>
           )}
@@ -558,8 +826,25 @@ export function ExplorerSidebar({
                    regarder une connexion refermait le sous-arbre qu'on venait d'ouvrir, et le
                    rouvrir le refermait encore. La flèche gagne donc une zone attrapable en débord
                    (voir `TreeRow`), et le double-clic est la seconde voie. */
-                onClick={() => onSelect(noeud)}
+                onClick={() => {
+                  if (clicAAvaler.current) {
+                    clicAAvaler.current = false
+                    return
+                  }
+                  onSelect(noeud)
+                }}
                 onChevron={noeud.chevron ? () => onToggle(noeud) : undefined}
+                // Le glisser-déposer (#167) : la ligne se reconnaît par `data-noeud` sous le pointeur,
+                // et dit par `data-depot` où le sujet tomberait.
+                data-noeud={noeud.id}
+                data-depot={depotSur(noeud)}
+                data-glisse={glissement?.id === noeud.id || undefined}
+                onPointerDown={
+                  sujetDe(noeud) === null
+                    ? undefined
+                    : (evenement: ReactPointerEvent<HTMLButtonElement>) =>
+                        debuterLeGlissement(evenement, noeud)
+                }
               />
             ),
           )}
@@ -677,6 +962,7 @@ type Cablage = {
   /** Rapporte un refus de « Passer en / Lever la lecture seule » (#168), qu'aucune ligne ne peut dire. */
   refuserLaLectureSeule: (dossier: string, refus: unknown) => void
   onExportFolder: ExplorerSidebarProps['onExportFolder']
+  demanderLeDeplacement: ((sujet: SujetDuDeplacement) => void) | undefined
   demanderLeRetrait: ((cible: CibleDeSuppression) => void) | undefined
   onRefresh: ExplorerSidebarProps['onRefresh']
   consoles: ExplorerSidebarProps['consoles']
@@ -699,9 +985,7 @@ function entreesDe(noeud: Noeud, c: Cablage): readonly EntreeDeMenu[] | undefine
   /*
    * **Le menu d'un dossier** (#166), dans cet ordre — le geste destructeur reste le dernier :
    * « Nouvelle connexion… », « Nouveau dossier », « Renommer… », « Couleur… », la lecture seule,
-   * « Exporter le dossier… » (#169), « Retirer… ». « Déplacer vers… » (#167) arrivera juste avant
-   * « Retirer… » ; elle n'est pas posée désactivée d'ici là : une entrée qui n'aboutit à rien d'ici à
-   * son ticket se lirait comme une panne.
+   * « Exporter le dossier… » (#169), « Déplacer vers… » (#167), « Retirer… ».
    *
    * **« Rafraîchir l'arborescence » reste en tête des dossiers de premier niveau**, là où il vivait
    * sur les projets : sa portée est l'arbre entier, et la racine est l'endroit le moins mensonger
@@ -787,6 +1071,17 @@ function entreesDe(noeud: Noeud, c: Cablage): readonly EntreeDeMenu[] | undefine
         icone: 'dl',
         onClick: c.onExportFolder ? () => c.onExportFolder?.(folder, noeud.label) : undefined,
         raison: c.onExportFolder ? undefined : RAISONS.exportIndisponible,
+      },
+      {
+        /* **« Déplacer vers… », juste avant le geste destructeur** (#167) : le chemin clavier du
+           glisser-déposer. Un chemin unique à la souris est un chemin que personne ne trouve au
+           clavier. `goto`, le glyphe de « suivre » ailleurs dans le produit. */
+        libelle: t('explorer.sidebar.menu.moveTo'),
+        icone: 'goto',
+        onClick: c.demanderLeDeplacement
+          ? () => c.demanderLeDeplacement?.({ kind: 'folder', folder })
+          : undefined,
+        raison: c.demanderLeDeplacement ? undefined : RAISONS.deplacementIndisponible,
       },
       {
         // **« Retirer… » et non « Supprimer… »** : ce qui part est une déclaration sur cet
@@ -904,6 +1199,15 @@ function entreesDe(noeud: Noeud, c: Cablage): readonly EntreeDeMenu[] | undefine
       raison: c.onEditDatabase ? undefined : RAISONS.modifierIndisponible,
     },
     {
+      // **Le même geste que sur un dossier** (#167), à la même place : juste avant « Retirer… ».
+      libelle: t('explorer.sidebar.menu.moveTo'),
+      icone: 'goto',
+      onClick: c.demanderLeDeplacement
+        ? () => c.demanderLeDeplacement?.({ kind: 'database', connection })
+        : undefined,
+      raison: c.demanderLeDeplacement ? undefined : RAISONS.deplacementIndisponible,
+    },
+    {
       libelle: t('explorer.sidebar.menu.removeFromDoraBase'),
       icone: 'trash',
       onClick: c.demanderLeRetrait
@@ -953,6 +1257,7 @@ function raisons(t: ReturnType<typeof useT>) {
     schemasIndisponible: t('explorer.sidebar.raisons.schemasUnavailable'),
     schemasHorsPostgres: t('explorer.sidebar.raisons.schemasPostgresOnly'),
     exportIndisponible: t('explorer.sidebar.raisons.exportUnavailable'),
+    deplacementIndisponible: t('explorer.sidebar.raisons.moveUnavailable'),
   }
 }
 

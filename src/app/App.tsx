@@ -8,6 +8,8 @@ import {
   deleteInstance,
   listKubernetesNamespaces,
   listKubernetesResources,
+  moveDatabase,
+  moveFolder,
   recolorFolder,
   renameConsole,
   renameFolder,
@@ -384,6 +386,26 @@ export function App() {
             }}
             onSetFolderReadOnly={async (folder, readOnly) => {
               setArbre(await setFolderReadOnly({ folder, readOnly }))
+            }}
+            // Déplacer (#167) : l'arbre rendu est reposé quand le cœur a déplacé ; une question sur
+            // la lecture seule remonte telle quelle, et la sidebar la pose dans « Déplacer vers… ».
+            onMove={async (sujet, { destination, index }, confirmed) => {
+              const issue =
+                sujet.kind === 'folder'
+                  ? await moveFolder({
+                      folder: sujet.folder,
+                      parent: destination,
+                      index,
+                      confirmed,
+                    })
+                  : await moveDatabase({
+                      connection: sujet.connection,
+                      folder: destination,
+                      index,
+                      confirmed,
+                    })
+              if (issue.kind === 'moved') setArbre(issue.tree)
+              return issue
             }}
             onEditDatabase={setEdition}
             // Les quatre écritures sur les consoles. Elles rendent l'arbre à jour, donc l'écran n'a

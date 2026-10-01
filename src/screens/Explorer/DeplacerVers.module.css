@@ -1,0 +1,62 @@
+/*
+ * « Déplacer vers… » (#167). Le handoff ne la maquette pas : elle emprunte la coquille de `08a`, les
+ * lignes de l'arbre (`TreeRow`) et la facture des blocs de `RenameReportDialog`.
+ */
+
+.corps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  /* Le corps de `Modal` n'a aucun remplissage (`08a`) : `--space-7` aligne sur l'en-tête et le pied. */
+  padding: var(--space-7);
+  font-family: var(--font-ui);
+  font-size: var(--text-label);
+  font-weight: var(--weight-medium);
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+
+.corps p {
+  margin: 0;
+}
+
+/* La liste des destinations : les lignes de l'arbre, à la graisse et à la taille de la sidebar, dans
+ * un cadre qui défile — un arbre de cinquante dossiers ne doit pas pousser le pied hors de la modale. */
+.liste {
+  /* Un `fieldset` : ses marges et sa largeur minimale d'agent utilisateur sont remises à zéro. */
+  min-width: 0;
+  margin: 0;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: var(--space-2) 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-field);
+  background: var(--paper-alt);
+  font-size: var(--text-dense);
+  font-weight: var(--weight-semibold);
+}
+
+/* Une destination impossible reste lisible — sa raison est dans son `title` —, mais se lit comme
+ * éteinte : l'opacité de `.glisseeColonne`, pour une ligne qu'on ne peut pas prendre. */
+.liste [aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+/* Ce que le déplacement fait à la lecture seule : un avertissement, pas un refus — la teinte `warn`,
+ * et non `danger`, qui dit « rien n'a eu lieu ». */
+.lectureSeule {
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-field);
+  background: var(--warn-bg);
+  font-weight: var(--weight-semibold);
+  color: var(--warn-ink);
+}
+
+.refus {
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-field);
+  background: var(--danger-bg);
+  font-weight: var(--weight-semibold);
+  color: var(--danger-ink);
+}

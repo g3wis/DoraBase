@@ -279,3 +279,167 @@ export function libelleDeConnexion(arbre: FolderTree, id: ConnectionId): string 
   const base = connexion(arbre, id)?.base
   return base === undefined ? undefined : base.label?.trim() || base.name
 }
+
+// -------------------------------------------------------------------------------------------------
+// Déplacer (#167)
+// -------------------------------------------------------------------------------------------------
+
+/** Ce qu'on déplace : un dossier et tout ce qu'il contient, ou une connexion. */
+export type SujetDuDeplacement =
+  | { kind: 'folder'; folder: FolderId }
+  | { kind: 'database'; connection: ConnectionId }
+
+/** Où on le range : un dossier (`null` : la racine), et la place parmi ses frères d'arrivée. */
+export type ArriveeDuDeplacement = { destination: FolderId | null; index: number | null }
+
+/** Ce qu'un déplacement fait à la lecture seule — la forme de `confirmationRequired`. */
+export type EffetSurLaLectureSeule = {
+  becomesReadOnly: ConnectionId[]
+  leavesReadOnly: ConnectionId[]
+  folders: FolderId[]
+}
+
+/** Le dossier qui range ce sujet, `null` à la racine ; `undefined` s'il n'est plus dans l'arbre. */
+export function parentDu(
+  arbre: FolderTree,
+  sujet: SujetDuDeplacement,
+): FolderId | null | undefined {
+  const ancetres =
+    sujet.kind === 'folder'
+      ? dossier(arbre, sujet.folder)?.ancetres
+      : connexion(arbre, sujet.connection)?.ancetres
+  if (ancetres === undefined) return undefined
+  return ancetres.at(-1)?.id ?? null
+}
+
+/** Le dossier et tous ses descendants — les destinations où il ne peut pas se ranger. */
+export function luiEtSesDescendants(arbre: FolderTree, id: FolderId): Set<FolderId> {
+  const situe = dossier(arbre, id)
+  const tous = new Set<FolderId>()
+  const parcourir = (d: Folder) => {
+    tous.add(d.id)
+    for (const sous of d.folders ?? []) parcourir(sous)
+  }
+  if (situe !== null) parcourir(situe.dossier)
+  return tous
+}
+
+/**
+ * L'arbre d'arrivée d'un déplacement, **sans aucun refus** — l'aperçu de la modale et les doubles.
+ *
+ * Le miroir de `deplacer_dossier` / `deplacer_connexion` : `index` compte les frères d'arrivée sans
+ * le sujet, et un rang trop grand veut dire « en dernier ». `null` si le sujet ou la destination
+ * n'existe plus. **Ce n'est pas l'écran qui décide** : il repose l'arbre que le cœur rend.
+ */
+export function arbreApresDeplacement(
+  arbre: FolderTree,
+  sujet: SujetDuDeplacement,
+  { destination, index }: ArriveeDuDeplacement,
+): FolderTree | null {
+  if (destination !== null && dossier(arbre, destination) === null) return null
+  let extrait: Folder | Database | null = null
+  const garderDossier = (d: Folder) => {
+    if (sujet.kind === 'folder' && d.id === sujet.folder) {
+      extrait = d
+      return false
+    }
+    return true
+  }
+  const garderBase = (b: Database) => {
+    if (sujet.kind === 'database' && idDeConnexion(b) === sujet.connection) {
+      extrait = b
+      return false
+    }
+    return true
+  }
+  const visiter = (d: Folder): Folder => ({
+    ...d,
+    ...(d.folders === undefined ? {} : { folders: d.folders.filter(garderDossier).map(visiter) }),
+    ...(d.connections === undefined ? {} : { connections: d.connections.filter(garderBase) }),
+  })
+  const sans: FolderTree = {
+    folders: arbre.folders.filter(garderDossier).map(visiter),
+    connections: arbre.connections.filter(garderBase),
+  }
+  const element = extrait as Folder | Database | null
+  if (element === null) return null
+  const inserer = <T>(liste: readonly T[]): T[] => {
+    const rang = Math.min(index ?? liste.length, liste.length)
+    return [...liste.slice(0, rang), element as T, ...liste.slice(rang)]
+  }
+  if (destination === null) {
+    return sujet.kind === 'folder'
+      ? { ...sans, folders: inserer(sans.folders) }
+      : { ...sans, connections: inserer(sans.connections) }
+  }
+  return surDossier(sans, destination, (d) =>
+    sujet.kind === 'folder'
+      ? { ...d, folders: inserer(d.folders ?? []) }
+      : { ...d, connections: inserer(d.connections ?? []) },
+  )
+}
+
+/**
+ * Ce qu'un changement d'arbre fait à la lecture seule effective, ou `null` s'il n'y change rien —
+ * le miroir de `question_de_lecture_seule` côté cœur.
+ *
+ * **La lecture seule effective, pas le drapeau des dossiers** : un dossier en lecture seule emporte
+ * la sienne où il va, et une connexion réglée en lecture seule le reste partout. Le dossier nommé est
+ * celui qui l'impose **après** pour une entrée, **avant** pour une sortie.
+ */
+export function effetSurLaLectureSeule(
+  avant: FolderTree,
+  apres: FolderTree,
+): EffetSurLaLectureSeule | null {
+  const effet: EffetSurLaLectureSeule = { becomesReadOnly: [], leavesReadOnly: [], folders: [] }
+  for (const { base } of connexions(avant)) {
+    const id = idDeConnexion(base)
+    const lectureAvant = lectureSeuleEffective(avant, id)
+    const lectureApres = lectureSeuleEffective(apres, id)
+    if (lectureApres === null) continue
+    const devient = estEnLectureSeule(lectureApres)
+    if (estEnLectureSeule(lectureAvant) === devient) continue
+    const source = devient ? lectureApres : lectureAvant
+    if (source?.kind === 'imposed') {
+      for (const folder of source.folders)
+        if (!effet.folders.includes(folder)) effet.folders.push(folder)
+    }
+    ;(devient ? effet.becomesReadOnly : effet.leavesReadOnly).push(id)
+  }
+  return effet.becomesReadOnly.length + effet.leavesReadOnly.length === 0 ? null : effet
+}
+
+/**
+ * Le déplacement **rejoué sans cœur** — pour la démo et les doubles de test, jamais pour l'écran de
+ * production. Les mêmes refus, la même question, dans le même ordre que `deplacer_*`.
+ */
+export function deplacementSimule(
+  arbre: FolderTree,
+  sujet: SujetDuDeplacement,
+  arrivee: ArriveeDuDeplacement,
+  confirmed: boolean,
+):
+  | { kind: 'moved'; tree: FolderTree }
+  | ({ kind: 'confirmationRequired' } & EffetSurLaLectureSeule) {
+  if (sujet.kind === 'folder' && arrivee.destination !== null) {
+    if (luiEtSesDescendants(arbre, sujet.folder).has(arrivee.destination)) {
+      throw 'un dossier ne se range pas dans lui-même ni dans ses sous-dossiers'
+    }
+  }
+  const apres = arbreApresDeplacement(arbre, sujet, arrivee)
+  if (apres === null) throw 'le dossier ou la connexion désignée n’existe plus'
+  if (sujet.kind === 'folder') {
+    const nom = dossier(arbre, sujet.folder)?.dossier.name.trim()
+    const freres =
+      arrivee.destination === null
+        ? arbre.folders
+        : (dossier(arbre, arrivee.destination)?.dossier.folders ?? [])
+    if (freres.some((frere) => frere.id !== sujet.folder && frere.name.trim() === nom)) {
+      throw `un dossier nommé « ${nom} » existe déjà à cet endroit : renommez l'un des deux avant de déplacer`
+    }
+  }
+  const effet = confirmed ? null : effetSurLaLectureSeule(arbre, apres)
+  return effet === null
+    ? { kind: 'moved', tree: apres }
+    : { kind: 'confirmationRequired', ...effet }
+}
