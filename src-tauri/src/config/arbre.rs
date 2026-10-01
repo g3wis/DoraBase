@@ -400,7 +400,7 @@ impl std::fmt::Display for ArbreError {
             Self::ConnexionEnDouble { id } => {
                 write!(
                     f,
-                    "deux connexions sont déclarées sous l'identifiant « {id} »"
+                    "deux bases de données sont déclarées sous l'identifiant « {id} »"
                 )
             }
             Self::NomDeDossierVide { id } => write!(f, "le dossier « {id} » n'a pas de nom"),
@@ -416,7 +416,7 @@ impl std::fmt::Display for ArbreError {
             ),
             Self::ReferenceDeSecretIncoherente { id } => write!(
                 f,
-                "le mot de passe de la connexion « {id} » n'est pas rangé sous sa référence"
+                "le mot de passe de la base de données « {id} » n'est pas rangé sous sa référence"
             ),
         }
     }
@@ -741,7 +741,7 @@ impl FolderTree {
     pub fn refus_d_ecrire(&self, id: &ConnectionId, geste: &str) -> Option<String> {
         match self.lecture_seule_effective(id) {
             None => Some(format!(
-                "cette connexion n'est plus déclarée dans la configuration : impossible de {geste}."
+                "cette base de données n'est plus déclarée dans la configuration : impossible de {geste}."
             )),
             Some(LectureSeule::Imposee { dossiers }) => {
                 let nom = dossiers
@@ -750,14 +750,14 @@ impl FolderTree {
                     .map(|dossier| dossier.name.as_str())
                     .unwrap_or("?");
                 Some(format!(
-                    "cette connexion est en lecture seule, imposée par le dossier « {nom} » : \
+                    "cette base de données est en lecture seule, imposée par le dossier « {nom} » : \
                      impossible de {geste}. Levez la lecture seule de ce dossier pour écrire."
                 ))
             }
             Some(LectureSeule::Reglee {
                 lecture_seule: true,
             }) => Some(format!(
-                "cette connexion est en lecture seule : impossible de {geste}. Décochez « Lecture \
+                "cette base de données est en lecture seule : impossible de {geste}. Décochez « Lecture \
                  seule » dans ses réglages pour écrire."
             )),
             Some(LectureSeule::Reglee {
@@ -848,7 +848,7 @@ impl std::fmt::Display for DeplacementError {
         match self {
             Self::DossierInconnu { folder } => write!(f, "le dossier « {folder} » n'existe pas"),
             Self::ConnexionInconnue { connection } => {
-                write!(f, "la connexion « {connection} » n'existe pas")
+                write!(f, "la base de données « {connection} » n'existe pas")
             }
             Self::DestinationInconnue { folder } => {
                 write!(f, "le dossier d'arrivée « {folder} » n'existe pas")
@@ -871,7 +871,7 @@ impl std::fmt::Display for DeplacementError {
             ),
             Self::ConfirmationRequise { .. } => write!(
                 f,
-                "ce déplacement change la lecture seule d'au moins une connexion : il doit être \
+                "ce déplacement change la lecture seule d'au moins une base de données : il doit être \
                  confirmé"
             ),
             Self::Arbre(erreur) => write!(f, "{erreur}"),

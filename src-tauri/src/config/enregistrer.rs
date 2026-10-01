@@ -65,7 +65,7 @@ impl std::fmt::Display for SaveError {
             }
             Self::DossierInconnu { folder } => write!(f, "le dossier « {folder} » n'existe pas"),
             Self::ConnexionInconnue { connection } => {
-                write!(f, "la connexion « {connection} » n'existe pas")
+                write!(f, "la base de données « {connection} » n'existe pas")
             }
         }
     }
@@ -277,11 +277,11 @@ impl std::fmt::Display for EditError {
             Self::ConsoleInconnue { nom } => write!(f, "aucune console nommée « {nom} »"),
             Self::DossierInconnu { folder } => write!(f, "le dossier « {folder} » n'existe pas"),
             Self::ConnexionInconnue { connection } => {
-                write!(f, "la connexion « {connection} » n'existe pas")
+                write!(f, "la base de données « {connection} » n'existe pas")
             }
             Self::ConnexionALaRacine { .. } => write!(
                 f,
-                "cette connexion n'est rangée dans aucun dossier : rangez-la dans un dossier pour \
+                "cette base de données n'est rangée dans aucun dossier : rangez-la dans un dossier pour \
                  lui déclarer des libellés de valeurs"
             ),
             Self::IconeInvalide { icon } => {
@@ -668,7 +668,7 @@ impl std::fmt::Display for DeleteError {
         match self {
             Self::DossierInconnu { folder } => write!(f, "le dossier « {folder} » n'existe pas"),
             Self::ConnexionInconnue { connection } => {
-                write!(f, "la connexion « {connection} » n'existe pas")
+                write!(f, "la base de données « {connection} » n'existe pas")
             }
             Self::Config { reason } => {
                 write!(f, "la configuration n'a pas pu être écrite : {reason}")

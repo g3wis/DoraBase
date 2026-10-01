@@ -269,7 +269,7 @@ test('chaque interrupteur porte le nom de son schéma', async () => {
 
   // Le piège n° 1 par un bout qu'aucun `gap` n'arrange : sans le nom dans le nom du contrôle, chaque
   // ligne porterait un interrupteur « affiché », indiscernable de ses voisins à la voix.
-  const tableau = screen.getByRole('table', { name: 'Schémas de la connexion' })
+  const tableau = screen.getByRole('table', { name: 'Schémas de la base de données' })
   expect(within(tableau).getAllByRole('switch')).toHaveLength(2)
   expect(interrupteur('reporting')).toBeInTheDocument()
 })

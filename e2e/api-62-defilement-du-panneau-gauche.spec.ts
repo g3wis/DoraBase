@@ -43,7 +43,7 @@ type Mesure = {
  */
 async function mesurer(page: Page): Promise<Mesure> {
   return await page.evaluate(() => {
-    const arbre = document.querySelector('[role=tree][aria-label="Dossiers et connexions"]')
+    const arbre = document.querySelector('[role=tree][aria-label="Dossiers et bases de données"]')
     const instances = document.querySelector('[role=tree][aria-label="Instances"]')
     if (arbre === null || instances === null) throw new Error('les deux zones doivent être rendues')
 
@@ -121,7 +121,7 @@ test('la molette fait défiler l’arbre', async ({ page }) => {
   // C'est le geste du signalement — « l'arbre est coupé, et la molette ne fait rien ». Le mesurer
   // plutôt que de le déduire de `scrollHeight` garde au passage le refus du zoom d'`API-57` : il ne
   // doit avaler que `wheel` + `ctrlKey`, jamais une molette nue.
-  await page.getByRole('tree', { name: 'Dossiers et connexions' }).hover()
+  await page.getByRole('tree', { name: 'Dossiers et bases de données' }).hover()
   await page.mouse.wheel(0, 200)
 
   // Une lecture sèche daterait la mesure du mauvais instant (règle n° 15) : le défilement est peint

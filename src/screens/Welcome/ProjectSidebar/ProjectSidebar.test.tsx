@@ -28,6 +28,8 @@ test('le bouton de pied demande un nouveau dossier', async () => {
 test('conserve le texte exact du sous-titre', () => {
   monter()
   expect(
-    screen.getByText('Un dossier range des connexions, et d’autres dossiers — dev, staging, prod.'),
+    screen.getByText(
+      'Un dossier range des bases de données, et d’autres dossiers — dev, staging, prod.',
+    ),
   ).toBeInTheDocument()
 })

@@ -150,7 +150,7 @@ describe('modifier une connexion (08g)', () => {
     const utilisateur = userEvent.setup()
     monter({
       onUpdate: async () => {
-        throw new Error('la connexion « c0000000000000e1 » n’existe plus')
+        throw new Error('la base de données « c0000000000000e1 » n’existe plus')
       },
     })
 

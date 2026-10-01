@@ -121,7 +121,7 @@ pub(crate) fn lecture_seule_effective(
             .lecture_seule_effective(connexion)
             .map(|lecture| lecture.est_active())
             .ok_or_else(|| {
-                "cette connexion n'est plus déclarée dans la configuration : rafraîchissez \
+                "cette base de données n'est plus déclarée dans la configuration : rafraîchissez \
                  l'arborescence."
                     .to_owned()
             })

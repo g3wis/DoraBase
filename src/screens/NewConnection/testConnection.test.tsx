@@ -273,7 +273,7 @@ test('fermer la sous-modale ne ferme pas A2, et garde le message dans le pied', 
   await userEvent.click(sous.getByRole('button', { name: /Fermer/ }))
 
   expect(screen.queryByRole('dialog', { name: 'Connexion impossible' })).not.toBeInTheDocument()
-  expect(screen.getByRole('dialog', { name: 'Nouvelle connexion' })).toBeInTheDocument()
+  expect(screen.getByRole('dialog', { name: 'Nouvelle base de données' })).toBeInTheDocument()
   // Le handoff le montre : le pied garde « Retester » et son message inline.
   expect(screen.getByRole('button', { name: 'Retester' })).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'hôte injoignable' })).toBeInTheDocument()

@@ -406,7 +406,7 @@ describe('Workbench', () => {
   // décoloré et à sa phrase. L'arbre, lui, est ce qui reste — c'est là qu'on sélectionne.
   it('au montage, rien n’est sélectionné : ni bande d’onglets ni panneau de détail', () => {
     monter()
-    expect(screen.getByRole('tree', { name: 'Dossiers et connexions' })).toBeInTheDocument()
+    expect(screen.getByRole('tree', { name: 'Dossiers et bases de données' })).toBeInTheDocument()
     expect(screen.getByText('Sélectionner une entité pour commencer')).toBeInTheDocument()
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Détail de l’objet')).not.toBeInTheDocument()
@@ -523,7 +523,7 @@ describe('Workbench', () => {
     expect(screen.queryByRole('grid')).not.toBeInTheDocument()
     // La liste des objets revient, et l'écran de travail est toujours là.
     expect(screen.getByRole('table')).toBeInTheDocument()
-    expect(screen.getByRole('tree', { name: 'Dossiers et connexions' })).toBeInTheDocument()
+    expect(screen.getByRole('tree', { name: 'Dossiers et bases de données' })).toBeInTheDocument()
   })
 
   it('la sidebar liste les colonnes de l’objet choisi, et les retire dès qu’il est ouvert', async () => {
@@ -1938,7 +1938,7 @@ describe('mode édition', () => {
 
     await utilisateur.click(screen.getByRole('button', { name: 'Actions de analytics' }))
     await utilisateur.click(screen.getByRole('button', { name: 'Retirer de DoraBase…' }))
-    await utilisateur.click(screen.getByRole('button', { name: 'Retirer la connexion' }))
+    await utilisateur.click(screen.getByRole('button', { name: 'Retirer la base de données' }))
 
     expect(screen.queryByLabelText('Modifications en attente de la table')).not.toBeInTheDocument()
 
@@ -2311,7 +2311,7 @@ describe('mode édition', () => {
 
     await utilisateur.click(screen.getByRole('button', { name: 'Actions de analytics' }))
     await utilisateur.click(screen.getByRole('button', { name: 'Retirer de DoraBase…' }))
-    await utilisateur.click(screen.getByRole('button', { name: 'Retirer la connexion' }))
+    await utilisateur.click(screen.getByRole('button', { name: 'Retirer la base de données' }))
 
     // **Un onglet survivant lirait une base dont la déclaration est partie** : au mieux une erreur,
     // au pire une lecture sur une connexion que le registre ne sait plus nommer.

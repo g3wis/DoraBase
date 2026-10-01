@@ -47,7 +47,7 @@ describe('la zone d’instances dans l’écran de travail', () => {
   it('est montée dans la sidebar, sous l’arbre des dossiers', () => {
     monter()
     // Les deux arbres coexistent : c'est ce que « une zone et non un onglet » veut dire.
-    expect(screen.getByRole('tree', { name: 'Dossiers et connexions' })).toBeInTheDocument()
+    expect(screen.getByRole('tree', { name: 'Dossiers et bases de données' })).toBeInTheDocument()
     expect(screen.getByRole('tree', { name: 'Instances' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^PG atelier/ })).toBeInTheDocument()
   })

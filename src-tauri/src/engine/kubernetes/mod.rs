@@ -279,7 +279,7 @@ fn valeur_utile(valeur: &Option<String>) -> Option<&str> {
 fn controler(proxy: &ProxyKubernetes, port_cible: u16) -> Result<(), EngineError> {
     if proxy.resource.trim().is_empty() {
         return Err(EngineError::local(
-            "aucune ressource Kubernetes n'est déclarée pour cette connexion — nommez-la dans le \
+            "aucune ressource Kubernetes n'est déclarée pour cette base de données — nommez-la dans le \
              panneau « Proxy / tunnel », par exemple « svc/postgres » pour un service ou \
              « postgres-0 » pour un pod",
         ));
@@ -380,7 +380,7 @@ pub(crate) fn resoudre_la_reference<'a>(
         Some(chemin) => Ok(Some(chemin)),
         None => Err(EngineError::local(format!(
             "le kubeconfig « {reference} » n'est plus déclaré. Ouvrez les préférences, section \
-             « Connexions », pour le déclarer à nouveau, ou choisissez-en un autre dans la connexion."
+             « Connexions », pour le déclarer à nouveau, ou choisissez-en un autre dans les réglages de la base de données."
         ))),
     }
 }
