@@ -694,6 +694,67 @@ impl FolderTree {
         })
     }
 
+    /// Les connexions dont la lecture seule **effective** diffère entre cet arbre et `suivant` (#168).
+    ///
+    /// Ce sont celles qu'un changement d'arbre doit **fermer** : leur session a été ouverte avec
+    /// l'ancien réglage côté moteur, et elle ne le perdrait pas d'elle-même. Les autres gardent leur
+    /// session — lever la lecture seule d'un dossier dont un sous-dossier la déclare aussi ne change
+    /// rien pour les connexions de ce dernier, et les fermer coûterait une poignée de main pour rien.
+    ///
+    /// Une connexion absente de l'un des deux arbres n'y figure pas : un retrait ferme déjà la sienne.
+    pub fn lecture_seule_changee(&self, suivant: &FolderTree) -> Vec<ConnectionId> {
+        self.connexions()
+            .filter_map(|(base, _)| {
+                let avant = self.lecture_seule_effective(&base.id)?.est_active();
+                let apres = suivant.lecture_seule_effective(&base.id)?.est_active();
+                (avant != apres).then(|| base.id.clone())
+            })
+            .collect()
+    }
+
+    /// Le refus d'**écrire** sur une connexion, avec sa raison ; `None` quand elle est inscriptible
+    /// (#168).
+    ///
+    /// **La lecture seule effective, jamais la `variant` envoyée par l'écran** : c'est ce que les
+    /// commandes qui écrivent consultent — `apply_changes`, `create_schema`, `run_sql`, l'import de
+    /// dump. Le défaut que cette fonction remplace est celui du dump d'avant #168, qui croyait le
+    /// drapeau que la webview lui passait.
+    ///
+    /// **Le dossier nommé est le plus extérieur** qui l'impose, comme la raison que l'écran affiche
+    /// sur la case figée d'`A2` et sur l'entrée « Passer en lecture seule » : c'est celui qu'il faut
+    /// aller lever, et un dossier plus proche en lecture seule ne changerait rien tant qu'il l'est.
+    ///
+    /// Une connexion **inconnue** est refusée aussi : une écriture sur une connexion que la
+    /// configuration ne déclare plus n'a aucune règle à qui obéir, et la laisser passer ferait de
+    /// l'absence une permission.
+    pub fn refus_d_ecrire(&self, id: &ConnectionId, geste: &str) -> Option<String> {
+        match self.lecture_seule_effective(id) {
+            None => Some(format!(
+                "cette connexion n'est plus déclarée dans la configuration : impossible de {geste}."
+            )),
+            Some(LectureSeule::Imposee { dossiers }) => {
+                let nom = dossiers
+                    .first()
+                    .and_then(|dossier| self.dossier(dossier))
+                    .map(|dossier| dossier.name.as_str())
+                    .unwrap_or("?");
+                Some(format!(
+                    "cette connexion est en lecture seule, imposée par le dossier « {nom} » : \
+                     impossible de {geste}. Levez la lecture seule de ce dossier pour écrire."
+                ))
+            }
+            Some(LectureSeule::Reglee {
+                lecture_seule: true,
+            }) => Some(format!(
+                "cette connexion est en lecture seule : impossible de {geste}. Décochez « Lecture \
+                 seule » dans ses réglages pour écrire."
+            )),
+            Some(LectureSeule::Reglee {
+                lecture_seule: false,
+            }) => None,
+        }
+    }
+
     /// Les libellés de valeurs d'une table, **tels qu'une connexion les lit**.
     ///
     /// **Table par table, et le dossier le plus proche l'emporte entièrement** : on ne fusionne pas
@@ -1113,6 +1174,65 @@ pub(crate) mod tests {
             arbre.lecture_seule_effective(&ConnectionId::brut("inconnue")),
             None
         );
+    }
+
+    #[test]
+    fn seules_les_connexions_dont_la_lecture_seule_effective_change_sont_rendues() {
+        let avant = decor();
+        // Lever `prod` : `c-prod` et `c-profonde` (inscriptibles localement) redeviennent
+        // inscriptibles ; `c-nord` et la racine ne bougent pas.
+        let mut leve = avant.clone();
+        leve.dossier_mut(&FolderId::brut("prod"))
+            .expect("là")
+            .read_only = false;
+        let mut changees: Vec<String> = avant
+            .lecture_seule_changee(&leve)
+            .into_iter()
+            .map(|id| id.as_str().to_owned())
+            .collect();
+        changees.sort_unstable();
+        assert_eq!(changees, ["c-prod", "c-profonde"]);
+
+        // Poser `nord` : `c-nord` l'était déjà localement, `c-prod`/`c-profonde` par `prod` — seule
+        // la racine y échappe, et rien ne change pour personne.
+        let mut pose = avant.clone();
+        pose.dossier_mut(&FolderId::brut("nord"))
+            .expect("là")
+            .read_only = true;
+        assert!(avant.lecture_seule_changee(&pose).is_empty());
+    }
+
+    #[test]
+    fn le_refus_d_ecrire_nomme_le_dossier_le_plus_exterieur_ou_le_reglage() {
+        let mut arbre = decor();
+        // `c-prod` est **inscriptible localement** : c'est le dossier qui décide (#168).
+        let imposee = arbre
+            .refus_d_ecrire(&ConnectionId::brut("c-prod"), "écrire")
+            .expect("refusée");
+        assert!(
+            imposee.contains("imposée par le dossier « prod »"),
+            "{imposee}"
+        );
+        // Deux ancêtres l'imposent : c'est le plus extérieur qu'il faut aller lever.
+        arbre.folders[0].read_only = true;
+        let deux = arbre
+            .refus_d_ecrire(&ConnectionId::brut("c-profonde"), "écrire")
+            .expect("refusée");
+        assert!(deux.contains("« Atelier Nord »"), "{deux}");
+
+        let locale = arbre
+            .refus_d_ecrire(&ConnectionId::brut("c-racine"), "écrire")
+            .is_none();
+        assert!(locale, "la racine inscriptible écrit");
+        let mut reglee = decor();
+        reglee.connections[0].connection.read_only = true;
+        let message = reglee
+            .refus_d_ecrire(&ConnectionId::brut("c-racine"), "écrire")
+            .expect("refusée par son réglage");
+        assert!(message.contains("Décochez"), "{message}");
+        assert!(reglee
+            .refus_d_ecrire(&ConnectionId::brut("inconnue"), "écrire")
+            .is_some());
     }
 
     #[test]

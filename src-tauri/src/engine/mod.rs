@@ -33,6 +33,8 @@ pub mod journal;
 pub mod kubernetes;
 pub mod mongo;
 pub mod mysql;
+/// La nature d'une requête de console, miroir de `nature.ts` (#168).
+pub mod nature;
 /// Le choix du port local, commun au tunnel SSH (`06e`) et au proxy Cloud SQL (`06g`).
 ///
 /// **Remonté d'un cran depuis `tunnel/`** en `06g` : les deux sortes de proxy en ont besoin,

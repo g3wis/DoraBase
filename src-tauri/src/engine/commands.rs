@@ -316,10 +316,18 @@ pub async fn open_database(
     // depuis la configuration coûterait une lecture de fichier par ouverture.
     engine: crate::config::Engine,
     variant: ConnectionSettings,
+    config: tauri::State<'_, crate::config::ConfigState>,
     registry: tauri::State<'_, ConnectionRegistry>,
 ) -> Result<ConnectionState, EngineError> {
     let identite = key.cle();
     log::info!("open_database ← {identite}");
+
+    // **La lecture seule de la session est celle de la configuration, jamais celle de la variante
+    // envoyée** (#168). Un dossier en lecture seule l'impose à toutes ses connexions, quel que soit
+    // leur réglage local : c'est la valeur *effective* que l'adaptateur reçoit, et qu'il pose sur la
+    // session du moteur. Elle voyage ensuite dans la recette du registre, donc une reconnexion et
+    // une session de console la retrouvent sans relire le fichier.
+    let variant = variante_a_ouvrir(&config, &key, variant)?;
 
     let secret = match &variant.password {
         Some(reference) => {
@@ -349,6 +357,21 @@ pub async fn open_database(
     let etat = registry.etat(&identite).await;
     log::info!("open_database → {identite} : {etat:?}");
     Ok(etat)
+}
+
+/// La variante qu'`open_database` ouvre : celle de l'écran, **sa lecture seule remplacée par la
+/// lecture seule effective de la configuration** (#168). Séparée pour se tester sans Tauri.
+pub(crate) fn variante_a_ouvrir(
+    config: &crate::config::ConfigState,
+    key: &DatabaseKey,
+    variant: ConnectionSettings,
+) -> Result<ConnectionSettings, EngineError> {
+    let read_only = crate::config::commands::lecture_seule_effective(config, &key.connection)
+        .map_err(EngineError::local)?;
+    Ok(ConnectionSettings {
+        read_only,
+        ..variant
+    })
 }
 
 /// Ferme une connexion et rend son port de tunnel.
@@ -455,8 +478,23 @@ pub async fn list_schemas(
 pub async fn create_schema(
     key: DatabaseKey,
     name: String,
+    config: tauri::State<'_, crate::config::ConfigState>,
     registry: tauri::State<'_, ConnectionRegistry>,
 ) -> Result<(), EngineError> {
+    creer_un_schema(&config, &registry, key, name).await
+}
+
+/// Le corps de `create_schema`, sans Tauri : c'est ce que le test de lecture seule exerce.
+pub(crate) async fn creer_un_schema(
+    config: &crate::config::ConfigState,
+    registry: &ConnectionRegistry,
+    key: DatabaseKey,
+    name: String,
+) -> Result<(), EngineError> {
+    // **Refusé sur une connexion en lecture seule effective** (#168), avant tout le reste : la
+    // configuration décide, pas l'écran.
+    crate::config::commands::refuser_si_lecture_seule(config, &key.connection, "créer un schéma")
+        .map_err(EngineError::local)?;
     // Refusé pendant une transaction de console : `create schema` prend des verrous que la
     // transaction ouverte à côté peut tenir, donc il **attendrait** — et le registre garde le verrou
     // de la connexion pendant ce temps. Voir la méthode du registre.
@@ -728,8 +766,33 @@ pub async fn preview_updates(
 pub async fn apply_changes(
     key: DatabaseKey,
     plan: crate::engine::UpdatePlan,
+    config: tauri::State<'_, crate::config::ConfigState>,
     registry: tauri::State<'_, ConnectionRegistry>,
 ) -> Result<crate::engine::ApplyOutcome, EngineError> {
+    appliquer_les_modifications(&config, &registry, key, plan).await
+}
+
+/// Le corps d'`apply_changes`, sans Tauri : c'est ce que le test de lecture seule exerce.
+pub(crate) async fn appliquer_les_modifications(
+    config: &crate::config::ConfigState,
+    registry: &ConnectionRegistry,
+    key: DatabaseKey,
+    plan: crate::engine::UpdatePlan,
+) -> Result<crate::engine::ApplyOutcome, EngineError> {
+    // **Refusé sur une connexion en lecture seule effective** (#168). L'écran ne laisse pas entrer
+    // en mode édition ; ceci garde le chemin qui ne passe pas par lui. Et la session du moteur est
+    // elle-même en lecture seule : ce refus-ci dit pourquoi, là où le serveur ne dirait que « read
+    // only transaction ».
+    crate::config::commands::refuser_si_lecture_seule(
+        config,
+        &key.connection,
+        "écrire les modifications de la grille",
+    )
+    .map_err(|refus| {
+        log::warn!("apply_changes → refusé : {refus}");
+        EngineError::local(refus)
+    })?;
+
     // **Refusé pendant une transaction de console** : les lignes qu'elle retient sont verrouillées
     // jusqu'à son issue, donc cette écriture attendrait — indéfiniment sur PostgreSQL —, et le
     // registre tient le verrou de la connexion pendant l'opération : toute lecture de cette base
@@ -784,8 +847,36 @@ pub async fn run_sql(
     limit: crate::engine::RowLimit,
     mode: crate::engine::TransactionMode,
     console: String,
+    config: tauri::State<'_, crate::config::ConfigState>,
     registry: tauri::State<'_, ConnectionRegistry>,
 ) -> Result<crate::engine::QueryResult, EngineError> {
+    executer_du_sql(&config, &registry, key, sql, limit, mode, console).await
+}
+
+/// Le corps de `run_sql`, sans Tauri : c'est ce que le test de lecture seule exerce.
+pub(crate) async fn executer_du_sql(
+    config: &crate::config::ConfigState,
+    registry: &ConnectionRegistry,
+    key: DatabaseKey,
+    sql: String,
+    limit: crate::engine::RowLimit,
+    mode: crate::engine::TransactionMode,
+    console: String,
+) -> Result<crate::engine::QueryResult, EngineError> {
+    // **Ce que la garde syntaxique sait reconnaître est refusé ici aussi** sur une connexion en
+    // lecture seule effective (#168) — le miroir de `nature.ts`, gardé par la même fixture. Sur
+    // PostgreSQL, MySQL et SQLite la session du moteur refuserait de toute façon ; ce refus-ci le dit
+    // avant l'envoi, et il est **le seul** qui vaille pour BigQuery, qui n'a pas de session à régler.
+    // Une lecture ne relit même pas la configuration.
+    if let Some(instruction) = crate::engine::nature::nature_de(&sql).instruction() {
+        crate::config::commands::refuser_si_lecture_seule(
+            config,
+            &key.connection,
+            &format!("exécuter un {instruction}"),
+        )
+        .map_err(EngineError::local)?;
+    }
+
     let resultat = registry
         // **Ni `avec` ni `Reprise` ici**, et pourtant les deux y sont : `executer_une_requete` passe
         // chacun de ses deux ordres par `avec` — le `begin` en `Rejouable`, la requête en `Unique`,
@@ -1008,5 +1099,373 @@ mod tests_known_hosts {
         let chemin = known_hosts_dans(None);
         assert_eq!(chemin, PathBuf::from(".ssh").join("known_hosts"));
         assert!(chemin.is_relative());
+    }
+}
+
+/// Les commandes qui écrivent consultent la lecture seule **de la configuration** (#168).
+///
+/// Sur un vrai fichier SQLite, sans décor : c'est le moteur qui porte la lecture seule de session
+/// sans conteneur, et c'est ce qui laisse ces tests tourner partout.
+#[cfg(test)]
+mod tests_lecture_seule {
+    use super::*;
+    use crate::config::{ConfigStore, ConnectionId, Engine, FolderId, FolderTree};
+    use crate::engine::{PendingInsert, PendingInsertValue, RowLimit, TransactionMode, UpdatePlan};
+
+    /// Le décor : un fichier SQLite déclaré sous le dossier « prod », **inscriptible localement** —
+    /// le cas de toute connexion migrée d'un environnement de production —, la configuration écrite
+    /// et le registre ouvert **en session inscriptible**. Ce dernier point est ce qui fait mordre le
+    /// test : le refus ne peut venir que de la configuration, pas du moteur.
+    struct Decor {
+        _repertoire: tempfile::TempDir,
+        config: crate::config::ConfigState,
+        registre: ConnectionRegistry,
+        variante: ConnectionSettings,
+        chemin_config: std::path::PathBuf,
+    }
+
+    fn cle() -> DatabaseKey {
+        DatabaseKey {
+            connection: ConnectionId::brut("jetons"),
+        }
+    }
+
+    async fn monter(dossier_en_lecture_seule: bool) -> Decor {
+        let repertoire = tempfile::tempdir().expect("répertoire temporaire");
+        let fichier = repertoire.path().join("atelier.db");
+        rusqlite::Connection::open(&fichier)
+            .expect("fichier")
+            .execute_batch("create table jetons (valeur integer)")
+            .expect("décor");
+        let variante = ConnectionSettings {
+            host: String::new(),
+            port: 0,
+            default_database: fichier.to_string_lossy().into_owned(),
+            username: String::new(),
+            password: None,
+            ssl_mode: SslMode::Disable,
+            ca_certificate: None,
+            auth_database: None,
+            read_only: false,
+            reconnect_on_startup: false,
+            tunnel: None,
+        };
+
+        let mut base = crate::config::arbre_de_test::base("jetons", false);
+        base.engine = Engine::Sqlite;
+        base.connection = variante.clone();
+        let mut prod =
+            crate::config::arbre_de_test::dossier("prod", "prod", dossier_en_lecture_seule);
+        prod.connections.push(base);
+        let arbre = FolderTree {
+            folders: vec![prod],
+            connections: Vec::new(),
+        };
+        let chemin_config = repertoire.path().join("config.json");
+        let (store, _) = ConfigStore::open(&chemin_config);
+        crate::config::commands::ecrire_le_reste_intact(&store, &arbre).expect("écrit");
+
+        let registre = ConnectionRegistry::new();
+        registre
+            .ouvrir(
+                &cle().cle(),
+                Engine::Sqlite,
+                &variante,
+                None,
+                &crate::engine::proxy::ContexteDeProxy::pour_les_tests(),
+            )
+            .await
+            .expect("un fichier SQLite doit s'ouvrir");
+        Decor {
+            _repertoire: repertoire,
+            config: crate::config::ConfigState::ouvert(store),
+            registre,
+            variante,
+            chemin_config,
+        }
+    }
+
+    fn un_ajout() -> UpdatePlan {
+        UpdatePlan {
+            schema: "main".into(),
+            table: "jetons".into(),
+            key_column: String::new(),
+            changes: Vec::new(),
+            inserts: vec![PendingInsert {
+                values: vec![PendingInsertValue {
+                    column: "valeur".into(),
+                    value: Some("1".into()),
+                }],
+            }],
+            deletes: Vec::new(),
+        }
+    }
+
+    async fn compte(decor: &Decor) -> i64 {
+        let resultat = decor
+            .registre
+            .executer_une_requete(
+                &cle().cle(),
+                "select count(*) from jetons",
+                RowLimit::OneHundred,
+                TransactionMode::Auto,
+                "lecteur",
+            )
+            .await
+            .expect("lecture");
+        match &resultat.rows[0][0] {
+            Value::Int { value } => *value,
+            autre => panic!("compte inattendu : {autre:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn la_grille_n_ecrit_pas_sous_un_dossier_en_lecture_seule_meme_si_la_variante_dit_non() {
+        // **Le sabotage qui le garde** : lire `base.connection.read_only` (le réglage local, faux
+        // ici) au lieu de la lecture seule effective fait passer l'écriture.
+        let decor = monter(true).await;
+        assert!(
+            !decor.variante.read_only,
+            "le décor doit être inscriptible localement"
+        );
+        let erreur = appliquer_les_modifications(&decor.config, &decor.registre, cle(), un_ajout())
+            .await
+            .expect_err("refus attendu");
+        assert!(
+            erreur.message.contains("imposée par le dossier « prod »"),
+            "{}",
+            erreur.message
+        );
+        assert_eq!(compte(&decor).await, 0, "rien n'a été écrit");
+
+        // Contrôle positif : dossier levé, la même écriture passe — la session est inscriptible.
+        let decor = monter(false).await;
+        appliquer_les_modifications(&decor.config, &decor.registre, cle(), un_ajout())
+            .await
+            .expect("écrite");
+        assert_eq!(compte(&decor).await, 1);
+    }
+
+    #[tokio::test]
+    async fn la_creation_de_schema_est_refusee_par_la_configuration() {
+        let decor = monter(true).await;
+        let erreur = creer_un_schema(&decor.config, &decor.registre, cle(), "ventes".into())
+            .await
+            .expect_err("refus attendu");
+        assert!(
+            erreur.message.contains("lecture seule"),
+            "{}",
+            erreur.message
+        );
+        // Contrôle positif : levée, c'est le **moteur** qui refuse — SQLite n'a pas de schémas —,
+        // donc un autre message. Sans ce contrôle, un refus systématique passerait.
+        let decor = monter(false).await;
+        let erreur = creer_un_schema(&decor.config, &decor.registre, cle(), "ventes".into())
+            .await
+            .expect_err("SQLite refuse lui-même");
+        assert!(
+            !erreur.message.contains("lecture seule"),
+            "{}",
+            erreur.message
+        );
+    }
+
+    #[tokio::test]
+    async fn la_console_refuse_une_ecriture_et_laisse_passer_une_lecture() {
+        let decor = monter(true).await;
+        let erreur = executer_du_sql(
+            &decor.config,
+            &decor.registre,
+            cle(),
+            "delete from jetons".into(),
+            RowLimit::OneHundred,
+            TransactionMode::Auto,
+            "console".into(),
+        )
+        .await
+        .expect_err("refus attendu");
+        assert!(
+            erreur.message.contains("exécuter un DELETE"),
+            "{}",
+            erreur.message
+        );
+        executer_du_sql(
+            &decor.config,
+            &decor.registre,
+            cle(),
+            "select * from jetons".into(),
+            RowLimit::OneHundred,
+            TransactionMode::Auto,
+            "console".into(),
+        )
+        .await
+        .expect("une lecture passe");
+    }
+
+    #[tokio::test]
+    async fn une_session_en_lecture_seule_fait_refuser_l_ecriture_par_sqlite() {
+        // **Le serveur, et non l'écran** : la variante porte la lecture seule effective, et
+        // l'adaptateur pose `query_only`. L'écriture passe par le registre, sans garde de
+        // configuration : c'est SQLite qui refuse.
+        let decor = monter(false).await;
+        let registre = ConnectionRegistry::new();
+        let mut variante = decor.variante.clone();
+        variante.read_only = true;
+        registre
+            .ouvrir(
+                "connexion/lecture",
+                Engine::Sqlite,
+                &variante,
+                None,
+                &crate::engine::proxy::ContexteDeProxy::pour_les_tests(),
+            )
+            .await
+            .expect("ouverte");
+        let ecrire = |mode| {
+            registre.executer_une_requete(
+                "connexion/lecture",
+                "insert into jetons values (1)",
+                RowLimit::OneHundred,
+                mode,
+                "console",
+            )
+        };
+        let erreur = ecrire(TransactionMode::Auto).await.expect_err("refusée");
+        assert!(erreur.message.contains("readonly"), "{}", erreur.message);
+        // Et la session de console en hérite : elle est ouverte depuis la recette. **Une lecture
+        // en transaction manuelle passe** — `query_only` refusait `BEGIN IMMEDIATE`, donc une
+        // console en mode manuel ne pouvait même plus lire —, l'écriture non.
+        registre
+            .executer_une_requete(
+                "connexion/lecture",
+                "select * from jetons",
+                RowLimit::OneHundred,
+                TransactionMode::Manual,
+                "console",
+            )
+            .await
+            .expect("une lecture en transaction manuelle");
+        let erreur = ecrire(TransactionMode::Manual).await.expect_err("refusée");
+        assert!(erreur.message.contains("readonly"), "{}", erreur.message);
+        registre
+            .annuler_la_transaction("connexion/lecture", "console")
+            .await
+            .expect("annulée");
+        // Contrôle positif : la lecture passe.
+        registre
+            .executer_une_requete(
+                "connexion/lecture",
+                "select * from jetons",
+                RowLimit::OneHundred,
+                TransactionMode::Auto,
+                "console",
+            )
+            .await
+            .expect("lecture");
+    }
+
+    #[tokio::test]
+    async fn poser_la_lecture_seule_ferme_la_connexion_et_est_refuse_pendant_une_transaction() {
+        let decor = monter(false).await;
+        let requete = crate::config::requetes::SetFolderReadOnlyRequest {
+            folder: FolderId::brut("prod"),
+            read_only: true,
+        };
+        // Une transaction manuelle retient une instruction : la fermer l'emporterait.
+        decor
+            .registre
+            .executer_une_requete(
+                &cle().cle(),
+                "insert into jetons values (1)",
+                RowLimit::OneHundred,
+                TransactionMode::Manual,
+                "console",
+            )
+            .await
+            .expect("retenue");
+        let refus = crate::config::commands::regler_la_lecture_seule_du_dossier(
+            &decor.config,
+            &decor.registre,
+            &requete,
+        )
+        .await
+        .expect_err("refus attendu");
+        assert!(refus.contains("transaction manuelle"), "{refus}");
+        assert!(
+            refus.contains("base-jetons"),
+            "le refus nomme la connexion : {refus}"
+        );
+        // Rien n'a été écrit : le dossier n'est pas passé en lecture seule.
+        let (store, _) = ConfigStore::open(&decor.chemin_config);
+        let arbre = store.load_tree().expect("relu");
+        assert!(
+            !arbre
+                .dossier(&FolderId::brut("prod"))
+                .expect("là")
+                .read_only
+        );
+
+        decor
+            .registre
+            .annuler_la_transaction(&cle().cle(), "console")
+            .await
+            .expect("annulée");
+        let arbre = crate::config::commands::regler_la_lecture_seule_du_dossier(
+            &decor.config,
+            &decor.registre,
+            &requete,
+        )
+        .await
+        .expect("posée");
+        assert!(
+            arbre
+                .dossier(&FolderId::brut("prod"))
+                .expect("là")
+                .read_only
+        );
+        // **La connexion est fermée**, pour se rouvrir avec la session en lecture seule.
+        assert_eq!(decor.registre.ouvertes().await, 0);
+        assert!(matches!(
+            decor.registre.etat(&cle().cle()).await,
+            ConnectionState::Never
+        ));
+    }
+
+    #[tokio::test]
+    async fn la_session_s_ouvre_avec_la_lecture_seule_de_la_configuration() {
+        // **La variante envoyée dit `readOnly: false`** ; le dossier l'impose. C'est la valeur de la
+        // configuration qui atteint l'adaptateur, donc la session du moteur.
+        let decor = monter(true).await;
+        let ouverte =
+            variante_a_ouvrir(&decor.config, &cle(), decor.variante.clone()).expect("connue");
+        assert!(ouverte.read_only);
+        // Et l'inverse : la variante envoyée à vrai n'impose rien quand la configuration écrit.
+        let decor = monter(false).await;
+        let mut envoyee = decor.variante.clone();
+        envoyee.read_only = true;
+        let ouverte = variante_a_ouvrir(&decor.config, &cle(), envoyee).expect("connue");
+        assert!(!ouverte.read_only);
+        // Une connexion que la configuration ne déclare pas ne s'ouvre pas.
+        let inconnue = DatabaseKey {
+            connection: ConnectionId::brut("inconnue"),
+        };
+        assert!(variante_a_ouvrir(&decor.config, &inconnue, decor.variante.clone()).is_err());
+    }
+
+    #[tokio::test]
+    async fn un_reglage_qui_ne_change_rien_ne_ferme_rien() {
+        // Poser la lecture seule sur un dossier qui l'a déjà : aucune connexion ne change.
+        let decor = monter(true).await;
+        crate::config::commands::regler_la_lecture_seule_du_dossier(
+            &decor.config,
+            &decor.registre,
+            &crate::config::requetes::SetFolderReadOnlyRequest {
+                folder: FolderId::brut("prod"),
+                read_only: true,
+            },
+        )
+        .await
+        .expect("posée");
+        assert_eq!(decor.registre.ouvertes().await, 1);
     }
 }

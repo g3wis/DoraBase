@@ -74,6 +74,54 @@ impl ConfigState {
     pub fn new() -> Self {
         Self(Mutex::new(None))
     }
+
+    /// Un état **déjà lu**, pour les tests des commandes qui consultent la configuration sans passer
+    /// par `load_config` (#168).
+    #[cfg(test)]
+    pub(crate) fn ouvert(store: ConfigStore) -> Self {
+        Self(Mutex::new(Some(store)))
+    }
+}
+
+/// Refuse une écriture sur une connexion en lecture seule **effective**, lue sur le disque (#168).
+///
+/// **La configuration est relue à chaque appel**, et c'est délibéré : c'est négligeable devant une
+/// écriture réseau, et un drapeau figé dans le registre devrait être tenu à jour par chaque commande
+/// de configuration qui peut le changer — une règle, pas N branchements. Voir
+/// `FolderTree::refus_d_ecrire` pour la règle elle-même et ses messages.
+///
+/// **Aucune `variant` dans la signature** : c'est la garantie. Une commande qui écrit ne peut pas
+/// croire l'écran sur parole, puisqu'elle n'a rien à lui demander.
+pub(crate) fn refuser_si_lecture_seule(
+    state: &ConfigState,
+    connexion: &ConnectionId,
+    geste: &str,
+) -> Result<(), String> {
+    avec_le_magasin(state, |store| {
+        match store.load_tree()?.refus_d_ecrire(connexion, geste) {
+            Some(refus) => Err(refus),
+            None => Ok(()),
+        }
+    })
+}
+
+/// La lecture seule **effective** d'une connexion, que `open_database` pose sur la session du
+/// moteur (#168). `Err` pour une connexion que la configuration ne déclare plus.
+pub(crate) fn lecture_seule_effective(
+    state: &ConfigState,
+    connexion: &ConnectionId,
+) -> Result<bool, String> {
+    avec_le_magasin(state, |store| {
+        store
+            .load_tree()?
+            .lecture_seule_effective(connexion)
+            .map(|lecture| lecture.est_active())
+            .ok_or_else(|| {
+                "cette connexion n'est plus déclarée dans la configuration : rafraîchissez \
+                 l'arborescence."
+                    .to_owned()
+            })
+    })
 }
 
 impl Default for ConfigState {
@@ -134,7 +182,7 @@ pub fn load_config(app: AppHandle, state: State<'_, ConfigState>) -> Result<Conf
 /// magasin. Recopier le déverrouillage et son refus là-bas aurait fait vivre deux fois la propriété
 /// « ne pas écraser ce qu'on n'a pas su lire ».
 pub(crate) fn avec_le_magasin<T>(
-    state: &State<'_, ConfigState>,
+    state: &ConfigState,
     operation: impl FnOnce(&ConfigStore) -> Result<T, String>,
 ) -> Result<T, String> {
     let garde = state
@@ -182,7 +230,7 @@ pub(crate) fn ecrire_le_reste_intact(
 /// **L'arbre vient du disque**, jamais de l'écran : une copie envoyée par la webview pourrait être
 /// périmée et écraser une écriture faite ailleurs (`08e`).
 fn ecrire_l_arbre(
-    state: &State<'_, ConfigState>,
+    state: &ConfigState,
     operation: impl FnOnce(&FolderTree) -> Result<FolderTree, String>,
 ) -> Result<FolderTree, String> {
     avec_le_magasin(state, |store| ecrire_l_arbre_sur(store, operation))
@@ -286,17 +334,78 @@ pub fn recolor_folder(
     })
 }
 
-/// Pose ou lève la lecture seule d'un dossier — **l'écriture du drapeau seule**. Ce qu'elle impose
-/// aux écrans et au moteur, et le refus pendant une transaction manuelle, sont l'affaire de #168.
+/// Pose ou lève la lecture seule d'un dossier, et **ferme les connexions dont la lecture seule
+/// effective change** (#168).
+///
+/// **Fermer, et non reposer le réglage sur la session vivante.** La lecture seule est posée côté
+/// moteur à l'ouverture (`SET SESSION CHARACTERISTICS …`, `SET SESSION TRANSACTION READ ONLY`,
+/// `PRAGMA query_only`) : une connexion ouverte garderait l'ancien réglage, et ses sessions de
+/// console aussi. MySQL en tient un **pool**, où reposer un `SET` n'atteindrait qu'une connexion sur
+/// dix. Fermer est la seule forme qui vaille pour les cinq moteurs, et c'est le patron des commandes
+/// de configuration qui périment ce qu'une connexion ouverte décrit ; la connexion se rouvre au geste
+/// suivant, avec le bon réglage, par `open_database`.
+///
+/// **Refusée tant qu'une transaction manuelle est ouverte** sur l'une des connexions concernées :
+/// fermer la connexion emporterait sa transaction — ce que la bascule de mode refuse déjà de faire en
+/// silence (`API-38`). Le refus vaut **dans les deux sens** : lever la lecture seule ferme aussi, et
+/// une transaction en lecture seule tient un journal que l'on perdrait sans l'avoir demandé.
 #[tauri::command]
-pub fn set_folder_read_only(
+pub async fn set_folder_read_only(
     request: SetFolderReadOnlyRequest,
     state: State<'_, ConfigState>,
+    registry: State<'_, ConnectionRegistry>,
 ) -> Result<FolderTree, String> {
-    ecrire_l_arbre(&state, |arbre| {
+    regler_la_lecture_seule_du_dossier(&state, &registry, &request).await
+}
+
+/// Le corps de `set_folder_read_only`, sans Tauri.
+pub(crate) async fn regler_la_lecture_seule_du_dossier(
+    state: &ConfigState,
+    registry: &ConnectionRegistry,
+    request: &SetFolderReadOnlyRequest,
+) -> Result<FolderTree, String> {
+    let regler = |arbre: &FolderTree| {
         super::enregistrer::regler_la_lecture_seule(arbre, &request.folder, request.read_only)
             .map_err(|erreur| erreur.to_string())
-    })
+    };
+
+    // D'abord **sans écrire** : ce qu'il faudrait fermer, pour savoir si c'est permis.
+    let (avant, projete) = avec_le_magasin(state, |store| {
+        let arbre = store.load_tree()?;
+        let suivant = regler(&arbre)?;
+        Ok((arbre, suivant))
+    })?;
+    for id in avant.lecture_seule_changee(&projete) {
+        if registry.transaction_ouverte(&cle_de_connexion(&id)).await {
+            let nom = avant
+                .connexion(&id)
+                .map(|(base, _)| base.label.clone().unwrap_or_else(|| base.name.clone()))
+                .unwrap_or_else(|| id.to_string());
+            return Err(format!(
+                "une transaction manuelle est ouverte dans une console de « {nom} » : validez-la ou \
+                 annulez-la avant de changer la lecture seule de ce dossier. La connexion doit être \
+                 rouverte pour suivre le réglage, et la fermer emporterait cette transaction."
+            ));
+        }
+    }
+
+    // L'écriture relit le disque : ce qui est fermé est ce qui a réellement changé.
+    let mut changees = Vec::new();
+    let ecrit = ecrire_l_arbre(state, |arbre| {
+        let suivant = regler(arbre)?;
+        changees = arbre.lecture_seule_changee(&suivant);
+        Ok(suivant)
+    })?;
+    for id in &changees {
+        registry.fermer(&cle_de_connexion(id)).await;
+    }
+    log::info!(
+        "set_folder_read_only ← {} = {} : {} connexion(s) fermée(s)",
+        request.folder,
+        request.read_only,
+        changees.len()
+    );
+    Ok(ecrit)
 }
 
 /// Le retrait d'un dossier ou d'une connexion, jusqu'à l'écriture : la commande ferme ensuite.

@@ -942,6 +942,21 @@ test('la lecture seule se pose et se lève depuis le menu du dossier qui la déc
   ])
 })
 
+test('un refus de la lecture seule se dit, avec le dossier qu’il concerne (#168)', async () => {
+  // Le cœur refuse quand une transaction manuelle est ouverte sur une connexion du dossier : un menu
+  // qui se fermerait sans effet se lirait comme une panne (défaut n° 36).
+  const refus =
+    'une transaction manuelle est ouverte dans une console de « analytics » : validez-la ou annulez-la avant de changer la lecture seule de ce dossier.'
+  render(<Piloté initial={[ID_PROJET]} onSetFolderReadOnly={() => Promise.reject(refus)} />)
+  await userEvent.click(screen.getByRole('button', { name: 'Actions de dev' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Passer en lecture seule' }))
+  const dialogue = await screen.findByRole('dialog', {
+    name: 'La lecture seule de « dev » n’a pas changé',
+  })
+  expect(dialogue).toHaveTextContent(refus)
+  expect(dialogue).toHaveTextContent('aucune connexion n’a été fermée')
+})
+
 test('sous un ancêtre en lecture seule, l’entrée est désactivée et nomme l’ancêtre', async () => {
   const arbre = arbreDeTest({
     id: 'f0000000000000c1',

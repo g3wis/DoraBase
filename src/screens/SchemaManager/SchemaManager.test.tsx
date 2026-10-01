@@ -209,15 +209,22 @@ test('le bouton de création est désactivé tant que le champ est vide', async 
   expect(screen.getByRole('button', { name: 'Créer' })).toBeDisabled()
 })
 
-test('le rappel de production ne paraît que sur un environnement marqué', async () => {
-  const { unmount } = monter({ production: false })
+test('en lecture seule, la création est désactivée avec sa raison, et le réglage reste (#168)', async () => {
+  const raison =
+    'Lecture seule, imposée par le dossier « prod » : levez-la sur ce dossier pour écrire.'
+  const { unmount } = monter({ lectureSeule: null })
   await waitFor(() => expect(interrupteur('public')).toBeInTheDocument())
-  expect(screen.queryByText(/ne peut pas la défaire/)).toBeNull()
+  expect(screen.queryByText(raison)).toBeNull()
+  expect(screen.getByLabelText('Créer un schéma')).toBeEnabled()
   unmount()
 
-  monter({ production: true })
+  monter({ lectureSeule: raison })
   await waitFor(() => expect(interrupteur('public')).toBeInTheDocument())
-  expect(screen.getByText(/ne peut pas la défaire/)).toBeInTheDocument()
+  expect(screen.getByText(raison)).toBeInTheDocument()
+  expect(screen.getByLabelText('Créer un schéma')).toBeDisabled()
+  expect(screen.getByRole('button', { name: 'Créer' })).toBeDisabled()
+  // **Les schémas affichés restent réglables** : c'est une préférence, pas une écriture.
+  expect(interrupteur('public')).toBeEnabled()
 })
 
 test('le filtre porte sur les deux listes, et le pied compte ce que l’arbre montrera', async () => {

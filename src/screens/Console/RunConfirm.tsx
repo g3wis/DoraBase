@@ -10,8 +10,6 @@ type RunConfirmProps = {
   sansRestriction: boolean
   /** La base visée, pour que la confirmation dise *où* la requête va partir. */
   cible: string
-  /** Vrai quand la base est déclarée en production. */
-  production: boolean
   /**
    * Vrai quand la connexion est en **transaction manuelle** (`API-38`).
    *
@@ -50,7 +48,6 @@ export function RunConfirm({
   nature,
   sansRestriction,
   cible,
-  production,
   dansUneTransaction = false,
   instructions = 1,
   ecritures = [],
@@ -109,12 +106,6 @@ export function RunConfirm({
             <dt>{t('console.runConfirm.base')}</dt>
             <dd className={styles.mono}>{cible}</dd>
           </div>
-          {production && (
-            <div className={styles.entree}>
-              <dt>{t('console.runConfirm.environnement')}</dt>
-              <dd className={styles.prod}>{t('console.runConfirm.production')}</dd>
-            </div>
-          )}
         </dl>
         {/* Ce que DoraBase ne fera pas : il n'y a ni patch inverse ni transaction ici, contrairement
             à `11d`. Le dire est le minimum honnête — laisser croire à un filet qui n'existe pas

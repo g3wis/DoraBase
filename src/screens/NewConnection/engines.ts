@@ -242,13 +242,16 @@ export function modeSslPourLeMoteur(engine: Engine, actuel: SslMode): SslMode {
 /**
  * L'enregistrement doit-il demander de confirmer un mode SSL **non authentifiant** (#87) ?
  *
- * Oui quand trois choses tiennent ensemble : la cible est marquée production, le moteur a un
+ * Oui quand trois choses tiennent ensemble : la cible est sensible, le moteur a un
  * transport à chiffrer, et le mode retenu ne vérifie pas l'identité du serveur — `disable`,
  * `allow`, `prefer` et `require`. `require` en est, et c'est le point : il chiffre sans
  * authentifier, donc il n'empêche pas plus un intermédiaire que le clair.
  *
- * **Le drapeau `production`, jamais le libellé** — la règle de `23g`, celle du rappel de production
- * du gestionnaire de schémas. Et **un moteur sans mode offert n'est jamais concerné** : SQLite et
+ * **La cible est sensible** quand un dossier du cadre **impose** la lecture seule (#168) — le seul
+ * marqueur qui ait survécu au drapeau `production` des environnements, et jamais le réglage local de
+ * la connexion, qu'un brouillon neuf a à vrai. Pour une instance managée, c'est son propre drapeau
+ * `production`, qu'elle garde. Un drapeau, jamais un libellé (`23g`). Et **un moteur sans mode offert
+ * n'est jamais concerné** : SQLite et
  * BigQuery n'ont pas de champ SSL, donc rien à confirmer qu'on puisse changer.
  *
  * Ce n'est pas un refus : descendre peut être juste — un serveur interne sans autorité publique, une
@@ -258,9 +261,9 @@ export function modeSslPourLeMoteur(engine: Engine, actuel: SslMode): SslMode {
 export function confirmationTlsRequise(
   engine: Engine,
   mode: SslMode,
-  production: boolean,
+  cibleSensible: boolean,
 ): boolean {
-  return production && modesSslDisponibles(engine).length > 0 && !authentifie(mode)
+  return cibleSensible && modesSslDisponibles(engine).length > 0 && !authentifie(mode)
 }
 
 /**

@@ -41,9 +41,9 @@ test('un moteur sans champ SSL n’a rien à confirmer', () => {
 const ARBRE = arbreDeTest(trioDeTest())
 
 /**
- * `A2` cadré sur un dossier. **`prod` est en lecture seule** dans le décor migré : c'est la lecture
- * seule effective la plus simple qui tient lieu, jusqu'à #168, du drapeau `production` que
- * l'environnement portait pour ce rappel.
+ * `A2` cadré sur un dossier. **`prod` est en lecture seule** dans le décor migré : la lecture seule
+ * *imposée* par un dossier est le marqueur de cible sensible qui a remplacé le drapeau `production`
+ * (#168) — et jamais le réglage local, qu'un brouillon neuf a à vrai.
  */
 function monterA2(dossier: string = ID_DE_TEST.dev) {
   const requetes: SaveDatabaseRequest[] = []
@@ -125,8 +125,14 @@ test('en prod, le défaut verify-full enregistre sans question', async () => {
 
 test('hors prod, un mode non authentifiant enregistre sans question', async () => {
   // **Le contrôle négatif** : sans lui, un rappel posé sur tout mode non authentifiant, quel que
-  // soit le dossier, passerait les trois tests d'au-dessus.
+  // soit le dossier, passerait les trois tests d'au-dessus. **Et c'est aussi celui du réglage
+  // local** (#168) : le brouillon neuf naît en lecture seule, donc un rappel branché sur la
+  // lecture seule *effective* plutôt qu'*imposée* se déclencherait ici.
   const requetes = monterA2()
+  expect(screen.getByRole('switch', { name: 'Ouvrir en lecture seule' })).toHaveAttribute(
+    'aria-checked',
+    'true',
+  )
   await choisirLeMode('prefer')
 
   await userEvent.click(enregistrerA2())

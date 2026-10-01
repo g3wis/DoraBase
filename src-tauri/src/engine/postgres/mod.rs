@@ -118,7 +118,22 @@ impl PostgresAdapter {
         )
         .await
         {
-            Ok(client) => Ok(Self { client, proxy }),
+            Ok(client) => {
+                // **La session en lecture seule côté moteur** (#168), posée avant toute autre
+                // requête. Voir `connect::LECTURE_SEULE` pour ce qu'elle garantit et ce qu'elle ne
+                // garantit pas.
+                if variante.read_only {
+                    if let Err(erreur) = client.batch_execute(connect::LECTURE_SEULE).await {
+                        let erreur = error::traduire(&erreur);
+                        drop(client);
+                        if let Some(p) = proxy {
+                            p.fermer().await;
+                        }
+                        return Err(erreur);
+                    }
+                }
+                Ok(Self { client, proxy })
+            }
             // **Le point de `06e`, étendu à Cloud SQL par `06g`** : sans cette qualification,
             // un proxy tombé produit un « connection refused » sur `127.0.0.1`, qui envoie
             // chercher un problème de PostgreSQL. `A3` distingue les deux lignes ; l'erreur
@@ -945,6 +960,60 @@ mod tests_db {
         PostgresAdapter::connect(&variante, secret.as_ref())
             .await
             .expect("la base de test doit répondre")
+    }
+
+    /// **La session en lecture seule côté moteur** (#168) : c'est le **serveur** qui refuse, par
+    /// `25006`, et non une garde de l'écran ou du cœur. `update … where false` : sous sabotage (la
+    /// session inscriptible), l'ordre ne toucherait aucune ligne du décor partagé.
+    #[tokio::test]
+    async fn une_session_en_lecture_seule_fait_refuser_l_ecriture_par_le_serveur() {
+        let (mut variante, secret) = variante_de_test();
+        variante.read_only = true;
+        let adaptateur = PostgresAdapter::connect(&variante, secret.as_ref())
+            .await
+            .expect("connexion");
+        // Une lecture passe, et plusieurs : le réglage est celui de la session, pas d'un ordre.
+        for _ in 0..3 {
+            adaptateur
+                .run_sql("select 1", crate::engine::RowLimit::OneHundred)
+                .await
+                .expect("lecture");
+        }
+        let erreur = adaptateur
+            .run_sql(
+                "update introspection.users set id = id where false",
+                crate::engine::RowLimit::OneHundred,
+            )
+            .await
+            .expect_err("le serveur refuse");
+        assert_eq!(erreur.code.as_deref(), Some("25006"), "{erreur:?}");
+        // Et une transaction ouverte ensuite naît en lecture seule — celle d'`apply_updates` comme
+        // celle d'une console.
+        adaptateur
+            .transaction(crate::engine::OrdreDeTransaction::Ouvrir)
+            .await
+            .expect("begin");
+        let erreur = adaptateur
+            .run_sql(
+                "create temp table jamais (valeur int)",
+                crate::engine::RowLimit::OneHundred,
+            )
+            .await
+            .expect_err("refusée dans la transaction");
+        assert_eq!(erreur.code.as_deref(), Some("25006"), "{erreur:?}");
+
+        // Contrôle positif : la même variante inscriptible n'est pas refusée.
+        variante.read_only = false;
+        let inscriptible = PostgresAdapter::connect(&variante, secret.as_ref())
+            .await
+            .expect("connexion");
+        inscriptible
+            .run_sql(
+                "update introspection.users set id = id where false",
+                crate::engine::RowLimit::OneHundred,
+            )
+            .await
+            .expect("inscriptible");
     }
 
     #[tokio::test]

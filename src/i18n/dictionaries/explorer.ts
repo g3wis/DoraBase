@@ -97,6 +97,9 @@ export const explorerFr: Dictionnaire = {
     refusedTitle: (p) => `« ${p.nom} » n’a pas pu être donné`,
     done: 'Terminé',
     reassurance: 'Le nom d’avant est gardé.',
+    // Le refus de « Passer en / Lever la lecture seule » (#168).
+    readOnlyRefusedTitle: (p) => `La lecture seule de « ${p.nom} » n’a pas changé`,
+    readOnlyReassurance: 'Le dossier garde son réglage, et aucune connexion n’a été fermée.',
   },
   rowMenu: {
     title: 'Actions',
@@ -259,6 +262,8 @@ export const explorerEn: Dictionnaire = {
     refusedTitle: (p) => `“${p.nom}” could not be given`,
     done: 'Done',
     reassurance: 'The previous name is kept.',
+    readOnlyRefusedTitle: (p) => `The read-only setting of “${p.nom}” did not change`,
+    readOnlyReassurance: 'The folder keeps its setting, and no connection was closed.',
   },
   rowMenu: {
     title: 'Actions',

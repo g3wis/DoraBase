@@ -17,7 +17,6 @@ export const PREFERENCES_PAR_DEFAUT: Preferences = {
   codeFontTenths: 125,
   guards: {
     pendingBeforeWrite: true,
-    prodReadOnly: true,
     refuseUnrestrictedWrites: true,
     keepInversePatch: true,
   },

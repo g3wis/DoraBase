@@ -10,7 +10,9 @@ export const REGLAGES: ConnectionSettings = {
   sslMode: 'prefer',
   caCertificate: null,
   authDatabase: null,
-  readOnly: true,
+  // Inscriptible : la lecture seule effective refuse l'édition (#168), et un décor « neutre » ne doit
+  // rien refuser qu'on ne lui ait demandé.
+  readOnly: false,
   reconnectOnStartup: false,
   tunnel: null,
 }
@@ -35,11 +37,7 @@ export const ID_DE_TEST = {
 } as const
 
 /** Une connexion du décor ; son identifiant n'est pas son nom. */
-export function connexionDeTest(
-  id: string,
-  name: string,
-  over: Partial<Omit<Database, 'environment'>> = {},
-): Database {
+export function connexionDeTest(id: string, name: string, over: Partial<Database> = {}): Database {
   return {
     id,
     name,
@@ -47,7 +45,7 @@ export function connexionDeTest(
     connection: REGLAGES,
     consoles: [],
     ...over,
-  } as Database
+  }
 }
 
 /** Le trio migré, avec les connexions qu'on range dans chacun de ses sous-dossiers. */

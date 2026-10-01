@@ -145,7 +145,7 @@ function baseMongo(sslMode: SslMode): Database {
     engine: 'mongodb',
     connection: varianteEnregistree(sslMode),
     consoles: [],
-  } as unknown as Database
+  }
 }
 
 test('une connexion MongoDB enregistrée en « prefer » s’ouvre sur « require »', () => {

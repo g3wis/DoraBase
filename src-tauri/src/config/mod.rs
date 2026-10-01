@@ -24,6 +24,9 @@ mod store;
 // (`export_projects`, `inspect_projects_file`, `import_projects`). Le fichier reste, non compilé.
 // mod transfert;
 
+/// Les décors d'arbre des tests de `config::arbre`, prêtés aux tests des commandes qui écrivent (#168).
+#[cfg(test)]
+pub(crate) use arbre::tests as arbre_de_test;
 pub use arbre::{
     cle_de_connexion, reference_de_connexion, tirage_du_systeme, ArbreError, ConnectionId,
     Descendance, Folder, FolderColor, FolderId, FolderTree, LectureSeule, ValueLabels,

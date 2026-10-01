@@ -113,7 +113,7 @@ describe('la coquille (`15a`)', () => {
     const { onChange } = monter({
       ...PREFERENCES_PAR_DEFAUT,
       theme: 'nuit',
-      guards: { ...PREFERENCES_PAR_DEFAUT.guards, prodReadOnly: false },
+      guards: { ...PREFERENCES_PAR_DEFAUT.guards, refuseUnrestrictedWrites: false },
     })
     await userEvent.click(screen.getByRole('button', { name: 'Réinitialiser' }))
 
@@ -217,26 +217,29 @@ describe('la grille et le code (`15c`)', () => {
 })
 
 describe('les garde-fous (`15d`)', () => {
-  it('les quatre apparaissent, et chacun dit ce qu’il protège', async () => {
+  it('les trois apparaissent, et chacun dit ce qu’il protège', async () => {
     monter()
     await allerA('Sécurité & écriture')
     const switches = screen.getAllByRole('switch')
-    expect(switches).toHaveLength(4)
+    // Trois depuis #168 : « Ouvrir les bases « prod » en lecture seule » est parti.
+    expect(switches).toHaveLength(3)
     // Chaque bascule dit **ce qu'elle protège**, pas comment elle marche — et ce qui arrive quand on
     // l'éteint, ce que `11d` réclamait avant de les rendre réglables.
     expect(screen.getByText(/part directement dans la base/)).toBeInTheDocument()
-    expect(screen.getByText(/s’ouvre modifiable/)).toBeInTheDocument()
+    // Le garde-fou « prod » est parti avec #168 : la lecture seule d'un dossier ne se règle pas ici.
+    expect(screen.queryByText(/s’ouvre modifiable/)).not.toBeInTheDocument()
   })
 
-  it('les trois premiers se règlent', async () => {
+  it('les deux premiers se règlent, et aucun ne parle plus de lecture seule (#168)', async () => {
     const { onChange } = monter()
     await allerA('Sécurité & écriture')
-    await userEvent.click(screen.getByRole('switch', { name: /lecture seule/ }))
+    await userEvent.click(screen.getByRole('switch', { name: /sans clause WHERE/ }))
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({
-        guards: expect.objectContaining({ prodReadOnly: false }),
+        guards: expect.objectContaining({ refuseUnrestrictedWrites: false }),
       }),
     )
+    expect(screen.queryByRole('switch', { name: /lecture seule/ })).not.toBeInTheDocument()
   })
 
   it('« Garder le patch inverse » est désactivé avec sa raison, pas allumé sans effet', async () => {
@@ -249,16 +252,16 @@ describe('les garde-fous (`15d`)', () => {
     expect(screen.getByText(/ce n’est pas encore tranché/)).toBeInTheDocument()
   })
 
-  it('les quatre sont actifs sur des préférences neuves', async () => {
+  it('les trois sont actifs sur des préférences neuves', async () => {
     monter()
     await allerA('Sécurité & écriture')
     const actifs = screen
       .getAllByRole('switch')
       .filter((bascule) => bascule.getAttribute('aria-checked') === 'true')
-    // Trois allumés, le quatrième désactivé : le défaut du modèle est `true` pour les quatre, et
+    // Deux allumés, le troisième désactivé : le défaut du modèle est `true` pour les trois, et
     // c'est ce qui compte — un défaut à `false` transformerait une mise à jour en levée
     // silencieuse des garde-fous.
-    expect(actifs).toHaveLength(3)
+    expect(actifs).toHaveLength(2)
   })
 })
 

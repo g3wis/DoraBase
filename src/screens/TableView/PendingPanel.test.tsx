@@ -163,27 +163,6 @@ test('un refus de prévisualisation s’affiche à la place du bloc', () => {
   expect(screen.getByRole('alert')).toHaveTextContent('pas de clé primaire')
 })
 
-// **L'encart suit le drapeau, jamais le libellé** (`23g`) : la prop est un booléen, et non plus un
-// identifiant d'environnement comparé à la chaîne `'prod'`. Un environnement nommé « live » et marqué
-// production n'avait pas l'encart, et un « prod » que personne n'avait marqué l'avait.
-test('l’encart de production n’existe pas quand le drapeau est baissé', () => {
-  monter({ production: false })
-  expect(screen.queryByText(/production/)).not.toBeInTheDocument()
-})
-
-test('en production, l’encart dit ce qui existe, pas ce qui est promis', () => {
-  monter({ production: true })
-  const encart = screen.getByText(/Cette base est en/)
-  expect(encart).toHaveTextContent('production')
-  // **Au présent depuis `11d`, qui livre la confirmation** — l'annoncer au futur quand elle existe
-  // serait aussi trompeur que l'inverse.
-  expect(encart).toHaveTextContent('demande une confirmation avant d’écrire')
-  // **Et sans la promesse des 24 h** : `11d` ne persiste pas le patch inverse. Annoncer une
-  // conservation qui n'existe pas est le genre de promesse que ce projet s'interdit — `A10` la
-  // livrera.
-  expect(encart.textContent).not.toContain('24 h')
-})
-
 test('après une écriture, le panneau montre de quoi défaire et non des cartes vides', () => {
   monter({ attente: [], patchInverse: 'BEGIN;\nUPDATE t SET a = 1;\nCOMMIT;' })
   // **Le panneau survit au vidage du modèle.** Une première version le démontait avec la dernière
@@ -196,10 +175,11 @@ test('après une écriture, le panneau montre de quoi défaire et non des cartes
   expect(screen.getByText(/ne l’a pas enregistré/)).toBeInTheDocument()
 })
 
-test('l’encart de production disparaît après l’écriture', () => {
-  monter({ attente: [], patchInverse: 'BEGIN;\nCOMMIT;', production: true })
-  // Annoncer « DoraBase demande une confirmation avant d'écrire » **après** avoir écrit se lirait
-  // comme un avertissement resté en place par erreur.
+test('le panneau n’annonce plus aucune confirmation de production (#168)', () => {
+  // La lecture seule refuse en amont : il n'y a plus de confirmation à annoncer, ni avant ni après
+  // l'écriture.
+  monter()
+  expect(screen.queryByText(/production/)).not.toBeInTheDocument()
   expect(screen.queryByText(/demande une confirmation/)).not.toBeInTheDocument()
 })
 

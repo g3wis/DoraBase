@@ -13,7 +13,7 @@ import { arbreDeTest, trioDeTest } from './pourLesTests'
 // **Noms inventés.** Ce test portait les identifiants d'une base réelle du commanditaire, ce qui
 // publiait un nom d'utilisateur et un nom de base dans le dépôt. Un décor de test n'a jamais besoin
 // d'être vrai — seulement cohérent.
-const BASE = {
+const BASE: Database = {
   id: 'c0000000000000e1',
   name: 'analytics',
   engine: 'postgresql',
@@ -36,7 +36,7 @@ const BASE = {
     tunnel: null,
   },
   consoles: [],
-} as unknown as Database
+}
 
 /** La connexion vit dans `Atelier Nord` › `prod` : c'est le cadre qui s'annonce en édition. */
 const APRES: FolderTree = arbreDeTest(trioDeTest({ prod: [BASE] }))
@@ -198,5 +198,68 @@ describe('modifier une connexion (08g)', () => {
 
     // Le panneau est replié à l'ouverture (`08c`) : le badge dit qu'il y a un tunnel dedans.
     expect(screen.getByText(/SSH activé/)).toBeInTheDocument()
+  })
+})
+
+describe('la case « Lecture seule » sous un dossier qui l’impose (#168)', () => {
+  it('montre l’état effectif, figé avec sa raison, et enregistre la valeur locale', async () => {
+    // **Localement inscriptible** : sans cela, « la valeur locale est gardée » et « la valeur
+    // effective est envoyée » rendraient la même requête (règle n° 5).
+    const locale: Database = { ...BASE, connection: { ...BASE.connection, readOnly: false } }
+    const arbre = arbreDeTest(trioDeTest({ prod: [locale] }))
+    const requetes: UpdateVariantRequest[] = []
+    render(
+      <>
+        <Sprite />
+        <LanguageProvider preferences={{ language: 'fr' }}>
+          <NewConnection
+            onClose={() => {}}
+            arbre={arbre}
+            edition={locale}
+            onBrowseKey={async () => null}
+            onTest={async () => {
+              throw new Error('non employé')
+            }}
+            onUpdate={async (requete) => {
+              requetes.push(requete)
+              return arbre
+            }}
+          />
+        </LanguageProvider>
+      </>,
+    )
+
+    const caseLS = screen.getByRole('switch', { name: 'Ouvrir en lecture seule' })
+    expect(caseLS).toHaveAttribute('aria-checked', 'true')
+    expect(caseLS).toBeDisabled()
+    expect(caseLS).toHaveAttribute('title', 'Imposée par le dossier « prod »')
+
+    await userEvent.click(enregistrer())
+    await waitFor(() => expect(requetes).toHaveLength(1))
+    // **La valeur locale, non écrasée** : lever la lecture seule du dossier rendra à la connexion le
+    // choix qu'on y avait fait.
+    expect(requetes[0]?.variant.readOnly).toBe(false)
+  })
+
+  it('hors d’un dossier qui l’impose, la case est la valeur locale et se règle', () => {
+    const libre: Database = { ...BASE, connection: { ...BASE.connection, readOnly: false } }
+    const arbre = arbreDeTest(trioDeTest({ dev: [libre] }))
+    render(
+      <LanguageProvider preferences={{ language: 'fr' }}>
+        <NewConnection
+          onClose={() => {}}
+          arbre={arbre}
+          edition={libre}
+          onBrowseKey={async () => null}
+          onTest={async () => {
+            throw new Error('non employé')
+          }}
+        />
+      </LanguageProvider>,
+    )
+    const caseLS = screen.getByRole('switch', { name: 'Ouvrir en lecture seule' })
+    expect(caseLS).toHaveAttribute('aria-checked', 'false')
+    expect(caseLS).toBeEnabled()
+    expect(caseLS).not.toHaveAttribute('title')
   })
 })

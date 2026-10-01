@@ -72,7 +72,7 @@
  * piste ne porte aucun libellé, donc rien d'autre ne dit qu'elle se clique. Il ne fait que
  * relever le filet, avec le jeton que le bouton secondaire emploie déjà.
  */
-.root:hover:not(:disabled) {
+.root:hover:not(:disabled, [aria-disabled="true"]) {
   border-color: var(--hover-border);
 }
 
@@ -83,7 +83,8 @@
 
 /* Désactivé : la pastille perd son relief et l'icône tenue son accent. Les deux positions
  * deviennent grises, ce qui dit « rien à choisir ici » sans effacer laquelle est tenue. */
-.root:disabled {
+.root:disabled,
+.root[aria-disabled="true"] {
   border-color: var(--disabled);
   cursor: not-allowed;
 }
@@ -99,11 +100,13 @@
   color: var(--accent);
 }
 
-.root:disabled .pastille {
+.root:disabled .pastille,
+.root[aria-disabled="true"] .pastille {
   background: var(--paper-alt);
   box-shadow: none;
 }
 
-.root:disabled .cellule {
+.root:disabled .cellule,
+.root[aria-disabled="true"] .cellule {
   color: var(--ink-3);
 }

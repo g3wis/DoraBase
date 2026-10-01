@@ -62,7 +62,7 @@ function connexion(defaultDatabase: string, name = 'Prod'): Database {
       reconnectOnStartup: false,
       tunnel: null,
     },
-  } as unknown as Database
+  }
 }
 
 /** Un dossier « Comptoir Sud » qui range la connexion — le nom du dossier est paramétrable. */

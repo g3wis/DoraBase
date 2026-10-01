@@ -1476,7 +1476,7 @@ const connexionDeGalerie = (
   name: string,
   engine: Database['engine'],
   consoles: Database['consoles'] = [],
-): Database => ({ id, name, engine, connection: REGLAGES_DE_GALERIE, consoles }) as Database
+): Database => ({ id, name, engine, connection: REGLAGES_DE_GALERIE, consoles })
 
 const ARBRE_DEMO: FolderTree = {
   folders: [
