@@ -83,6 +83,10 @@ test('l’icône d’une instance tombe dans la colonne des icônes de projet', 
     // d'instance reprend. C'est le piège que ce test existe pour éviter, et il s'y était pris lui-même.
     const boite = (selecteur: string) => {
       const ligne = document.querySelector(selecteur)
+      // Sur une ligne de dossier, l'icône est un contrôle posé par-dessus la ligne (#171), qui en
+      // garde la place vide : c'est cette place qu'on mesure.
+      const place = ligne?.querySelector('[data-icon-slot]')
+      if (place) return place.getBoundingClientRect().x
       const icones = [...(ligne?.querySelectorAll('svg') ?? [])].filter(
         (svg) => svg.closest('[data-chevron-zone]') === null,
       )

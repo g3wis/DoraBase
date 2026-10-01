@@ -18,6 +18,7 @@ import type {
   MoveResult,
   RecolorFolderRequest,
   RenameFolderRequest,
+  SetFolderIconRequest,
   SetFolderReadOnlyRequest,
   ValueLabelsRequest,
   VisibleSchemasRequest,
@@ -366,6 +367,11 @@ export async function renameFolder(request: RenameFolderRequest): Promise<Folder
 /** Change la pastille d'un dossier ; `null` la retire. */
 export async function recolorFolder(request: RecolorFolderRequest): Promise<FolderTree> {
   return appeler<FolderTree>('recolor_folder', { request })
+}
+
+/** L'icône d'un dossier (#171) ; `icon: null` la rend à `pin`. */
+export async function setFolderIcon(request: SetFolderIconRequest): Promise<FolderTree> {
+  return appeler<FolderTree>('set_folder_icon', { request })
 }
 
 /** Passe un dossier en lecture seule, ou la lève. Elle s'impose à tous ses descendants. */

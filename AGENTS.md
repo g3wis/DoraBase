@@ -160,6 +160,10 @@ qu'il portait et que le rendu ne dit pas.
   n'en est **pas** un : le bouton de saut d'une cellule de clé étrangère, qui relève son encre
   d'`--ink-2` à `--ink` comme les actions de ligne et la bande de sidebar le font déjà, et le
   canal `--cell-actions` qui le révèle — la cellule, elle, ne change ni de fond ni de filet.
+  **L'icône d'une ligne de dossier en a un depuis #171**, et c'est encore le même argument :
+  devenue le contrôle qui ouvre le panneau de couleur et d'icône, elle reprend à la lettre le
+  survol du « … » de la même ligne — `--hover-row` sur une boîte de 18 px —, et son encre ne bouge
+  pas, puisqu'elle porte la couleur du dossier.
 - **Aucune couleur littérale hors `src/design/tokens.json`.** Garde-fou : `pnpm tokens:check`.
 - **L'échelle d'espacement n'a pas de 8 px** : 3, 5, 6, 7, 9, 11, 14, 16. Un littéral
   commenté vaut mieux qu'un jeton approximatif choisi « parce que ça se ressemble ».
@@ -1223,24 +1227,199 @@ format ».
 Aucune maquette n'existe : **tout est réemployé de ce que l'arbre dessinait déjà**, pour n'inventer
 aucun pixel.
 
-- **un glyphe unique, `pin`** — celui de l'environnement : « un lieu où vivent des connexions » se lit
-  sans légende, et c'est ce qu'est un dossier. Deux glyphes pour un seul concept ne diraient rien de
-  plus, donc le `bag` des projets est parti ;
+- **`pin` par défaut** — celui de l'environnement : « un lieu où vivent des connexions » se lit sans
+  légende, et c'est ce qu'est un dossier. Le `bag` des projets est parti. Depuis #171, chaque dossier
+  peut **choisir** son icône — voir « L'icône d'un dossier » ci-dessous ;
 - **la teinte est la pastille du dossier, ou `--accent-deep` sans couleur** — celle des projets
   d'avant : un dossier racine migré ne change pas d'aspect. **En gras au niveau 0**, comme un projet ;
   replié, il annonce « n connexions » **à toute profondeur** — « n sous-dossiers » ne dirait pas s'il
   y a quoi que ce soit dedans ;
 - **le verrou sur le dossier qui *déclare* la lecture seule**, et lui seul, et l'état entre dans
   l'annonce de la ligne : un glyphe n'a pas de nom accessible. Le badge `PROD` est parti ;
-- **« Couleur… » ouvre une petite modale**, la rangée de pastilles de l'ancien éditeur de projet
-  extraite en `Nuancier`, plus une pastille « Aucune ». Pas de sous-menu : `RowMenu` n'a que des
-  entrées simples ;
+- **la couleur et l'icône se règlent dans un panneau sous l'icône de la ligne** (« Couleur… » en
+  modale jusqu'à #171) : la rangée de pastilles de l'ancien éditeur de projet extraite en `Nuancier`,
+  plus une pastille « Aucune », puis la grille des icônes. Il s'ouvre au clic sur l'icône, ou par
+  « Couleur et icône… » du menu — voir « L'icône d'un dossier ». Pas de sous-menu : `RowMenu` n'a que
+  des entrées simples ;
 - **un dossier vide le dit** (« Dossier vide ») : un nœud déplié sans enfant se lit comme un
   chargement en cours, or rien ne charge ici ;
 - **un dossier naît « dossier N » et passe en renommage sur place** — depuis l'accueil, la bande de
   tête, `⌘N` ou le menu d'un dossier. C'est « aucune modale ne nomme un objet à sa création »,
   appliqué au seul objet qui en avait encore une : le parcours en deux étapes de l'accueil (projet,
   puis connexion) est parti avec les projets.
+
+#### L'icône d'un dossier (30 septembre 2026, #171)
+
+Demandé : « changer la couleur du dossier mais aussi son icône, avec une bibliothèque qui colle au
+design system ». Le sprite n'avait aucune icône qui distingue des dossiers entre eux. Arbitré par le
+demandeur : **Lucide** (ISC), celle de shadcn, qui a la grammaire du sprite — 24 × 24, trait de 2,
+extrémités arrondies —, **une sélection copiée dans le sprite**, non toute la bibliothèque. Neuf
+décisions à ne pas défaire :
+
+- **48 icônes copiées, 56 offertes.** `lucide-static` 1.49.0, obtenu par `npm pack` et **jamais
+  installé** : aucune dépendance, rien au bundle d'exécution, aucune requête réseau. Les symboles sont
+  les éléments intérieurs des SVG de Lucide, **sans** les attributs de leur racine — `fill="none"
+  stroke="currentColor" stroke-width="2"`… sont exactement ce que `Icon` pose sur son `<svg>`, donc
+  l'épaisseur vient d'un seul endroit. Leurs noms sont ceux de Lucide (`building-2`, `chart-column`),
+  pour qu'une icône se retrouve dans la bibliothèque. La licence complète est dans
+  `src/design/icons/LICENSE-lucide.txt`, la version en tête du groupe dans `sprite.svg`. Les 8 autres
+  viennent du sprite d'origine (`pin`, `srv`, `cloud`, `code`, `flask`, `compass`, `star`, `shield`) :
+  recopier le nuage de Lucide à côté de `cloud` ferait deux dessins pour une idée ;
+- **ce qui n'est pas offert : ce qui nomme déjà un palier de l'arbre.** `schema` (c'est un dossier !),
+  `table`, `view`, `term` (une console), `db` (une connexion sans logo), `bag` (la racine de
+  « Déplacer vers… »), `lock` / `unlock` (le verrou de la lecture seule, en bout de la même ligne).
+  C'est pour cela qu'**aucun dossier de Lucide** n'est entré : l'arbre dessine déjà un dossier, et
+  c'est un schéma. Un test garde cette liste en négatif ;
+- **la liste n'a qu'un lieu, `src/data/iconesDeDossier.ts`**, et le cœur ne la connaît pas. Il ne
+  vérifie que la **forme** d'un nom, et seulement quand on l'écrit (`regler_l_icone` : `[a-z0-9-]`,
+  1 à 40) — recopier la liste en Rust ferait deux sources, et une version plus ancienne refuserait ce
+  qu'une plus récente a posé ;
+- **`Folder.icon` est une chaîne facultative, pas une énumération**, et c'est l'écart voulu avec
+  `FolderColor`. Un nom inconnu — écrit à la main, ou par une version plus récente — se relit, se
+  **garde tel quel** à la réécriture, et ne retombe sur `pin` **qu'à l'affichage**
+  (`iconeDeDossier`). Une énumération aurait fait échouer la lecture, donc mis toute la configuration
+  en quarantaine pour un glyphe ; `valider` ne regarde pas l'icône pour la même raison. `serde(default,
+  skip_serializing_if)` : aucun cran de migration, et un dossier sans icône n'écrit aucune clé ;
+- **le repli porte sur la liste, pas sur le sprite** : `table` existe dans le sprite et retombe quand
+  même sur `pin`, un `<use>` vers un symbole absent rendant une case **vide** sans rien pour le dire ;
+- **une commande à part, `set_folder_icon`**, plutôt qu'un `recolor_folder` élargi. La modale applique
+  chaque choix au clic (la règle de #166), et une commande qui réglerait les deux renverrait la couleur
+  *affichée* à chaque clic d'icône — donc écraserait une couleur encore en vol. Choisir `pin` écrit
+  `null`, non « pin » : un dossier revenu au défaut ne se distingue pas d'un dossier qui n'y a jamais
+  touché ;
+- **« Couleur et icône… », et non « Apparence… »** : un mot qui résume cacherait ce que l'entrée a
+  gagné — on cherche l'icône d'un dossier à côté de sa couleur, pas sous un intitulé abstrait. Le
+  glyphe reste `paint`, et les deux gestionnaires (`onRecolorFolder`, `onSetFolderIcon`) sont exigés
+  ensemble : un panneau qui n'en réglerait qu'un annoncerait par son nom ce qu'il n'offre pas. Sans
+  eux, l'icône de la ligne redevient un dessin plutôt qu'un contrôle inerte (défaut n° 36) ;
+- **la grille n'a pas de filet, et sa choisie porte la pastille sombre** du segment actif de
+  `SegmentedControl` : **fond et encre**, jamais la couleur seule — `--btn-strong-*` depuis la revue
+  plus bas, qui l'inverse en « Nuit ». De vraies
+  cases radio masquées dans un `<label>`, pour les flèches du groupe natif ; le nom accessible est
+  celui de l'icône en toutes lettres (`explorer.folderIcons.*`, deux langues, tous distincts — un
+  test le garde). **Pas de `position: relative` sur la cellule** : un sabotage l'a montrée inerte, les
+  cases absolues restant à leur place statique dans une grille qui ne défile pas ;
+- **l'icône voyage, et la fusion garde la locale** (#169) : un dossier créé par l'import apporte la
+  sienne, **même inconnue d'ici** ; un homonyme garde la sienne, **absence comprise** — un import ne
+  complète pas ce qu'on a laissé vide. L'icône ne s'hérite pas : l'export d'un sous-dossier ne
+  matérialise pas celle d'un ancêtre. « Déplacer vers… » dessine les destinations avec la même icône
+  que l'arbre.
+
+**Regardé à la loupe** (`deviceScaleFactor: 6`, ligne d'arbre, les 56 teintées des cinq couleurs) :
+l'épaisseur concorde, et ne peut que concorder — elle vient d'`Icon`. **La taille optique, non tout à
+fait** : les icônes de Lucide occupent leur carré de 20 unités, là où `cloud`, `code`, `star` et
+`compass` du sprite d'origine sont dessinés plus petits — dans la grille, ils paraissent d'un cran en
+retrait. Laissé tel quel : ce sont des icônes du produit, employées ailleurs, et les redessiner
+changerait ces écrans-là.
+
+**Et le réglage s'est fait petit panneau sous l'icône** (30 septembre 2026, rapporté à l'usage : « pas
+de grosse fenêtre, juste une petite modale sous l'icône lorsqu'on clique dessus »). La modale de
+780 px pour deux rangées de choix cachait l'arbre même dont on réglait une ligne : on choisissait une
+icône sans la voir à sa place. `ApparenceDialog` est partie, `PanneauDApparence` la remplace. Dix
+décisions à ne pas défaire :
+
+- **l'icône de la ligne est devenue un contrôle, et c'est un frère posé par-dessus**, jamais un bouton
+  dans le bouton de la ligne (`TreeRow.iconControl`) — la parade du « … » et du bouton de saut
+  d'`API-55`. La ligne garde à la place de l'icône une **case vide de la même taille**, et le contrôle
+  de 18 px s'y pose au pixel : son abscisse vient de la même indentation, plus la gouttière du chevron
+  (11 + 5). Un test de bout en bout garde l'**égalité** des deux boîtes, glyphe contre case ;
+- **cliquer l'icône ne sélectionne ni ne déplie la ligne** — le clic ne tombe plus sur elle —, et un
+  second clic referme. Le reste de la ligne garde son comportement ;
+- **presser l'icône n'arme pas le glisser-déposer** (#167), et ce n'est pas le seuil de 4 px qui le
+  décide : le `pointerdown` est écouté sur la ligne, dont le contrôle n'est pas un descendant. Glisser
+  depuis l'icône ne fait donc rien, ce que l'e2e mesure en glissant pour de vrai ;
+- **une seule mécanique pour les deux chemins** (règle n° 17) : « Couleur et icône… » reste, c'est le
+  chemin clavier, et il ouvre **le même panneau, sous la même icône** — l'état est l'identifiant du
+  dossier, et la ligne qui le porte rend le panneau. Le test l'atteste par l'`aria-expanded` de
+  l'icône, et non par la présence d'une fenêtre ;
+- **`position: fixed`, la géométrie posée par le composant, et placée depuis l'ancre** : l'arbre
+  défile dans une zone en `overflow: auto` qui rognerait un panneau ancré dans le flux (défaut n° 35,
+  la réponse de `ListeDeroulante`). Sous l'icône à 3 px, aligné sur son bord gauche ; **au-dessus**
+  quand le bas de la fenêtre manque et que le haut a la place ; ramené dans la fenêtre si aucun des
+  deux ne l'a, quitte à couvrir la ligne. Trois égalités en e2e, une par cas, et `elementFromPoint`
+  sur la dernière case ;
+- **l'icône est hors du parcours de tabulation** (`tabIndex={-1}`), comme le bouton de saut d'une
+  clé étrangère d'`API-55` : le chemin clavier est l'entrée du menu, et un arrêt de plus par dossier
+  entre la ligne et son « … » allongerait tout parcours de l'arbre pour un geste rare — trois tests
+  e2e qui tabulent de la ligne au « … » (`08h`, `167`) l'ont dit dès la première barrière. Elle reste
+  focalisable par le code, et c'est là que `Échap` rend le focus ;
+- **rendu à côté de l'icône, pas en fin de document** : `Tab` en ressort vers le « … » de la même
+  ligne, l'argument de `Popover` contre le portail. Et il **suit** l'icône quand l'arbre
+  défile, au lieu de se fermer comme le menu au pointeur : on y travaille ;
+- **trois fermetures, sans « Terminé »** : `Échap` (écouté en capture sur le document, arrêté, et qui
+  **rend le focus à l'icône**), le clic ailleurs — l'icône exclue, sans quoi son clic refermerait puis
+  rouvrirait —, et le focus qui sort. Chaque choix s'applique au clic et **le panneau reste ouvert** :
+  on essaie une icône, on la regarde sur sa ligne, on en essaie une autre. Le focus entre sur la
+  couleur cochée, seul arrêt de tabulation de son groupe ;
+- **huit colonnes de 22 px** (`--h-tree-row`), sept rangées, **un panneau de 217 px** qui tient dans
+  la sidebar de 252 px. L'icône reste à 14 px — plus petite, les tracés de Lucide se referment —, et
+  22 lui laisse 4 px de chaque côté : à 20, comparé côte à côte à `deviceScaleFactor: 2`, la pastille
+  de la choisie touchait presque ses voisines. **Les cases n'ont plus de filet** : cinquante-six
+  carrés bordés faisaient un quadrillage plus présent que les icônes, et c'est la forme des entrées
+  d'un panneau flottant du produit — le panneau est le cadre. **Aucun intitulé** « Couleur » /
+  « Icône » : les deux groupes se lisent d'eux-mêmes et portent leur nom accessible ;
+- **le liseré de la pastille choisie est le fond du panneau**, et non plus `--bar`, celui de
+  l'éditeur de projet d'où la rangée venait : posé sur un autre fond, il dessinait un second anneau
+  crème. `Nuancier` n'a plus que cet appelant, et le liseré suit son fond — `--paper` depuis la revue
+  ci-dessous.
+
+**Et une revue de design l'a repris le 1er octobre 2026**, en sept points, dont trois arbitrés par le
+propriétaire. Aucune maquette, comme avant : chaque point réemploie un jeton ou une forme existante.
+
+- **le panneau est de la famille des menus** (arbitré) : `--paper`, `--border`, `--radius-field` et
+  `--shadow-popover`, exactement l'habillage de `MenuContextuel` et de `ListeDeroulante`. Il portait le
+  `--field` blanc et le rayon de 10 px des panneaux, donc se lisait comme une troisième sorte de
+  surface flottante à côté du « … » qui l'ouvre. Seul le rembourrage diffère, 9 px contre 3 : il
+  encadre une grille, pas des entrées arrondies. L'e2e **mesure** l'habillage du menu au clic droit de
+  la même ligne et le compare valeur calculée par valeur calculée, plutôt que de recopier des jetons ;
+- **« Aucune » est une pastille creuse** (arbitré) : un anneau de 1 px à `--accent-deep` — la teinte
+  que l'arbre donne à un dossier sans couleur, `arbre.ts` et « Déplacer vers… » —, sur un fond
+  transparent. Pleine, elle se lisait comme une sixième couleur, l'accent du produit, et non comme
+  l'absence de choix. Choisie, ses deux anneaux restent distincts parce que 2 px de fond les séparent —
+  regardé à `deviceScaleFactor: 6` dans les deux thèmes. L'anneau tient 4,4:1 sur le fond clair et
+  3,7:1 en « Nuit » ;
+- **les pastilles sont dans les colonnes des icônes** : `.nuancier` est la même grille que
+  `GrilleDIcones`, huit pistes de `--h-tree-row` et `--space-1` d'écart, chaque pastille centrée dans
+  sa case. À `gap: 9px`, la rangée tombait entre les colonnes du dessous : deux rangées voisines sur
+  deux rythmes se lisent comme un défaut d'alignement. L'e2e garde l'**égalité** des centres, pastille
+  contre colonne, sur les six ;
+- **la cible est la case, le dessin reste à 9 px** : la case radio — qui *est* le dessin,
+  `appearance: none` — est posée dans un `<label>` de 22 px, la forme de `GrilleDIcones`. Une cible
+  de 9 px se ratait ; agrandir le dessin aurait fait des pastilles plus grosses que les icônes ;
+- **chaque pastille est nommée en toutes lettres** (`explorer.folderColors.*`, deux langues), en nom
+  accessible **et** en `title` sur la case, comme les icônes — « amber » n'est un nom pour personne.
+  « Aucune » a pris la majuscule pour la même raison : c'est désormais un `title` qu'on lit ;
+- **l'anneau de la choisie est `--ink-2`**, et non plus `--ink-4` : composé sur le fond, celui-ci ne
+  tenait que 2,4:1 en clair, sous le 3:1 d'un indicateur d'état ; `--ink-2` tient 3,6:1 en clair et
+  5,5:1 en « Nuit » ;
+- **en « Nuit », la case d'icône choisie s'inverse** (arbitré) : `--btn-strong-bg` / `--btn-strong-ink`
+  au lieu de `--dark` / `--on-dark`, le bouton plein, qui est le plus contrasté avec la page dans les
+  deux thèmes. `--dark` y reste une surface sombre relevée, à peine distincte du panneau, et la case
+  choisie se perdait parmi les cinquante-cinq autres. **En clair rien ne bouge** : les deux paires
+  valent `#23201C` / `#FBF7EF` au caractère près ;
+- **le panneau est posé au pixel entier** (`Math.round` sur `left` et `top`) : l'icône tombe sur une
+  demi-coordonnée — mesuré à x = 21,5 dans `?demo` —, et un panneau posé à `,5` se peint flou, filet
+  compris. Les égalités de position de l'e2e tolèrent donc **0,5 px, et pas davantage** — l'écart de
+  l'arrondi, ce qui reste une égalité (règle n° 18) —, et une assertion de plus garde que le panneau
+  est entier.
+
+**Une garde retirée le jour même** : un effet oubliait le dossier ouvert quand sa ligne disparaissait,
+pour que le panneau ne ressurgisse pas avec elle. Elle était **inatteignable** : tout geste qui retire
+une ligne — replier un parent, taper dans le filtre — passe par un clic ou un focus hors du panneau,
+qui l'ont déjà fermé. Le test écrit pour elle restait vert sans elle ; les deux sont partis.
+
+**Et un sabotage vert pour rien, le quatrième du chantier** : la première passe de sabotages
+Playwright a été rouge **partout**, y compris sur des sabotages sans rapport avec les tests qui
+tombaient — parce qu'un `vite` lancé à la main pour les captures occupait `DORABASE_E2E_PORT + 1`, le
+port du projet `windows`, et que Playwright refusait de démarrer. **Un rouge unanime est aussi
+suspect qu'un vert** : relancée serveur libéré, avec la liste des tests tombés, chaque sabotage ne
+fait tomber que le sien.
+
+**Ce qui reste à voir à l'œil** : le panneau sous WKWebView — en particulier l'entrée du focus sur la
+couleur cochée et `Échap` après un clic de souris, WebKit ne focalisant pas au clic —, le survol de
+l'icône, et le panneau ouvert près du bas d'une vraie sidebar longue. Le clair et « Nuit » ont été
+regardés sous Chromium à `deviceScaleFactor: 2`. Et un vrai `config.json` relu après relance — l'e2e
+le simule par un cœur qui range son arbre dans `localStorage`, le test Rust le vérifie sur disque.
 
 **L'indentation est devenue une règle, et c'est la table qui l'a dite** (#166) :
 `8 + 14 × niveau + 16 × paliers sous la connexion`. `TreeRow` portait une table littérale de cinq
@@ -1253,7 +1432,7 @@ et la pile du filtre, qui marche à toute profondeur tant que ce n'est pas l'ind
 visuel est un champ à part. Le sabotage `8 + 14 × (niveau + paliers)` fait tomber quatre valeurs.
 
 **Le menu d'un dossier, dans cet ordre** : « Rafraîchir l'arborescence » (sur un dossier racine
-seulement), « Nouvelle connexion… », « Nouveau dossier », « Renommer… », « Couleur… », « Passer en
+seulement), « Nouvelle connexion… », « Nouveau dossier », « Renommer… », « Couleur et icône… », « Passer en
 lecture seule » ou « Lever la lecture seule », « Exporter le dossier… », « Déplacer vers… »,
 « Retirer… ». Ce qui crée d'abord, ce qui règle ensuite, ce qui produit un fichier puis ce qui
 déplace, et **le geste destructeur en dernier**, comme partout dans le produit. Sous un ancêtre en

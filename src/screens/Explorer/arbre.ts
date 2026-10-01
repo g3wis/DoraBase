@@ -1,4 +1,5 @@
 import { connexionsDescendantes, idDeConnexion } from '../../data/dossiers'
+import { iconeDeDossier } from '../../data/iconesDeDossier'
 import type { IconName } from '../../design/icons/names'
 import type {
   ConnectionId,
@@ -232,6 +233,9 @@ function noeudsDeDossier(
     label: dossier.name,
     chevron: deplie ? 'open' : 'closed',
     /*
+     * **L'icône du dossier, `pin` à défaut** (#171) : un nom inconnu du fichier retombe sur `pin`
+     * dans `iconeDeDossier`, jamais sur une case vide. Ce qui suit reste la raison du défaut.
+     *
      * **`pin` pour tous les dossiers**, racine comprise. Le `bag` des projets et la goutte des
      * environnements disaient deux paliers d'un modèle qui n'en a plus qu'un : deux glyphes pour un
      * seul concept ne diraient rien de plus. `pin` a été choisi pour l'environnement parce qu'« un
@@ -239,7 +243,7 @@ function noeudsDeDossier(
      * sa goutte n'a de voisin nulle part dans l'arbre, là où `srv` se confondait avec le `db` de la
      * connexion à 13 px.
      */
-    icon: 'pin',
+    icon: iconeDeDossier(dossier),
     // Sans couleur, la teinte des projets d'avant : un dossier racine migré ne change pas d'aspect.
     iconColor: dossier.color ? COULEURS_DE_DOSSIER[dossier.color] : 'var(--accent-deep)',
     // Un dossier replié annonce combien de connexions il porte, **à toute profondeur** : « n

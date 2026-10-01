@@ -17,6 +17,7 @@ import {
   saveInstance,
   saveKubeconfigs,
   savePreferences,
+  setFolderIcon,
   setFolderReadOnly,
 } from '../data/commandes'
 import { ARBRE_VIDE, arbreEstVide } from '../data/dossiers'
@@ -391,6 +392,9 @@ export function App() {
             }}
             onRecolorFolder={async (folder, color) => {
               setArbre(await recolorFolder({ folder, color }))
+            }}
+            onSetFolderIcon={async (folder, icon) => {
+              setArbre(await setFolderIcon({ folder, icon }))
             }}
             onSetFolderReadOnly={async (folder, readOnly) => {
               setArbre(await setFolderReadOnly({ folder, readOnly }))

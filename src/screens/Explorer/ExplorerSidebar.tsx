@@ -1,6 +1,7 @@
 import {
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
+  type RefObject,
   useEffect,
   useMemo,
   useRef,
@@ -13,6 +14,7 @@ import {
   type SujetDuDeplacement,
 } from '../../data/dossiers'
 import { Icon } from '../../design/icons/Icon'
+import type { IconName } from '../../design/icons/names'
 import type { MoveResult } from '../../domain/arbre'
 import type { ConnectionId, FolderColor, FolderId, FolderTree } from '../../domain/config'
 import type { ColumnInfo, ConnectionState } from '../../domain/engine'
@@ -29,7 +31,6 @@ import { SidebarToolbar, SidebarToolbarButton } from '../../ui/SidebarToolbar/Si
 import { TreeRow } from '../../ui/TreeRow/TreeRow'
 import { vitesseAuBord } from '../../ui/VirtualGrid/defilementAuBord'
 import { aplatir, type Charge, type Deplies, idDossier, type Noeud } from './arbre'
-import { CouleurDialog } from './CouleurDialog'
 import { type CibleDeSuppression, DeleteConnectionDialog } from './DeleteConnectionDialog'
 import { DeplacerVers } from './DeplacerVers'
 import styles from './ExplorerSidebar.module.css'
@@ -41,6 +42,7 @@ import {
   positionDansLaLigne,
   sujetDe,
 } from './glissement'
+import { PanneauDApparence } from './PanneauDApparence'
 import { type RapportDeRenommage, RenameReportDialog } from './RenameReportDialog'
 import { RowMenu } from './RowMenu'
 
@@ -80,6 +82,12 @@ export type ExplorerSidebarProps = {
   onRenameFolder?: (dossier: FolderId, nom: string) => Promise<void>
   /** Change la pastille d'un dossier ; `null` la retire. */
   onRecolorFolder?: (dossier: FolderId, couleur: FolderColor | null) => Promise<void>
+  /**
+   * Change l'icône d'un dossier ; `null` la rend à `pin` (#171). **Les deux gestionnaires ensemble
+   * ouvrent « Couleur et icône… »** : une modale qui ne réglerait que l'un des deux annoncerait par
+   * son titre ce qu'elle n'offre pas.
+   */
+  onSetFolderIcon?: (dossier: FolderId, icone: IconName | null) => Promise<void>
   /** Passe un dossier en lecture seule, ou la lève. */
   onSetFolderReadOnly?: (dossier: FolderId, lectureSeule: boolean) => Promise<void>
   /**
@@ -208,6 +216,7 @@ export function ExplorerSidebar({
   renommageInitial,
   onRenameFolder,
   onRecolorFolder,
+  onSetFolderIcon,
   onSetFolderReadOnly,
   onOpenPreferences,
   onRefresh,
@@ -243,7 +252,10 @@ export function ExplorerSidebar({
   useEffect(() => {
     if (renommageInitial !== undefined) setEnRenommage(renommageInitial)
   }, [renommageInitial])
-  /** Le dossier dont la modale « Couleur… » est ouverte, par identifiant. */
+  /**
+   * Le dossier dont le panneau « Couleur et icône » est ouvert, par identifiant (#171) — ouvert par
+   * son icône comme par l'entrée du menu, sous la même icône.
+   */
   const [aColorer, setAColorer] = useState<FolderId | null>(null)
   const [aRetirer, setARetirer] = useState<CibleDeSuppression | null>(null)
   /**
@@ -311,10 +323,42 @@ export function ExplorerSidebar({
           )
         }
 
-  const dossierAColorer =
-    aColorer === null ? undefined : noeuds.find((noeud) => noeud.folder === aColorer)
-
   const visibles = useMemo(() => filtrer(noeuds, filtre), [noeuds, filtre])
+
+  // **Le panneau vit sur sa ligne** : une ligne qui disparaît l'emporte. Aucun effet n'oublie l'état
+  // pour autant, et ce n'est pas un oubli : tout geste qui retire la ligne — replier un parent, taper
+  // dans le filtre — passe par un clic ou un focus hors du panneau, qui l'ont déjà fermé. Une garde
+  // écrite pour ce cas a été retirée le jour même : aucun test ne pouvait l'atteindre.
+  const apparenceDisponible = onRecolorFolder !== undefined && onSetFolderIcon !== undefined
+
+  /**
+   * L'icône d'une ligne de dossier, devenue contrôle (#171) : son clic ouvre — ou referme — le
+   * panneau, sans sélectionner ni déplier la ligne. Absent quand le panneau ne pourrait rien écrire :
+   * l'icône redevient alors un dessin, plutôt qu'un contrôle inerte (défaut n° 36).
+   */
+  const controleDIcone = (noeud: Noeud) => {
+    const folder = noeud.folder
+    if (noeud.kind !== 'folder' || folder === undefined) return undefined
+    if (onRecolorFolder === undefined || onSetFolderIcon === undefined) return undefined
+    const ouvert = aColorer === folder
+    return {
+      label: t('explorer.sidebar.appearanceFor', { cible: noeud.label }),
+      onClick: () => setAColorer(ouvert ? null : folder),
+      panneau: ouvert
+        ? (ancre: RefObject<HTMLButtonElement | null>) => (
+            <PanneauDApparence
+              nom={noeud.label}
+              couleur={couleurDe(arbre, folder)}
+              icone={dossier(arbre, folder)?.dossier.icon ?? null}
+              ancre={ancre}
+              onRecolorer={(couleur) => onRecolorFolder(folder, couleur)}
+              onChangerDIcone={(icone) => onSetFolderIcon(folder, icone)}
+              onFermer={() => setAColorer(null)}
+            />
+          )
+        : undefined,
+    }
+  }
 
   /**
    * Les actions d'une ligne, câblées sur cet écran.
@@ -331,7 +375,7 @@ export function ExplorerSidebar({
       renommageDisponible:
         noeud.kind === 'folder' ? onRenameFolder !== undefined : onRenameDatabase !== undefined,
       creerUnDossier,
-      colorer: onRecolorFolder === undefined ? undefined : setAColorer,
+      colorer: apparenceDisponible ? setAColorer : undefined,
       onSetFolderReadOnly,
       refuserLaLectureSeule: (nom: string, refus: unknown) =>
         setRapport({ nom, refus: messageDuRefus(refus), sorte: 'lectureSeule' }),
@@ -575,14 +619,6 @@ export function ExplorerSidebar({
           onFermer={() => setMenuAuPointeur(null)}
         />
       )}
-      {dossierAColorer?.folder !== undefined && onRecolorFolder !== undefined && (
-        <CouleurDialog
-          nom={dossierAColorer.label}
-          couleur={couleurDe(arbre, dossierAColorer.folder)}
-          onRecolorer={(couleur) => onRecolorFolder(dossierAColorer.folder as FolderId, couleur)}
-          onClose={() => setAColorer(null)}
-        />
-      )}
       {aDeplacer !== null && onMove !== undefined && (
         <DeplacerVers
           arbre={arbre}
@@ -803,6 +839,7 @@ export function ExplorerSidebar({
                   ) : undefined
                 }
                 actions={renderActions(noeud, actionsDe(noeud))}
+                iconControl={controleDIcone(noeud)}
                 /* **Le clic droit ouvre le même menu, au pointeur.** `08h` l'avait écarté — « le
                    handoff ne le maquette pas, et un “…” visible enseigne son existence là où un clic
                    droit se devine » — puis l'usage l'a réclamé : le « … » reste, il enseigne, et le
@@ -984,7 +1021,7 @@ function entreesDe(noeud: Noeud, c: Cablage): readonly EntreeDeMenu[] | undefine
 
   /*
    * **Le menu d'un dossier** (#166), dans cet ordre — le geste destructeur reste le dernier :
-   * « Nouvelle connexion… », « Nouveau dossier », « Renommer… », « Couleur… », la lecture seule,
+   * « Nouvelle connexion… », « Nouveau dossier », « Renommer… », « Couleur et icône… », la lecture seule,
    * « Exporter le dossier… » (#169), « Déplacer vers… » (#167), « Retirer… ».
    *
    * **« Rafraîchir l'arborescence » reste en tête des dossiers de premier niveau**, là où il vivait
@@ -1030,7 +1067,10 @@ function entreesDe(noeud: Noeud, c: Cablage): readonly EntreeDeMenu[] | undefine
         raison: c.renommageDisponible ? undefined : RAISONS.renommerIndisponible,
       },
       {
-        libelle: t('explorer.sidebar.menu.color'),
+        /* **« Couleur et icône… », et non « Apparence… »** (#171) : un mot qui résume cacherait ce
+           que l'entrée a gagné — on ne cherche pas l'icône d'un dossier sous « Apparence », on la
+           cherche à côté de sa couleur. Nommer les deux est ce qui rend le second geste trouvable. */
+        libelle: t('explorer.sidebar.menu.appearance'),
         icone: 'paint',
         onClick: c.colorer ? () => c.colorer?.(folder) : undefined,
         raison: c.colorer ? undefined : RAISONS.dossierIndisponible,

@@ -1820,6 +1820,10 @@ export function WorkbenchDemo() {
         onSetFolderReadOnly={async (folder, readOnly) =>
           setArbre((precedent) => surDossier(precedent, folder, (d) => ({ ...d, readOnly })))
         }
+        // #171 : `null` rend `pin`, comme le cœur, qui n'écrit alors aucune clé.
+        onSetFolderIcon={async (folder, icon) =>
+          setArbre((precedent) => surDossier(precedent, folder, (d) => ({ ...d, icon })))
+        }
         // Le déplacement (#167), **rejoué sans cœur** : mêmes refus et même question que `move_*`.
         // Aucune connexion n'est fermée ici — la démo n'a pas de registre à qui le demander.
         onMove={async (sujet, arrivee, confirmed) => {

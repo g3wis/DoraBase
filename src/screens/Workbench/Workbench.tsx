@@ -17,6 +17,7 @@ import {
   libelleDeConnexion,
   raisonDeLaLectureSeule,
 } from '../../data/dossiers'
+import type { IconName } from '../../design/icons/names'
 import type { DatabaseKey } from '../../domain/arbre'
 import type {
   ConnectionId,
@@ -151,6 +152,8 @@ type WorkbenchProps = {
   revelation?: { connection: ConnectionId }
   onRenameFolder?: (dossier: FolderId, nom: string) => Promise<void>
   onRecolorFolder?: (dossier: FolderId, couleur: FolderColor | null) => Promise<void>
+  /** L'icône d'un dossier (#171) ; `null` la rend à `pin`. */
+  onSetFolderIcon?: (dossier: FolderId, icone: IconName | null) => Promise<void>
   onSetFolderReadOnly?: (dossier: FolderId, lectureSeule: boolean) => Promise<void>
   /** Ouvre `A2` en mode édition sur cette connexion (`08g`). */
   onEditDatabase?: (database: Database) => void
@@ -266,6 +269,7 @@ export function Workbench({
   revelation,
   onRenameFolder,
   onRecolorFolder,
+  onSetFolderIcon,
   onSetFolderReadOnly,
   onEditDatabase,
   onImportProjects,
@@ -1668,6 +1672,7 @@ export function Workbench({
                   renommageInitial={renommageInitial}
                   onRenameFolder={onRenameFolder}
                   onRecolorFolder={onRecolorFolder}
+                  onSetFolderIcon={onSetFolderIcon}
                   onSetFolderReadOnly={onSetFolderReadOnly}
                   onImportProjects={onImportProjects}
                   onExportFolder={onExportFolder}

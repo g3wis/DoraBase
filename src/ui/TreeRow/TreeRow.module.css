@@ -182,3 +182,41 @@
 .wrap:has([aria-expanded="true"]) .actions {
   visibility: visible;
 }
+
+/*
+ * L'icône devenue contrôle (#171) : posée **par-dessus la case vide** que la ligne garde à sa place,
+ * l'abscisse venant du composant (indentation + gouttière du chevron). 18 px, comme le « … » de la
+ * même ligne : c'est le seul contrôle de ligne qui existe déjà, donc sa boîte et son rayon.
+ */
+.iconControl {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  margin: auto 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-control);
+  background: transparent;
+  cursor: pointer;
+}
+
+/*
+ * **Un survol, et ce n'en est pas un d'inventé** : c'est celui du « … » de la même ligne —
+ * `--hover-row` sur une boîte de 18 px (`RowMenu`). Une icône qui ouvre un panneau sans rien dire au
+ * survol se lirait comme une décoration, la raison qui a donné le leur aux actions de la bande de
+ * tête. L'encre, elle, ne bouge pas : elle porte la couleur du dossier.
+ */
+.iconControl:hover {
+  background: var(--hover-row);
+}
+
+.iconControl:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}

@@ -876,6 +876,51 @@ mod tests {
     }
 
     #[test]
+    fn une_icone_inconnue_ou_mal_formee_se_relit_et_se_garde() {
+        // #171 : « un nom inconnu du fichier ne doit jamais faire échouer la lecture ». Le fichier
+        // est écrit **à la main**, comme le ferait une version plus récente ou un utilisateur : un
+        // nom qu'aucune version ne connaît, et un autre que `regler_l_icone` refuserait. Les deux se
+        // relisent — pas de quarantaine — et survivent à une réécriture, pour qu'une version plus
+        // ancienne ne détruise pas ce qu'une plus récente a posé. Le repli sur `pin` est l'affaire
+        // de l'écran (`iconeDeDossier`).
+        let dir = tempfile::tempdir().unwrap();
+        let chemin = dir.path().join("config.json");
+        let texte = format!(
+            r#"{{"version":{VERSION_COURANTE},"folders":[
+                {{"id":"a","name":"A","icon":"une-icone-de-demain","readOnly":false}},
+                {{"id":"b","name":"B","icon":"Pas Un Nom !","readOnly":false}},
+                {{"id":"c","name":"C","readOnly":false}}
+            ],"connections":[]}}"#
+        );
+        fs::write(&chemin, texte).unwrap();
+
+        let LoadOutcome::Loaded { tree, .. } = load(&chemin) else {
+            panic!("la configuration devait se lire");
+        };
+        let icones: Vec<Option<&str>> = tree.folders.iter().map(|d| d.icon.as_deref()).collect();
+        assert_eq!(
+            icones,
+            vec![Some("une-icone-de-demain"), Some("Pas Un Nom !"), None]
+        );
+
+        save(
+            &chemin,
+            &tree,
+            &Preferences::default(),
+            &[],
+            &Kubeconfigs::default(),
+        )
+        .unwrap();
+        let ecrit = fs::read_to_string(&chemin).unwrap();
+        assert!(ecrit.contains("une-icone-de-demain"));
+        let valeur: serde_json::Value = serde_json::from_str(&ecrit).unwrap();
+        assert!(
+            valeur["folders"][2].get("icon").is_none(),
+            "sans icône, aucune clé : un fichier d'avant #171 se réécrit à l'identique"
+        );
+    }
+
+    #[test]
     fn le_fichier_porte_un_numero_de_version() {
         let dir = tempfile::tempdir().unwrap();
         let chemin = dir.path().join("config.json");

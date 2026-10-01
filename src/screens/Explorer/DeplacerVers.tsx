@@ -11,6 +11,7 @@ import {
   parentDu,
   type SujetDuDeplacement,
 } from '../../data/dossiers'
+import { iconeDeDossier } from '../../data/iconesDeDossier'
 import type { MoveResult } from '../../domain/arbre'
 import type { FolderId, FolderTree } from '../../domain/config'
 import { useT } from '../../i18n/LanguageContext'
@@ -186,7 +187,8 @@ export function DeplacerVers({
               depth: ancetres.length + 1,
               indent: indentation(ancetres.length + 1),
               label: d.name,
-              icon: 'pin',
+              // L'icône de l'arbre (#171) : la destination se reconnaît comme la ligne qu'elle est.
+              icon: iconeDeDossier(d),
               iconColor: d.color ? COULEURS_DE_DOSSIER[d.color] : 'var(--accent-deep)',
             }),
           )}

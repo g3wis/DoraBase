@@ -27,6 +27,7 @@
 //! | `create_folder` | [`CreateFolderRequest`] | [`CreateFolderResult`] |
 //! | `rename_folder` | [`RenameFolderRequest`] | `FolderTree` |
 //! | `recolor_folder` | [`RecolorFolderRequest`] | `FolderTree` |
+//! | `set_folder_icon` | [`SetFolderIconRequest`] | `FolderTree` |
 //! | `set_folder_read_only` | [`SetFolderReadOnlyRequest`] | `FolderTree` |
 //! | `delete_folder` (async) | [`DeleteFolderRequest`] | [`DeleteResult`] |
 //! | `move_folder` | [`MoveFolderRequest`] | [`MoveResult`] |
@@ -197,6 +198,20 @@ pub struct RecolorFolderRequest {
     pub folder: FolderId,
     /// `None` retire la pastille.
     pub color: Option<FolderColor>,
+}
+
+/// `set_folder_icon` (#171).
+///
+/// **Une commande à part plutôt qu'un `recolor_folder` élargi** : la modale applique chaque choix au
+/// clic, et une commande qui réglerait les deux ferait renvoyer la couleur *affichée* à chaque clic
+/// d'icône — donc écraser une couleur encore en vol, si les deux gestes se suivent de près.
+#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "arbre.ts")]
+pub struct SetFolderIconRequest {
+    pub folder: FolderId,
+    /// `None` rend l'icône par défaut (`pin`).
+    pub icon: Option<String>,
 }
 
 /// `set_folder_read_only` — l'effet sur les écrans est celui de #168.

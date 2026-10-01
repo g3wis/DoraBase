@@ -91,6 +91,7 @@ function Piloté({
   onNewFolder,
   onRenameFolder,
   onRecolorFolder,
+  onSetFolderIcon,
   onSetFolderReadOnly,
   onOpenPreferences,
   onOpenDiagram,
@@ -114,6 +115,7 @@ function Piloté({
   onNewFolder?: ExplorerSidebarProps['onNewFolder']
   onRenameFolder?: ExplorerSidebarProps['onRenameFolder']
   onRecolorFolder?: ExplorerSidebarProps['onRecolorFolder']
+  onSetFolderIcon?: ExplorerSidebarProps['onSetFolderIcon']
   onSetFolderReadOnly?: ExplorerSidebarProps['onSetFolderReadOnly']
   onOpenPreferences?: () => void
   onOpenDiagram?: ExplorerSidebarProps['onOpenDiagram']
@@ -145,6 +147,7 @@ function Piloté({
           onNewFolder={onNewFolder}
           onRenameFolder={onRenameFolder}
           onRecolorFolder={onRecolorFolder}
+          onSetFolderIcon={onSetFolderIcon}
           onSetFolderReadOnly={onSetFolderReadOnly}
           onOpenPreferences={onOpenPreferences}
           onOpenDiagram={onOpenDiagram}
@@ -790,6 +793,7 @@ test('le menu d’un dossier racine suit l’ordre décidé, le geste destructeu
       onNewFolder={async () => 'f-neuf'}
       onRenameFolder={async () => {}}
       onRecolorFolder={async () => {}}
+      onSetFolderIcon={async () => {}}
       onSetFolderReadOnly={async () => {}}
       onExportFolder={vi.fn()}
       onDelete={async () => AUCUN_RESIDU}
@@ -804,7 +808,7 @@ test('le menu d’un dossier racine suit l’ordre décidé, le geste destructeu
     'Nouvelle connexion…',
     'Nouveau dossier',
     'Renommer…',
-    'Couleur…',
+    'Couleur et icône…',
     'Passer en lecture seule',
     'Exporter le dossier…',
     'Déplacer vers…',
@@ -916,23 +920,233 @@ test('un refus de renommage de dossier est dit, avec ce qui rassure', async () =
   expect(dialogue).toHaveTextContent('Le nom d’avant est gardé.')
 })
 
-test('« Couleur… » ouvre le nuancier, dont une pastille recolore le dossier', async () => {
+test('« Couleur et icône… » ouvre le nuancier, dont une pastille recolore le dossier', async () => {
   const recolores: [string, string | null][] = []
+  const icones: [string, string | null][] = []
   render(
     <Piloté
       initial={[ID_PROJET]}
       onRecolorFolder={async (folder, couleur) => {
         recolores.push([folder, couleur])
       }}
+      onSetFolderIcon={async (folder, icone) => {
+        icones.push([folder, icone])
+      }}
     />,
   )
   await userEvent.click(screen.getByRole('button', { name: 'Actions de staging' }))
-  await userEvent.click(screen.getByRole('button', { name: 'Couleur…' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Couleur et icône…' }))
   const nuancier = screen.getByRole('radiogroup', { name: 'Couleur de staging' })
-  // La couleur en place est cochée — et « aucune » est une pastille comme les autres.
-  expect(within(nuancier).getByRole('radio', { name: 'amber' })).toBeChecked()
-  await userEvent.click(within(nuancier).getByRole('radio', { name: 'aucune' }))
+  // La couleur en place est cochée — et « Aucune » est une pastille comme les autres.
+  expect(within(nuancier).getByRole('radio', { name: 'Ambre' })).toBeChecked()
+  await userEvent.click(within(nuancier).getByRole('radio', { name: 'Aucune' }))
   expect(recolores).toEqual([[ID_DE_TEST.staging, null]])
+  // **Un geste, une commande** (#171) : recolorier n'a rien écrit de l'icône.
+  expect(icones).toEqual([])
+})
+
+test('chaque pastille porte son nom en toutes lettres, en nom accessible et en `title`', async () => {
+  render(
+    <Piloté
+      initial={[ID_PROJET]}
+      onRecolorFolder={async () => {}}
+      onSetFolderIcon={async () => {}}
+    />,
+  )
+  await userEvent.click(screen.getByRole('button', { name: 'Actions de staging' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Couleur et icône…' }))
+  const nuancier = screen.getByRole('radiogroup', { name: 'Couleur de staging' })
+  const noms = ['Aucune', 'Vert', 'Ambre', 'Rouge', 'Ardoise', 'Violet']
+  // **Ancrés** : un motif lâche accepterait « amber » sous « Ambre », ou le nom deux fois.
+  for (const nom of noms) {
+    const pastille = within(nuancier).getByRole('radio', { name: new RegExp(`^${nom}$`) })
+    // Le `title` est sur la case qui porte la pastille — la cible de 22 px, comme dans la grille.
+    expect(pastille.closest('label')).toHaveAttribute('title', nom)
+  }
+  expect(within(nuancier).getAllByRole('radio')).toHaveLength(noms.length)
+  // **Creuse** : « Aucune » ne porte aucun fond, les cinq autres portent leur couleur.
+  const aucune = within(nuancier).getByRole('radio', { name: 'Aucune' })
+  expect(aucune.style.background).toBe('')
+  expect(within(nuancier).getByRole('radio', { name: 'Vert' }).style.background).toBe(
+    'var(--success)',
+  )
+})
+
+test('la grille d’icônes change l’icône du dossier, et « Repère » la rend à pin', async () => {
+  const recolores: [string, string | null][] = []
+  const icones: [string, string | null][] = []
+  render(
+    <Piloté
+      initial={[ID_PROJET]}
+      onRecolorFolder={async (folder, couleur) => {
+        recolores.push([folder, couleur])
+      }}
+      onSetFolderIcon={async (folder, icone) => {
+        icones.push([folder, icone])
+      }}
+    />,
+  )
+  await userEvent.click(screen.getByRole('button', { name: 'Actions de staging' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Couleur et icône…' }))
+  const grille = screen.getByRole('group', { name: 'Icône de staging' })
+  // Contrôle positif : la grille porte la sélection entière, chacune nommée en toutes lettres.
+  expect(within(grille).getAllByRole('radio')).toHaveLength(56)
+  // Sans icône enregistrée, c'est `pin` — « Repère » — qui est cochée.
+  expect(within(grille).getByRole('radio', { name: 'Repère' })).toBeChecked()
+
+  await userEvent.click(within(grille).getByRole('radio', { name: 'Fusée' }))
+  expect(within(grille).getByRole('radio', { name: 'Fusée' })).toBeChecked()
+  await userEvent.click(within(grille).getByRole('radio', { name: 'Repère' }))
+  // `pin` s'écrit `null` : l'absence de choix, pas un nom.
+  expect(icones).toEqual([
+    [ID_DE_TEST.staging, 'rocket'],
+    [ID_DE_TEST.staging, null],
+  ])
+  expect(recolores).toEqual([])
+})
+
+test('un refus du cœur rend la case d’avant, et se dit', async () => {
+  render(
+    <Piloté
+      initial={[ID_PROJET]}
+      onRecolorFolder={async () => {}}
+      onSetFolderIcon={async () => {
+        throw 'configuration verrouillée'
+      }}
+    />,
+  )
+  await userEvent.click(screen.getByRole('button', { name: 'Actions de staging' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Couleur et icône…' }))
+  const grille = screen.getByRole('group', { name: 'Icône de staging' })
+  await userEvent.click(within(grille).getByRole('radio', { name: 'Fusée' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('configuration verrouillée')
+  expect(within(grille).getByRole('radio', { name: 'Repère' })).toBeChecked()
+})
+
+// --- Le panneau sous l'icône (#171) ---
+
+const ICONE_DE_STAGING = 'Changer la couleur et l’icône de « staging »'
+
+function PilotéAvecApparence(props: { onToggleSpy?: (n: Noeud) => void }) {
+  return (
+    <Piloté
+      initial={[ID_PROJET]}
+      onRecolorFolder={async () => {}}
+      onSetFolderIcon={async () => {}}
+      {...props}
+    />
+  )
+}
+
+test('cliquer l’icône d’un dossier ouvre le panneau, sans sélectionner ni déplier la ligne', async () => {
+  const bascules: string[] = []
+  render(<PilotéAvecApparence onToggleSpy={(n) => bascules.push(n.id)} />)
+  const ligne = screen.getByRole('treeitem', { name: /^staging\b/ })
+  const icone = screen.getByRole('button', { name: ICONE_DE_STAGING })
+  expect(icone).toHaveAttribute('aria-expanded', 'false')
+
+  await userEvent.click(icone)
+  const panneau = screen.getByRole('dialog', { name: 'Couleur et icône de staging' })
+  expect(within(panneau).getByRole('radiogroup', { name: 'Couleur de staging' })).toBeVisible()
+  expect(within(panneau).getAllByRole('radio', { name: /./ }).length).toBe(6 + 56)
+  expect(icone).toHaveAttribute('aria-expanded', 'true')
+  // **La négative est le sujet** : le clic est tombé sur l'icône, pas sur la ligne.
+  expect(ligne).toHaveAttribute('aria-selected', 'false')
+  expect(bascules).toEqual([])
+
+  // Contrôle positif du décor : un clic sur le libellé, lui, sélectionne toujours.
+  await userEvent.click(within(ligne).getByText('staging'))
+  expect(ligne).toHaveAttribute('aria-selected', 'true')
+})
+
+test('le glyphe du dossier est dans le contrôle, et la ligne garde sa place vide', () => {
+  render(<PilotéAvecApparence />)
+  const ligne = screen.getByRole('treeitem', { name: /^staging\b/ })
+  const icone = screen.getByRole('button', { name: ICONE_DE_STAGING })
+  expect([...icone.querySelectorAll('use')].map((u) => u.getAttribute('href'))).toEqual(['#i-pin'])
+  expect(ligne.querySelector('[data-icon-slot]')).not.toBeNull()
+  // **Un frère, pas un enfant** : un bouton dans le bouton de la ligne serait invalide.
+  expect(ligne.contains(icone)).toBe(false)
+  // Hors du parcours de tabulation : le chemin clavier est l'entrée du menu.
+  expect(icone).toHaveAttribute('tabindex', '-1')
+})
+
+test('« Couleur et icône… » ouvre le même panneau, sous la même icône', async () => {
+  render(<PilotéAvecApparence />)
+  await userEvent.click(screen.getByRole('button', { name: 'Actions de staging' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Couleur et icône…' }))
+  const panneau = screen.getByRole('dialog', { name: 'Couleur et icône de staging' })
+  const icone = screen.getByRole('button', { name: ICONE_DE_STAGING })
+  // **Une seule mécanique** (règle n° 17) : c'est l'icône qui se dit ouverte, et le panneau vit à
+  // côté d'elle — non une seconde fenêtre ouverte ailleurs.
+  expect(icone).toHaveAttribute('aria-expanded', 'true')
+  expect(icone.parentElement?.contains(panneau)).toBe(true)
+})
+
+test('`Échap` ferme le panneau et rend le focus à l’icône', async () => {
+  render(<PilotéAvecApparence />)
+  const icone = screen.getByRole('button', { name: ICONE_DE_STAGING })
+  await userEvent.click(icone)
+  const panneau = screen.getByRole('dialog', { name: 'Couleur et icône de staging' })
+  // Le focus est entré, sur la couleur en place.
+  expect(document.activeElement).toBe(within(panneau).getByRole('radio', { name: 'Ambre' }))
+  await userEvent.keyboard('{Escape}')
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(document.activeElement).toBe(icone)
+})
+
+test('un clic ailleurs, ou un second clic sur l’icône, ferment le panneau', async () => {
+  render(<PilotéAvecApparence />)
+  const icone = screen.getByRole('button', { name: ICONE_DE_STAGING })
+  await userEvent.click(icone)
+  expect(screen.getByRole('dialog')).toBeInTheDocument()
+  await userEvent.click(icone)
+  expect(screen.queryByRole('dialog')).toBeNull()
+
+  await userEvent.click(icone)
+  expect(screen.getByRole('dialog')).toBeInTheDocument()
+  await userEvent.click(screen.getByRole('tree'))
+  expect(screen.queryByRole('dialog')).toBeNull()
+})
+
+test('un choix dans le panneau s’applique au clic, et le panneau reste ouvert', async () => {
+  const icones: [string, string | null][] = []
+  render(
+    <Piloté
+      initial={[ID_PROJET]}
+      onRecolorFolder={async () => {}}
+      onSetFolderIcon={async (folder, icone) => {
+        icones.push([folder, icone])
+      }}
+    />,
+  )
+  await userEvent.click(screen.getByRole('button', { name: ICONE_DE_STAGING }))
+  const panneau = screen.getByRole('dialog', { name: 'Couleur et icône de staging' })
+  await userEvent.click(within(panneau).getByRole('radio', { name: 'Fusée' }))
+  expect(icones).toEqual([[ID_DE_TEST.staging, 'rocket']])
+  expect(within(panneau).getByRole('radio', { name: 'Fusée' })).toBeChecked()
+  expect(screen.getByRole('dialog', { name: 'Couleur et icône de staging' })).toBe(panneau)
+})
+
+test('la ligne d’un dossier dessine son icône, et retombe sur pin pour un nom inconnu', () => {
+  const arbre = structuredClone(ARBRE)
+  const racine = arbre.folders[0]
+  const [premier, second] = racine?.folders ?? []
+  if (!racine || !premier || !second)
+    throw new Error('le décor porte une racine et deux sous-dossiers')
+  racine.icon = 'rocket'
+  premier.icon = 'une-icone-de-demain'
+  second.icon = 'Pas Un Nom !'
+  render(<Piloté initial={[ID_PROJET]} arbre={arbre} />)
+  // Les glyphes de la ligne, chevron et verrou écartés : ce qui reste est l'icône du dossier.
+  const glypheDe = (nom: string) =>
+    [...screen.getByRole('treeitem', { name: new RegExp(`^${nom}\\b`) }).querySelectorAll('use')]
+      .map((use) => use.getAttribute('href'))
+      .filter((href) => href !== '#i-chevr' && href !== '#i-chevd' && href !== '#i-lock')
+  expect(glypheDe(racine.name)).toEqual(['#i-rocket'])
+  // Le repli ne rend jamais une case vide : un `<use>` vers `#i-une-icone-de-demain` n'y serait pas.
+  expect(glypheDe(premier.name)).toEqual(['#i-pin'])
+  expect(glypheDe(second.name)).toEqual(['#i-pin'])
 })
 
 test('la lecture seule se pose et se lève depuis le menu du dossier qui la déclare', async () => {

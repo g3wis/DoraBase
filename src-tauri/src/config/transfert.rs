@@ -766,6 +766,7 @@ impl Versement<'_> {
                     id,
                     name: entrant.name.clone(),
                     color: entrant.color,
+                    icon: entrant.icon.clone(),
                     read_only: entrant.read_only,
                     folders: Vec::new(),
                     connections: Vec::new(),
@@ -1380,6 +1381,27 @@ mod tests {
     }
 
     #[test]
+    fn l_icone_d_un_dossier_voyage_avec_son_export() {
+        // #171 : l'icône est un champ du dossier comme sa couleur, donc elle part avec le clonage de
+        // `composer` et traverse le fichier — et **seulement la sienne** : contrairement à la
+        // lecture seule et aux libellés, elle ne s'hérite pas, donc rien n'est matérialisé.
+        let mut arbre = halle();
+        arbre.folders[0].icon = Some("factory".into());
+        arbre.folders[0].folders[0].icon = Some("bug".into());
+
+        let retenu = composer(&arbre, Some(&FolderId::brut("dev"))).expect("export");
+        let fichier = fichier_de(retenu.folders, retenu.connections);
+        let texte = serde_json::to_string(&fichier).expect("écriture");
+        let relu: FichierDeDossiers = serde_json::from_str(&texte).expect("relecture");
+
+        assert_eq!(relu.folders[0].icon.as_deref(), Some("bug"));
+        assert!(
+            !texte.contains("factory"),
+            "l'icône d'un ancêtre ne se matérialise pas dans l'export d'un sous-dossier"
+        );
+    }
+
+    #[test]
     fn tout_exporter_porte_les_connexions_a_la_racine() {
         let mut arbre = halle();
         arbre.connections.push(base("c-racine", false));
@@ -1988,15 +2010,22 @@ mod tests {
     }
 
     #[test]
-    fn un_dossier_homonyme_se_fond_recursivement_en_gardant_nom_et_couleur_locaux() {
+    fn un_dossier_homonyme_se_fond_recursivement_en_gardant_nom_couleur_et_icone_locaux() {
         let mut locaux = halle();
         // Le `prod` local est retiré : il arrivera du fichier. Le `dev` local a sa couleur.
         locaux.folders[0].folders.truncate(1);
         locaux.folders[0].folders[0].color = Some(crate::config::FolderColor::Green);
+        locaux.folders[0].folders[0].icon = Some("rocket".into());
         locaux.folders[0].name = "  Halle ".into();
         let mut entrant = halle().folders.remove(0);
         entrant.id = FolderId::brut("autre-id");
         entrant.folders[0].color = Some(crate::config::FolderColor::Red);
+        // #171 : l'icône suit la règle de la couleur — gardée chez un homonyme, apportée par un
+        // dossier créé. Le `Halle` local n'en a pas, et doit **rester** sans : « locale gardée »
+        // vaut aussi pour l'absence, sans quoi un import compléterait ce qu'on a laissé vide.
+        entrant.icon = Some("factory".into());
+        entrant.folders[0].icon = Some("bug".into());
+        entrant.folders[1].icon = Some("un-nom-venu-d-ailleurs".into());
 
         let fusion = fusionner(
             &locaux,
@@ -2024,7 +2053,19 @@ mod tests {
             Some(crate::config::FolderColor::Green),
             "la couleur locale est gardée"
         );
+        assert_eq!(racine.icon, None, "l'absence locale d'icône est gardée");
+        assert_eq!(
+            racine.folders[0].icon.as_deref(),
+            Some("rocket"),
+            "l'icône locale est gardée"
+        );
         assert_eq!(racine.folders[1].name, "prod");
+        assert_eq!(
+            racine.folders[1].icon.as_deref(),
+            Some("un-nom-venu-d-ailleurs"),
+            "un dossier créé apporte son icône, même inconnue d'ici : elle retombera sur `pin` à \
+             l'affichage, et se retrouvera si le fichier revient vers la version qui la connaît"
+        );
         assert!(racine.folders[1].read_only);
     }
 
