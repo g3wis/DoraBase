@@ -1,7 +1,8 @@
 /* Les noms d’icônes du sprite. **Source, éditée à la main** : ce fichier et `sprite.svg`
    étaient extraits du mockup de handoff, retiré du dépôt le 25 août 2026. Une icône
    ajoutée doit l’être dans les deux. Les noms en `kebab-case` (`building-2`…) sont ceux des
-   icônes copiées de Lucide pour les dossiers (#171) — voir `sprite.svg`. */
+   icônes copiées de Lucide pour les dossiers (#171), et `lucide-*` les quatre équivalents de Lucide
+   d’icônes d’origine, réservés à la grille des dossiers (#175) — voir `sprite.svg`. */
 /* biome-ignore-all format: une entrée par ligne, pour que le diff nomme l’icône ajoutée */
 export type IconName =
   | 'activity'
@@ -61,6 +62,10 @@ export type IconName =
   | 'lightbulb'
   | 'link'
   | 'lock'
+  | 'lucide-cloud'
+  | 'lucide-code'
+  | 'lucide-compass'
+  | 'lucide-star'
   | 'mail'
   | 'map'
   | 'mongo'

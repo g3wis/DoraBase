@@ -1,5 +1,5 @@
 import { connexionsDescendantes, idDeConnexion } from '../../data/dossiers'
-import { iconeDeDossier } from '../../data/iconesDeDossier'
+import { dessinDeDossier } from '../../data/iconesDeDossier'
 import type { IconName } from '../../design/icons/names'
 import type {
   ConnectionId,
@@ -243,7 +243,7 @@ function noeudsDeDossier(
      * sa goutte n'a de voisin nulle part dans l'arbre, là où `srv` se confondait avec le `db` de la
      * connexion à 13 px.
      */
-    icon: iconeDeDossier(dossier),
+    icon: dessinDeDossier(dossier),
     // Sans couleur, la teinte des projets d'avant : un dossier racine migré ne change pas d'aspect.
     iconColor: dossier.color ? COULEURS_DE_DOSSIER[dossier.color] : 'var(--accent-deep)',
     // Un dossier replié annonce combien de connexions il porte, **à toute profondeur** : « n

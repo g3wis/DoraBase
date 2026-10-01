@@ -14,9 +14,9 @@ export const ICONE_PAR_DEFAUT: IconName = 'pin'
  * liste : le cœur n'en vérifie que la forme (`regler_l_icone`), pour qu'une version plus ancienne
  * relise sans rien perdre ce qu'une plus récente a écrit.
  *
- * **48 icônes copiées de Lucide** (licence ISC, `design/icons/LICENSE-lucide.txt`) et **8 du sprite
- * d'origine**. Les secondes ne sont pas recopiées de Lucide : un second nuage à côté de `cloud` ferait
- * deux dessins pour une seule idée. Rangées par familles — organisation, infrastructure, développement,
+ * **48 icônes copiées de Lucide** (licence ISC, `design/icons/LICENSE-lucide.txt`) et **8 noms du
+ * sprite d'origine**, dont quatre — `cloud`, `code`, `star`, `compass` — sont **dessinés** par leur
+ * équivalent de Lucide depuis #175 (voir `dessinDIcone`) : le nom reste, le dessin change. Rangées par familles — organisation, infrastructure, développement,
  * commerce, mesure, repères —, `pin` en tête parce que c'est celle qu'on retrouve en la retirant.
  *
  * **Ce qui n'est pas offert, et pourquoi** : les glyphes qui *nomment déjà un palier de l'arbre*. Un
@@ -91,6 +91,32 @@ export const ICONES_DE_DOSSIER: readonly IconName[] = [
 ]
 
 const OFFERTES: ReadonlySet<string> = new Set(ICONES_DE_DOSSIER)
+
+/**
+ * **Le nom d'une icône n'est pas son dessin** (#175). `cloud`, `code`, `star` et `compass` du sprite
+ * d'origine sont dessinés plus petits que les 48 de Lucide, et paraissaient d'un cran en retrait dans
+ * la grille : un dossier qui les choisit reçoit l'équivalent de Lucide, de la même source et de la
+ * même version. **Le nom persisté ne change pas** — `Folder.icon` vaut toujours `cloud`, qui se relit
+ * dans toutes les versions —, et les quatre symboles d'origine restent au sprite pour les écrans qui
+ * les emploient. Une table et non un renommage dans `ICONES_DE_DOSSIER` : renommer aurait périmé
+ * chaque dossier déjà réglé, et une version plus ancienne aurait relu `lucide-cloud` comme inconnu.
+ */
+const DESSINS: Partial<Record<IconName, IconName>> = {
+  cloud: 'lucide-cloud',
+  code: 'lucide-code',
+  star: 'lucide-star',
+  compass: 'lucide-compass',
+}
+
+/** Le symbole à dessiner pour une icône de dossier — la grille, l'arbre, « Déplacer vers… ». */
+export function dessinDIcone(icone: IconName): IconName {
+  return DESSINS[icone] ?? icone
+}
+
+/** Le dessin d'un dossier : son icône résolue (`iconeDeDossier`), puis son dessin. */
+export function dessinDeDossier(dossier: Pick<Folder, 'icon'>): IconName {
+  return dessinDIcone(iconeDeDossier(dossier))
+}
 
 /**
  * L'icône à dessiner pour un dossier : la sienne si elle est offerte, `pin` sinon.

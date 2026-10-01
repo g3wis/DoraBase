@@ -380,6 +380,18 @@ test('la couleur déclarée teinte l’icône, et l’absence de couleur prend l
   expect(noeuds.every((n) => n.kind !== 'folder' || n.icon === 'pin')).toBe(true)
 })
 
+test('un dossier réglé sur « cloud » est dessiné par l’équivalent de Lucide (#175)', () => {
+  const base = arbre()
+  const [racine] = base.folders
+  if (!racine) throw new Error('décor sans dossier')
+  const suivant: FolderTree = {
+    ...base,
+    folders: [{ ...racine, icon: 'cloud' }, ...base.folders.slice(1)],
+  }
+  const [noeud] = aplatir(suivant, new Set(), RIEN, JAMAIS)
+  expect(noeud?.icon).toBe('lucide-cloud')
+})
+
 test('le verrou et l’annonce suivent le dossier qui déclare la lecture seule, lui seul', () => {
   const noeuds = aplatir(arbre(), new Set([idRacine]), RIEN, JAMAIS)
   const prod = noeuds.find((n) => n.label === 'prod')

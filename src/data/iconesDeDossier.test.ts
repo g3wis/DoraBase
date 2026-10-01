@@ -1,7 +1,15 @@
 import { expect, test } from 'vitest'
 import spriteBrut from '../design/icons/sprite.svg?raw'
 import { DICTIONNAIRES } from '../i18n/dictionaries'
-import { ICONE_PAR_DEFAUT, ICONES_DE_DOSSIER, iconeDeDossier } from './iconesDeDossier'
+import ddlPanelBrut from '../screens/Structure/DdlPanel.tsx?raw'
+import toolbarBrut from '../screens/TableView/Toolbar.tsx?raw'
+import {
+  dessinDeDossier,
+  dessinDIcone,
+  ICONE_PAR_DEFAUT,
+  ICONES_DE_DOSSIER,
+  iconeDeDossier,
+} from './iconesDeDossier'
 
 test('une icône offerte est dessinée telle quelle', () => {
   expect(iconeDeDossier({ icon: 'rocket' })).toBe('rocket')
@@ -46,4 +54,42 @@ test('chaque icône offerte a son nom accessible, dans les deux langues', () => 
     const valeurs = Object.values(noms)
     expect(new Set(valeurs).size, langue).toBe(valeurs.length)
   }
+})
+
+// --- Le dessin d'une icône de dossier (#175) ---
+
+const SYMBOLES = new Set([...spriteBrut.matchAll(/<symbol id="i-([a-z0-9-]+)"/g)].map((m) => m[1]))
+const REMPLACEES = ['cloud', 'code', 'star', 'compass'] as const
+
+test('un dossier réglé sur l’une des quatre garde son nom et prend le dessin de Lucide', () => {
+  for (const nom of REMPLACEES) {
+    // **Le nom persisté ne bouge pas** : c'est lui que la grille coche et que le cœur écrit.
+    expect(iconeDeDossier({ icon: nom })).toBe(nom)
+    expect(ICONES_DE_DOSSIER).toContain(nom)
+    expect(dessinDeDossier({ icon: nom })).toBe(`lucide-${nom}`)
+    expect(SYMBOLES.has(`lucide-${nom}`), nom).toBe(true)
+  }
+})
+
+test('les équivalents de Lucide ne sont pas offerts sous leur propre nom', () => {
+  // Les offrir doublerait l'icône dans la grille, et un dossier réglé sur `lucide-cloud` serait
+  // relu comme inconnu par une version plus ancienne.
+  expect(ICONES_DE_DOSSIER.filter((icone) => icone.startsWith('lucide-'))).toEqual([])
+  expect(iconeDeDossier({ icon: 'lucide-cloud' })).toBe(ICONE_PAR_DEFAUT)
+})
+
+test('les autres icônes sont dessinées telles qu’elles s’appellent', () => {
+  expect(dessinDIcone('rocket')).toBe('rocket')
+  expect(dessinDIcone('pin')).toBe('pin')
+  expect(dessinDeDossier({ icon: null })).toBe('pin')
+})
+
+test('les quatre symboles d’origine restent au sprite, et `code` sert encore ailleurs', () => {
+  // **Les autres écrans ne bougent pas** (#175, tranché par le demandeur) : la barre d'outils de la
+  // grille et le panneau DDL dessinent toujours `i-code`. `cloud`, `star` et `compass` n'ont pas
+  // d'autre appelant dans `src/` que la galerie, qui lit le sprite entier — ils restent quand même :
+  // la décision ne les retire pas.
+  for (const nom of REMPLACEES) expect(SYMBOLES.has(nom), nom).toBe(true)
+  expect(toolbarBrut).toContain('<Icon name="code"')
+  expect(ddlPanelBrut).toContain('<Icon name="code"')
 })
