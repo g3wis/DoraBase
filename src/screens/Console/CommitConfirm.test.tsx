@@ -28,7 +28,6 @@ function monter(
             ...validation,
           }}
           cible="analytics"
-          production={false}
           onClose={() => {}}
           onConfirmer={() => {}}
           {...props}
@@ -58,13 +57,11 @@ test('le `where` manquant passe en premier', () => {
   expect(screen.getByRole('button', { name: 'Valider 1 écriture' })).toBeInTheDocument()
 })
 
-test('l’environnement de production porte son encart, et lui seul', () => {
-  monter({}, { production: false })
-  expect(screen.queryByText('production')).toBeNull()
-  monter({}, { production: true })
-  // **Le drapeau de la déclaration** (`23g`), jamais le libellé : un environnement nommé « live »
-  // et marqué production doit porter l'encart.
-  expect(screen.getByText('production')).toBeInTheDocument()
+test('elle ne porte plus de ligne « production » (#168)', () => {
+  // Une connexion en lecture seule ne tient pas de transaction qui écrive : la console refuse avant
+  // l'envoi, et la session du moteur refuse aussi. Il n'y a plus d'environnement à annoncer.
+  monter()
+  expect(screen.queryByText(/production/i)).toBeNull()
 })
 
 test('elle dit ce que DoraBase ne sait pas défaire', () => {

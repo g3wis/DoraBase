@@ -16,6 +16,9 @@ use super::error::traduire;
 /// `redirection` porte le point d'entrée du tunnel, comme en `06b` et `18b`, et le refus d'une
 /// variante déclarant un tunnel sans redirection est **le même** : se connecter en direct
 /// contournerait la consigne de sécurité de l'utilisateur.
+/// L'ordre qui met une session MySQL en lecture seule (#168).
+pub const LECTURE_SEULE: &str = "SET SESSION TRANSACTION READ ONLY";
+
 pub fn preparer(
     variante: &ConnectionSettings,
     mot_de_passe: Option<&Secret>,
@@ -32,6 +35,20 @@ pub fn preparer(
         (None, _) => (variante.host.as_str(), variante.port),
     };
 
+    let mut reglages_de_session = vec![
+        "SET time_zone = '+00:00'".to_owned(),
+        "SET SESSION sql_mode = 'STRICT_ALL_TABLES'".to_owned(),
+    ];
+    // **La session en lecture seule côté moteur** (#168), et c'est ici qu'elle doit l'être : MySQL
+    // tient un **pool**, et un `SET` posé après l'ouverture n'atteindrait qu'une de ses connexions.
+    // `SET SESSION TRANSACTION READ ONLY` vaut pour toute transaction de la session, autocommit
+    // compris : une écriture est refusée par le serveur (1792, « Cannot execute statement in a READ
+    // ONLY transaction »). Comme ailleurs, une console peut le lever ; il arrête la faute, pas
+    // l'intention.
+    if variante.read_only {
+        reglages_de_session.push(LECTURE_SEULE.to_owned());
+    }
+
     let mut options = OptsBuilder::default()
         .ip_or_hostname(hote.to_owned())
         .tcp_port(port)
@@ -46,10 +63,16 @@ pub fn preparer(
         // `sql_mode` est fixé au passage : `ANSI_QUOTES` change la règle de citation, et `16c` cite
         // au backtick. Le laisser au réglage du serveur ferait dépendre notre SQL d'une variable
         // qu'un administrateur peut changer.
-        .init(vec![
-            "SET time_zone = '+00:00'".to_owned(),
-            "SET SESSION sql_mode = 'STRICT_ALL_TABLES'".to_owned(),
-        ])
+        //
+        // **`setup` et non `init`** (#168), et c'était un défaut antérieur. `init` n'est joué qu'à
+        // la **création** d'une connexion ; or le pool la réinitialise (`COM_RESET_CONNECTION`)
+        // chaque fois qu'elle lui revient — `reset_connection` vaut vrai par défaut —, ce qui efface
+        // les variables de session. Le fuseau forcé ne tenait donc que jusqu'au premier retour au
+        // pool, et la lecture seule aurait fait de même : une écriture refusée au premier essai,
+        // acceptée au second. `setup` est rejoué à la création **et** après chaque
+        // réinitialisation. Le test sur base réelle de la lecture seule le garde, par plusieurs
+        // allers-retours au pool avant l'écriture.
+        .setup(reglages_de_session)
         // `program_name` apparaît dans `performance_schema.session_connect_attrs` : c'est ce qui
         // permet à un administrateur de reconnaître les connexions de l'outil. Même raison
         // qu'`application_name` en `06b`.
@@ -278,7 +301,7 @@ mod tests {
         // **Sans cela, un `TIMESTAMP` se lit différemment selon la machine.** Un explorateur de bases
         // ne peut pas afficher une valeur qui dépend de qui regarde.
         let options = preparer(&variante(), None, None).expect("préparable");
-        let init = options.init().join(" | ");
+        let init = options.setup().join(" | ");
         assert!(init.contains("time_zone = '+00:00'"), "{init}");
     }
 
@@ -287,6 +310,19 @@ mod tests {
         // `ANSI_QUOTES` changerait la règle de citation sous nos pieds : `16c` cite au backtick, et
         // le laisser au réglage du serveur ferait dépendre notre SQL d'une variable d'administration.
         let options = preparer(&variante(), None, None).expect("préparable");
-        assert!(options.init().iter().any(|i| i.contains("sql_mode")));
+        assert!(options.setup().iter().any(|i| i.contains("sql_mode")));
+    }
+
+    #[test]
+    fn la_lecture_seule_est_un_reglage_de_session_rejoue_par_le_pool() {
+        // `setup`, non `init` : rejoué après chaque réinitialisation du pool (#168).
+        let mut lecture_seule = variante();
+        lecture_seule.read_only = true;
+        let options = preparer(&lecture_seule, None, None).expect("préparable");
+        assert!(options.setup().iter().any(|i| i == LECTURE_SEULE));
+        assert!(options.init().is_empty());
+        // Contrôle négatif : inscriptible, la session ne l'est pas moins.
+        let options = preparer(&variante(), None, None).expect("préparable");
+        assert!(!options.setup().iter().any(|i| i == LECTURE_SEULE));
     }
 }

@@ -599,12 +599,8 @@ function GardeFous({
         checked={guards.pendingBeforeWrite}
         onCheckedChange={(pendingBeforeWrite) => onRegler({ pendingBeforeWrite })}
       />
-      <GardeFou
-        libelle={t('preferences.securite.prodReadOnly.libelle')}
-        detail={t('preferences.securite.prodReadOnly.detail', { raccourci: raccourci('E') })}
-        checked={guards.prodReadOnly}
-        onCheckedChange={(prodReadOnly) => onRegler({ prodReadOnly })}
-      />
+      {/* « Ouvrir les bases « prod » en lecture seule » est parti (#168) : la lecture seule d'un
+          dossier s'impose à tous ses descendants, et ne laisse rien à régler ici. */}
       <GardeFou
         libelle={t('preferences.securite.refuseUnrestrictedWrites.libelle')}
         detail={t('preferences.securite.refuseUnrestrictedWrites.detail')}

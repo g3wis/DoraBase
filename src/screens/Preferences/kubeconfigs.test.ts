@@ -17,11 +17,10 @@ const DEUX: Kubeconfigs = {
 }
 
 /** Une connexion qui vise un cluster par la référence donnée. */
-function connexion(name: string, environment: string, kubeconfig: string | null) {
+function connexion(name: string, kubeconfig: string | null) {
   return {
     name,
     engine: 'postgresql' as const,
-    environment,
     connection: {
       host: '127.0.0.1',
       port: 5432,
@@ -31,6 +30,8 @@ function connexion(name: string, environment: string, kubeconfig: string | null)
       sslMode: 'prefer' as const,
       caCertificate: null,
       authDatabase: null,
+      readOnly: false,
+      reconnectOnStartup: false,
       tunnel: {
         localPort: null,
         proxy: {
@@ -58,7 +59,7 @@ function projet(name: string, databases: ReturnType<typeof connexion>[]): Folder
             id: 'f-prod',
             name: 'prod',
             readOnly: true,
-            connections: databases as unknown as Database[],
+            connections: databases.map((base, rang): Database => ({ id: `c-${rang}`, ...base })),
           },
         ],
       },
@@ -73,7 +74,7 @@ describe('qui se sert d’une déclaration', () => {
   it('nomme les connexions par leur chemin de dossiers', () => {
     // **Des étiquettes, jamais un compte** : la raison d'un retrait refusé doit dire *quoi changer*,
     // et « 3 connexions » n'envoie nulle part.
-    const projects = projet('Halle', [connexion('catalogue', 'prod', 'prod')])
+    const projects = projet('Halle', [connexion('catalogue', 'prod')])
 
     expect(utilisationsDe('prod', projects, [])).toEqual(['Halle › prod › catalogue'])
   })
@@ -83,7 +84,7 @@ describe('qui se sert d’une déclaration', () => {
     // bouton **actif qui échoue** — exactement le défaut que le grisé existe pour éviter, et le
     // cœur refuserait alors le retrait que l'écran vient d'autoriser.
     const instances = [
-      { id: 'pg-prod', label: 'pg prod', ...connexion('x', 'prod', 'prod') },
+      { id: 'pg-prod', label: 'pg prod', ...connexion('x', 'prod') },
     ] as unknown as ManagedInstance[]
 
     expect(utilisationsDe('prod', VIDE, instances)).toEqual(['pg prod'])
@@ -92,13 +93,13 @@ describe('qui se sert d’une déclaration', () => {
   it('ne nomme pas une connexion qui vise une autre déclaration', () => {
     // Le contrôle négatif : sans lui, « qui s'en sert » rendrait tout ce qui est Kubernetes, et
     // aucune déclaration ne serait jamais retirable.
-    const projects = projet('Halle', [connexion('catalogue', 'prod', 'bac')])
+    const projects = projet('Halle', [connexion('catalogue', 'bac')])
 
     expect(utilisationsDe('prod', projects, [])).toEqual([])
   })
 
   it('ne nomme pas une connexion sans kubeconfig, ni sans proxy', () => {
-    const projects = projet('Halle', [connexion('catalogue', 'prod', null)])
+    const projects = projet('Halle', [connexion('catalogue', null)])
 
     expect(utilisationsDe('prod', projects, [])).toEqual([])
   })

@@ -17,6 +17,12 @@ type TableStatusBarProps = {
   pendingChanges?: number
   /** Vrai quand l'onglet est en mode édition — le rappel `⌘E` change de sens. */
   editing?: boolean
+  /**
+   * Quand la connexion est en lecture seule **effective** (#168) : le dossier qui l'impose, ou
+   * `null` quand c'est le réglage de la connexion. La barre dit alors **pourquoi**, au lieu d'inviter
+   * à un `⌘E` qui ne répondrait pas. Absent : la connexion écrit.
+   */
+  lectureSeule?: { dossier: string | null }
 }
 
 /**
@@ -43,6 +49,7 @@ export function TableStatusBar({
   error,
   pendingChanges = 0,
   editing = false,
+  lectureSeule,
 }: TableStatusBarProps) {
   const t = useT()
   // **La barre du mode édition dit autre chose**, et le mockup le montre : « 3 modifications en
@@ -103,7 +110,11 @@ export function TableStatusBar({
         <Icon name={editing ? 'pencil' : 'lock'} size={11} strokeWidth={2.2} />
         {editing
           ? t('tableView.statusBar.editingNoChange')
-          : t('tableView.statusBar.readOnlyHint', { raccourci: raccourci('E') })}
+          : lectureSeule === undefined
+            ? t('tableView.statusBar.readOnlyHint', { raccourci: raccourci('E') })
+            : lectureSeule.dossier === null
+              ? t('tableView.statusBar.readOnlyLocal')
+              : t('tableView.statusBar.readOnlyImposed', { dossier: lectureSeule.dossier })}
       </span>
     </div>
   )

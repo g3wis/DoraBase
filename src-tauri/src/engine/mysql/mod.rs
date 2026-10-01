@@ -594,6 +594,74 @@ mod tests_db {
         .expect("connexion au MySQL de test")
     }
 
+    /// **La session en lecture seule côté moteur** (#168) : le **serveur** refuse (1792). Plusieurs
+    /// lectures d'abord, et c'est le point : chacune rend sa connexion au pool, qui la réinitialise
+    /// — un réglage posé en `init` seulement serait effacé au premier retour, et l'écriture passerait
+    /// alors au deuxième essai. `update … where false` ne touche rien sous sabotage.
+    #[tokio::test]
+    async fn une_session_en_lecture_seule_fait_refuser_l_ecriture_par_le_serveur() {
+        let mut lecture_seule = variante();
+        lecture_seule.read_only = true;
+        let lecteur = MysqlAdapter::connect_via(
+            &lecture_seule,
+            Some(&mot_de_passe()),
+            &crate::engine::proxy::ContexteDeProxy::pour_les_tests(),
+        )
+        .await
+        .expect("connexion");
+        for _ in 0..5 {
+            lecteur
+                .run_sql("select 1", RowLimit::OneHundred)
+                .await
+                .expect("lecture");
+        }
+        let ecrire = "update dorabase_test.jetons_lecture_seule set valeur = valeur where false";
+        lecteur
+            .run_sql(
+                "create table if not exists dorabase_test.jetons_lecture_seule (valeur int)",
+                RowLimit::OneHundred,
+            )
+            .await
+            .expect_err("même un create est refusé");
+        // Une table à lui, créée d'une session inscriptible : aucun autre test ne la retire.
+        adaptateur_inscriptible_cree_la_table().await;
+        let erreur = lecteur
+            .run_sql(ecrire, RowLimit::OneHundred)
+            .await
+            .expect_err("le serveur refuse");
+        assert_eq!(erreur.code.as_deref(), Some("1792"), "{erreur:?}");
+        // Encore après d'autres allers-retours au pool.
+        for _ in 0..5 {
+            lecteur
+                .run_sql("select 1", RowLimit::OneHundred)
+                .await
+                .expect("lecture");
+        }
+        let erreur = lecteur
+            .run_sql(ecrire, RowLimit::OneHundred)
+            .await
+            .expect_err("toujours refusée");
+        assert_eq!(erreur.code.as_deref(), Some("1792"), "{erreur:?}");
+
+        // Contrôle positif : inscriptible, la même écriture passe.
+        adaptateur()
+            .await
+            .run_sql(ecrire, RowLimit::OneHundred)
+            .await
+            .expect("inscriptible");
+    }
+
+    async fn adaptateur_inscriptible_cree_la_table() {
+        adaptateur()
+            .await
+            .run_sql(
+                "create table if not exists dorabase_test.jetons_lecture_seule (valeur int)",
+                RowLimit::OneHundred,
+            )
+            .await
+            .expect("création");
+    }
+
     #[tokio::test]
     async fn la_sonde_rend_une_latence_et_distingue_le_serveur() {
         let sonde = adaptateur().await.probe().await.expect("sonde");

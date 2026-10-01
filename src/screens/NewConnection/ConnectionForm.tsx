@@ -14,6 +14,15 @@ import { ToggleWithLabel } from './ToggleWithLabel'
 type ConnectionFormProps = {
   draft: ConnectionDraft
   onChange: (patch: Partial<ConnectionDraft>) => void
+  /**
+   * Le nom du dossier qui **impose** la lecture seule à cette connexion, s'il y en a un (#168) — le
+   * plus extérieur, celui qu'il faut aller lever.
+   *
+   * La case « Lecture seule » montre alors l'état **effectif**, cochée et figée avec sa raison ; le
+   * réglage **local** reste dans le brouillon, non écrasé, et c'est lui qui s'enregistre : lever la
+   * lecture seule du dossier rend à la connexion le choix que l'utilisateur y avait fait.
+   */
+  lectureSeuleImposee?: string | null
 }
 
 /**
@@ -36,7 +45,11 @@ function optionsSsl(engine: Engine) {
  * flex imbriqué donnerait des colonnes qui ne s'alignent pas d'une rangée à l'autre — écart
  * que Vitest ne peut pas voir, d'où les mesures dans `e2e/`.
  */
-export function ConnectionForm({ draft, onChange }: ConnectionFormProps) {
+export function ConnectionForm({
+  draft,
+  onChange,
+  lectureSeuleImposee = null,
+}: ConnectionFormProps) {
   const t = useT()
   const [passwordVisible, setPasswordVisible] = useState(false)
   // **Un moteur de fichier n'a pas de serveur** (`17a`) : cinq champs du formulaire ne veulent rien
@@ -249,9 +262,14 @@ export function ConnectionForm({ draft, onChange }: ConnectionFormProps) {
         )}
         <div className={styles.toggles}>
           <ToggleWithLabel
-            checked={draft.readOnly}
+            checked={draft.readOnly || lectureSeuleImposee !== null}
             onCheckedChange={(readOnly) => onChange({ readOnly })}
             label={t('newConnection.form.readOnlyLabel')}
+            raison={
+              lectureSeuleImposee === null
+                ? undefined
+                : t('newConnection.form.readOnlyImposed', { dossier: lectureSeuleImposee })
+            }
           />
           <ToggleWithLabel
             checked={draft.reconnectOnStartup}

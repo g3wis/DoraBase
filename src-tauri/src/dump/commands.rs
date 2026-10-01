@@ -341,6 +341,7 @@ pub async fn cancel_export(
 pub async fn start_import(
     request: DumpRequest,
     app: tauri::AppHandle,
+    config: tauri::State<'_, crate::config::ConfigState>,
     registry: tauri::State<'_, ConnectionRegistry>,
     dumps: tauri::State<'_, DumpState>,
 ) -> Result<(), DumpFailure> {
@@ -348,10 +349,11 @@ pub async fn start_import(
     let fichier = PathBuf::from(&request.file);
     log::info!("start_import ← {identite} depuis {}", fichier.display());
 
-    // **`readOnly` refuse avant toute autre étape** : avant la découverte du binaire, avant
-    // l'inspection du fichier, avant la modale : une variante en lecture seule ne doit
-    // même pas voir la question posée.
-    refuser_si_lecture_seule(&request.variant)?;
+    // **La lecture seule refuse avant toute autre étape** : avant la découverte du binaire, avant
+    // l'inspection du fichier, avant la modale : une connexion en lecture seule ne doit même pas
+    // voir la question posée. **Lue dans la configuration** (#168), par `key.connection` — la
+    // variante envoyée par l'écran n'est pas crue sur parole.
+    refuser_si_lecture_seule(&config, &request.key)?;
 
     let secret = relire_le_secret(&app, &request.variant)?;
     let (cible, version) =
@@ -400,9 +402,10 @@ pub async fn inspect_dump(
     file: String,
     request: DumpRequest,
     app: tauri::AppHandle,
+    config: tauri::State<'_, crate::config::ConfigState>,
     registry: tauri::State<'_, ConnectionRegistry>,
 ) -> Result<super::inspect::Inspection, DumpFailure> {
-    refuser_si_lecture_seule(&request.variant)?;
+    refuser_si_lecture_seule(&config, &request.key)?;
     let secret = relire_le_secret(&app, &request.variant)?;
     let (_cible, version) =
         cible_et_version(&registry, &request.key, &request.variant, secret.as_ref()).await?;
@@ -411,17 +414,25 @@ pub async fn inspect_dump(
     Ok(inspection)
 }
 
-/// Le refus de `readOnly`, avec **où** se change le réglage.
-fn refuser_si_lecture_seule(variante: &ConnectionSettings) -> Result<(), DumpFailure> {
-    if variante.read_only {
-        return Err(DumpFailure {
-            kind: "lectureSeule".into(),
-            message: "cette variante est en lecture seule : l'import écrirait dans la base. \
-                      Le réglage se change dans A2, « Lecture seule »."
-                .into(),
-        });
-    }
-    Ok(())
+/// Le refus de la lecture seule **effective**, avec **où** elle se lève (#168).
+///
+/// **La configuration, jamais `request.variant`** : c'était le défaut d'avant #168, et il est celui
+/// que le cadrage désignait — le drapeau venait de la webview, donc le cœur croyait l'écran sur
+/// parole. Une connexion sous un dossier en lecture seule a le plus souvent un réglage local
+/// inscriptible ; lu sur la variante, l'import serait passé.
+fn refuser_si_lecture_seule(
+    config: &crate::config::ConfigState,
+    key: &DatabaseKey,
+) -> Result<(), DumpFailure> {
+    crate::config::commands::refuser_si_lecture_seule(
+        config,
+        &key.connection,
+        "importer un dump, qui écrirait dans la base",
+    )
+    .map_err(|message| DumpFailure {
+        kind: "lectureSeule".into(),
+        message,
+    })
 }
 
 /// Relit le mot de passe depuis le magasin, comme `open_database`.
@@ -510,24 +521,47 @@ mod tests {
         assert!(erreur.message.contains("tunnel"), "{}", erreur.message);
     }
 
-    #[tokio::test]
-    async fn une_variante_en_lecture_seule_refuse_avant_tout_le_reste() {
-        // Avant la découverte du binaire, avant l'inspection, avant la modale.
-        let mut variante = variante_tunnelee_fermee();
-        variante.read_only = true;
-        let erreur = refuser_si_lecture_seule(&variante).expect_err("refus attendu");
+    /// Une configuration lue, qui range `commandes` sous un dossier en lecture seule — avec un
+    /// réglage **local inscriptible**, comme toute connexion migrée d'un environnement de production.
+    fn configuration_sous_un_dossier_en_lecture_seule(
+        repertoire: &std::path::Path,
+        dossier_en_lecture_seule: bool,
+    ) -> crate::config::ConfigState {
+        use crate::config::{ConfigStore, FolderTree};
+        let mut base = crate::config::arbre_de_test::base("commandes", false);
+        base.connection = variante_tunnelee_fermee();
+        let mut dossier =
+            crate::config::arbre_de_test::dossier("prod", "prod", dossier_en_lecture_seule);
+        dossier.connections.push(base);
+        let arbre = FolderTree {
+            folders: vec![dossier],
+            connections: Vec::new(),
+        };
+        let (store, _) = ConfigStore::open(repertoire.join("config.json"));
+        crate::config::commands::ecrire_le_reste_intact(&store, &arbre).expect("écrit");
+        crate::config::ConfigState::ouvert(store)
+    }
 
+    #[tokio::test]
+    async fn l_import_refuse_la_lecture_seule_de_la_configuration_meme_si_la_variante_dit_non() {
+        // **Le défaut d'avant #168, et le sabotage qui le garde** : la variante envoyée dit
+        // `readOnly: false` — c'est le cas de toute connexion migrée d'un environnement de
+        // production —, et c'est le dossier qui impose. Relire `variant.read_only` fait tomber ce
+        // test.
+        let repertoire = tempfile::tempdir().expect("répertoire");
+        let config = configuration_sous_un_dossier_en_lecture_seule(repertoire.path(), true);
+        let erreur = refuser_si_lecture_seule(&config, &cle_de_test()).expect_err("refus attendu");
         assert_eq!(erreur.kind, "lectureSeule");
         assert!(
-            erreur.message.contains("lecture seule"),
-            "{}",
+            erreur.message.contains("imposée par le dossier « prod »"),
+            "le message ne dit pas où lever la lecture seule : {}",
             erreur.message
         );
-        assert!(
-            erreur.message.contains("A2"),
-            "le message ne dit pas où changer le réglage : {}",
-            erreur.message
-        );
+
+        // Contrôle positif : le même décor, dossier levé, laisse passer.
+        let repertoire = tempfile::tempdir().expect("répertoire");
+        let config = configuration_sous_un_dossier_en_lecture_seule(repertoire.path(), false);
+        assert!(refuser_si_lecture_seule(&config, &cle_de_test()).is_ok());
     }
 
     #[test]

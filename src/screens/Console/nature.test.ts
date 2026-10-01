@@ -1,5 +1,19 @@
 import { describe, expect, it } from 'vitest'
+import brut from '../../../src-tauri/tests/fixtures/nature-sql.json?raw'
 import { demandeConfirmation, natureDe, sansRestriction } from './nature'
+
+/**
+ * **La fixture partagée avec le cœur** (#168) : `engine/nature.rs` la lit aussi, et refuse côté Rust
+ * ce que ce classificateur refuse avant la modale sur une connexion en lecture seule. Les deux
+ * doivent rendre exactement `expected`.
+ */
+describe('la nature d’une requête, telle que le cœur la lit aussi (#168)', () => {
+  it('rend exactement ce que la fixture partagée attend', () => {
+    const { cases } = JSON.parse(brut) as { cases: { sql: string; expected: unknown }[] }
+    expect(cases.length).toBeGreaterThanOrEqual(10)
+    for (const { sql, expected } of cases) expect(natureDe(sql), sql).toEqual(expected)
+  })
+})
 
 describe('la nature d’une requête (`12c`)', () => {
   it('une lecture ne demande aucune confirmation', () => {

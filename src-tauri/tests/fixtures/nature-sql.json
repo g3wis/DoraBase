@@ -1,0 +1,51 @@
+{
+  "_comment": "Fixture partagée (#168) : la nature d'une requête de console, lue par `engine/nature.rs` (le refus de `run_sql` sur une connexion en lecture seule) et par `src/screens/Console/nature.test.ts` (le refus avant la modale). Les deux classificateurs doivent rendre exactement « expected » : l'écran qui refuse et le cœur qui refuse gardent deux chemins différents, et ne doivent pas diverger sur ce qu'est une écriture.",
+  "cases": [
+    { "sql": "select * from orders", "expected": { "kind": "lecture" } },
+    { "sql": "with x as (select 1) select * from x", "expected": { "kind": "lecture" } },
+    { "sql": "table orders", "expected": { "kind": "lecture" } },
+    { "sql": "explain select 1", "expected": { "kind": "lecture" } },
+    { "sql": "(select 1)", "expected": { "kind": "lecture" } },
+    { "sql": "select * from logs where action = 'delete'", "expected": { "kind": "lecture" } },
+    {
+      "sql": "delete from orders where id = 1",
+      "expected": { "kind": "ecriture", "instruction": "DELETE" }
+    },
+    {
+      "sql": "INSERT INTO orders (id) VALUES (1)",
+      "expected": { "kind": "ecriture", "instruction": "INSERT" }
+    },
+    {
+      "sql": "update orders set status = 1",
+      "expected": { "kind": "ecriture", "instruction": "UPDATE" }
+    },
+    { "sql": "truncate orders;", "expected": { "kind": "ecriture", "instruction": "TRUNCATE" } },
+    { "sql": "drop table orders", "expected": { "kind": "schema", "instruction": "DROP" } },
+    {
+      "sql": "alter table orders add column x int",
+      "expected": { "kind": "schema", "instruction": "ALTER" }
+    },
+    { "sql": "create schema ventes", "expected": { "kind": "schema", "instruction": "CREATE" } },
+    {
+      "sql": "-- nettoyage\ndelete from orders",
+      "expected": { "kind": "ecriture", "instruction": "DELETE" }
+    },
+    {
+      "sql": "/* rapport\nmensuel */ truncate orders",
+      "expected": { "kind": "ecriture", "instruction": "TRUNCATE" }
+    },
+    {
+      "sql": "with vieux as (select id from orders) delete from orders",
+      "expected": { "kind": "ecriture", "instruction": "DELETE" }
+    },
+    {
+      "sql": "with x as (select 'delete') select * from x",
+      "expected": { "kind": "ecriture", "instruction": "DELETE" }
+    },
+    { "sql": "with x as (select 1) select * from deleted_rows", "expected": { "kind": "lecture" } },
+    {
+      "sql": "with x as (insert into t values (1) returning *) drop table y",
+      "expected": { "kind": "schema", "instruction": "DROP" }
+    }
+  ]
+}

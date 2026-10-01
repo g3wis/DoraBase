@@ -46,6 +46,9 @@ pub struct SqliteAdapter {
     /// serait ici plus lourd et moins juste.
     connexion: Arc<Mutex<Connection>>,
     chemin: PathBuf,
+    /// Vrai quand la session est en `query_only` (#168) — ce qui décide de la forme du `BEGIN`
+    /// d'une transaction de console, voir `transaction`.
+    lecture_seule: bool,
 }
 
 /// `Debug` à la main : même raison qu'en `06b` et `18b`, un dérivé exposerait l'état interne.
@@ -68,12 +71,21 @@ impl SqliteAdapter {
         let a_ouvrir = chemin.clone();
         // L'ouverture lit l'en-tête et pose deux pragmas : c'est du travail bloquant, court mais
         // réel, et il n'a rien à faire sur le fil de l'exécuteur.
-        let connexion = tokio::task::spawn_blocking(move || connect::ouvrir(&a_ouvrir))
-            .await
-            .map_err(|e| EngineError::local(format!("ouverture interrompue : {e}")))??;
+        let lecture_seule = variante.read_only;
+        let connexion = tokio::task::spawn_blocking(move || {
+            let connexion = connect::ouvrir(&a_ouvrir)?;
+            // **La session en lecture seule côté moteur** (#168) — voir `connect::poser_la_lecture_seule`.
+            if lecture_seule {
+                connect::poser_la_lecture_seule(&connexion, &a_ouvrir)?;
+            }
+            Ok::<_, EngineError>(connexion)
+        })
+        .await
+        .map_err(|e| EngineError::local(format!("ouverture interrompue : {e}")))??;
         Ok(Self {
             connexion: Arc::new(Mutex::new(connexion)),
             chemin,
+            lecture_seule,
         })
     }
 
@@ -301,6 +313,10 @@ impl EngineAdapter for SqliteAdapter {
     /// milieu d'une transaction qu'on croyait tenue. Prendre le verrou d'écriture dès l'ouverture
     /// échoue tout de suite, ou pas du tout.
     ///
+    /// **Sauf en lecture seule** (#168) : `query_only` refuse `BEGIN IMMEDIATE`, qui prend le verrou
+    /// d'écriture — une console en transaction manuelle n'aurait alors même pas pu lire. Et la raison
+    /// d'`IMMEDIATE` tombe avec : une session qui ne peut pas écrire n'a aucun verrou à promouvoir.
+    ///
     /// **Une seule connexion, donc une transaction qui survit à l'appel** : `SqliteAdapter` détient
     /// un `Connection` derrière un `Mutex`, et chaque `avec` reprend le même.
     async fn transaction(
@@ -308,6 +324,7 @@ impl EngineAdapter for SqliteAdapter {
         ordre: crate::engine::OrdreDeTransaction,
     ) -> Result<(), EngineError> {
         let sql = match ordre {
+            crate::engine::OrdreDeTransaction::Ouvrir if self.lecture_seule => "BEGIN",
             crate::engine::OrdreDeTransaction::Ouvrir => "BEGIN IMMEDIATE",
             autre => autre.sql(),
         };

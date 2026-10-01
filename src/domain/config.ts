@@ -252,7 +252,13 @@ export type FolderTree = { folders: Array<Folder>,
 connections: Array<Database>, };
 
 /**
- * Les quatre garde-fous d'écriture (`15d`).
+ * Les trois garde-fous d'écriture (`15d`).
+ *
+ * **Ils étaient quatre** : `prod_read_only` — « les bases déclarées `prod` s'ouvrent en lecture
+ * seule » — est parti avec #168. Il n'avait aucun lecteur, et la lecture seule d'un dossier, qui
+ * s'impose à tous ses descendants, ne laisse plus rien à régler : un réglage qui ne change rien
+ * n'est pas un choix offert. Un fichier qui le porte encore se relit sans lui — `serde` ignore le
+ * champ, et la prochaine écriture le retire ; il n'y avait rien à reprendre, donc aucun cran.
  *
  * **Tous à `true` par défaut, y compris pour une installation existante.** `serde(default)` rend
  * `Default::default()`, et un défaut à `false` transformerait une mise à jour de DoraBase en levée
@@ -263,10 +269,6 @@ export type Guards = {
  * Le mode de `A6` : toute édition passe par un diff à valider.
  */
 pendingBeforeWrite: boolean, 
-/**
- * Les bases déclarées `prod` s'ouvrent en lecture seule.
- */
-prodReadOnly: boolean, 
 /**
  * `DELETE`/`UPDATE` sans `WHERE` sont **refusés**, et non simplement confirmés.
  */

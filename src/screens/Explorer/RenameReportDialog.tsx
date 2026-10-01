@@ -8,6 +8,13 @@ export type RapportDeRenommage = {
   nom: string
   /** Le refus du cœur. Rien n'a été renommé. */
   refus: string
+  /**
+   * `lectureSeule` quand le refus est celui de « Passer en / Lever la lecture seule » (#168) — une
+   * transaction manuelle ouverte sur une connexion du dossier. Même geste depuis la même ligne, même
+   * absence d'écran où le dire : la même modale, avec son titre et sa phrase à elle. `nom` est
+   * alors celui du dossier.
+   */
+  sorte?: 'renommage' | 'lectureSeule'
 }
 
 type RenameReportDialogProps = {
@@ -27,7 +34,11 @@ export function RenameReportDialog({ rapport, onClose }: RenameReportDialogProps
   const t = useT()
   return (
     <Modal
-      title={t('explorer.renameReport.refusedTitle', { nom: rapport.nom })}
+      title={
+        rapport.sorte === 'lectureSeule'
+          ? t('explorer.renameReport.readOnlyRefusedTitle', { nom: rapport.nom })
+          : t('explorer.renameReport.refusedTitle', { nom: rapport.nom })
+      }
       icon="warn"
       onClose={onClose}
       footer={
@@ -40,7 +51,11 @@ export function RenameReportDialog({ rapport, onClose }: RenameReportDialogProps
         <p className={styles.refus}>{rapport.refus}</p>
         {/* **Le fait qui rassure, dit aussi fort que celui qui inquiète** — la règle de `08j` : un
             refus de renommage laisse tout en place. */}
-        <p>{t('explorer.renameReport.reassurance')}</p>
+        <p>
+          {rapport.sorte === 'lectureSeule'
+            ? t('explorer.renameReport.readOnlyReassurance')
+            : t('explorer.renameReport.reassurance')}
+        </p>
       </div>
     </Modal>
   )

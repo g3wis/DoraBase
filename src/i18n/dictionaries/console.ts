@@ -1,6 +1,8 @@
 import type { Dictionnaire } from '../types'
 
 export const consoleFr: Dictionnaire = {
+  // Le refus d'une instruction qui écrit sur une connexion en lecture seule (#168), avant la modale.
+  refusLectureSeule: (p) => `${p.instruction} refusé avant l’envoi. ${p.raison}`,
   arbreJson: {
     vide: 'La commande n’a rendu aucun document.',
     toutReplier: 'Tout replier',
@@ -148,8 +150,6 @@ export const consoleFr: Dictionnaire = {
     ecritures: 'Écritures',
     instructions: 'Instructions',
     base: 'Base',
-    environnement: 'Environnement',
-    production: 'production',
     rappel:
       'La validation est définitive : DoraBase ne sait pas la défaire, et il n’y a pas de patch inverse pour une requête de console.',
     annuler: 'Annuler',
@@ -176,8 +176,6 @@ export const consoleFr: Dictionnaire = {
     ecritures: 'Écritures',
     instructions: 'Instructions',
     base: 'Base',
-    environnement: 'Environnement',
-    production: 'production',
     rappel:
       'DoraBase exécute la requête telle qu’elle est écrite, sans transaction et sans patch inverse.',
     // **Seule une modification de structure arrive ici en transaction manuelle** (`API-38`) : les
@@ -214,6 +212,7 @@ export const consoleFr: Dictionnaire = {
 }
 
 export const consoleEn: Dictionnaire = {
+  refusLectureSeule: (p) => `${p.instruction} refused before sending. ${p.raison}`,
   arbreJson: {
     vide: 'The command returned no document.',
     toutReplier: 'Collapse all',
@@ -337,8 +336,6 @@ export const consoleEn: Dictionnaire = {
     ecritures: 'Writes',
     instructions: 'Statements',
     base: 'Database',
-    environnement: 'Environment',
-    production: 'production',
     rappel:
       'Committing is final: DoraBase cannot undo it, and there is no inverse patch for a console query.',
     annuler: 'Cancel',
@@ -363,8 +360,6 @@ export const consoleEn: Dictionnaire = {
     ecritures: 'Writes',
     instructions: 'Statements',
     base: 'Database',
-    environnement: 'Environment',
-    production: 'production',
     rappel:
       'DoraBase runs the query exactly as written, without a transaction and without an inverse patch.',
     rappelTransaction:

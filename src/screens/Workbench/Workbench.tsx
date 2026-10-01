@@ -9,8 +9,13 @@ import {
   connexionsDescendantes,
   couleurLaPlusProche,
   dossier,
+  dossierQuiImpose,
+  estEnLectureSeule,
   idDeConnexion,
+  lectureSeuleEffective,
+  lectureSeuleSituee,
   libelleDeConnexion,
+  raisonDeLaLectureSeule,
 } from '../../data/dossiers'
 import type { DatabaseKey } from '../../domain/arbre'
 import type {
@@ -63,7 +68,6 @@ import { SchemaManager } from '../SchemaManager/SchemaManager'
 import { PASSERELLE_SCHEMAS, type PasserelleSchemas } from '../SchemaManager/schemaCommands'
 import { DdlPanel } from '../Structure/DdlPanel'
 import { StructureStatusBar, StructureView } from '../Structure/StructureView'
-import { ApplyConfirm } from '../TableView/ApplyConfirm'
 import type { Echelle } from '../TableView/horodatage'
 import { type LibellesDeTable, libellesDeLaTable } from '../TableView/libelles'
 import { type EnAttente, retirer } from '../TableView/modifications'
@@ -521,12 +525,7 @@ export function Workbench({
    */
   const rienAMontrer = actif === null && contexte === null
 
-  /**
-   * Le chemin de dossiers de ce qu'on regarde, et les dossiers qui le portent — la barre de titre,
-   * et la **lecture seule imposée**, la plus simple qui soit : un dossier contenant la connexion est
-   * en lecture seule. Elle tient lieu du drapeau `production` des environnements jusqu'à #168, et le
-   * décor migré marque justement `prod` : les garde-fous s'allument au même endroit qu'avant.
-   */
+  /** Le chemin de dossiers de ce qu'on regarde, et les dossiers qui le portent — la barre de titre. */
   const ancetresIndiques: readonly Folder[] =
     indication === null
       ? []
@@ -536,7 +535,14 @@ export function Workbench({
             const situe = dossier(arbre, indication.folder)
             return situe ? [...situe.ancetres, situe.dossier] : []
           })()
-  const lectureSeuleIndiquee = ancetreEnLectureSeule(ancetresIndiques) !== null
+  /**
+   * La puce « Lecture seule » de la barre de titre (#168) : pour une connexion, sa lecture seule
+   * **effective**, réglage local compris ; pour un dossier, celle qu'il porte ou qu'on lui impose.
+   */
+  const lectureSeuleIndiquee =
+    indication !== null && 'connection' in indication
+      ? estEnLectureSeule(lectureSeuleEffective(arbre, indication.connection))
+      : ancetreEnLectureSeule(ancetresIndiques) !== null
 
   /**
    * Le moteur déclaré d'une connexion, **par son identifiant** (#166).
@@ -620,6 +626,27 @@ export function Workbench({
    * Déclaré avant `useExecution`, qui en tire le découpage d'une suite d'instructions (#156).
    */
   const moteurConsole = consoleActive === null ? undefined : moteurDe(consoleActive.key.connection)
+  /**
+   * La raison de la lecture seule de la connexion de la console, et le refus qu'elle prononce
+   * **avant la modale** (#168). Mémoïsé : `useExecution` en fait une dépendance de `demander`.
+   */
+  const raisonDeLaConsole =
+    cleConsole === null
+      ? null
+      : raisonDeLaLectureSeule(
+          t,
+          arbre,
+          lectureSeuleEffective(arbre, cleConsole.connection),
+          moteurDe(cleConsole.connection),
+        )
+  const refusDEcrire = useMemo(
+    () =>
+      raisonDeLaConsole === null
+        ? null
+        : (instruction: string) =>
+            t('console.refusLectureSeule', { instruction, raison: raisonDeLaConsole }),
+    [raisonDeLaConsole, t],
+  )
   const transaction = useTransaction(passerelleTransaction, consoleDeTransaction, arbre)
   const execution = useExecution(
     cleConsole,
@@ -629,6 +656,7 @@ export function Workbench({
     transaction.jeton(consoleDeTransaction),
     transaction.apresExecution,
     moteurConsole,
+    refusDEcrire,
   )
 
   /**
@@ -720,7 +748,18 @@ export function Workbench({
   // depuis que `11b` a livré la bascule ; son commentaire l'affirmait pourtant encore. Il devait
   // partir avec le bouton : forcé à vrai, il aurait rendu une bascule qui allume sans pouvoir
   // éteindre — le bouton inerte du défaut n° 36, exactement ce que ce bouton vient offrir.
-  const enEdition = idActif !== null && ongletsEnEdition.has(idActif)
+  /**
+   * La lecture seule **effective** de la table ouverte (#168) — le miroir de ce que le cœur consulte
+   * avant `apply_changes`. Elle fige le mode édition : ni `⌘E` ni la bascule ne l'ouvrent, et un
+   * onglet qui était en édition quand son dossier est passé en lecture seule en sort.
+   */
+  const lectureDeLaTable =
+    table === null ? null : lectureSeuleEffective(arbre, table.key.connection)
+  const raisonDeLaTable =
+    table === null
+      ? null
+      : raisonDeLaLectureSeule(t, arbre, lectureDeLaTable, moteurDe(table.key.connection))
+  const enEdition = idActif !== null && ongletsEnEdition.has(idActif) && raisonDeLaTable === null
   const vue: VueObjet = idActif === null ? 'donnees' : (vues[idActif] ?? 'donnees')
   const structureActive = table !== null && vue === 'structure'
   const attente = idActif === null ? [] : (attentes[idActif] ?? [])
@@ -994,9 +1033,6 @@ export function Workbench({
   const [textes, setTextes] = useState<Readonly<Record<string, string>>>({})
   const application = useApplication(cle, table, attente, detail?.columns ?? [], {
     passerelle: passerelleApply ?? PASSERELLE_APPLY,
-    // **La lecture seule imposée par un dossier, en attendant #168** : elle tient lieu du drapeau
-    // `production` des environnements. Le drapeau, jamais le nom du dossier (`23g`).
-    production: lectureSeuleIndiquee,
     // **Après le succès, la grille est relue et le modèle vidé.** Les valeurs écrites peuvent
     // différer de celles saisies — un `trigger`, une valeur par défaut, une troncature — et
     // afficher la saisie donnerait un écran qui ne reflète plus la base. Vider le modèle fait
@@ -1033,7 +1069,9 @@ export function Workbench({
    * bouton est arrivé après le raccourci.
    */
   const basculerLEdition = useCallback(() => {
-    if (idActif === null) return
+    // **Une connexion en lecture seule n'entre pas en édition** (#168), et le geste ne fait rien :
+    // la bascule est figée avec sa raison, et la barre d'état dit pourquoi.
+    if (idActif === null || raisonDeLaTable !== null) return
     setOngletsEnEdition((precedent) => {
       const suivant = new Set(precedent)
       // **Quitter le mode garde les modifications en attente** : les perdre sur une frappe serait
@@ -1042,7 +1080,7 @@ export function Workbench({
       else suivant.add(idActif)
       return suivant
     })
-  }, [idActif])
+  }, [idActif, raisonDeLaTable])
 
   /**
    * `⌘E` bascule le mode édition de l'onglet actif.
@@ -1329,6 +1367,7 @@ export function Workbench({
           onRangChange={setRangChoisi}
           edition={enEdition}
           onBasculerEdition={basculerLEdition}
+          lectureSeule={raisonDeLaTable}
           rafraichissement={rafraichissement}
           // Le « Rafraîchir » de la toolbar relit **ce que l'écran montre** : les lignes, que
           // la vue sait relire seule, et la structure, qui vit ici.
@@ -1396,7 +1435,12 @@ export function Workbench({
     return {
       base: situee.base,
       chemin: situee.ancetres.map((ancetre) => ancetre.name),
-      lectureSeule: ancetreEnLectureSeule(situee.ancetres) !== null,
+      lectureSeule: raisonDeLaLectureSeule(
+        t,
+        arbre,
+        lectureSeuleSituee(situee),
+        situee.base.engine,
+      ),
       cle: cleDesSchemas,
     }
   })()
@@ -1414,9 +1458,8 @@ export function Workbench({
             base: connexionDesSchemas.base.label?.trim() || connexionDesSchemas.base.name,
           }}
           affiches={connexionDesSchemas.base.visibleSchemas ?? null}
-          // **La lecture seule imposée par un dossier**, en attendant #168 — le drapeau, jamais le
-          // nom (`23g`), comme pour la confirmation d'écriture.
-          production={connexionDesSchemas.lectureSeule}
+          // **La lecture seule effective** (#168) : elle désactive la création, avec sa raison.
+          lectureSeule={connexionDesSchemas.lectureSeule}
           onClose={() => setSchemasAGerer(null)}
           onLire={async () => {
             /* **Ouvrir avant de lire, et l'attendre.** Le menu d'une connexion est atteignable dès
@@ -1486,10 +1529,6 @@ export function Workbench({
              validation. */
           dansUneTransaction={transaction.mode(consoleDeTransaction) === 'manual'}
           cible={contexte ? `${libelleActuel} · ${contexte.schema}` : '—'}
-          // **Le drapeau, non le nom** (`23g`) : la lecture seule imposée par un dossier, en attendant
-          // la lecture seule effective de #168. Comparer une chaîne rendrait la garantie fausse au
-          // premier renommage.
-          production={lectureSeuleIndiquee}
           enCours={execution.enCours}
           onClose={execution.annulerLaConfirmation}
           onConfirmer={execution.executer}
@@ -1501,23 +1540,12 @@ export function Workbench({
         <CommitConfirm
           validation={transaction.aValider}
           cible={libelleActuel ?? '—'}
-          // **Le drapeau, jamais le nom** (`23g`), comme les deux autres confirmations.
-          production={lectureSeuleIndiquee}
           enCours={transaction.enCours}
           onClose={transaction.annulerLaValidation}
           onConfirmer={() => {
             const cible = transaction.aValider
             if (cible !== null) transaction.valider(cible.console)
           }}
-        />
-      )}
-      {application.confirmation && table && (
-        <ApplyConfirm
-          attente={attente}
-          table={`${table.schema}.${table.table}`}
-          enCours={application.enCours}
-          onClose={application.annulerLaConfirmation}
-          onConfirmer={application.appliquer}
         />
       )}
       <div className={styles.body}>
@@ -1916,9 +1944,6 @@ export function Workbench({
                       <PendingPanel
                         attente={attente}
                         table={`${table.schema}.${table.table}`}
-                        // **Le drapeau, non le nom** (`23g`) : l'encart rouge suit la lecture seule
-                        // imposée par un dossier, en attendant #168.
-                        production={lectureSeuleIndiquee}
                         sql={sqlPrevu.sql}
                         erreurSql={sqlPrevu.erreur}
                         onRetirer={(cleLigne, column) =>
@@ -2021,6 +2046,11 @@ export function Workbench({
           error={lecture.error}
           pendingChanges={attente.length}
           editing={enEdition}
+          lectureSeule={
+            estEnLectureSeule(lectureDeLaTable)
+              ? { dossier: dossierQuiImpose(arbre, lectureDeLaTable) }
+              : undefined
+          }
         />
       )}
     </div>

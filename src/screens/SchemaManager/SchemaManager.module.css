@@ -95,7 +95,8 @@
   flex: 1;
 }
 
-/* Le rappel de production. Sur un environnement marqué seulement — voir le composant. */
+/* La raison d'une lecture seule qui désactive la création (#168) — l'ancien rappel de production,
+ * même encre : c'est la seule part de l'écran qui ne réponde pas, et elle dit pourquoi. */
 .rappel {
   margin: 0 0 var(--space-5);
   padding: var(--space-3) var(--space-5);

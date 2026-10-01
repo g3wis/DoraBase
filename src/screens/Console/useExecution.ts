@@ -169,6 +169,17 @@ export function useExecution(
    * (`instructions.ts`, #156). Absent, rien n'est découpé : le texte part tel quel, comme avant.
    */
   moteur?: Engine,
+  /**
+   * Le refus d'écrire d'une connexion en lecture seule effective (#168) : le message affiché pour une
+   * instruction qui écrit, son verbe en paramètre. `null` quand la connexion écrit.
+   *
+   * **Avant la modale, et avant l'envoi** : une instruction d'écriture ou de schéma est refusée ici,
+   * et le refus s'affiche dans la grille comme une erreur, avec sa raison. Ouvrir la confirmation
+   * d'abord ferait demander « êtes-vous sûr ? » pour un geste qui ne peut pas aboutir. Le cœur
+   * refuse de son côté ce que la même classification reconnaît (`engine/nature.rs`), et la session
+   * du moteur, là où elle existe, refuse le reste.
+   */
+  refusDEcrire: ((instruction: string) => string) | null = null,
 ): Execution {
   const [parConsole, setParConsole] = useState<Readonly<Record<string, EtatConsole>>>({})
   const etat = (idConsole === null ? undefined : parConsole[idConsole]) ?? AU_REPOS
@@ -251,6 +262,31 @@ export function useExecution(
       const coupees = decoupeLesSuites(moteur) ? decouper(sql, moteur) : []
       const suite = coupees.length > 1 ? coupees.map((instruction) => instruction.sql) : [sql]
 
+      // **Rien ne part d'une suite dont une instruction écrit**, lectures comprises : la suite a été
+      // écrite en supposant que chacune aboutirait, et en jouer la moitié la laisserait dans un état
+      // que personne n'a demandé. La première qui écrit porte le refus ; les autres le disent.
+      if (refusDEcrire !== null) {
+        const refusee = suite.findIndex((instruction) => natureDe(instruction).kind !== 'lecture')
+        const nature = refusee < 0 ? undefined : natureDe(suite[refusee] ?? '')
+        if (nature !== undefined && nature.kind !== 'lecture') {
+          const message = refusDEcrire(nature.instruction)
+          poser(idConsole, (precedent) => ({
+            ...precedent,
+            aConfirmer: null,
+            enCours: false,
+            etapes: suite.map((instruction, index) => ({
+              sql: instruction,
+              statut: index === refusee ? 'erreur' : 'nonExecutee',
+              resultat: null,
+              erreur: index === refusee ? message : null,
+            })),
+            choisie: refusee,
+            suivre: true,
+          }))
+          return
+        }
+      }
+
       const aConfirmer = suite
         .map((instruction) => ({ instruction, nature: natureDe(instruction) }))
         .filter(
@@ -274,7 +310,7 @@ export function useExecution(
       }
       lancer(suite)
     },
-    [idConsole, lancer, poser, mode, moteur],
+    [idConsole, lancer, poser, mode, moteur, refusDEcrire],
   )
 
   const reindexer = useCallback((nouvelId: (id: string) => string) => {

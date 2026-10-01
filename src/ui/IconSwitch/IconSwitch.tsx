@@ -55,7 +55,13 @@ export function IconSwitch({
       aria-label={label}
       disabled={disabled}
       className={cx(styles.root, className)}
-      onClick={() => onCheckedChange(!checked)}
+      // **`aria-disabled` n'arrête pas le clic**, contrairement à `disabled` : c'est tout son
+      // intérêt — le contrôle garde son survol et son focus, donc l'infobulle qui dit pourquoi il est
+      // figé reste atteignable (piège n° 3). Le clic doit donc être refusé ici.
+      onClick={() => {
+        if (rest['aria-disabled'] === true || rest['aria-disabled'] === 'true') return
+        onCheckedChange(!checked)
+      }}
       {...rest}
     >
       {/* La pastille est **sous** les deux cellules, jamais entre elles : elle est peinte en

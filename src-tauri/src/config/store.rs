@@ -657,7 +657,7 @@ mod tests_preferences {
     }
 
     #[test]
-    fn les_quatre_garde_fous_sont_actifs_sur_une_configuration_anterieure() {
+    fn les_trois_garde_fous_sont_actifs_sur_une_configuration_anterieure() {
         let dossier = tempdir().unwrap();
         let chemin = dossier.path().join("config.json");
         fs::write(&chemin, AVANT_15A).unwrap();
@@ -669,7 +669,6 @@ mod tests_preferences {
         // jour de DoraBase en levée silencieuse des garde-fous.
         let g = preferences.guards;
         assert!(g.pending_before_write, "{g:?}");
-        assert!(g.prod_read_only, "{g:?}");
         assert!(g.refuse_unrestricted_writes, "{g:?}");
         assert!(g.keep_inverse_patch, "{g:?}");
     }
@@ -686,7 +685,7 @@ mod tests_preferences {
             row_height: 32,
             code_font_tenths: 110,
             guards: Guards {
-                prod_read_only: false,
+                keep_inverse_patch: false,
                 ..Guards::default()
             },
         };

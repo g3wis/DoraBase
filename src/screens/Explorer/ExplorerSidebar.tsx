@@ -263,6 +263,8 @@ export function ExplorerSidebar({
       creerUnDossier,
       colorer: onRecolorFolder === undefined ? undefined : setAColorer,
       onSetFolderReadOnly,
+      refuserLaLectureSeule: (nom: string, refus: unknown) =>
+        setRapport({ nom, refus: messageDuRefus(refus), sorte: 'lectureSeule' }),
       demanderLeRetrait,
       onRefresh,
       consoles,
@@ -660,6 +662,8 @@ type Cablage = {
   creerUnDossier: ((parent: Noeud | null) => void) | undefined
   colorer: ((dossier: FolderId) => void) | undefined
   onSetFolderReadOnly: ExplorerSidebarProps['onSetFolderReadOnly']
+  /** Rapporte un refus de « Passer en / Lever la lecture seule » (#168), qu'aucune ligne ne peut dire. */
+  refuserLaLectureSeule: (dossier: string, refus: unknown) => void
   demanderLeRetrait: ((cible: CibleDeSuppression) => void) | undefined
   onRefresh: ExplorerSidebarProps['onRefresh']
   consoles: ExplorerSidebarProps['consoles']
@@ -745,7 +749,13 @@ function entreesDe(noeud: Noeud, c: Cablage): readonly EntreeDeMenu[] | undefine
         icone: lectureSeule ? 'unlock' : 'lock',
         onClick:
           c.onSetFolderReadOnly && noeud.imposeePar === undefined
-            ? () => void c.onSetFolderReadOnly?.(folder, !lectureSeule).catch(() => {})
+            ? () =>
+                void c.onSetFolderReadOnly?.(folder, !lectureSeule).catch((refus) =>
+                  // **Le refus se dit** (#168) : une transaction manuelle ouverte sur une connexion
+                  // du dossier l'empêche, et un menu qui se ferme sans effet se lirait comme une
+                  // panne.
+                  c.refuserLaLectureSeule(noeud.label, refus),
+                )
             : undefined,
         raison:
           noeud.imposeePar !== undefined
@@ -947,4 +957,17 @@ function frequenceLisible(colonne: ColumnInfo): string | null {
 /** La couleur d'un dossier telle que l'arbre la porte — la modale s'ouvre sur elle. */
 function couleurDe(arbre: FolderTree, id: FolderId): FolderColor | null {
   return dossier(arbre, id)?.dossier.color ?? null
+}
+
+/**
+ * Le message d'un refus du cœur, quelle qu'en soit la forme : une chaîne pour les commandes de
+ * configuration, un objet à `message` pour celles du moteur. Un `[object Object]` dans une modale
+ * serait pire que rien.
+ */
+function messageDuRefus(refus: unknown): string {
+  if (typeof refus === 'string') return refus
+  if (refus !== null && typeof refus === 'object' && 'message' in refus) {
+    return String((refus as { message: unknown }).message)
+  }
+  return String(refus)
 }

@@ -32,6 +32,24 @@ fn authentification_iam(variante: &ConnectionSettings) -> bool {
     )
 }
 
+/// L'ordre qui met la session en lecture seule, posé à l'ouverture quand la lecture seule
+/// **effective** de la connexion est vraie (#168).
+///
+/// **`default_transaction_read_only` pour toute la session** : chaque transaction qu'elle ouvre —
+/// l'autocommit d'une instruction seule, le `begin` d'`apply_updates`, celui d'une transaction de
+/// console — naît en lecture seule, et le serveur refuse toute écriture avec `25006` (« cannot
+/// execute … in a read-only transaction »). C'est ce qui fait de la lecture seule un fait du
+/// **serveur**, et plus seulement de l'écran.
+///
+/// **Un `SET` après la connexion, et non un paramètre de démarrage** (`options=-c …`) : un
+/// répartiteur comme PgBouncer refuse les paramètres de démarrage qu'il ne connaît pas, et la
+/// connexion échouerait pour une raison qui n'a rien à voir avec elle.
+///
+/// **Ce n'est pas un verrou contre une intention** : `set session characteristics as transaction
+/// read write` le lève, et c'est du SQL qu'une console peut envoyer. Ce qu'il arrête, c'est la faute
+/// — le `delete` lancé dans la mauvaise console —, comme toute la lecture seule du produit.
+pub const LECTURE_SEULE: &str = "SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY";
+
 pub fn preparer(
     variante: &ConnectionSettings,
     mot_de_passe: Option<&Secret>,

@@ -105,6 +105,24 @@ pub fn ouvrir(chemin: &Path) -> Result<Connection, EngineError> {
     Ok(connexion)
 }
 
+/// Met la connexion en lecture seule **côté moteur** (#168) : `PRAGMA query_only = ON`.
+///
+/// **Toute écriture est alors refusée par SQLite lui-même** — `SQLITE_READONLY`, « attempt to write a
+/// readonly database » —, qu'elle vienne de la grille, d'une console ou d'un `begin immediate` qui
+/// voudrait écrire ensuite. Posé **après** `journal_mode` et `foreign_keys`, qui ne sont pas des
+/// écritures de données mais que le pragma n'a pas à gêner.
+///
+/// **Un pragma, et non une ouverture `SQLITE_OPEN_READ_ONLY`** : la connexion reste la même que
+/// celle d'une base inscriptible — même WAL, même fichier —, et c'est aussi un réglage qu'une
+/// console peut lever (`pragma query_only = off`). Comme ailleurs, la lecture seule arrête la faute,
+/// pas l'intention. Son échec, lui, **n'est pas ignoré** : une connexion annoncée en lecture seule
+/// qui ne l'est pas serait le pire des deux mondes.
+pub fn poser_la_lecture_seule(connexion: &Connection, chemin: &Path) -> Result<(), EngineError> {
+    connexion
+        .pragma_update(None, "query_only", true)
+        .map_err(|erreur| super::error::traduire_a_l_ouverture(&erreur, chemin))
+}
+
 /// La version de SQLite et la taille du fichier, pour le test de connexion de `A2`.
 ///
 /// « SQLite 3.46.0 · 4,2 Mo » : la taille remplace ce qu'un serveur dirait de lui-même, et c'est la

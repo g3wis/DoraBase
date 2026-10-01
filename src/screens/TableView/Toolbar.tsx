@@ -183,6 +183,12 @@ type ToolbarProps = {
   edition?: boolean
   onBasculerEdition?: () => void
   /**
+   * La raison de la lecture seule effective, déjà traduite, quand la connexion ne peut pas écrire
+   * (#168) : la bascule est alors **figée** sur le cadenas fermé, en `aria-disabled`, et son
+   * infobulle dit pourquoi et où la lever — au lieu d'inviter à un `⌘E` qui ne répondrait pas.
+   */
+  lectureSeule?: string | null
+  /**
    * Ajoute une ligne au modèle — **absent hors mode édition**, où il n'y aurait rien à en faire.
    *
    * Le bouton n'apparaît donc qu'en édition, plutôt que d'y être désactivé en permanence : un
@@ -262,6 +268,7 @@ export function Toolbar({
   onRefresh,
   edition = false,
   onBasculerEdition,
+  lectureSeule = null,
   onAjouterUneLigne,
   libelleAjouter,
   enCours = false,
@@ -402,12 +409,18 @@ export function Toolbar({
           tenir bon, pas la description. */}
       {onBasculerEdition !== undefined && (
         <Tooltip
-          label={t(edition ? 'tableView.toolbar.lockHint' : 'tableView.toolbar.unlockHint', {
-            raccourci: raccourci('E'),
-          })}
+          label={
+            lectureSeule ??
+            t(edition ? 'tableView.toolbar.lockHint' : 'tableView.toolbar.unlockHint', {
+              raccourci: raccourci('E'),
+            })
+          }
         >
           <IconSwitch
-            checked={!edition}
+            checked={lectureSeule !== null || !edition}
+            // `aria-disabled` et non `disabled` : l'infobulle qui dit pourquoi doit rester
+            // atteignable au survol et au clavier (piège n° 3).
+            aria-disabled={lectureSeule !== null || undefined}
             onCheckedChange={onBasculerEdition}
             label={t('tableView.toolbar.lockLabel')}
             iconOff="unlock"

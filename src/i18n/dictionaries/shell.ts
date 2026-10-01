@@ -20,6 +20,18 @@ export const shellFr: Dictionnaire = {
       offline: (p) => `hors ligne · ${p.reason}`,
     },
   },
+  // La raison d'une lecture seule effective (#168), dite partout où elle refuse ou fige : le bouton
+  // du mode édition, le gestionnaire de schémas, le refus de la console. Elle nomme **où la lever**.
+  lectureSeule: {
+    imposee: (p) =>
+      `Lecture seule, imposée par le dossier « ${p.dossier} » : levez-la sur ce dossier pour écrire.`,
+    locale:
+      'Lecture seule, réglée sur cette connexion : décochez « Lecture seule » dans ses réglages pour écrire.',
+    // MongoDB et BigQuery n'ont pas de session à mettre en lecture seule : c'est DoraBase seul qui
+    // refuse, et le dire évite de croire le serveur aussi protégé qu'un PostgreSQL.
+    sansSession:
+      'Ce moteur n’a pas de session en lecture seule : c’est DoraBase qui refuse d’écrire, pas le serveur.',
+  },
   statusBar: {
     folderCount: (p) => `${p.count} dossier${Number(p.count) > 1 ? 's' : ''}`,
     paletteHint: (p) => `${p.raccourci} palette`,
@@ -54,6 +66,12 @@ export const shellEn: Dictionnaire = {
       connected: (p) => `connected · ${p.version}`,
       offline: (p) => `offline · ${p.reason}`,
     },
+  },
+  lectureSeule: {
+    imposee: (p) =>
+      `Read-only, imposed by the “${p.dossier}” folder: lift it on that folder to write.`,
+    locale: 'Read-only, set on this connection: untick “Read-only” in its settings to write.',
+    sansSession: 'This engine has no read-only session: DoraBase refuses to write, not the server.',
   },
   statusBar: {
     folderCount: (p) => `${p.count} folder${Number(p.count) > 1 ? 's' : ''}`,

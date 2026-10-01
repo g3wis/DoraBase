@@ -26,8 +26,6 @@ export const schemasFr: Dictionnaire = {
     label: 'Créer un schéma',
     placeholder: 'nom_du_schema',
     button: 'Créer',
-    // Sur un environnement marqué production seulement : l'exécution est immédiate et sans retour.
-    warning: 'La commande part immédiatement sur la base ; DoraBase ne peut pas la défaire.',
     done: (p) => `Le schéma « ${p.name} » est créé, et coché.`,
   },
   footer: {
@@ -64,7 +62,6 @@ export const schemasEn: Dictionnaire = {
     label: 'Create a schema',
     placeholder: 'schema_name',
     button: 'Create',
-    warning: 'The statement runs on the database right away; DoraBase cannot undo it.',
     done: (p) => `Schema “${p.name}” created, and ticked.`,
   },
   footer: {

@@ -13,15 +13,6 @@ type PendingPanelProps = {
   /** `public.orders`, pour l'en-tête des cartes et le titre. */
   table: string
   /**
-   * Vrai quand l'environnement de la connexion est **marqué production** (`23g`).
-   *
-   * C'était l'identifiant d'environnement, comparé à la chaîne `'prod'`. Un environnement nommé
-   * « live » et marqué production n'avait donc pas l'encart, et un « prod » que l'utilisateur n'avait
-   * pas marqué l'avait — l'exact inverse de ce que `23g` promet. Le drapeau se lit sur la
-   * déclaration, et l'écran reçoit le drapeau plutôt que de le recalculer.
-   */
-  production?: boolean
-  /**
    * Le SQL rendu par le moteur, ou `null` tant qu'il n'est pas revenu.
    *
    * **Jamais fabriqué ici.** Le bloc annonce « SQL qui sera exécuté » : composer un équivalent côté
@@ -66,7 +57,6 @@ type PendingPanelProps = {
 export function PendingPanel({
   attente,
   table,
-  production = false,
   sql,
   erreurSql = null,
   onRetirer,
@@ -258,24 +248,9 @@ export function PendingPanel({
           </section>
         )}
 
-        {production && !apresEcriture && (
-          // Sur l'**environnement déclaré**, jamais sur une devinette à partir du nom de l'hôte :
-          // un serveur nommé `db-prod-replica` peut être une copie de travail, et l'inverse existe.
-          <p className={styles.production}>
-            <Icon name="warn" size={12} strokeWidth={2.2} className={styles.productionIcone} />
-            {/* **Rédigé au présent depuis `11d`, et sans la promesse des 24 h.** `11c` l'annonçait au
-                futur — « demandera une confirmation supplémentaire et gardera le patch inverse
-                pendant 24 h » — parce que rien ne le livrait encore. La confirmation existe
-                maintenant, donc elle se dit au présent ; la conservation du patch, elle, n'existe
-                pas : `A10` en fera une préférence, et l'annoncer avant serait une promesse fausse.
-                C'est le panneau qui dit ce qu'il en est vraiment, sous le patch lui-même. */}
-            <span>
-              {t('tableView.pendingPanel.productionPrefix')}
-              <strong>{t('tableView.pendingPanel.productionWord')}</strong>
-              {t('tableView.pendingPanel.productionSuffix')}
-            </span>
-          </p>
-        )}
+        {/* **L'encart rouge de production est parti** (#168) : une connexion en lecture seule
+            n'a pas de modifications en attente — l'écran n'entre pas en mode édition, et le cœur
+            refuse d'écrire —, donc il n'y a plus rien à annoncer ici. */}
       </div>
 
       <footer className={styles.pied}>

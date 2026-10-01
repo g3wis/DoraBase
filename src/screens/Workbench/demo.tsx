@@ -45,12 +45,21 @@ import { grouperParBoucle, type PasserelleStructures } from './useStructures'
 import { Workbench } from './Workbench'
 
 /**
- * Le décor de la démo, **exactement la migration v6 → v7 du décor d'avant** (#166).
+ * Le décor de la démo, **la migration v6 → v7 du décor d'avant** (#166), **à trois drapeaux près**
+ * (#168).
  *
  * Deux projets v6 — « Atelier Nord », qui déclarait quatre environnements dont deux connexions en
  * `prod`, et « Outils internes », vide — deviennent deux dossiers racine ; leurs environnements, des
- * sous-dossiers dans l'ordre déclaré, couleur reprise, et **`prod` en lecture seule** parce qu'il
- * était marqué production. Les identifiants sont ceux que `migration::v6::vers_v7` dérive des
+ * sous-dossiers dans l'ordre déclaré, couleur reprise, et `prod` en lecture seule parce qu'il était
+ * marqué production.
+ *
+ * **Les trois drapeaux que ce décor ne reprend pas** : la lecture seule d'« Atelier Nord › prod », et
+ * le réglage local de ses deux connexions. La migration exacte les mettait tous trois à vrai, et
+ * depuis #168 la lecture seule **refuse** au lieu de confirmer : les deux seules connexions de la
+ * démo n'auraient plus rien laissé écrire — ni la grille, ni la console, ni une transaction —, alors
+ * que la démo existe pour montrer l'édition. « Outils internes › prod » garde la sienne : c'est le
+ * dossier en lecture seule que l'arbre montre. Le test de bout en bout de #168 pose la lecture seule
+ * par le geste, depuis le menu du dossier — ce qui l'exerce au lieu de la supposer. Les identifiants sont ceux que `migration::v6::vers_v7` dérive des
  * mêmes données (`sha256` des parties jointes par U+001F, seize chiffres hexadécimaux) : un décor
  * qui inventerait les siens ne prouverait rien de la forme que l'application reçoit vraiment.
  *
@@ -64,12 +73,9 @@ const ANALYTICS = 'ba31b549870182d4'
 /** La base documentaire du décor — voir `estMongo`. */
 const EVENEMENTS = '24af7ce4cc310d22'
 
-/**
- * Une connexion du décor, **sans le champ `environment`** que la projection de #164 exige encore :
- * #165 le retire du modèle, et un décor qui l'écrirait cesserait de compiler ce jour-là.
- */
-function declarer(connexion: Omit<Database, 'environment'>): Database {
-  return connexion as Database
+/** Une connexion du décor — l'identité, désormais, sans rien à retirer (#165 a ôté `environment`). */
+function declarer(connexion: Database): Database {
+  return connexion
 }
 
 const ARBRE_DEMO: FolderTree = {
@@ -86,7 +92,7 @@ const ARBRE_DEMO: FolderTree = {
           id: 'e804baad33a1e6d3',
           name: 'prod',
           color: 'red',
-          readOnly: true,
+          readOnly: false,
           connections: [
             declarer({
               id: ANALYTICS,
@@ -117,7 +123,7 @@ const ARBRE_DEMO: FolderTree = {
                 sslMode: 'prefer',
                 caCertificate: null,
                 authDatabase: null,
-                readOnly: true,
+                readOnly: false,
                 reconnectOnStartup: false,
                 tunnel: null,
               },
@@ -139,7 +145,7 @@ const ARBRE_DEMO: FolderTree = {
                 sslMode: 'disable',
                 caCertificate: null,
                 authDatabase: null,
-                readOnly: true,
+                readOnly: false,
                 reconnectOnStartup: false,
                 tunnel: null,
               },

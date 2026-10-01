@@ -12,8 +12,6 @@ type CommitConfirmProps = {
   validation: ValidationADemander
   /** La base visée, pour que la confirmation dise *où* la transaction va s'écrire. */
   cible: string
-  /** Vrai quand l'environnement de la connexion est **marqué production** (`23g`). */
-  production: boolean
   onClose: () => void
   onConfirmer: () => void
   enCours?: boolean
@@ -43,7 +41,6 @@ type CommitConfirmProps = {
 export function CommitConfirm({
   validation,
   cible,
-  production,
   onClose,
   onConfirmer,
   enCours = false,
@@ -78,12 +75,6 @@ export function CommitConfirm({
             <dt>{t('console.commitConfirm.base')}</dt>
             <dd className={styles.mono}>{cible}</dd>
           </div>
-          {production && (
-            <div className={styles.entree}>
-              <dt>{t('console.commitConfirm.environnement')}</dt>
-              <dd className={styles.prod}>{t('console.commitConfirm.production')}</dd>
-            </div>
-          )}
         </dl>
         {/* Ce que DoraBase ne fera pas. Une validation ne se défait par aucun geste du produit : il
             n'y a pas de patch inverse ici, contrairement à `11d`, et le dire est le minimum

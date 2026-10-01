@@ -34,12 +34,16 @@ type SchemaManagerProps = {
    */
   affiches: readonly string[] | null
   /**
-   * L'environnement est-il marqué production ? Le drapeau, **jamais le libellé** (`23g`).
+   * La raison de la lecture seule effective de la connexion, déjà traduite ; `null` quand elle écrit
+   * (#168).
    *
-   * Il n'ajoute pas de confirmation : il ajoute un rappel dans la bande de création, la seule part
-   * de cet écran qui écrive sur la base.
+   * **Elle désactive la bande de création, et elle seule** : `create schema` écrit sur la base, et le
+   * cœur le refuserait. Les schémas affichés restent réglables — c'est une préférence enregistrée
+   * dans la configuration, pas une écriture sur le serveur. Le rappel de production qu'elle remplace
+   * (« DoraBase ne peut pas la défaire ») n'a plus de cible : là où la création est permise, elle
+   * n'est pas davantage protégée par un drapeau, et là où elle ne l'est pas, elle est refusée.
    */
-  production?: boolean
+  lectureSeule?: string | null
   onClose: () => void
   /** Lit les schémas de la connexion — `list_schemas`, catalogue compris et marqué. */
   onLire: () => Promise<SchemaInfo[]>
@@ -82,7 +86,7 @@ type Lecture =
 export function SchemaManager({
   cible,
   affiches,
-  production = false,
+  lectureSeule = null,
   onClose,
   onLire,
   onCreer,
@@ -364,16 +368,17 @@ export function SchemaManager({
       </div>
 
       <div className={styles.creation}>
-        {production && (
-          // Sur un environnement marqué production seulement : ailleurs, la phrase se lirait comme
-          // une mise en garde permanente, et une mise en garde permanente ne se lit plus.
-          <p className={styles.rappel}>{t('schemas.create.warning')}</p>
+        {lectureSeule !== null && (
+          // **Désactivée avec sa raison**, écrite plutôt qu'en infobulle : un champ et un bouton
+          // désactivés ne reçoivent ni survol ni focus, et la raison serait inatteignable.
+          <p className={styles.rappel}>{lectureSeule}</p>
         )}
         <div className={styles.rangeeDeCreation}>
           <Field
             label={t('schemas.create.label')}
             mono
             value={nouveau}
+            disabled={lectureSeule !== null}
             placeholder={t('schemas.create.placeholder')}
             onChange={(evenement) => {
               setNouveau(evenement.target.value)
@@ -390,7 +395,7 @@ export function SchemaManager({
           <Button
             size="lg"
             variant="secondary"
-            disabled={nouveau.trim() === '' || creation.enCours}
+            disabled={lectureSeule !== null || nouveau.trim() === '' || creation.enCours}
             onClick={() => void creer()}
           >
             {t('schemas.create.button')}

@@ -3,7 +3,7 @@ import type { Dictionnaire } from '../types'
 /**
  * `A5`/`A6`, l'écran de visualisation et d'édition de table
  * (`src/screens/TableView/`) : la grille, le panneau de ligne, le panneau des modifications en
- * attente, et la confirmation d'écriture en production.
+ * attente.
  */
 export const tableViewFr: Dictionnaire = {
   toolbar: {
@@ -54,23 +54,6 @@ export const tableViewFr: Dictionnaire = {
   editableCell: {
     newValue: 'Nouvelle valeur',
   },
-  applyConfirm: {
-    title: 'Écrire en production',
-    alertPrefix: 'Cette base est déclarée en ',
-    alertProduction: 'production',
-    alertSuffix: '.',
-    table: 'Table',
-    rowsLabel: (p) => (p.count === 1 ? 'Ligne' : 'Lignes'),
-    columnsLabel: (p) => (p.count === 1 ? 'Colonne' : 'Colonnes'),
-    instructions: 'Instructions',
-    transactionSuffix: (p) => `${p.resume}, en une transaction`,
-    and: ' et ',
-    patchNote:
-      'Après l’écriture, DoraBase affichera le SQL qui l’annule. Il reste disponible tant que cet onglet est ouvert.',
-    cancel: 'Annuler',
-    writing: 'Écriture…',
-    confirm: 'Écrire en production',
-  },
   pendingPanel: {
     ariaLabel: 'Modifications en attente de la table',
     writtenTitle: 'Écriture appliquée',
@@ -88,10 +71,6 @@ export const tableViewFr: Dictionnaire = {
     preparingQuery: 'Le moteur prépare la requête…',
     undoSql: 'SQL qui annule cette écriture',
     undoSqlNote: 'Disponible tant que cet onglet est ouvert. DoraBase ne l’a pas enregistré.',
-    productionPrefix: 'Cette base est en ',
-    productionWord: 'production',
-    productionSuffix:
-      '. DoraBase demande une confirmation avant d’écrire, et affiche ensuite le SQL qui annule l’écriture.',
     close: 'Fermer',
     cancelAll: 'Tout annuler',
     applyDisabledReason: 'L’écriture dans la base n’est pas encore branchée : rien ne peut partir.',
@@ -131,6 +110,9 @@ export const tableViewFr: Dictionnaire = {
     noRead: 'Aucune lecture',
     editingNoChange: 'édition — aucune modification',
     readOnlyHint: (p) => `lecture seule — ${p.raccourci} pour éditer`,
+    // La lecture seule effective (#168) : la barre dit pourquoi au lieu d'inviter à `⌘E`.
+    readOnlyImposed: (p) => `lecture seule — imposée par le dossier « ${p.dossier} »`,
+    readOnlyLocal: 'lecture seule — réglée sur la connexion',
   },
   grid: {
     removeNewRow: (p) => `Retirer la nouvelle ligne ${p.rang}`,
@@ -274,23 +256,6 @@ export const tableViewEn: Dictionnaire = {
   editableCell: {
     newValue: 'New value',
   },
-  applyConfirm: {
-    title: 'Write to production',
-    alertPrefix: 'This database is declared as ',
-    alertProduction: 'production',
-    alertSuffix: '.',
-    table: 'Table',
-    rowsLabel: (p) => (p.count === 1 ? 'Row' : 'Rows'),
-    columnsLabel: (p) => (p.count === 1 ? 'Column' : 'Columns'),
-    instructions: 'Statements',
-    transactionSuffix: (p) => `${p.resume}, in a single transaction`,
-    and: ' and ',
-    patchNote:
-      'After the write, DoraBase will display the SQL that undoes it. It stays available as long as this tab is open.',
-    cancel: 'Cancel',
-    writing: 'Writing…',
-    confirm: 'Write to production',
-  },
   pendingPanel: {
     ariaLabel: 'Pending changes for the table',
     writtenTitle: 'Write applied',
@@ -308,10 +273,6 @@ export const tableViewEn: Dictionnaire = {
     preparingQuery: 'The engine is preparing the query…',
     undoSql: 'SQL that undoes this write',
     undoSqlNote: 'Available as long as this tab is open. DoraBase has not saved it.',
-    productionPrefix: 'This database is in ',
-    productionWord: 'production',
-    productionSuffix:
-      '. DoraBase asks for confirmation before writing, and then shows the SQL that undoes the write.',
     close: 'Close',
     cancelAll: 'Cancel all',
     applyDisabledReason: 'Writing to the database is not wired up yet: nothing can go out.',
@@ -349,6 +310,8 @@ export const tableViewEn: Dictionnaire = {
     noRead: 'No read yet',
     editingNoChange: 'editing — no changes',
     readOnlyHint: (p) => `read-only — ${p.raccourci} to edit`,
+    readOnlyImposed: (p) => `read-only — imposed by the “${p.dossier}” folder`,
+    readOnlyLocal: 'read-only — set on the connection',
   },
   grid: {
     removeNewRow: (p) => `Remove the new row ${p.rang}`,

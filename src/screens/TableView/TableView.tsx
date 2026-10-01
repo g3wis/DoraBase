@@ -177,6 +177,8 @@ type TableViewProps = {
    * reçoit.
    */
   onBasculerEdition?: () => void
+  /** La raison de la lecture seule effective, quand elle interdit l'édition (#168) — voir `Toolbar`. */
+  lectureSeule?: string | null
   /**
    * Les modifications en attente, **détenues par l'écran** (`11b`).
    *
@@ -306,6 +308,7 @@ export function TableView({
   onRangChange,
   edition = false,
   onBasculerEdition,
+  lectureSeule = null,
   rafraichissement = 0,
   onRelireLaStructure,
   structureEnCours = false,
@@ -1241,6 +1244,7 @@ export function TableView({
         sql={fenetre?.sql ?? null}
         edition={edition}
         onBasculerEdition={onBasculerEdition}
+        lectureSeule={lectureSeule}
         // **Le `+` s'adapte au moteur, il ne s'ajoute pas.** Sur MongoDB, poser une ligne vide
         // éditée cellule par cellule n'a pas de sens sans colonnes déclarées : le geste ouvre
         // directement l'éditeur JSON (`18g`), qui compose le document entier d'un coup.

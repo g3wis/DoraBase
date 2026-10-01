@@ -81,16 +81,6 @@
   color: var(--ink-meta);
 }
 
-/* L'environnement, quand c'est la production : la même encre que l'alerte, sans son fond — le fait
- * compte, mais il ne doit pas concurrencer l'absence de `WHERE`, qui est plus grave. */
-.prod {
-  color: var(--danger-ink);
-  font-weight: var(--weight-bold);
-  text-transform: uppercase;
-  font-size: var(--text-caps-sm);
-  letter-spacing: var(--tracking-caps-sm);
-}
-
 .pied {
   display: flex;
   align-items: center;

@@ -1,4 +1,12 @@
-import type { ConnectionId, Database, Folder, FolderId, FolderTree } from '../domain/config'
+import type {
+  ConnectionId,
+  Database,
+  EffectiveReadOnly,
+  Engine,
+  Folder,
+  FolderId,
+  FolderTree,
+} from '../domain/config'
 
 /**
  * L'arbre de dossiers (#166), lu par l'écran : des fonctions **pures**, sans IPC.
@@ -21,14 +29,12 @@ export const ARBRE_VIDE: FolderTree = Object.freeze({
 }) as unknown as FolderTree
 
 /**
- * L'identifiant d'une connexion.
- *
- * **Transitoire** : la projection de #164 le déclare encore facultatif (`id?`), parce que la chaîne
- * de chargement lit des fichiers v6 qui n'en portent pas. #165 le rend obligatoire ; ce détour
- * devient alors un simple accès, et il est le seul endroit du front qui ait à le savoir.
+ * L'identifiant d'une connexion — obligatoire depuis #165, donc un simple accès. La fonction reste
+ * parce que tout le front la lit par là : c'est le seul endroit qui dise que l'identité d'une
+ * connexion est son `id`, jamais son nom.
  */
 export function idDeConnexion(base: Database): ConnectionId {
-  return base.id ?? ''
+  return base.id
 }
 
 /** Vrai quand l'arbre ne porte rien — l'écran d'accueil prend alors la place de l'écran de travail. */
@@ -97,24 +103,100 @@ export function cheminDe(arbre: FolderTree, id: ConnectionId): string[] {
  *
  * C'est la raison que l'entrée « Passer en lecture seule » donne quand elle est désactivée : un
  * ancêtre en lecture seule l'impose à tous ses descendants (#108), donc le réglage local d'un
- * sous-dossier n'y changerait rien.
+ * sous-dossier n'y changerait rien. C'est aussi celui que nomment la case figée d'`A2`, la barre
+ * d'état de la grille et le refus de la console — le premier de `EffectiveReadOnly.folders`.
  */
 export function ancetreEnLectureSeule(ancetres: readonly Folder[]): Folder | null {
   return ancetres.find((ancetre) => ancetre.readOnly) ?? null
 }
 
 /**
- * Vrai quand un dossier contenant cette connexion est en lecture seule.
+ * La lecture seule **effective** d'une connexion (#168) — le miroir exact de
+ * `FolderTree::lecture_seule_effective`, que les commandes qui écrivent consultent côté cœur.
  *
- * **La lecture la plus simple de la lecture seule effective**, et elle ne remplace pas celle de
- * #168 : elle tient lieu, en attendant, du drapeau `production` que les environnements portaient.
- * Le décor migré marque justement `prod` en lecture seule, donc les garde-fous qui s'allumaient sur
- * « prod » s'allument toujours au même endroit.
+ * **Imposée** si un ancêtre au moins la déclare — tous les ancêtres, pas le seul parent —, les
+ * dossiers allant du plus extérieur au plus proche ; **locale** sinon, le réglage de la connexion
+ * décidant seul. `null` pour une connexion que l'arbre ne porte pas.
+ *
+ * **Une règle, deux côtés du pont** (règle n° 20) : l'écran s'en sert pour désactiver ce que le cœur
+ * refuserait — ⌘E, la case d'`A2`, la console —, et la fixture partagée
+ * `src-tauri/tests/fixtures/lecture-seule.json` est lue par les deux implémentations, qui doivent
+ * rendre la même chose.
  */
-export function imposeeParUnDossier(arbre: FolderTree, id: ConnectionId): boolean {
+export function lectureSeuleEffective(
+  arbre: FolderTree,
+  id: ConnectionId,
+): EffectiveReadOnly | null {
   const situee = connexion(arbre, id)
-  return situee !== null && ancetreEnLectureSeule(situee.ancetres) !== null
+  if (situee === null) return null
+  return lectureSeuleSituee(situee)
 }
+
+/** La même règle sur une connexion déjà située — pour qui a déjà ses ancêtres sous la main. */
+export function lectureSeuleSituee(situee: ConnexionSituee): EffectiveReadOnly {
+  const folders = situee.ancetres.filter((ancetre) => ancetre.readOnly).map((a) => a.id)
+  return folders.length > 0
+    ? { kind: 'imposed', folders }
+    : { kind: 'local', readOnly: situee.base.connection.readOnly }
+}
+
+/** Vrai quand la connexion est en lecture seule, quelle qu'en soit la cause. */
+export function estEnLectureSeule(lecture: EffectiveReadOnly | null): boolean {
+  if (lecture === null) return false
+  return lecture.kind === 'imposed' || lecture.readOnly
+}
+
+/**
+ * Le nom du dossier qui impose la lecture seule — le plus extérieur, celui qu'il faut aller lever —,
+ * ou `null` quand elle n'est pas imposée. C'est ce que nomment la case figée d'`A2`, la barre d'état
+ * de la grille, le bouton du mode édition et le refus de la console.
+ */
+export function dossierQuiImpose(
+  arbre: FolderTree,
+  lecture: EffectiveReadOnly | null,
+): string | null {
+  if (lecture?.kind !== 'imposed') return null
+  const premier = lecture.folders[0]
+  return (premier === undefined ? null : dossier(arbre, premier)?.dossier.name) ?? null
+}
+
+/**
+ * La raison d'une lecture seule effective, **déjà traduite** — ou `null` quand la connexion écrit.
+ *
+ * Une seule phrase pour tous les endroits qui refusent ou figent (#168) : le bouton du mode édition,
+ * le gestionnaire de schémas, le refus de la console. Elle nomme **où** la lever — le dossier, ou le
+ * réglage de la connexion —, parce qu'un refus qui ne dit pas quoi faire se lit comme une panne.
+ */
+export function raisonDeLaLectureSeule(
+  t: (cle: string, parametres?: Record<string, string | number>) => string,
+  arbre: FolderTree,
+  lecture: EffectiveReadOnly | null,
+  moteur?: Engine,
+): string | null {
+  if (!estEnLectureSeule(lecture)) return null
+  const nom = dossierQuiImpose(arbre, lecture)
+  const raison =
+    nom === null
+      ? t('shell.lectureSeule.locale')
+      : t('shell.lectureSeule.imposee', { dossier: nom })
+  // **Deux moteurs n'ont pas de session en lecture seule**, et cela se dit plutôt que se découvre :
+  // MongoDB n'a pas d'équivalent à `SET SESSION … READ ONLY`, BigQuery exécute chaque requête comme
+  // un job indépendant. Le refus y est celui de DoraBase seul — l'écran et le cœur —, pas du serveur.
+  return moteur !== undefined && !MOTEURS_A_SESSION_EN_LECTURE_SEULE.has(moteur)
+    ? `${raison} ${t('shell.lectureSeule.sansSession')}`
+    : raison
+}
+
+/**
+ * Les moteurs dont l'adaptateur met la **session** en lecture seule (#168) : `SET SESSION
+ * CHARACTERISTICS AS TRANSACTION READ ONLY`, `SET SESSION TRANSACTION READ ONLY`, `PRAGMA
+ * query_only`. Le miroir des trois `connect_via` qui la posent côté cœur.
+ */
+const MOTEURS_A_SESSION_EN_LECTURE_SEULE: ReadonlySet<Engine> = new Set([
+  'postgresql',
+  'mysql',
+  'sqlite',
+])
 
 /** Le dossier coloré le plus proche parmi ces ancêtres — la pastille de la barre de titre. */
 export function couleurLaPlusProche(ancetres: readonly Folder[]): Folder['color'] {

@@ -251,28 +251,6 @@
   color: var(--ink-meta);
 }
 
-/* L'encart de production : rouge, et rédigé au futur — les deux garde-fous qu'il annonce arrivent
- * avec `11d`. Le dire au présent avant qu'ils existent serait une promesse fausse. */
-.production {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-4);
-  margin: 0;
-  padding: var(--space-5);
-  border-radius: var(--radius-control-2);
-  background: var(--danger-bg);
-  font-family: var(--font-ui);
-  font-size: var(--text-label);
-  font-weight: var(--weight-medium);
-  line-height: 1.45;
-  color: var(--danger-ink);
-}
-
-.productionIcone {
-  flex: none;
-  margin-top: 1px;
-}
-
 .pied {
   display: flex;
   align-items: center;

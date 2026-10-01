@@ -43,7 +43,9 @@ const variante = {
   sslMode: 'prefer' as const,
   caCertificate: null,
   authDatabase: null,
-  readOnly: true,
+  // **Inscriptible localement** (#168) : la lecture seule effective refuse désormais l'édition et
+  // l'écriture, et ce décor mesure l'écran qui écrit. Les tests de la lecture seule posent la leur.
+  readOnly: false,
   reconnectOnStartup: false,
   tunnel: null,
 }
@@ -52,12 +54,17 @@ const ANALYTICS = 'c0000000000000a1'
 const SHOP = 'c0000000000000a2'
 
 /**
- * **Les deux connexions sont dans `prod`**, sous-dossier en lecture seule du décor migré : le décor
- * mesure les onglets, la grille et les consoles, pas l'imbrication — `arbre.test.ts` s'en charge.
+ * **Les deux connexions sont dans `prod`** : le décor mesure les onglets, la grille et les consoles,
+ * pas l'imbrication — `arbre.test.ts` s'en charge. **`prod` y est levé** (#168) : la lecture seule
+ * refuse désormais l'édition et l'écriture, que ce décor mesure. `PROJETS_EN_LECTURE_SEULE` la pose.
  */
-const PROJETS: FolderTree = arbreDeTest(
+const PROJETS_EN_LECTURE_SEULE: FolderTree = arbreDeTest(
   trioDeTest({ prod: [connexionDeTest(ANALYTICS, 'analytics'), connexionDeTest(SHOP, 'shop')] }),
 )
+const PROJETS: FolderTree = surDossier(PROJETS_EN_LECTURE_SEULE, ID_DE_TEST.prod, (dossier) => ({
+  ...dossier,
+  readOnly: false,
+}))
 
 const SCHEMAS: SchemaInfo[] = [
   {
@@ -274,10 +281,7 @@ function avecConsole(nom: string, sql: string): FolderTree {
   return surConnexion(PROJETS, ANALYTICS, (base) => ({ ...base, consoles: [{ name: nom, sql }] }))
 }
 
-/**
- * Les connexions **déménagent en `dev`** : l'arbre les liste sous ce sous-dossier, et `dev` n'étant
- * pas en lecture seule, l'écriture n'ouvre pas de confirmation.
- */
+/** Les connexions **déménagent en `dev`** : l'arbre les liste sous ce sous-dossier. */
 const PROJETS_DEV: FolderTree = arbreDeTest(
   trioDeTest({
     dev: [
@@ -374,6 +378,13 @@ function monter(over: Partial<Parameters<typeof Workbench>[0]> = {}) {
            l'écran suit pour redessiner, et sans lui aucune écriture de configuration ne serait
            observable ici. Avant `{...over}`, donc un test peut le remplacer par un espion. */
         onArbre={setProjets}
+        // La lecture seule d'un dossier, appliquée à l'état comme le ferait `set_folder_read_only`
+        // (#168) : c'est ce qui laisse un test la poser ou la lever au milieu d'un parcours.
+        onSetFolderReadOnly={async (folder, readOnly) => {
+          setProjets((precedents) =>
+            surDossier(precedents, folder, (dossier) => ({ ...dossier, readOnly })),
+          )
+        }}
         {...over}
       />
     )
@@ -1056,6 +1067,28 @@ describe('la console SQL (`12a`)', () => {
     expect(confirmation).toHaveTextContent('toutes les lignes')
 
     await utilisateur.click(screen.getByRole('button', { name: /Exécuter ce DELETE/ }))
+    await waitFor(() => expect(executer).toHaveBeenCalledOnce())
+  })
+
+  it('sous un dossier en lecture seule, un `delete` est refusé sans ouvrir la modale (#168)', async () => {
+    const utilisateur = userEvent.setup()
+    const executer = vi.fn(async () => RESULTAT)
+    monter({ arbre: PROJETS_EN_LECTURE_SEULE, passerelleExecution: { runSql: executer } })
+    await ouvrirUneConsole(utilisateur)
+    await saisir(utilisateur, 'delete from orders')
+    await utilisateur.click(screen.getByRole('button', { name: /Exécuter/ }))
+
+    // **Ni modale, ni envoi** : demander « êtes-vous sûr ? » pour un geste qui ne peut pas aboutir
+    // serait une question pour rien.
+    expect(screen.queryByRole('dialog', { name: 'Écrire dans la base' })).not.toBeInTheDocument()
+    expect(executer).not.toHaveBeenCalled()
+    // Le refus s'affiche dans la grille, comme une erreur, avec sa raison.
+    expect(await screen.findByText(/DELETE refusé avant l’envoi/)).toHaveTextContent(
+      'imposée par le dossier « prod »',
+    )
+    // Contrôle positif : une lecture part.
+    await saisir(utilisateur, 'select * from orders')
+    await utilisateur.click(screen.getByRole('button', { name: /Exécuter/ }))
     await waitFor(() => expect(executer).toHaveBeenCalledOnce())
   })
 
@@ -1899,7 +1932,7 @@ describe('mode édition', () => {
     expect(screen.queryByLabelText('Modifications en attente de la table')).not.toBeInTheDocument()
   })
 
-  it('hors production, « Appliquer » écrit sans confirmation intermédiaire', async () => {
+  it('« Appliquer » écrit sans confirmation intermédiaire', async () => {
     const utilisateur = userEvent.setup()
     const ecrire = vi.fn(async () => ({ applied: 1, inverseSql: 'BEGIN;\nUPDATE …;\nCOMMIT;' }))
     monter({
@@ -2065,45 +2098,83 @@ describe('mode édition', () => {
     expect(screen.getByLabelText('Modifications en attente de la table')).toBeInTheDocument()
   })
 
-  it('en production, « Appliquer » demande une confirmation et n’écrit pas encore', async () => {
+  it('sous un dossier en lecture seule, ⌘E n’ouvre pas l’édition et la barre dit pourquoi (#168)', async () => {
     const utilisateur = userEvent.setup()
-    const ecrire = vi.fn(async () => ({ applied: 1, inverseSql: '' }))
-    // Le décor par défaut est en `prod` : c'est le cas qui compte ici.
-    monter({ passerellePreview: PREVIEW, passerelleApply: { applyChanges: ecrire } })
+    // **`prod` impose la lecture seule, et la connexion est inscriptible localement** : c'est le
+    // dossier qui décide, jamais le réglage de la connexion seul.
+    monter({ arbre: PROJETS_EN_LECTURE_SEULE })
     await ouvrirEtEditer(utilisateur)
-    await modifier(utilisateur)
 
-    const panneau = await screen.findByLabelText('Modifications en attente de la table')
-    await utilisateur.click(within(panneau).getByRole('button', { name: /Appliquer/ }))
-
-    // **Rien n'est parti.** C'est le garde-fou central de `11d`, et aucun test ne le couvrait : le
-    // désactiver laissait la suite entièrement verte.
-    expect(ecrire).not.toHaveBeenCalled()
-    const confirmation = screen.getByRole('dialog', { name: 'Écrire en production' })
-    // Elle **récapitule** au lieu de demander « êtes-vous sûr ? » : c'est ce qui permet de
-    // s'apercevoir qu'on s'est trompé de table, ou qu'on touche vingt lignes au lieu d'une.
-    expect(confirmation).toHaveTextContent('public.orders')
-    expect(confirmation).toHaveTextContent('status')
-    expect(confirmation).toHaveTextContent('1 UPDATE')
+    // ⌘E n'a rien ouvert : aucune cellule modifiable.
+    expect(screen.queryAllByRole('button', { name: 'Modifier status' })).toHaveLength(0)
+    expect(screen.getByRole('status', { name: 'État de la table' })).toHaveTextContent(
+      'lecture seule — imposée par le dossier « prod »',
+    )
+    // Et la barre n'invite plus à un ⌘E qui ne répondrait pas.
+    expect(screen.getByRole('status', { name: 'État de la table' })).not.toHaveTextContent(
+      'pour éditer',
+    )
+    // La bascule est figée **avec sa raison**, en `aria-disabled` : un clic ne fait rien non plus.
+    const bascule = screen.getByRole('switch', { name: 'Verrouiller la table' })
+    expect(bascule).toHaveAttribute('aria-disabled', 'true')
+    expect(bascule).toHaveAttribute('aria-checked', 'true')
+    await utilisateur.click(bascule)
+    expect(screen.queryAllByRole('button', { name: 'Modifier status' })).toHaveLength(0)
+    await utilisateur.hover(bascule)
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(
+      'imposée par le dossier « prod » : levez-la sur ce dossier',
+    )
   })
 
-  it('la confirmation de production écrit, et l’annuler n’écrit rien', async () => {
+  it('un ⌘E refusé ne se rejoue pas quand la lecture seule est levée (#168)', async () => {
+    // **Les deux gardes, et pourquoi il en faut deux** : l'onglet n'entre pas en édition (première)
+    // et le geste n'est pas retenu (seconde). Sans la seconde, le ⌘E pressé en vain resterait en
+    // mémoire, et lever la lecture seule ferait basculer l'onglet en édition sans qu'on l'ait
+    // demandé à ce moment-là. Le décor part inscriptible et la lecture seule se pose au menu : le
+    // harnais ne repose que l'arbre qu'il tient lui-même.
     const utilisateur = userEvent.setup()
-    const ecrire = vi.fn(async () => ({ applied: 1, inverseSql: '' }))
-    monter({ passerellePreview: PREVIEW, passerelleApply: { applyChanges: ecrire } })
+    monter()
+    await ouvrirLArbreJusquAuSchema(utilisateur)
+    await utilisateur.click(await screen.findByRole('treeitem', { name: /^orders/ }))
+    await screen.findByRole('grid')
+    await utilisateur.click(screen.getByRole('button', { name: /^Actions de prod/ }))
+    await utilisateur.click(screen.getByRole('button', { name: 'Passer en lecture seule' }))
+    await utilisateur.keyboard(auModificateur('e'))
+    expect(screen.queryAllByRole('button', { name: 'Modifier status' })).toHaveLength(0)
+
+    await utilisateur.click(screen.getByRole('button', { name: /^Actions de prod/ }))
+    await utilisateur.click(screen.getByRole('button', { name: 'Lever la lecture seule' }))
+    await waitFor(() =>
+      expect(screen.getByRole('status', { name: 'État de la table' })).toHaveTextContent(
+        `${raccourci('E')} pour éditer`,
+      ),
+    )
+    expect(screen.queryAllByRole('button', { name: 'Modifier status' })).toHaveLength(0)
+  })
+
+  it('passer le dossier en lecture seule fait sortir l’onglet de l’édition (#168)', async () => {
+    const utilisateur = userEvent.setup()
+    monter()
     await ouvrirEtEditer(utilisateur)
-    await modifier(utilisateur)
-    const panneau = await screen.findByLabelText('Modifications en attente de la table')
+    expect(await screen.findAllByRole('button', { name: 'Modifier status' })).not.toHaveLength(0)
 
-    await utilisateur.click(within(panneau).getByRole('button', { name: /Appliquer/ }))
-    await utilisateur.click(screen.getByRole('button', { name: 'Annuler' }))
-    expect(ecrire).not.toHaveBeenCalled()
-    // Les modifications survivent au renoncement : rien n'a été écrit, rien n'a été perdu.
-    expect(screen.getByLabelText('Modifications en attente de la table')).toBeInTheDocument()
+    await utilisateur.click(screen.getByRole('button', { name: /^Actions de prod/ }))
+    await utilisateur.click(screen.getByRole('button', { name: 'Passer en lecture seule' }))
+    await waitFor(() =>
+      expect(screen.queryAllByRole('button', { name: 'Modifier status' })).toHaveLength(0),
+    )
+    expect(screen.getByRole('status', { name: 'État de la table' })).toHaveTextContent(
+      'imposée par le dossier « prod »',
+    )
+  })
 
-    await utilisateur.click(within(panneau).getByRole('button', { name: /Appliquer/ }))
-    await utilisateur.click(screen.getByRole('button', { name: 'Écrire en production' }))
-    await waitFor(() => expect(ecrire).toHaveBeenCalledOnce())
+  it('lever la lecture seule du dossier rend l’édition, sans rien d’autre à faire (#168)', async () => {
+    // Le contrôle positif du précédent : le même décor, dossier levé, ouvre l'édition — sans quoi un
+    // écran qui refuserait toujours passerait.
+    const utilisateur = userEvent.setup()
+    monter({ arbre: PROJETS })
+    await ouvrirEtEditer(utilisateur)
+    expect(await screen.findAllByRole('button', { name: 'Modifier status' })).not.toHaveLength(0)
   })
 
   it('⌘E bascule, et le rappel de la barre d’état suit', async () => {

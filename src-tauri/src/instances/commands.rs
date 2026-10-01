@@ -156,11 +156,18 @@ pub async fn open_instance(
         None => None,
     };
 
+    // **Jamais en lecture seule** (#168) : une instance managée existe pour écrire — des rôles, des
+    // bases —, et c'est son drapeau `production` qui la protège, par la confirmation qui montre le
+    // SQL. L'adaptateur pose la lecture seule de session quand la variante la porte ; celle d'une
+    // instance ne doit pas la porter, quoi que le fichier contienne.
+    let mut reglages = instance.connection.clone();
+    reglages.read_only = false;
+
     registry
         .ouvrir(
             &cle,
             instance.engine,
-            &instance.connection,
+            &reglages,
             secret.as_ref(),
             &crate::engine::commands::contexte_de_proxy(&app),
         )

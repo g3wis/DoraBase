@@ -207,8 +207,8 @@ export function NewConnection({
   // La sous-modale de `A3` se ferme sans effacer l'échec : le pied garde son message et
   // « Retester », ce que le handoff montre explicitement.
   const [echecOuvert, setEchecOuvert] = useState(false)
-  // Le rappel d'un mode SSL non authentifiant en production (#87) : ouvert par un enregistrement qui
-  // le demande, fermé par « Revenir » ou par la confirmation, qui enregistre.
+  // Le rappel d'un mode SSL non authentifiant sur une cible sensible (#87, #168) : ouvert par un
+  // enregistrement qui le demande, fermé par « Revenir » ou par la confirmation, qui enregistre.
   const [confirmationTlsOuverte, setConfirmationTlsOuverte] = useState(false)
   const [enregistrement, setEnregistrement] = useState<
     { phase: 'jamais' } | { phase: 'en-cours' } | { phase: 'refuse'; message: string }
@@ -306,14 +306,18 @@ export function NewConnection({
   const enregistrementBloque = test.phase === 'echoue' || enregistrement.phase === 'en-cours'
 
   /**
-   * Le dossier qui impose la lecture seule au cadre, s'il y en a un — ce qui tient lieu, en attendant
-   * #168, du drapeau `production` que l'environnement portait pour le rappel TLS de #87.
+   * Le dossier qui **impose** la lecture seule au cadre, s'il y en a un (#168) — le plus extérieur.
+   *
+   * Il fige la case « Lecture seule », et c'est le seul marqueur de cible sensible qui subsiste pour
+   * le rappel TLS de #87 : le risque qu'il couvre — un intermédiaire qui lit le mot de passe — existe
+   * même en lecture seule. **Le réglage local n'y est pas branché**, et c'est délibéré : un brouillon
+   * neuf naît `readOnly: true`, donc le rappel se déclencherait sur presque toutes les connexions.
    */
   const dossierEnLectureSeule = ancetreEnLectureSeule(cadre)
 
   /**
-   * Enregistre — après le rappel de #87 quand la cible est marquée production et que le mode ne
-   * vérifie pas le serveur. `confirme` n'est passé que par ce rappel : le bouton du pied et `⌘↩`
+   * Enregistre — après le rappel de #87 quand un dossier du cadre impose la lecture seule et que le
+   * mode ne vérifie pas le serveur. `confirme` n'est passé que par ce rappel : le bouton du pied et `⌘↩`
    * passent toujours par la question, y compris en édition, puisque c'est bien ce mode-là qui partira.
    */
   async function enregistrer(confirme = false) {
@@ -496,7 +500,11 @@ export function NewConnection({
         onDeclareKubeconfig={onDeclareKubeconfig}
         {...(catalogueKubernetes === undefined ? {} : { catalogueKubernetes })}
       />
-      <ConnectionForm draft={draft} onChange={patch} />
+      <ConnectionForm
+        draft={draft}
+        onChange={patch}
+        lectureSeuleImposee={dossierEnLectureSeule?.name ?? null}
+      />
 
       {confirmationTlsOuverte &&
         draft.sslMode !== 'verify-ca' &&
