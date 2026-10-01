@@ -78,7 +78,12 @@ async function choisirLeMode(mode: string) {
 }
 
 const enregistrerA2 = () => screen.getByRole('button', { name: /Enregistrer & ouvrir/ })
-const rappel = () => screen.queryByRole('dialog', { name: 'Mode SSL non vérifié en production' })
+/**
+ * **Un seul titre pour les deux appelants, et il nomme le risque** (#173) : un dossier en lecture
+ * seule n'est pas forcément de production. Le chercher par ce nom, des deux côtés, est ce qui garde
+ * qu'aucun appelant ne revienne à un titre à lui.
+ */
+const rappel = () => screen.queryByRole('dialog', { name: 'Le serveur ne sera pas authentifié' })
 
 test('en prod, un mode non authentifiant passe par un rappel qui le nomme', async () => {
   const requetes = monterA2(ID_DE_TEST.prod)
@@ -90,6 +95,10 @@ test('en prod, un mode non authentifiant passe par un rappel qui le nomme', asyn
   expect(dialogue).not.toBeNull()
   // Le rappel nomme la cible par son libellé et le mode — deux fois : dans le corps et sur le bouton.
   expect(dialogue).toHaveTextContent('Le dossier « prod » est en lecture seule.')
+  // **Rien ne dit « production »** sous un dossier en lecture seule (#173) : ni le titre, ni le
+  // badge, qui suit la cible.
+  expect(dialogue).toHaveTextContent('LECTURE SEULE')
+  expect(dialogue).not.toHaveTextContent(/PROD|production/)
   expect(dialogue).toHaveTextContent('Le mode « prefer »')
   expect(dialogue).toHaveTextContent('repasse en clair')
   // Rien n'est parti tant qu'on n'a pas confirmé.
@@ -175,6 +184,8 @@ test('une instance de production en mode non authentifiant passe par le rappel',
   await userEvent.click(screen.getByRole('button', { name: 'Enregistrer & ouvrir' }))
 
   expect(rappel()).toHaveTextContent('Cette instance est marquée production.')
+  expect(rappel()).toHaveTextContent('PROD')
+  expect(rappel()).not.toHaveTextContent('LECTURE SEULE')
   expect(rappel()).toHaveTextContent('Rien n’est chiffré.')
   expect(requetes).toHaveLength(0)
 
@@ -192,4 +203,38 @@ test('une instance hors production enregistre sans question', async () => {
 
   await waitFor(() => expect(requetes).toHaveLength(1))
   expect(rappel()).toBeNull()
+})
+
+// --- Les deux langues ---
+
+test('en anglais aussi, le titre nomme le risque et le corps la cible (#173)', async () => {
+  render(
+    <>
+      <Sprite />
+      <LanguageProvider preferences={{ language: 'en' }}>
+        <NewConnection
+          onClose={() => {}}
+          arbre={ARBRE}
+          dossier={ID_DE_TEST.prod}
+          onBrowseKey={async () => null}
+          onTest={async () => {
+            throw new Error('non employé')
+          }}
+          onSave={async () => ({ tree: ARBRE, connection: 'c-neuve' })}
+        />
+      </LanguageProvider>
+    </>,
+  )
+  await userEvent.click(screen.getByRole('combobox', { name: 'SSL mode' }))
+  await userEvent.click(
+    within(screen.getByRole('listbox', { name: 'SSL mode' })).getByRole('option', {
+      name: 'require',
+    }),
+  )
+  await userEvent.click(screen.getByRole('button', { name: /Save & open/ }))
+
+  const dialogue = screen.getByRole('dialog', { name: 'The server will not be authenticated' })
+  expect(dialogue).toHaveTextContent('The “prod” folder is read-only.')
+  expect(dialogue).toHaveTextContent('READ-ONLY')
+  expect(dialogue).not.toHaveTextContent(/PROD|production/)
 })

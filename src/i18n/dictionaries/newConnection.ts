@@ -112,8 +112,11 @@ export const newConnectionFr: Dictionnaire = {
     root: 'Racine',
   },
   tlsConfirm: {
-    title: 'Mode SSL non vérifié en production',
-    badge: 'PROD',
+    title: 'Le serveur ne sera pas authentifié',
+    badge: {
+      instance: 'PROD',
+      folder: 'LECTURE SEULE',
+    },
     folder: (p) => `Le dossier « ${p.name} » est en lecture seule.`,
     instance: 'Cette instance est marquée production.',
     body: (p) =>
@@ -239,8 +242,11 @@ export const newConnectionEn: Dictionnaire = {
     root: 'Root',
   },
   tlsConfirm: {
-    title: 'Unverified SSL mode in production',
-    badge: 'PROD',
+    title: 'The server will not be authenticated',
+    badge: {
+      instance: 'PROD',
+      folder: 'READ-ONLY',
+    },
     folder: (p) => `The “${p.name}” folder is read-only.`,
     instance: 'This instance is marked production.',
     body: (p) =>

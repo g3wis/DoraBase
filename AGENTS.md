@@ -4824,8 +4824,15 @@ désormais le seul mode qui authentifie le serveur, et **desserrer devient un ge
   connexions et cesserait de dire quoi que ce soit. Le rappel vaut aussi en **édition** : c'est bien
   ce mode-là qui partira. Ce n'est pas un refus — un serveur interne sans autorité publique est un cas
   légitime —, c'est un geste qu'on fait en le nommant, sur le patron du rappel de `SqlConfirm` des
-  instances. **Son titre dit encore « en production »**, partagé avec les instances : voir « Ce qui
-  attend une décision humaine » ;
+  instances. **Son titre nomme le risque, son corps la cible** (1er octobre 2026, #173, tranché par
+  le demandeur) : « Le serveur ne sera pas authentifié », le même pour les deux appelants et vrai des
+  quatre modes. Il disait « Mode SSL non vérifié en production », ce qui était faux sous un dossier en
+  lecture seule, qui n'est pas forcément de production. Un titre par appelant a été écarté — deux
+  phrases à tenir en phase pour une seule question. Le corps nomme la cible (« Cette instance est
+  marquée production. », « Le dossier « X » est en lecture seule. »), et le **badge** suit elle aussi :
+  « PROD » pour l'instance, « LECTURE SEULE » pour le dossier — le badge fixe redisait l'erreur du
+  titre à côté du corps. Le composant reçoit donc la **cible** (`CibleSensible`) et non plus une phrase
+  déjà composée ;
 - **`onClick={enregistrer}` est interdit sur ces deux boutons** : `enregistrer` prend désormais un
   `confirme`, et l'événement de clic, qui est vrai, y sauterait le rappel. Un sabotage le garde.
 
@@ -6626,11 +6633,6 @@ Aucun de ces points ne bloque le code en place.
   descendants, sans exception » ; et elle garde son propre drapeau `production`, que l'arbre a
   justement retiré aux connexions. Ranger sans hériter, c'est un palier de l'arbre qui ne suit pas la
   règle des autres.
-- **Le titre de `ConfirmationTls` dit « en production »** pour les deux cibles qu'il sert : une
-  instance marquée production, et depuis #168 une connexion sous un dossier en lecture seule — qui
-  n'est pas forcément de production. Le rappel est juste, son titre ne l'est qu'à moitié. Deux titres
-  selon l'appelant, ou un titre qui nomme le risque plutôt que la cible (« le serveur ne sera pas
-  authentifié ») : c'est une phrase à choisir, pas un défaut de logique.
 - **Importer un dossier sous un autre nom, ou « à côté » de l'existant**, n'existe pas. La fusion
   couvre le cas courant — deux machines, un même dossier — mais pas « je veux les deux côte à côte
   pour comparer » : les connexions s'apparient par identifiant, donc un second exemplaire demanderait
