@@ -1,0 +1,152 @@
+{
+  "version": 6,
+  "projects": [
+    {
+      "name": "Atelier Nord",
+      "environments": [
+        { "id": "dev", "label": "dev", "color": "green", "production": false },
+        { "id": "preprod", "label": "preprod", "color": "violet", "production": false },
+        { "id": "staging", "label": "staging", "color": "amber", "production": false },
+        { "id": "prod", "label": "prod", "color": "red", "production": true }
+      ],
+      "databases": [
+        {
+          "name": "analytics",
+          "label": "Catalogue",
+          "engine": "postgresql",
+          "environment": "prod",
+          "connection": {
+            "host": "db.interne",
+            "port": 5432,
+            "defaultDatabase": "analytics",
+            "username": "dora",
+            "password": "Atelier Nord/analytics/prod",
+            "sslMode": "verify-full",
+            "caCertificate": null,
+            "authDatabase": null,
+            "readOnly": false,
+            "reconnectOnStartup": false,
+            "tunnel": null
+          },
+          "consoles": [
+            {
+              "name": "CA par jour",
+              "sql": "select date_trunc('day', created_at), sum(total_cents)\nfrom orders\ngroup by 1"
+            }
+          ],
+          "visibleSchemas": ["public"]
+        },
+        {
+          "name": "evenements",
+          "engine": "mongodb",
+          "environment": "prod",
+          "connection": {
+            "host": "localhost",
+            "port": 27017,
+            "defaultDatabase": "atelier_journal",
+            "username": "",
+            "password": null,
+            "sslMode": "disable",
+            "caCertificate": null,
+            "authDatabase": null,
+            "readOnly": true,
+            "reconnectOnStartup": false,
+            "tunnel": null
+          },
+          "consoles": []
+        },
+        {
+          "name": "analytics",
+          "engine": "postgresql",
+          "environment": "dev",
+          "connection": {
+            "host": "localhost",
+            "port": 5432,
+            "defaultDatabase": "analytics",
+            "username": "dorabase",
+            "password": "Ancien Nord/analytics/dev",
+            "sslMode": "prefer",
+            "caCertificate": null,
+            "authDatabase": null,
+            "readOnly": true,
+            "reconnectOnStartup": false,
+            "tunnel": null
+          },
+          "consoles": []
+        },
+        {
+          "name": "entrepot",
+          "engine": "postgresql",
+          "environment": "staging",
+          "connection": {
+            "host": "127.0.0.1",
+            "port": 5432,
+            "defaultDatabase": "entrepot",
+            "username": "dora",
+            "password": "Atelier Nord/entrepot/staging",
+            "sslMode": "require",
+            "caCertificate": null,
+            "authDatabase": null,
+            "readOnly": false,
+            "reconnectOnStartup": true,
+            "tunnel": {
+              "localPort": null,
+              "proxy": {
+                "kind": "kubernetes",
+                "kubeconfig": "staging",
+                "namespace": "donnees",
+                "resource": "svc/postgres"
+              }
+            }
+          },
+          "consoles": []
+        }
+      ],
+      "queries": [{ "name": "CA par jour", "sql": "select sum(total_cents) from orders" }],
+      "valueLabels": {
+        "orders": {
+          "status": { "1": "payée", "3": "expédiée" }
+        }
+      }
+    },
+    {
+      "name": "Outils internes",
+      "environments": [
+        { "id": "dev", "label": "dev", "color": "green", "production": false },
+        { "id": "prod", "label": "prod", "color": "red", "production": true }
+      ],
+      "databases": [],
+      "queries": [{ "name": "Inventaire", "sql": "select count(*) from stock" }]
+    }
+  ],
+  "preferences": {
+    "theme": "nuit",
+    "rowHeight": 24
+  },
+  "instances": [
+    {
+      "id": "serveur-central",
+      "label": "Serveur central",
+      "engine": "postgresql",
+      "connection": {
+        "host": "db.interne",
+        "port": 5432,
+        "defaultDatabase": "postgres",
+        "username": "admin",
+        "password": "instance/serveur-central",
+        "sslMode": "verify-full",
+        "caCertificate": null,
+        "authDatabase": null,
+        "readOnly": false,
+        "reconnectOnStartup": false,
+        "tunnel": null
+      },
+      "production": true,
+      "confirmWrites": true
+    }
+  ],
+  "kubeconfigs": {
+    "declarations": [{ "id": "staging", "label": "staging", "path": "~/.kube/staging.yaml" }],
+    "default": "staging"
+  }
+}

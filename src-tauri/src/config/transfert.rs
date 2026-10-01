@@ -24,7 +24,7 @@
 //! `Vec<Project>`, sérialisé par le même `serde`. Une seconde description — un « ProjectExport » à
 //! douze champs — aurait divergé au premier champ ajouté à `ConnectionSettings`, sans qu'aucun test
 //! le voie (règle n° 17). C'est aussi ce qui permet à l'import de réemployer la chaîne de migrations
-//! du magasin plutôt que d'en tenir une seconde : voir `store::projets_du_document`.
+//! du magasin plutôt que d'en tenir une seconde : voir `migration::projets_du_document`.
 //!
 //! # Ce que le fichier fait des mots de passe
 //!
@@ -761,7 +761,7 @@ pub fn lire(chemin: &Path) -> Result<FichierDeProjets, TransfertError> {
     // créer** : là-bas, les chemins sont encore écrits dans les connexions, et c'est le cran qui les
     // relève. Un fichier déjà en v6 les porte, et la migration ne tourne pas — d'où le `if`, et non
     // un `unwrap_or` qui aurait laissé croire à un repli.
-    let (projects, declarees) = super::store::projets_du_document(valeur, enveloppe.version)
+    let (projects, declarees) = super::migration::projets_du_document(valeur, enveloppe.version)
         .map_err(|raison| TransfertError::Illisible { raison })?;
     let kubeconfigs = if enveloppe.version < VERSION_COURANTE {
         declarees.declarations
@@ -1289,6 +1289,7 @@ mod tests {
 
     pub(super) fn connexion(nom: &str, env: &str) -> Database {
         Database {
+            id: crate::config::ConnectionId::vide(),
             name: nom.to_owned(),
             label: None,
             engine: Engine::PostgreSql,

@@ -43,6 +43,19 @@ kubeconfigs: Kubeconfigs, } | { "kind": "unreadable", reason: string,
 quarantinedTo: string, } | { "kind": "tooNew", found: number, supported: number, };
 
 /**
+ * L'identifiant stable d'une connexion (#164).
+ *
+ * **Figé à la création, jamais dérivé du nom ni du dossier** : c'est ce qui fait qu'un renommage ou
+ * un déplacement ne le périme pas. Il n'a aucun sens lisible, et c'est voulu — un identifiant
+ * lisible dérivé du libellé, comme `InstanceId`, ferait que deux postes créant chacun une « psql »
+ * produisent le même, et l'import les prendrait pour la même connexion.
+ *
+ * `#[ts(type = "string")]`, comme `EnvironmentId` : `ts-rs` projetterait sinon la structure et non
+ * la chaîne qu'elle transporte.
+ */
+export type ConnectionId = string;
+
+/**
  * Les réglages de connexion d'une connexion déclarée. Tout le formulaire de `A2` vit ici, à
  * l'exception du nom, du moteur et de l'environnement, qui appartiennent à la connexion elle-même.
  *
@@ -177,14 +190,36 @@ environments: Array<EnvironmentDeclaration>, };
  * Le précédent est celui d'`EnvironmentDeclaration` — un identifiant figé, un libellé qui ne l'est
  * pas — appliqué ici à la connexion plutôt qu'à l'environnement.
  */
-export type Database = { name: string, 
+export type Database = { 
+/**
+ * L'identifiant stable de la connexion (#164) : clé du registre et référence du secret dès la
+ * bascule de #165, figé à la création et indépendant du dossier qui la contient.
+ *
+ * **`default` et `skip_serializing_if`, temporairement.** La chaîne de chargement lit encore des
+ * fichiers v6, qui n'en portent pas : il se lit donc vide, et ne s'écrit pas tant qu'il l'est —
+ * aucun fichier v6 ne reçoit de clé `id` qu'aucune version ne relirait. C'est la migration v7
+ * (`migration::v6::vers_v7`) qui le dérive, et `FolderTree::valider` refuse un identifiant vide.
+ * **#165 retire les deux attributs** en basculant `VERSION_COURANTE` à 7 ; le champ devient alors
+ * obligatoire, dans le fichier comme dans sa projection TypeScript.
+ */
+id?: ConnectionId, name: string, 
 /**
  * Le nom d'affichage, quand il diffère de `name`. `None` ou vide : `name` fait foi.
  *
  * **`#[serde(default)]` : aucune migration.** Une configuration écrite avant ce champ n'en a
  * simplement pas — `27a` en tient la règle.
  */
-label?: string | null, engine: Engine, environment: EnvironmentId, connection: ConnectionSettings, 
+label?: string | null, engine: Engine, 
+/**
+ * L'environnement de la connexion — **qui disparaît à la bascule de #165** : dans l'arbre de
+ * dossiers, c'est le dossier qui range une connexion, et plus rien ne la désigne par lui.
+ *
+ * **`default`, temporairement** : une connexion de l'arbre v7 (`FolderTree`) n'en porte pas, et
+ * la fixture partagée de la lecture seule s'écrit sans lui. Un fichier v6 le porte toujours, donc
+ * rien ne change pour le chargement courant. Pas de `skip_serializing_if` : sa projection
+ * TypeScript deviendrait facultative, et chaque écran qui le lit cesserait de compiler.
+ */
+environment: EnvironmentId, connection: ConnectionSettings, 
 /**
  * Les consoles SQL de cette connexion, telles que l'arbre les montre sous elle.
  *
@@ -267,6 +302,14 @@ export type DeleteResult = { projects: Array<Project>,
 leftoverSecrets: Array<string>, };
 
 /**
+ * La lecture seule effective d'une connexion (#164, lue par #168).
+ *
+ * Projetée en `EffectiveReadOnly` : c'est la forme que la fixture partagée
+ * `tests/fixtures/lecture-seule.json` écrit, et que le miroir TypeScript de #168 doit rendre.
+ */
+export type EffectiveReadOnly = { "kind": "imposed", folders: Array<FolderId>, } | { "kind": "local", readOnly: boolean, };
+
+/**
  * Les sept moteurs du handoff, et rien d'autre : un moteur inconnu ne compile pas.
  */
 export type Engine = "postgresql" | "mysql" | "sqlite" | "mongodb" | "redis" | "snowflake" | "bigquery";
@@ -335,6 +378,81 @@ project: string | null,
  * Un défaut qui les inclurait ferait d'un export ordinaire un fichier de secrets.
  */
 includePasswords: boolean, };
+
+/**
+ * Un dossier de l'arbre (#164).
+ *
+ * # Les libellés de valeurs vivent ici
+ *
+ * La migration les pose sur le dossier racine issu du projet, ce qui reproduit la sémantique
+ * d'`API-75` : partagés entre dev, staging et prod. La résolution se fait **table par table**, et le
+ * dossier le plus proche qui déclare la table l'emporte **entièrement** — voir
+ * [`FolderTree::libelles_de`].
+ */
+export type Folder = { id: FolderId, 
+/**
+ * Renommable, et **jamais une identité**.
+ */
+name: string, 
+/**
+ * `None` : aucune pastille — la teinte par défaut de l'arbre.
+ */
+color?: FolderColor | null, 
+/**
+ * La lecture seule, qui s'impose à **tous** les descendants (#108) : un sous-dossier ou une
+ * connexion ne peut pas la lever pour lui-même.
+ *
+ * **Toujours écrit**, même faux : c'est un garde-fou, et un fichier qui le tairait ne se
+ * relirait pas d'un coup d'œil.
+ */
+readOnly: boolean, 
+/**
+ * Les sous-dossiers, **dans l'ordre déclaré** — l'ordre dev/staging/prod voulu par l'utilisateur
+ * survit à la migration, et aucun tri alphabétique ne le défait.
+ */
+folders?: Array<Folder>, 
+/**
+ * Les connexions rangées directement ici, dans l'ordre déclaré.
+ */
+connections?: Array<Database>, valueLabels?: { [key in string]: { [key in string]: { [key in string]: string } } }, 
+/**
+ * Les requêtes de `12f` encore en transit : un projet v6 sans connexion n'avait nulle part où
+ * les verser. Même règle que `Project::queries` — elles attendent la première connexion du
+ * sous-arbre.
+ */
+queries?: Array<SavedQuery>, };
+
+/**
+ * La pastille d'un dossier : les cinq jetons existants, et rien de plus.
+ *
+ * **Anciennement `EnvironmentColor`, aux mêmes valeurs `kebab-case`** : le JSON d'une couleur
+ * d'environnement v6 se relit donc tel quel en couleur de dossier, ce dont la migration dépend.
+ * La raison des cinq jetons n'a pas changé — une couleur libre finirait par produire des pastilles
+ * indistinguables.
+ */
+export type FolderColor = "green" | "amber" | "red" | "slate" | "violet";
+
+/**
+ * L'identifiant stable d'un dossier (#164). Mêmes règles que [`ConnectionId`].
+ *
+ * **Un dossier a une identité, bien qu'il s'apparie par son nom à l'import** (#169) : le déplacer,
+ * le renommer ou le recolorier doit le désigner sans ambiguïté, et deux dossiers homonymes peuvent
+ * vivre sous deux parents différents.
+ */
+export type FolderId = string;
+
+/**
+ * La racine de l'arbre : **pas un dossier**, donc ni nom, ni couleur, ni lecture seule.
+ *
+ * **Imbriqué plutôt qu'à plat** (une liste de dossiers portant un `parent`) : un cycle ou un parent
+ * mort deviennent inexprimables, l'export d'un sous-arbre est un clonage, et le fichier se lit à la
+ * main. Le prix — une recherche par identifiant est un parcours — ne pèse rien à cette taille.
+ */
+export type FolderTree = { folders: Array<Folder>, 
+/**
+ * Les connexions rangées à la racine, hors de tout dossier.
+ */
+connections: Array<Database>, };
 
 /**
  * Les quatre garde-fous d'écriture (`15d`).

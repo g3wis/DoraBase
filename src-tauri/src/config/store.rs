@@ -3,6 +3,7 @@
 //! La logique prend un **chemin** en paramètre : elle se teste donc avec un répertoire
 //! temporaire, et c'est la commande Tauri (`commands.rs`) qui résout le vrai chemin.
 
+#[cfg(test)]
 use std::collections::BTreeMap;
 
 use std::fs::{self, File};
@@ -11,10 +12,14 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::model::{
-    Database, EnvironmentColor, EnvironmentDeclaration, EnvironmentId, Kubeconfigs,
-    ManagedInstance, Preferences, Project,
-};
+use super::migration::migrer_le_document;
+// Les crans sur `Value` et les types du modèle que les tests de ce fichier emploient encore, depuis
+// que la chaîne vit dans `migration` (#164).
+#[cfg(test)]
+use super::migration::retirer_les_comptes_de_service;
+#[cfg(test)]
+use super::model::{Database, EnvironmentColor, EnvironmentId};
+use super::model::{Kubeconfigs, ManagedInstance, Preferences, Project};
 
 /// La version du format sur disque. À incrémenter pour tout changement de forme, en ajoutant la
 /// migration correspondante dans `migrer`.
@@ -331,443 +336,6 @@ fn migrer(cible: &Path, brut: &str, valeur: serde_json::Value, depuis: u32) -> L
             quarantined_to: sauvegarde,
         },
     }
-}
-
-/// La chaîne de migrations elle-même, appliquée à un document **déjà analysé**.
-///
-/// **Ni chemin, ni écriture, ni sauvegarde** — et c'est ce qui la rend réemployable. Le transfert
-/// de projets (`API-30`) migre un fichier qui n'est *pas* la configuration : il n'y a rien à
-/// sauvegarder avant, puisque rien n'est réécrit, et rien à mettre en quarantaine, puisque le
-/// fichier appartient à l'utilisateur et qu'on ne fait que le lire. Ce qui doit être commun, en
-/// revanche, c'est la chaîne : deux échelles de migration pour la même forme de données
-/// divergeraient à la première montée de version (règle n° 17), et c'est le fichier de transfert —
-/// celui qui traîne dans un dossier partagé pendant des mois — qui en paierait le prix.
-///
-/// L'erreur est une **chaîne déjà formulée** : les deux causes — aucune migration connue, migration
-/// impossible — se disent différemment, et `migrer` les rendait déjà telles quelles.
-///
-/// Elle rend **tout ce que le document porte** — projets, préférences, instances managées
-/// (`API-32`) —, et non les seuls projets : c'est `migrer` qui en a besoin. Le transfert, lui, n'en
-/// garde qu'un tiers, et c'est `projets_du_document` qui le dit plutôt que cette fonction, qui n'a
-/// pas à connaître ses appelants.
-pub(crate) fn migrer_le_document(
-    mut valeur: serde_json::Value,
-    depuis: u32,
-) -> Result<(Vec<Project>, Preferences, Vec<ManagedInstance>, Kubeconfigs), String> {
-    // **Le cran du proxy passe en premier, et il est le seul à travailler sur le JSON.** `05d`
-    // remplace un tunnel plat par `{ localPort, proxy }` partout où un tunnel apparaît ; il ne
-    // connaît ni les projets, ni les bases, ni les environnements. L'appliquer d'abord, sur la
-    // valeur déjà analysée par `load`, évite de l'écrire deux fois — une pour la forme v1, qui
-    // porte des variantes, une pour la v2, qui porte des connexions. Les crans suivants ne le
-    // voient donc pas, et `migration_v1_vers_v2` n'a rien à en savoir.
-    if depuis < 3 {
-        hisser_les_tunnels_vers_le_proxy(&mut valeur);
-    }
-    // v3 → v4 (`06j`) : même patron, même raison — un cran qui ne connaît ni les projets, ni
-    // les bases, et qui s'applique avant les crans à types dédiés.
-    if depuis < 4 {
-        retirer_les_comptes_de_service(&mut valeur);
-    }
-    // v5 → v6 (`API-70`) : même patron que les deux crans ci-dessus — il ne connaît ni les projets,
-    // ni les bases, seulement la forme d'un proxy Kubernetes, et il s'applique avant les crans à
-    // types dédiés. Il est le premier à **rendre** quelque chose : les déclarations qu'il a créées
-    // ne sont pas dans le document d'origine, donc rien ne pourrait les relire après coup.
-    let declarees = (depuis < 6).then(|| declarer_les_kubeconfigs(&mut valeur));
-    let brut_migre = valeur.to_string();
-
-    // v0 → v1 : la v0 n'a jamais été diffusée, sa forme est celle de la v1.
-    // v1 → v2 : `23a`/`23b`. La chaîne est écrite pour se composer — une v1 lue depuis une v0 passe
-    // ensuite par le même bras que si elle venait du disque.
-    // v2 → v3 : `05d`, déjà appliqué ci-dessus ; il ne reste qu'à lire la forme courante.
-    // v3 → v4 : `06j`, de même.
-    // v4 → v5 : `25c` **ne transforme rien** — `activeEnvironment` disparaît du modèle, et `serde`
-    // ignore un champ qu'il ne connaît pas. Relire suffit ; le champ ne sera simplement pas réécrit.
-    let migre = match depuis {
-        0 | 1 => migration_v1_vers_v2(&brut_migre),
-        // `2..=5` et non `2 | 3 | 4 | 5` : clippy refuse l'énumération d'entiers contigus.
-        2..=5 => serde_json::from_str::<ConfigFile>(&brut_migre)
-            .map(|fichier| (fichier.projects, fichier.preferences, fichier.instances)),
-        _ => {
-            return Err(format!(
-                "aucune migration connue depuis la version {depuis}"
-            ));
-        }
-    };
-
-    migre
-        .map(|(projets, preferences, instances)| {
-            // **Ce que le cran a déclaré l'emporte**, et il n'y a pas de conflit possible : il ne
-            // tourne que pour `depuis < 6`, où le document ne portait aucune clé `kubeconfigs` à
-            // relire. `unwrap_or_default` est donc le cas d'un document déjà en v6, que seul
-            // `projets_du_document` peut présenter ici.
-            (
-                projets,
-                preferences,
-                instances,
-                declarees.unwrap_or_default(),
-            )
-        })
-        .map_err(|erreur| format!("migration depuis la version {depuis} impossible : {erreur}"))
-}
-
-/// Les projets d'un document `{ version, projects, … }` déjà analysé, migrés si sa version est
-/// antérieure à la courante.
-///
-/// **Écrite pour le transfert de projets (`API-30`)**, qui lit un fichier portant les mêmes projets
-/// que la configuration sans être la configuration : ni préférences à en tirer, ni quarantaine à
-/// prononcer sur un fichier qui n'est pas le nôtre.
-///
-/// **Le bras « rien à migrer » est ici et non dans la chaîne**, et c'est délibéré : élargir le
-/// `2..=4` de `migrer_le_document` jusqu'à `VERSION_COURANTE` en aurait fait un bras attrape-tout
-/// (règle n° 16) — le jour où la v5 → v6 demande une transformation, la plage l'avalerait en silence
-/// et lirait un fichier v5 comme s'il portait la forme v6. Séparés, l'oubli se dit : une version
-/// sans cran tombe sur « aucune migration connue ».
-///
-/// **Ce jour est arrivé** (`API-70`, v5 → v6) : la plage a été élargie à `2..=5` *avec* la
-/// transformation qui va avec, et la séparation a tenu — c'est elle qui a fait remarquer qu'il y
-/// avait un cran à écrire plutôt qu'une borne à pousser.
-///
-/// Une version **postérieure** n'est pas traitée ici : l'appelant la refuse d'abord, avec son propre
-/// message — un fichier de transfert et une configuration ne se répondent pas de la même façon.
-pub(crate) fn projets_du_document(
-    valeur: serde_json::Value,
-    version: u32,
-) -> Result<(Vec<Project>, Kubeconfigs), String> {
-    let (mut projects, kubeconfigs) = if version == VERSION_COURANTE {
-        (
-            serde_json::from_value::<Vec<Project>>(
-                valeur
-                    .get("projects")
-                    .cloned()
-                    .unwrap_or(serde_json::Value::Null),
-            )
-            .map_err(|erreur| format!("forme inattendue : {erreur}"))?,
-            // Un document déjà en v6 porte ses déclarations à la racine ; c'est l'appelant qui les
-            // lit, avec le reste de son enveloppe.
-            Kubeconfigs::default(),
-        )
-    } else {
-        let migre = migrer_le_document(valeur, version)?;
-        (migre.0, migre.3)
-    };
-
-    // **La même reprise qu'à la lecture de la configuration**, et pour la même raison : un fichier
-    // écrit avant le 20 août 2026 porte des requêtes enregistrées, que rien d'autre ne convertit en
-    // consoles. Les laisser dans `queries` les rendrait invisibles jusqu'à la relecture suivante du
-    // fichier de configuration — ou les perdrait, si le projet d'accueil a déjà une connexion.
-    super::enregistrer::migrer_requetes_en_consoles(&mut projects);
-    Ok((projects, kubeconfigs))
-}
-
-/// v5 → v6 (`API-70`) : un transfert Kubernetes porte une **référence** au lieu d'un chemin.
-///
-/// Relève chaque `kubeconfig` écrit dans un proxy Kubernetes, le déclare une fois — deux connexions
-/// qui nommaient le même fichier partagent donc une déclaration, ce qui est tout l'objet du chantier
-/// — et remplace le chemin par l'identifiant obtenu.
-///
-/// **Écrite sur du `serde_json::Value`, comme les deux crans précédents, et pour la même raison** :
-/// un proxy Kubernetes apparaît sous une connexion de projet *et* sous une instance managée, et le
-/// même document sert de fichier de transfert. Descendre l'arbre en cherchant les proxys plutôt
-/// qu'en connaissant les chemins qui y mènent est la seule écriture qui ne se répète pas trois fois.
-///
-/// **Déterministe** : `serde_json::Map` est une `BTreeMap` — la crate n'active pas `preserve_order`
-/// — donc l'ordre de visite est celui des clés, et celui des tableaux est le leur. Deux migrations
-/// du même fichier rendent les mêmes identifiants, ce dont dépend le libellé attribué en cas de
-/// collision.
-///
-/// **Pas idempotente, et elle n'a pas à l'être** : un second passage prendrait les identifiants
-/// qu'elle vient d'écrire pour des chemins. C'est `depuis < 6` qui la garde, comme `depuis < 3`
-/// garde le hissage des tunnels — lequel est idempotent par construction, non par précaution.
-fn declarer_les_kubeconfigs(valeur: &mut serde_json::Value) -> Kubeconfigs {
-    let mut kubeconfigs = Kubeconfigs::default();
-    referencer_les_kubeconfigs(valeur, &mut kubeconfigs);
-    kubeconfigs
-}
-
-fn referencer_les_kubeconfigs(valeur: &mut serde_json::Value, kubeconfigs: &mut Kubeconfigs) {
-    match valeur {
-        serde_json::Value::Object(objet) => {
-            if objet.get("kind").and_then(serde_json::Value::as_str) == Some("kubernetes") {
-                // **Une valeur blanche vaut absente**, comme partout ailleurs pour ce champ : la
-                // déclarer poserait une entrée sans chemin dans la liste des préférences, que
-                // `Kubeconfigs::valider` refuserait ensuite — donc une configuration migrée qui ne
-                // se réécrit plus.
-                let chemin = objet
-                    .get("kubeconfig")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::trim)
-                    .filter(|chemin| !chemin.is_empty())
-                    .map(str::to_owned);
-                match chemin {
-                    Some(chemin) => {
-                        let id = kubeconfigs.declarer(&chemin);
-                        objet.insert(
-                            "kubeconfig".to_owned(),
-                            serde_json::Value::from(id.as_str()),
-                        );
-                    }
-                    None => {
-                        objet.remove("kubeconfig");
-                    }
-                }
-            }
-            for (_, enfant) in objet.iter_mut() {
-                referencer_les_kubeconfigs(enfant, kubeconfigs);
-            }
-        }
-        serde_json::Value::Array(elements) => {
-            for element in elements {
-                referencer_les_kubeconfigs(element, kubeconfigs);
-            }
-        }
-        _ => {}
-    }
-}
-
-/// v2 → v3 (`05d`) : le tunnel plat devient `{ localPort, proxy: { kind: "ssh", … } }`.
-///
-/// **Purement structurelle, sans perte possible** : jusqu'à la v2, un tunnel ne pouvait décrire
-/// qu'un bastion SSH — aucune autre sorte n'existait. L'étiquette est donc connue sans avoir à la
-/// deviner.
-///
-/// **Écrite sur du `serde_json::Value`, et c'est ce qui la rend indépendante des autres crans.**
-/// Un `mod v2` de types dédiés, comme `mod v1` en fait pour `23a`/`23b`, obligerait à décrire deux
-/// fois la structure qui *entoure* le tunnel : une fois telle qu'elle est en v1, avec ses variantes,
-/// une fois telle qu'elle est en v2, avec ses connexions. La forme du tunnel, elle, est la même dans
-/// les deux. Descendre l'arbre en cherchant les `tunnel` plutôt qu'en connaissant le chemin qui y
-/// mène est donc la seule écriture qui ne se répète pas.
-///
-/// **Cette fonction ne valide rien** : elle transforme ce qu'elle reconnaît, et laisse passer tel
-/// quel ce qu'elle ne reconnaît pas (`tunnel` absent, `null`, ou déjà sous la forme v3 — reconnue à
-/// sa clé `proxy`). C'est sûr uniquement parce que `migrer` désérialise le résultat juste après :
-/// tout ce qu'elle n'a pas su remettre en forme y échouera et partira en quarantaine, jamais
-/// silencieusement accepté.
-fn hisser_les_tunnels_vers_le_proxy(valeur: &mut serde_json::Value) {
-    match valeur {
-        serde_json::Value::Object(objet) => {
-            if let Some(tunnel) = objet.get_mut("tunnel") {
-                // `null` est le cas courant — aucun tunnel déclaré : rien à faire, et c'est un
-                // chemin couvert. Un objet portant déjà `proxy` est une v3 : laissée intacte, ce
-                // qui rend la fonction idempotente.
-                if let Some(plat) = tunnel.as_object_mut() {
-                    if !plat.contains_key("proxy") {
-                        let port_local =
-                            plat.remove("localPort").unwrap_or(serde_json::Value::Null);
-                        // `kind` valait déjà « ssh » avant la v3. Le réécrire explicitement rend la
-                        // migration lisible sans connaître l'ancienne forme, et fait de lui
-                        // l'étiquette du proxy — ce que `#[serde(tag = "kind")]` attend.
-                        plat.insert("kind".to_owned(), serde_json::Value::from("ssh"));
-                        let proxy = serde_json::Value::Object(std::mem::take(plat));
-                        *tunnel = serde_json::json!({ "localPort": port_local, "proxy": proxy });
-                    }
-                }
-            }
-            for (_, enfant) in objet.iter_mut() {
-                hisser_les_tunnels_vers_le_proxy(enfant);
-            }
-        }
-        serde_json::Value::Array(elements) => {
-            for element in elements {
-                hisser_les_tunnels_vers_le_proxy(element);
-            }
-        }
-        _ => {}
-    }
-}
-
-/// v3 → v4 (`06j`) : le chemin de compte de service disparaît des proxys Cloud SQL.
-///
-/// **Pourquoi un cran, alors que `serde` ignore les clés inconnues.** Sans lui, un fichier v3
-/// serait lu comme courant, la clé serait silencieusement perdue à la première écriture, et
-/// aucune sauvegarde n'aurait été prise. Le cran existe pour deux effets, tous deux dans
-/// `migrer` : la version du fichier finit par dire la vérité sur le modèle qu'il porte, et
-/// l'original part dans `config.v3.bak` **avant** que la clé s'en aille. Un utilisateur qui
-/// avait désigné un compte de service peut donc le retrouver ; sans ce cran, il n'aurait
-/// nulle part où le chercher.
-///
-/// **Ce qui reste possible après ce retrait** : `GOOGLE_APPLICATION_CREDENTIALS`, que le
-/// proxy lit de lui-même. Le retrait ferme un champ, pas une voie.
-///
-/// Même écriture que `hisser_les_tunnels_vers_le_proxy`, et pour la même raison : descendre
-/// l'arbre en cherchant les proxys plutôt qu'en connaissant le chemin qui y mène évite de
-/// décrire deux fois ce qui les entoure. Elle ne valide rien non plus — `migrer`
-/// désérialise juste après, donc ce qu'elle laisserait mal formé part en quarantaine.
-fn retirer_les_comptes_de_service(valeur: &mut serde_json::Value) {
-    match valeur {
-        serde_json::Value::Object(objet) => {
-            // Uniquement sous un proxy Cloud SQL, reconnu à son étiquette. Retirer la clé
-            // partout où elle porte ce nom marcherait aujourd'hui et deviendrait faux le jour
-            // où un autre objet la porte pour une autre raison.
-            if objet.get("kind").and_then(serde_json::Value::as_str) == Some("cloud-sql") {
-                objet.remove("credentialsFilePath");
-            }
-            for (_, enfant) in objet.iter_mut() {
-                retirer_les_comptes_de_service(enfant);
-            }
-        }
-        serde_json::Value::Array(elements) => {
-            for element in elements {
-                retirer_les_comptes_de_service(element);
-            }
-        }
-        _ => {}
-    }
-}
-
-/// La forme v1 d'un fichier : ce qu'on doit encore savoir lire (`23a`, `23b`).
-///
-/// **Des types dédiés, et non le modèle courant.** Faire lire l'ancienne forme par les structures
-/// d'aujourd'hui obligerait à garder dans le modèle des champs qui n'existent plus — un
-/// `#[serde(alias)]` ici, un `Option<Vec<_>>` là — et ces béquilles survivraient à la migration.
-/// Décrire l'ancien format à part le laisse mourir avec elle.
-mod v1 {
-    use serde::Deserialize;
-
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct Fichier {
-        pub projects: Vec<Projet>,
-        #[serde(default)]
-        pub preferences: crate::config::model::Preferences,
-    }
-
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct Projet {
-        pub name: String,
-        /// **Lu, jamais réécrit** — et c'est pour cela qu'il est encore ici alors que le modèle ne
-        /// le porte plus (`25c`). Il sert à *déduire les environnements déclarés* : un projet dont la
-        /// seule trace d'un environnement était d'y être actif perdrait cette déclaration si on
-        /// cessait de le lire.
-        pub active_environment: String,
-        pub databases: Vec<Base>,
-        #[serde(default)]
-        pub queries: Vec<crate::config::model::SavedQuery>,
-    }
-
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct Base {
-        pub name: String,
-        pub engine: crate::config::model::Engine,
-        pub variants: Vec<Variante>,
-    }
-
-    /// L'ancienne `EnvironmentVariant` : les réglages **plus** leur environnement.
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct Variante {
-        pub environment: String,
-        #[serde(flatten)]
-        pub reglages: crate::config::model::ConnectionSettings,
-    }
-}
-
-/// v1 → v2 : les environnements montent au projet, et chaque variante devient une connexion.
-///
-/// # Ce que cette migration garantit, et pourquoi
-///
-/// **Elle duplique, elle ne choisit pas.** Une base à trois variantes devient trois connexions. Ne
-/// garder que celle de l'environnement actif serait plus court, mais perdrait deux déclarations que
-/// l'utilisateur avait faites — et leurs mots de passe deviendraient orphelins dans le trousseau,
-/// invisibles et non nettoyables. C'est la règle de `08j` : on ne supprime jamais ce qu'on n'a pas
-/// demandé à supprimer.
-///
-/// **Aucun secret ne bouge.** La référence d'un mot de passe contient déjà l'identifiant
-/// d'environnement (`08e`), et les identifiants sont conservés tels quels — `dev`, `staging`, `prod`.
-/// C'est précisément ce qui rend cette migration sûre, et c'est pour cela que `23a` fige les
-/// identifiants au lieu de les dériver des libellés.
-///
-/// **Les environnements déclarés sont ceux qui servaient.** Ils sont déduits des variantes présentes,
-/// plus l'environnement actif, dans l'ordre du trio. Déclarer les trois d'office ajouterait des
-/// environnements vides que l'utilisateur n'a jamais demandés ; n'en déclarer aucun rendrait le
-/// projet invalide.
-/// **Aucune instance n'en sort, et le vecteur vide est la bonne réponse** : `API-32` est postérieur
-/// de plus de deux crans à cette forme, donc un fichier v1 ne peut en porter aucune.
-fn migration_v1_vers_v2(
-    brut: &str,
-) -> Result<(Vec<Project>, Preferences, Vec<ManagedInstance>), serde_json::Error> {
-    let ancien: v1::Fichier = serde_json::from_str(brut)?;
-
-    let projects = ancien
-        .projects
-        .into_iter()
-        .map(|projet| {
-            let mut identifiants: Vec<String> = Vec::new();
-            for base in &projet.databases {
-                for variante in &base.variants {
-                    if !identifiants.contains(&variante.environment) {
-                        identifiants.push(variante.environment.clone());
-                    }
-                }
-            }
-            if !identifiants.contains(&projet.active_environment) {
-                identifiants.push(projet.active_environment.clone());
-            }
-
-            // L'ordre du trio d'abord, puis le reste : un fichier écrit à la main pourrait porter
-            // autre chose, et l'ordre du sélecteur ne doit pas dépendre de l'ordre des bases.
-            let rang = |id: &str| match id {
-                "dev" => 0,
-                "staging" => 1,
-                "prod" => 2,
-                _ => 3,
-            };
-            identifiants.sort_by_key(|id| (rang(id), id.clone()));
-
-            let environments = identifiants
-                .iter()
-                .map(|id| {
-                    let (color, production) = match id.as_str() {
-                        "prod" => (EnvironmentColor::Red, true),
-                        "staging" => (EnvironmentColor::Amber, false),
-                        "dev" => (EnvironmentColor::Green, false),
-                        // Un identifiant inconnu garde une couleur neutre : inventer « rouge » le
-                        // ferait passer pour une production, donc protégé alors qu'il ne l'est pas.
-                        _ => (EnvironmentColor::Slate, false),
-                    };
-                    EnvironmentDeclaration {
-                        id: EnvironmentId::brut(id.clone()),
-                        label: id.clone(),
-                        color,
-                        production,
-                    }
-                })
-                .collect();
-
-            let databases = projet
-                .databases
-                .into_iter()
-                .flat_map(|base| {
-                    base.variants
-                        .into_iter()
-                        .map(|variante| Database {
-                            name: base.name.clone(),
-                            label: None,
-                            engine: base.engine,
-                            environment: EnvironmentId::brut(variante.environment),
-                            connection: variante.reglages,
-                            consoles: Vec::new(),
-                            // Une configuration d'avant `API-33` n'a réglé aucun schéma : `None`
-                            // rend l'arbre qu'elle avait, tous les non-système.
-                            visible_schemas: None,
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .collect();
-
-            Project {
-                name: projet.name,
-                environments,
-                databases,
-                queries: projet.queries,
-                // Un fichier v1 n'a aucun libellé de valeur à reprendre (`API-75`).
-                value_labels: BTreeMap::new(),
-            }
-        })
-        .collect();
-
-    Ok((projects, ancien.preferences, Vec::new()))
 }
 
 fn mettre_en_quarantaine(cible: &Path, raison: String) -> LoadOutcome {
@@ -1114,6 +682,7 @@ mod tests {
             // `analytics` en dev **et** en prod : deux connexions depuis `23b`.
             databases: vec![
                 Database {
+                    id: crate::config::ConnectionId::vide(),
                     name: "analytics".to_owned(),
                     label: None,
                     engine: Engine::PostgreSql,
@@ -1123,6 +692,7 @@ mod tests {
                     visible_schemas: None,
                 },
                 Database {
+                    id: crate::config::ConnectionId::vide(),
                     name: "analytics".to_owned(),
                     label: None,
                     engine: Engine::PostgreSql,
@@ -2028,6 +1598,7 @@ mod tests {
             queries: Vec::new(),
             value_labels: BTreeMap::new(),
             databases: vec![Database {
+                id: crate::config::ConnectionId::vide(),
                 name: "analytics".to_owned(),
                 label: None,
                 engine: Engine::PostgreSql,
@@ -2077,6 +1648,7 @@ mod tests {
             queries: Vec::new(),
             value_labels: BTreeMap::new(),
             databases: vec![Database {
+                id: crate::config::ConnectionId::vide(),
                 name: "analytics".to_owned(),
                 label: None,
                 engine: Engine::PostgreSql,
@@ -2627,6 +2199,7 @@ mod tests_migration_kubeconfigs {
                 }),
             });
             Database {
+                id: crate::config::ConnectionId::vide(),
                 name: nom.to_owned(),
                 label: None,
                 engine: Engine::PostgreSql,

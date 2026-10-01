@@ -126,6 +126,12 @@ impl EnvironmentId {
         Self(valeur.into())
     }
 
+    /// L'environnement d'une connexion de l'arbre v7, qui n'en a plus (#164). **Temporaire** : part
+    /// avec le champ `Database::environment` à la bascule de #165.
+    pub fn absent() -> Self {
+        Self(String::new())
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -551,6 +557,20 @@ impl std::error::Error for ModelError {}
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "config.ts")]
 pub struct Database {
+    /// L'identifiant stable de la connexion (#164) : clé du registre et référence du secret dès la
+    /// bascule de #165, figé à la création et indépendant du dossier qui la contient.
+    ///
+    /// **`default` et `skip_serializing_if`, temporairement.** La chaîne de chargement lit encore des
+    /// fichiers v6, qui n'en portent pas : il se lit donc vide, et ne s'écrit pas tant qu'il l'est —
+    /// aucun fichier v6 ne reçoit de clé `id` qu'aucune version ne relirait. C'est la migration v7
+    /// (`migration::v6::vers_v7`) qui le dérive, et `FolderTree::valider` refuse un identifiant vide.
+    /// **#165 retire les deux attributs** en basculant `VERSION_COURANTE` à 7 ; le champ devient alors
+    /// obligatoire, dans le fichier comme dans sa projection TypeScript.
+    #[serde(
+        default = "super::arbre::ConnectionId::vide",
+        skip_serializing_if = "super::arbre::ConnectionId::est_vide"
+    )]
+    pub id: super::arbre::ConnectionId,
     pub name: String,
     /// Le nom d'affichage, quand il diffère de `name`. `None` ou vide : `name` fait foi.
     ///
@@ -559,6 +579,14 @@ pub struct Database {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
     pub engine: Engine,
+    /// L'environnement de la connexion — **qui disparaît à la bascule de #165** : dans l'arbre de
+    /// dossiers, c'est le dossier qui range une connexion, et plus rien ne la désigne par lui.
+    ///
+    /// **`default`, temporairement** : une connexion de l'arbre v7 (`FolderTree`) n'en porte pas, et
+    /// la fixture partagée de la lecture seule s'écrit sans lui. Un fichier v6 le porte toujours, donc
+    /// rien ne change pour le chargement courant. Pas de `skip_serializing_if` : sa projection
+    /// TypeScript deviendrait facultative, et chaque écran qui le lit cesserait de compiler.
+    #[serde(default = "EnvironmentId::absent")]
     pub environment: EnvironmentId,
     pub connection: ConnectionSettings,
     /// Les consoles SQL de cette connexion, telles que l'arbre les montre sous elle.
@@ -1334,6 +1362,7 @@ mod tests {
 
     fn connexion(nom: &str, env: &str) -> Database {
         Database {
+            id: crate::config::ConnectionId::vide(),
             name: nom.to_owned(),
             label: None,
             engine: Engine::PostgreSql,

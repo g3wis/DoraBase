@@ -394,6 +394,7 @@ mod tests {
     /// Une connexion du décor. **Aucun nom réel** : les noms sont inventés, l'hôte est `localhost`.
     fn connexion(nom: &str, environnement: &str, secret: Option<&str>) -> Database {
         Database {
+            id: crate::config::ConnectionId::vide(),
             name: nom.to_owned(),
             label: None,
             engine: Engine::PostgreSql,

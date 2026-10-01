@@ -50,6 +50,7 @@ mod tests {
 
     fn connexion(nom: &str, env: &str) -> Database {
         Database {
+            id: crate::config::ConnectionId::vide(),
             name: nom.to_owned(),
             label: None,
             engine: Engine::PostgreSql,

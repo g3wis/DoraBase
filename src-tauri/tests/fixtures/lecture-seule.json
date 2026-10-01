@@ -1,0 +1,247 @@
+{
+  "_comment": "Fixture partagée (#164, relue par #168) : un arbre v7 et la lecture seule effective attendue de chaque connexion. Lue par le test Rust de config/arbre.rs et par le test Vitest du miroir TypeScript ; les deux implémentations doivent rendre exactement « expected ». « prod-trois-paliers » garde que l'on lit tous les ancêtres et pas le seul parent ; « inconnue » vaut null.",
+  "tree": {
+    "folders": [
+      {
+        "id": "nord",
+        "name": "Atelier Nord",
+        "readOnly": false,
+        "folders": [
+          {
+            "id": "dev",
+            "name": "dev",
+            "color": "green",
+            "readOnly": false,
+            "connections": [
+              {
+                "id": "dev-locale-seule",
+                "name": "psql",
+                "engine": "postgresql",
+                "connection": {
+                  "host": "localhost",
+                  "port": 5432,
+                  "defaultDatabase": "catalogue",
+                  "username": "dora",
+                  "password": null,
+                  "sslMode": "verify-full",
+                  "readOnly": true,
+                  "reconnectOnStartup": false,
+                  "tunnel": null
+                },
+                "consoles": []
+              },
+              {
+                "id": "dev-inscriptible",
+                "name": "psql",
+                "engine": "postgresql",
+                "connection": {
+                  "host": "localhost",
+                  "port": 5432,
+                  "defaultDatabase": "catalogue",
+                  "username": "dora",
+                  "password": null,
+                  "sslMode": "verify-full",
+                  "readOnly": false,
+                  "reconnectOnStartup": false,
+                  "tunnel": null
+                },
+                "consoles": []
+              }
+            ]
+          },
+          {
+            "id": "prod",
+            "name": "prod",
+            "color": "red",
+            "readOnly": true,
+            "folders": [
+              {
+                "id": "archives",
+                "name": "archives",
+                "readOnly": false,
+                "folders": [
+                  {
+                    "id": "froides",
+                    "name": "froides",
+                    "readOnly": false,
+                    "connections": [
+                      {
+                        "id": "prod-trois-paliers",
+                        "name": "psql",
+                        "engine": "postgresql",
+                        "connection": {
+                          "host": "localhost",
+                          "port": 5432,
+                          "defaultDatabase": "catalogue",
+                          "username": "dora",
+                          "password": null,
+                          "sslMode": "verify-full",
+                          "readOnly": false,
+                          "reconnectOnStartup": false,
+                          "tunnel": null
+                        },
+                        "consoles": []
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            "connections": [
+              {
+                "id": "prod-reglee-inscriptible",
+                "name": "psql",
+                "engine": "postgresql",
+                "connection": {
+                  "host": "localhost",
+                  "port": 5432,
+                  "defaultDatabase": "catalogue",
+                  "username": "dora",
+                  "password": null,
+                  "sslMode": "verify-full",
+                  "readOnly": false,
+                  "reconnectOnStartup": false,
+                  "tunnel": null
+                },
+                "consoles": []
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "audit",
+        "name": "Audit",
+        "readOnly": true,
+        "folders": [
+          {
+            "id": "audit-prod",
+            "name": "prod",
+            "readOnly": true,
+            "connections": [
+              {
+                "id": "audit-deux-imposants",
+                "name": "psql",
+                "engine": "postgresql",
+                "connection": {
+                  "host": "localhost",
+                  "port": 5432,
+                  "defaultDatabase": "catalogue",
+                  "username": "dora",
+                  "password": null,
+                  "sslMode": "verify-full",
+                  "readOnly": false,
+                  "reconnectOnStartup": false,
+                  "tunnel": null
+                },
+                "consoles": []
+              }
+            ]
+          },
+          {
+            "id": "audit-libre",
+            "name": "libre",
+            "readOnly": false,
+            "folders": [
+              {
+                "id": "audit-profond",
+                "name": "profond",
+                "readOnly": true,
+                "connections": [
+                  {
+                    "id": "audit-exterieur-et-profond",
+                    "name": "psql",
+                    "engine": "postgresql",
+                    "connection": {
+                      "host": "localhost",
+                      "port": 5432,
+                      "defaultDatabase": "catalogue",
+                      "username": "dora",
+                      "password": null,
+                      "sslMode": "verify-full",
+                      "readOnly": true,
+                      "reconnectOnStartup": false,
+                      "tunnel": null
+                    },
+                    "consoles": []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "connections": [
+      {
+        "id": "racine-inscriptible",
+        "name": "psql",
+        "engine": "postgresql",
+        "connection": {
+          "host": "localhost",
+          "port": 5432,
+          "defaultDatabase": "catalogue",
+          "username": "dora",
+          "password": null,
+          "sslMode": "verify-full",
+          "readOnly": false,
+          "reconnectOnStartup": false,
+          "tunnel": null
+        },
+        "consoles": []
+      },
+      {
+        "id": "racine-lecture-seule",
+        "name": "psql",
+        "engine": "postgresql",
+        "connection": {
+          "host": "localhost",
+          "port": 5432,
+          "defaultDatabase": "catalogue",
+          "username": "dora",
+          "password": null,
+          "sslMode": "verify-full",
+          "readOnly": true,
+          "reconnectOnStartup": false,
+          "tunnel": null
+        },
+        "consoles": []
+      }
+    ]
+  },
+  "expected": {
+    "dev-locale-seule": {
+      "kind": "local",
+      "readOnly": true
+    },
+    "dev-inscriptible": {
+      "kind": "local",
+      "readOnly": false
+    },
+    "prod-reglee-inscriptible": {
+      "kind": "imposed",
+      "folders": ["prod"]
+    },
+    "prod-trois-paliers": {
+      "kind": "imposed",
+      "folders": ["prod"]
+    },
+    "audit-deux-imposants": {
+      "kind": "imposed",
+      "folders": ["audit", "audit-prod"]
+    },
+    "audit-exterieur-et-profond": {
+      "kind": "imposed",
+      "folders": ["audit", "audit-profond"]
+    },
+    "racine-inscriptible": {
+      "kind": "local",
+      "readOnly": false
+    },
+    "racine-lecture-seule": {
+      "kind": "local",
+      "readOnly": true
+    },
+    "inconnue": null
+  }
+}
