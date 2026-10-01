@@ -37,6 +37,8 @@ export type TokenName =
   | 'engine-sq'
   | 'engine-sq-bg'
   | 'field'
+  | 'folder-amber'
+  | 'folder-slate'
   | 'font-mono'
   | 'font-title'
   | 'font-ui'
@@ -197,6 +199,8 @@ export const tokens: Record<TokenName, string> = {
   'engine-sq': 'var(--engine-sq)',
   'engine-sq-bg': 'var(--engine-sq-bg)',
   'field': 'var(--field)',
+  'folder-amber': 'var(--folder-amber)',
+  'folder-slate': 'var(--folder-slate)',
   'font-mono': 'var(--font-mono)',
   'font-title': 'var(--font-title)',
   'font-ui': 'var(--font-ui)',

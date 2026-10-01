@@ -1234,6 +1234,20 @@ aucun pixel.
   d'avant : un dossier racine migré ne change pas d'aspect. **En gras au niveau 0**, comme un projet ;
   replié, il annonce « n connexions » **à toute profondeur** — « n sous-dossiers » ne dirait pas s'il
   y a quoi que ce soit dedans ;
+- **l'ambre et l'ardoise ont des jetons à eux, `--folder-amber` et `--folder-slate`** (1er octobre
+  2026, #172, tranché par le demandeur). Sur `--warn` et `--ink-4`, ils tenaient 1,95:1 et 2,41:1 sur
+  `--paper` en clair, sous le 3:1 d'un objet graphique porteur d'information (WCAG 1.4.11) — dans le
+  panneau d'apparence comme dans tout l'arbre. Foncer `--warn` ou l'échelle d'encre aurait changé
+  chaque avertissement et chaque encre secondaire du produit : les deux jetons ne servent qu'à
+  `COULEURS_DE_DOSSIER`. En clair, `#9F6F12` (ambre, même teinte, plus sombre) et `#7C766F` (l'ardoise
+  rendue opaque et foncée) ; **en « Nuit », la valeur effective d'avant**, `--warn` et `--ink-4` au
+  caractère près, où les deux passaient déjà. Les valeurs ont été choisies pour tenir **aussi** sur une
+  ligne survolée et sur une ligne sélectionnée (accent par défaut à 22 %), le fond le plus exigeant :
+  3,15:1 et 3,21:1 là, 4,13:1 et 4,20:1 sur `--paper`. `couleursDeDossier.test.ts` **calcule** le
+  contraste depuis `tokens.json` — jamais une valeur recopiée — contre les fonds inventoriés : `--paper`
+  (le panneau), `--paper-alt` (la sidebar, « Déplacer vers… »), `--field` (l'en-tête des modales),
+  `--paper-bright` et le milieu du dégradé de la barre de titre (la pastille de l'indicateur). Les
+  captures de fidélité d'`a1` n'ont pas bougé : aucune ne montre de dossier ambre ou ardoise ;
 - **le verrou sur le dossier qui *déclare* la lecture seule**, et lui seul, et l'état entre dans
   l'annonce de la ligne : un glyphe n'a pas de nom accessible. Le badge `PROD` est parti ;
 - **la couleur et l'icône se règlent dans un panneau sous l'icône de la ligne** (« Couleur… » en
@@ -6633,6 +6647,13 @@ Aucun de ces points ne bloque le code en place.
   descendants, sans exception » ; et elle garde son propre drapeau `production`, que l'arbre a
   justement retiré aux connexions. Ranger sans hériter, c'est un palier de l'arbre qui ne suit pas la
   règle des autres.
+- **Le vert de dossier (`--success`) est sous 3:1 sur une ligne d'arbre survolée ou sélectionnée**
+  (relevé avec #172) : 2,75:1 et 2,41:1 en clair, quand il tient 3,03:1 à 3,38:1 sur les fonds au
+  repos. La décision de #172 ne portait que sur l'ambre et l'ardoise, et ne laissait rien changer
+  d'autre. Un `--folder-green` sur le même patron réglerait le cas sans toucher à `--success` ; c'est
+  une valeur de design à choisir. Et la sélection est mesurée avec l'accent **par défaut** : un accent
+  réglé plus sombre dans les préférences peut faire tomber n'importe quelle teinte, ce qu'aucun jeton
+  ne peut garantir.
 - **Importer un dossier sous un autre nom, ou « à côté » de l'existant**, n'existe pas. La fusion
   couvre le cas courant — deux machines, un même dossier — mais pas « je veux les deux côte à côte
   pour comparer » : les connexions s'apparient par identifiant, donc un second exemplaire demanderait

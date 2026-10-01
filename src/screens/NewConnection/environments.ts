@@ -6,12 +6,20 @@ import type { FolderColor, SslMode } from '../../domain/config'
  * **Anciennement `COULEURS_D_ENVIRONNEMENT`**, aux mêmes cinq clés : `FolderColor` a repris les
  * valeurs d'`EnvironmentColor`, et un sous-dossier migré depuis un environnement garde donc sa
  * teinte au pixel. Une couleur libre finirait par produire des pastilles indistinguables.
+ *
+ * **L'ambre et l'ardoise ont des jetons à eux** (#172) : `--warn` et `--ink-4` restaient sous le
+ * contraste de 3:1 qu'un objet graphique porteur d'information demande (WCAG 1.4.11) — 1,95:1 et
+ * 2,41:1 sur `--paper`, en clair. Les foncer à la source aurait changé chaque avertissement et chaque
+ * encre secondaire du produit ; `--folder-amber` et `--folder-slate` ne servent qu'ici, foncés en
+ * clair, **inchangés en « Nuit »**, où les deux passaient déjà. Le contraste est gardé par
+ * `couleursDeDossier.test.ts`, calculé depuis `tokens.json` contre chaque fond où une teinte de
+ * dossier est posée.
  */
 export const COULEURS_DE_DOSSIER: Record<FolderColor, string> = {
   green: 'var(--success)',
-  amber: 'var(--warn)',
+  amber: 'var(--folder-amber)',
   red: 'var(--danger)',
-  slate: 'var(--ink-4)',
+  slate: 'var(--folder-slate)',
   violet: 'var(--violet)',
 }
 
