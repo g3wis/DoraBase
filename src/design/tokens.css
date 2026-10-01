@@ -37,6 +37,8 @@
   --engine-sq: #2E7D57;
   --engine-sq-bg: #E7F3EC;
   --field: #FFFFFF;
+  --folder-amber: #9F6F12;
+  --folder-slate: #7C766F;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
   --font-title: 'Baloo 2', Nunito, sans-serif;
   --font-ui: Nunito, system-ui, sans-serif;
@@ -195,6 +197,8 @@
   --engine-sq: #5FB98C;
   --engine-sq-bg: #16261F;
   --field: #121110;
+  --folder-amber: #F0B94E;
+  --folder-slate: rgba(237,231,218,.45);
   --gridline: rgba(237,231,218,.08);
   --gridline-2: rgba(237,231,218,.14);
   --hero-wash: #1A1712;
@@ -282,6 +286,8 @@
     --engine-sq: #5FB98C;
     --engine-sq-bg: #16261F;
     --field: #121110;
+    --folder-amber: #F0B94E;
+    --folder-slate: rgba(237,231,218,.45);
     --gridline: rgba(237,231,218,.08);
     --gridline-2: rgba(237,231,218,.14);
     --hero-wash: #1A1712;
