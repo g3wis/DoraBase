@@ -671,13 +671,47 @@ pub fn save_database(
 /// Met à jour les réglages d'une connexion existante. **Ferme toujours la connexion** : elle
 /// pointe peut-être encore l'ancien hôte. Elle n'est pas rouverte : le nouveau réglage peut être
 /// faux, et une erreur juste après un enregistrement réussi se lirait comme son échec.
+///
+/// **Refusée tant qu'une transaction manuelle est ouverte** sur cette connexion (#174) — le patron
+/// de `set_folder_read_only`, des déplacements et de l'import. Fermer emporterait la transaction, et
+/// le serveur l'annulerait sans que rien à l'écran le dise : le panneau qui la listait se viderait
+/// au premier rafraîchissement. Une confirmation qui nommerait la transaction a été écartée : les
+/// trois autres gestes refusent, et une quatrième conduite pour la même cause serait une règle de
+/// plus à apprendre.
 #[tauri::command]
 pub async fn update_variant(
     request: UpdateVariantRequest,
     state: State<'_, ConfigState>,
     registry: State<'_, ConnectionRegistry>,
 ) -> Result<FolderTree, String> {
-    let arbre = avec_le_magasin(&state, |store| {
+    mettre_a_jour_la_connexion(&state, &registry, &request).await
+}
+
+/// Le corps d'`update_variant`, sans Tauri.
+pub(crate) async fn mettre_a_jour_la_connexion(
+    state: &ConfigState,
+    registry: &ConnectionRegistry,
+    request: &UpdateVariantRequest,
+) -> Result<FolderTree, String> {
+    let cle = cle_de_connexion(&request.connection);
+
+    // D'abord **sans écrire** : une transaction ouverte, que la fermeture emporterait.
+    if registry.transaction_ouverte(&cle).await {
+        let nom = avec_le_magasin(state, |store| {
+            let arbre = store.load_tree()?;
+            Ok(arbre
+                .chemin_de(&request.connection)
+                .map(|morceaux| morceaux.join(" › ")))
+        })?
+        .unwrap_or_else(|| request.connection.to_string());
+        return Err(format!(
+            "une transaction manuelle est ouverte dans une console de « {nom} » : validez-la ou \
+             annulez-la avant de modifier cette connexion. Ses nouveaux réglages demandent de la \
+             rouvrir, et la fermer emporterait cette transaction."
+        ));
+    }
+
+    let arbre = avec_le_magasin(state, |store| {
         let mut arbre = store.load_tree()?;
         let magasin = magasin_de(store)?;
         let secret = request.password.as_deref().map(crate::secrets::Secret::new);
@@ -696,9 +730,7 @@ pub async fn update_variant(
         Ok(arbre)
     })?;
 
-    registry
-        .fermer(&cle_de_connexion(&request.connection))
-        .await;
+    registry.fermer(&cle).await;
     log::info!("update_variant ← {} → connexion fermée", request.connection);
     Ok(arbre)
 }
@@ -1459,6 +1491,169 @@ mod tests_import {
             apercu.folders[0].connections_kept,
             vec!["Halle › prod › base-jetons".to_owned()]
         );
+    }
+}
+
+/// Modifier une connexion refuse tant qu'une transaction manuelle y est ouverte (#174), sur un vrai
+/// fichier SQLite.
+#[cfg(test)]
+mod tests_mettre_a_jour {
+    use super::*;
+    use crate::config::arbre::tests::{base, dossier};
+    use crate::config::model::{Engine, SslMode};
+    use crate::engine::registry::ConnectionState;
+    use crate::engine::{RowLimit, TransactionMode};
+
+    struct Decor {
+        _repertoire: tempfile::TempDir,
+        config: ConfigState,
+        registre: ConnectionRegistry,
+        chemin_config: std::path::PathBuf,
+        connexion: crate::config::model::Database,
+    }
+
+    fn cle() -> String {
+        cle_de_connexion(&ConnectionId::brut("jetons"))
+    }
+
+    /// `dev` porte une connexion SQLite **ouverte**.
+    async fn monter() -> Decor {
+        let repertoire = tempfile::tempdir().expect("répertoire temporaire");
+        let base_sqlite = repertoire.path().join("atelier.db");
+        rusqlite::Connection::open(&base_sqlite)
+            .expect("fichier")
+            .execute_batch("create table jetons (valeur integer)")
+            .expect("décor");
+        let mut connexion = base("jetons", false);
+        connexion.engine = Engine::Sqlite;
+        connexion.connection.default_database = base_sqlite.to_string_lossy().into_owned();
+        connexion.connection.ssl_mode = SslMode::Disable;
+        connexion.connection.password = None;
+        let mut dev = dossier("dev", "dev", false);
+        dev.connections.push(connexion.clone());
+        let chemin_config = repertoire.path().join("config.json");
+        let (store, _) = ConfigStore::open(&chemin_config);
+        ecrire_le_reste_intact(
+            &store,
+            &FolderTree {
+                folders: vec![dev],
+                connections: Vec::new(),
+            },
+        )
+        .expect("écrit");
+
+        let registre = ConnectionRegistry::new();
+        registre
+            .ouvrir(
+                &cle(),
+                Engine::Sqlite,
+                &connexion.connection,
+                None,
+                &crate::engine::proxy::ContexteDeProxy::pour_les_tests(),
+            )
+            .await
+            .expect("un fichier SQLite doit s'ouvrir");
+        Decor {
+            _repertoire: repertoire,
+            config: ConfigState::ouvert(store),
+            registre,
+            chemin_config,
+            connexion,
+        }
+    }
+
+    fn demande(decor: &Decor, libelle: &str) -> UpdateVariantRequest {
+        UpdateVariantRequest {
+            connection: ConnectionId::brut("jetons"),
+            variant: decor.connexion.connection.clone(),
+            password: None,
+            label: Some(libelle.to_owned()),
+        }
+    }
+
+    fn libelle_sur_le_disque(decor: &Decor) -> Option<String> {
+        let (store, _) = ConfigStore::open(&decor.chemin_config);
+        let arbre = store.load_tree().expect("relu");
+        let (base, _) = arbre
+            .connexion(&ConnectionId::brut("jetons"))
+            .expect("toujours déclarée");
+        base.label.clone()
+    }
+
+    /// **Le refus est calculé avant d'écrire** : rien n'est écrit, la connexion reste ouverte et la
+    /// transaction garde son instruction. Sabotage vérifié : retirer la garde fait tomber ce test —
+    /// l'écriture passe, la connexion se ferme et la transaction disparaît avec elle.
+    #[tokio::test]
+    async fn une_transaction_ouverte_refuse_la_modification_sans_rien_ecrire_ni_fermer() {
+        let decor = monter().await;
+        decor
+            .registre
+            .executer_une_requete(
+                &cle(),
+                "insert into jetons values (1)",
+                RowLimit::OneHundred,
+                TransactionMode::Manual,
+                "console",
+            )
+            .await
+            .expect("retenue");
+
+        let refus = mettre_a_jour_la_connexion(
+            &decor.config,
+            &decor.registre,
+            &demande(&decor, "renommée"),
+        )
+        .await
+        .expect_err("refus attendu");
+
+        assert!(refus.contains("transaction manuelle"), "{refus}");
+        assert!(
+            refus.contains("dev › base-jetons"),
+            "le refus nomme la connexion par son chemin : {refus}"
+        );
+        assert!(refus.contains("validez-la ou"), "{refus}");
+        assert_eq!(libelle_sur_le_disque(&decor), None, "rien n'est écrit");
+        assert!(matches!(
+            decor.registre.etat(&cle()).await,
+            ConnectionState::Connected { .. }
+        ));
+        assert!(
+            decor.registre.transaction_ouverte(&cle()).await,
+            "la transaction est intacte"
+        );
+    }
+
+    /// Contrôle positif : la transaction annulée, la même modification passe et **ferme** la
+    /// connexion, comme avant #174.
+    #[tokio::test]
+    async fn sans_transaction_la_modification_s_ecrit_et_ferme_la_connexion() {
+        let decor = monter().await;
+        decor
+            .registre
+            .executer_une_requete(
+                &cle(),
+                "insert into jetons values (1)",
+                RowLimit::OneHundred,
+                TransactionMode::Manual,
+                "console",
+            )
+            .await
+            .expect("retenue");
+        decor
+            .registre
+            .annuler_la_transaction(&cle(), "console")
+            .await
+            .expect("annulée");
+
+        mettre_a_jour_la_connexion(&decor.config, &decor.registre, &demande(&decor, "renommée"))
+            .await
+            .expect("modifiée");
+
+        assert_eq!(libelle_sur_le_disque(&decor).as_deref(), Some("renommée"));
+        assert!(matches!(
+            decor.registre.etat(&cle()).await,
+            ConnectionState::Never
+        ));
     }
 }
 

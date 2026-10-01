@@ -308,7 +308,8 @@ icon: string | null, };
 export type SetFolderReadOnlyRequest = { folder: FolderId, readOnly: boolean, };
 
 /**
- * `update_variant` : **ferme toujours** la connexion — l'hôte peut avoir changé.
+ * `update_variant` : **ferme toujours** la connexion — l'hôte peut avoir changé —, et **refuse**
+ * tant qu'une console y tient une transaction manuelle, que la fermeture emporterait (#174).
  */
 export type UpdateVariantRequest = { connection: ConnectionId, variant: ConnectionSettings, 
 /**
