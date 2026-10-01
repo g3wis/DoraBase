@@ -341,7 +341,8 @@ pub struct SaveDatabaseResult {
     pub connection: ConnectionId,
 }
 
-/// `update_variant` : **ferme toujours** la connexion — l'hôte peut avoir changé.
+/// `update_variant` : **ferme toujours** la connexion — l'hôte peut avoir changé —, et **refuse**
+/// tant qu'une console y tient une transaction manuelle, que la fermeture emporterait (#174).
 #[derive(Debug, Clone, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "arbre.ts")]

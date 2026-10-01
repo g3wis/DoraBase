@@ -1520,9 +1520,22 @@ poser le bon régime depuis la recette. Les autres connexions restent `Connected
 registre ni au Trousseau. **Le refus pendant une transaction manuelle vaut dans les deux sens** —
 poser comme lever —, parce que fermer emporterait la transaction (`API-38`) ; il nomme le chemin de
 la connexion, le registre ne rendant qu'un booléen. C'est le **patron** que `set_folder_read_only`,
-les deux déplacements et l'import suivent tous les trois : d'abord calculer sans écrire ce qu'il
-faudrait fermer, refuser si c'est une transaction ouverte, écrire, puis fermer hors du verrou de
-configuration.
+les deux déplacements, l'import et — depuis #174 — `update_variant` suivent tous les quatre : d'abord
+calculer sans écrire ce qu'il faudrait fermer, refuser si c'est une transaction ouverte, écrire, puis
+fermer hors du verrou de configuration.
+
+**`update_variant` refuse, il ne confirme pas** (1er octobre 2026, #174, tranché par le demandeur).
+Il fermait la connexion modifiée sans regarder ses transactions, donc une transaction manuelle tenue
+par une console était **annulée en silence** par un « Enregistrer » d'`A2` — le comportement d'avant
+les dossiers, devenu l'exception parmi les gestes qui ferment. Une confirmation qui nommerait la
+transaction a été écartée : quatre gestes pour une même cause, trois qui refusent et un qui demande,
+seraient une règle de plus à apprendre. Le refus est calculé **avant toute écriture** — ni le fichier,
+ni le Trousseau, ni le registre ne bougent —, nomme la connexion par son **chemin** et dit de valider
+ou d'annuler la transaction d'abord. Il nomme la connexion et non la console : le registre indexe les
+transactions par jeton d'onglet, qui ne nomme rien. Côté `A2`, rien de neuf : le refus s'affiche au
+pied comme tous les refus d'enregistrement, et la modale **reste ouverte** — fermer perdrait la saisie
+avec le message. Le test Rust tourne sur un vrai fichier SQLite (`tests_mettre_a_jour`), et le
+sabotage qui retire la garde le fait tomber.
 
 **Et un défaut antérieur, trouvé en route : `init` de `mysql_async` n'est joué qu'une fois** (#168).
 Il ne s'exécute qu'à la création d'une connexion du pool, or le pool **réinitialise** la session à
@@ -4319,7 +4332,8 @@ base que le registre avait fermée, et la première requête répondait « aucun
 **Ce ne sont plus les mêmes commandes qui ferment** (29 septembre 2026, #165 à #169). Avant les
 dossiers, renommer un projet ou une connexion fermait, parce que le triplet changeait. Aujourd'hui
 **six** commandes appellent `fermer`, chacune parce qu'elle **périme** quelque chose de la recette
-d'une connexion ouverte : `update_variant` (l'hôte peut changer), `delete_database` et
+d'une connexion ouverte : `update_variant` (l'hôte peut changer — et il refuse depuis #174 tant
+qu'une transaction manuelle y est ouverte), `delete_database` et
 `delete_folder` (la déclaration part), et trois qui ne ferment **que** les connexions dont la lecture
 seule effective change — `set_folder_read_only`, `move_folder` / `move_database` et
 `import_projects`. **Renommer ne ferme plus rien**, et **retirer une console non plus** : ce fichier a
@@ -6617,12 +6631,6 @@ Aucun de ces points ne bloque le code en place.
   n'est pas forcément de production. Le rappel est juste, son titre ne l'est qu'à moitié. Deux titres
   selon l'appelant, ou un titre qui nomme le risque plutôt que la cible (« le serveur ne sera pas
   authentifié ») : c'est une phrase à choisir, pas un défaut de logique.
-- **`update_variant` ferme la connexion sans regarder une transaction manuelle ouverte** — le
-  comportement d'avant les dossiers, et il détonne maintenant : les trois gestes qui ferment pour la
-  lecture seule (`set_folder_read_only`, les déplacements, l'import) **refusent** tant qu'une
-  transaction est ouverte, parce que fermer l'emporterait. Modifier les réglages d'une connexion en
-  plein milieu d'une transaction l'annule donc sans le dire. Refuser comme les trois autres est le
-  plus simple ; confirmer en nommant la transaction est plus doux. Rien ne l'a tranché.
 - **Importer un dossier sous un autre nom, ou « à côté » de l'existant**, n'existe pas. La fusion
   couvre le cas courant — deux machines, un même dossier — mais pas « je veux les deux côte à côte
   pour comparer » : les connexions s'apparient par identifiant, donc un second exemplaire demanderait

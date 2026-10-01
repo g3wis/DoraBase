@@ -41,14 +41,16 @@ const BASE: Database = {
 /** La connexion vit dans `Atelier Nord` › `prod` : c'est le cadre qui s'annonce en édition. */
 const APRES: FolderTree = arbreDeTest(trioDeTest({ prod: [BASE] }))
 
-function monter(over: { onUpdate?: (r: UpdateVariantRequest) => Promise<FolderTree> } = {}) {
+function monter(
+  over: { onUpdate?: (r: UpdateVariantRequest) => Promise<FolderTree>; onClose?: () => void } = {},
+) {
   const requetes: UpdateVariantRequest[] = []
   render(
     <>
       <Sprite />
       <LanguageProvider preferences={{ language: 'fr' }}>
         <NewConnection
-          onClose={() => {}}
+          onClose={over.onClose ?? (() => {})}
           arbre={APRES}
           edition={BASE}
           onBrowseKey={async () => null}
@@ -156,6 +158,29 @@ describe('modifier une connexion (08g)', () => {
 
     await utilisateur.click(enregistrer())
     expect(await screen.findByText(/n’existe plus/)).toBeInTheDocument()
+  })
+
+  it('le refus d’une transaction ouverte s’affiche au pied et laisse la modale ouverte (#174)', async () => {
+    // Le cœur refuse `update_variant` tant qu'une console tient une transaction manuelle sur cette
+    // connexion : la fermer l'emporterait. L'écran n'a rien à décider — il affiche le refus comme
+    // les autres, et **ne se ferme pas**, sans quoi la saisie serait perdue avec le message.
+    const utilisateur = userEvent.setup()
+    let fermetures = 0
+    monter({
+      onClose: () => {
+        fermetures += 1
+      },
+      onUpdate: async () => {
+        throw new Error(
+          'une transaction manuelle est ouverte dans une console de « Atelier Nord › prod › analytics » : validez-la ou annulez-la avant de modifier cette connexion.',
+        )
+      },
+    })
+
+    await utilisateur.click(enregistrer())
+    expect(await screen.findByText(/transaction manuelle est ouverte/)).toBeInTheDocument()
+    expect(fermetures).toBe(0)
+    expect(enregistrer()).toBeEnabled()
   })
 
   it('un tunnel enregistré est prérempli, panneau compris', () => {
