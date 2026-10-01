@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test'
+import { deplierUnEnvironnement } from './pourLesTests'
 
 /**
- * Le transfert de projets (`API-30`).
+ * Le transfert de dossiers (`API-30`, porté sur l'arbre par #169).
  *
  * # Ce que ce niveau garde, et qu'aucun autre ne peut garder
  *
@@ -9,12 +10,12 @@ import { expect, test } from '@playwright/test'
  * le câblage de l'entrée de menu. Trois faits leur échappent aux trois, parce que jsdom ne calcule
  * aucune mise en page (règle n° 9) :
  *
- * 1. **que le chemin complet existe** — le menu d'une ligne de projet ouvre bien la modale, dans
+ * 1. **que le chemin complet existe** — le menu d'une ligne de dossier ouvre bien la modale, dans
  *    l'écran assemblé et non dans une vitrine (règle n° 8) ;
  * 2. **que les deux modales tiennent dans la fenêtre** : c'est le défaut du 1er septembre 2026, où
  *    le pied d'`A2` sortait par le bas et « Enregistrer » devenait inatteignable. Celle d'import
  *    porte une liste dont la longueur vient du fichier, donc elle est du même gabarit ;
- * 3. **que la liste des projets défile dans son propre conteneur** plutôt que de pousser les deux
+ * 3. **que la liste des dossiers défile dans son propre conteneur** plutôt que de pousser les deux
  *    boutons hors de vue.
  *
  * # Les deux sens passent par un vrai chemin
@@ -28,19 +29,77 @@ import { expect, test } from '@playwright/test'
  * de bout en bout, sont le même cas resté ouvert.
  */
 
-/* **L'export d'un projet depuis le menu de sa ligne est parti avec les projets** (#166) : le menu
-   d'un dossier ne porte pas encore « Exporter le dossier… », qui revient avec #169. Les trois tests
-   de ce bloc reviendront avec lui. */
+/** Ouvre « Exporter le dossier… » depuis le menu « … » de la ligne `nom`, déjà visible. */
+async function ouvrirLExport(page: import('@playwright/test').Page, nom: string): Promise<void> {
+  // Le survol est obligatoire : le « … » d'une ligne est en `visibility: hidden` hors survol.
+  await page.getByRole('treeitem', { name: new RegExp(`^${nom}\\b`) }).hover()
+  await page.getByRole('button', { name: `Actions de ${nom}`, exact: true }).click()
+  await page.getByRole('button', { name: 'Exporter le dossier…' }).click()
+  await page.getByRole('dialog', { name: 'Exporter', exact: true }).waitFor()
+  await page.evaluate(() => document.fonts.ready)
+}
 
-test.describe("l'import de projets", () => {
+/* **L'export d'un dossier depuis le menu de sa ligne** (#169) : les trois tests que #166 avait
+   retirés avec les projets, portés sur les dossiers. */
+test.describe("l'export d'un dossier", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/?demo')
+    await ouvrirLExport(page, 'Atelier Nord')
+  })
+
+  test('le menu de la ligne ouvre la modale, sur ce dossier', async ({ page }) => {
+    const modale = page.getByRole('dialog', { name: 'Exporter', exact: true })
+
+    // **La portée est nommée** : c'est la seule chose qui distingue l'export d'un dossier de celui
+    // de tout l'arbre, et elle vient du nœud d'où part le geste.
+    await expect(modale).toContainText('Atelier Nord')
+    await expect(modale.getByRole('switch', { name: 'Inclure les mots de passe' })).toHaveAttribute(
+      'aria-checked',
+      'false',
+    )
+  })
+
+  test("l'avertissement des mots de passe paraît avant le choix du fichier", async ({ page }) => {
+    const modale = page.getByRole('dialog', { name: 'Exporter', exact: true })
+    await expect(modale).toContainText('sans mot de passe')
+
+    await modale.getByRole('switch', { name: 'Inclure les mots de passe' }).click()
+
+    // **Avant le geste, pas après** : une confirmation arriverait une fois le fichier choisi.
+    await expect(modale).toContainText('ne se reprend pas')
+    // Et le bloc reste dans la modale, malgré deux lignes de texte de plus.
+    await attendreQueRienNeDeborde(page, 'Exporter')
+  })
+
+  test('la modale tient dans la fenêtre, et rien ne franchit ses bords', async ({ page }) => {
+    await mesurerLaCoquille(page, 'Exporter')
+  })
+})
+
+test("un sous-dossier s'exporte aussi, et annonce qu'il emporte ce qu'il hérite", async ({
+  page,
+}) => {
+  // **Le cas qui a le plus à perdre** (#169) : exporté seul, un sous-dossier perd ses ancêtres, et
+  // le cœur fige dans le fichier ce qu'il leur devait. La modale le dit avant le geste.
+  await page.goto('/?demo')
+  await deplierUnEnvironnement(page, 'staging')
+  await ouvrirLExport(page, 'staging')
+  const modale = page.getByRole('dialog', { name: 'Exporter', exact: true })
+
+  await expect(modale).toContainText('staging')
+  await expect(modale).toContainText('emporte la lecture seule et les libellés')
+  await mesurerLaCoquille(page, 'Exporter')
+})
+
+test.describe("l'import de dossiers", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/?demo')
     // **Par le bouton de la bande**, comme un utilisateur : c'est ce chemin-là qui manquait.
     await page
       .getByRole('toolbar', { name: 'Actions du panneau' })
-      .getByRole('button', { name: 'Importer des projets…' })
+      .getByRole('button', { name: 'Importer des dossiers…' })
       .click()
-    await page.getByRole('dialog', { name: 'Importer des projets' }).waitFor()
+    await page.getByRole('dialog', { name: 'Importer des dossiers' }).waitFor()
     await page.getByRole('button', { name: 'Choisir un fichier…' }).click()
     // La mesure **après** l'attente qui prouve l'effet (règle n° 15) : l'aperçu arrive d'une
     // promesse, et une lecture sèche daterait du rendu d'avant.
@@ -49,28 +108,30 @@ test.describe("l'import de projets", () => {
   })
 
   test('les trois sortes de verdict se lisent, et le refusé n’a pas de case', async ({ page }) => {
-    const modale = page.getByRole('dialog', { name: 'Importer des projets' })
+    const modale = page.getByRole('dialog', { name: 'Importer des dossiers' })
 
-    await expect(modale).toContainText('Nouveau projet')
-    await expect(modale).toContainText('Projet existant, complété')
+    await expect(modale).toContainText('Nouveau dossier')
+    await expect(modale).toContainText('Dossier existant, complété')
     await expect(modale).toContainText('Refusé')
-    /* **Aucune case sur un projet refusé** : un contrôle grisé dirait « pas maintenant », or
-       celui-ci ne pourra jamais retenir ce projet-là. Sa raison est écrite sur la ligne.
+    /* **Aucune case sur un dossier refusé** : un contrôle grisé dirait « pas maintenant », or
+       celui-ci ne pourra jamais retenir ce dossier-là. Sa raison est écrite sur la ligne.
 
        **Le compte, et non l'absence d'une case nommée « Bancal »** : c'est le sabotage qui l'a
        dit. Une case rendue sur la ligne refusée n'aurait *pas* de nom accessible — le libellé
        n'est un `<label>` que sur une ligne retenue —, donc une recherche par nom rendait zéro
-       pour la mauvaise raison et restait verte. Trois projets, deux cases. */
-    await expect(modale.getByRole('checkbox')).toHaveCount(2)
+       pour la mauvaise raison et restait verte. Trois dossiers et la ligne de la racine, trois
+       cases. */
+    await expect(modale.getByRole('checkbox')).toHaveCount(3)
     await expect(modale.getByRole('checkbox', { name: 'Quai Sud' })).toBeVisible()
     await expect(modale.getByRole('checkbox', { name: 'Atelier Nord' })).toBeVisible()
-    await expect(modale).toContainText('porte deux sous-dossiers')
-    // Deux projets retenus sur les trois du fichier : le refusé ne compte pas.
-    await expect(modale.getByRole('button', { name: 'Importer 2 projets' })).toBeVisible()
+    await expect(modale.getByRole('checkbox', { name: 'Connexions à la racine' })).toBeVisible()
+    await expect(modale).toContainText('n’a pas de nom')
+    // Trois lignes retenues sur les quatre du fichier : le refusé ne compte pas.
+    await expect(modale.getByRole('button', { name: 'Importer 3 éléments' })).toBeVisible()
   })
 
   test('ce qui ne sera pas versé est dit, avec sa liste en infobulle', async ({ page }) => {
-    const modale = page.getByRole('dialog', { name: 'Importer des projets' })
+    const modale = page.getByRole('dialog', { name: 'Importer des dossiers' })
 
     await expect(modale).toContainText('déjà déclarées ici')
     await expect(modale).toContainText('le texte local est gardé')
@@ -79,19 +140,24 @@ test.describe("l'import de projets", () => {
       'title',
       'Atelier Nord › prod › analytics',
     )
+    // **La seule chose qu'un import change à ce qui était déjà là** (#169).
+    await expect(modale.getByText(/passent en lecture seule/)).toHaveAttribute(
+      'title',
+      'Atelier Nord › prod',
+    )
   })
 
-  test('décocher un projet change le compte du bouton', async ({ page }) => {
-    const modale = page.getByRole('dialog', { name: 'Importer des projets' })
+  test('décocher un dossier change le compte du bouton', async ({ page }) => {
+    const modale = page.getByRole('dialog', { name: 'Importer des dossiers' })
     await modale.getByRole('checkbox', { name: 'Quai Sud' }).click()
 
-    await expect(modale.getByRole('button', { name: 'Importer 1 projet' })).toBeVisible()
+    await expect(modale.getByRole('button', { name: 'Importer 2 éléments' })).toBeVisible()
   })
 
   test('la modale tient dans la fenêtre, et la liste défile sans pousser le pied', async ({
     page,
   }) => {
-    const { fenetre } = await mesurerLaCoquille(page, 'Importer des projets')
+    const { fenetre } = await mesurerLaCoquille(page, 'Importer des dossiers')
 
     // Le **pied** est ce que le défaut du 1er septembre rendait inatteignable : ce n'est pas la
     // modale qui grandit sans fin, c'est son corps qui défile.
@@ -100,18 +166,18 @@ test.describe("l'import de projets", () => {
     if (!boite) throw new Error('le pied doit être mesurable')
     expect(boite.y + boite.height).toBeLessThanOrEqual(fenetre.height)
     /* **Cherché dans la modale, non dans la page** : depuis que la bande de l'arbre porte
-       « Importer des projets… », un `/^Importer/` non ancré désigne deux boutons — celui qui ouvre
+       « Importer des dossiers… », un `/^Importer/` non ancré désigne deux boutons — celui qui ouvre
        et celui qui applique — et Playwright refuse alors de conclure. C'est la règle du nom
        accessible ancré (`/orders/` compte aussi `orders_by_day`), par le bout où c'est le *décor*
        qui a changé sous un motif resté juste. */
     await expect(
-      page.getByRole('dialog', { name: 'Importer des projets' }).getByRole('button', {
+      page.getByRole('dialog', { name: 'Importer des dossiers' }).getByRole('button', {
         name: /^Importer \d/,
       }),
     ).toBeVisible()
 
     /* **La liste a son propre conteneur de défilement**, et c'est la garde qui compte : un fichier
-       de trente projets ferait sinon un corps de plusieurs milliers de pixels. La mesure porte sur
+       de trente dossiers ferait sinon un corps de plusieurs milliers de pixels. La mesure porte sur
        la valeur *calculée* et non sur le rectangle, qui ne dirait rien de la capacité à défiler. */
     const liste = page.getByRole('checkbox', { name: 'Quai Sud' }).locator('xpath=../..')
     const defilement = await liste.evaluate((el) => ({
@@ -128,7 +194,7 @@ async function mesurerLaCoquille(
   page: import('@playwright/test').Page,
   titre: string,
 ): Promise<{ fenetre: { width: number; height: number } }> {
-  const coquille = page.getByRole('dialog', { name: titre })
+  const coquille = page.getByRole('dialog', { name: titre, exact: true })
   const boite = await coquille.boundingBox()
   const fenetre = page.viewportSize()
   if (!boite || !fenetre) throw new Error('la modale doit être mesurable')
@@ -152,7 +218,7 @@ async function attendreQueRienNeDeborde(
   titre: string,
 ): Promise<void> {
   const debordements = await page
-    .getByRole('dialog', { name: titre })
+    .getByRole('dialog', { name: titre, exact: true })
     .evaluate((racine: HTMLElement) => {
       const cadre = racine.getBoundingClientRect()
       return [...racine.querySelectorAll<HTMLElement>('*')]

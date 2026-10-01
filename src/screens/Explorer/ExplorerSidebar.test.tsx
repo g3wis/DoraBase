@@ -82,6 +82,7 @@ function Piloté({
   onEditDatabase,
   onRenameDatabase,
   onImportProjects,
+  onExportFolder,
   onDelete,
   modificationsEnAttenteDe,
   onRefresh,
@@ -103,6 +104,7 @@ function Piloté({
   onEditDatabase?: (connection: ConnectionId) => void
   onRenameDatabase?: ExplorerSidebarProps['onRenameDatabase']
   onImportProjects?: () => void
+  onExportFolder?: ExplorerSidebarProps['onExportFolder']
   onDelete?: (cible: CibleDeSuppression) => Promise<{ leftoverSecrets: string[] }>
   modificationsEnAttenteDe?: (cible: CibleDeSuppression) => number
   onRefresh?: () => void
@@ -132,6 +134,7 @@ function Piloté({
           onEditDatabase={onEditDatabase}
           onRenameDatabase={onRenameDatabase}
           onImportProjects={onImportProjects}
+          onExportFolder={onExportFolder}
           onDelete={onDelete}
           modificationsEnAttenteDe={modificationsEnAttenteDe}
           onRefresh={onRefresh}
@@ -785,13 +788,15 @@ test('le menu d’un dossier racine suit l’ordre décidé, le geste destructeu
       onRenameFolder={async () => {}}
       onRecolorFolder={async () => {}}
       onSetFolderReadOnly={async () => {}}
+      onExportFolder={vi.fn()}
       onDelete={async () => AUCUN_RESIDU}
     />,
   )
   await userEvent.click(screen.getByRole('button', { name: 'Actions de Atelier Nord' }))
-  // **Ni « Déplacer vers… » ni « Exporter le dossier… »** : #167 et #169 les poseront. Une entrée
-  // qui n'aboutit à rien d'ici là se lirait comme une panne. Le « … » rend un `Popover` de boutons,
-  // donc l'ordre se lit dans le panneau lui-même.
+  // **« Exporter le dossier… » (#169) après la lecture seule, avant « Retirer… »**, et pas encore
+  // « Déplacer vers… » : #167 la posera juste avant « Retirer… ». Une entrée qui n'aboutit à rien
+  // d'ici là se lirait comme une panne. Le « … » rend un `Popover` de boutons, donc l'ordre se lit
+  // dans le panneau lui-même.
   const attendues = [
     'Rafraîchir l’arborescence',
     'Nouvelle connexion…',
@@ -799,6 +804,7 @@ test('le menu d’un dossier racine suit l’ordre décidé, le geste destructeu
     'Renommer…',
     'Couleur…',
     'Passer en lecture seule',
+    'Exporter le dossier…',
     'Retirer de DoraBase…',
   ]
   const panneau = screen.getByRole('button', { name: attendues[0] }).parentElement
@@ -1390,7 +1396,29 @@ describe('le clic droit ouvre le même menu, au pointeur (`26`)', () => {
   })
 })
 
-test('« Importer des projets… » vit dans la bande, à côté de « Nouveau dossier »', async () => {
+test('« Exporter le dossier… » passe l’identifiant et le nom du dossier de sa ligne', async () => {
+  // **Le geste part du palier qui connaît son contexte** (#169) : le cœur reçoit l'identifiant,
+  // la modale montre le nom. Un sous-dossier s'exporte aussi — c'est lui qui a le plus à perdre,
+  // puisqu'il perd ses ancêtres.
+  const onExportFolder = vi.fn()
+  render(<Piloté initial={TOUT_DEPLIE} onExportFolder={onExportFolder} />)
+
+  await userEvent.click(screen.getByRole('button', { name: 'Actions de prod' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Exporter le dossier…' }))
+
+  expect(onExportFolder).toHaveBeenCalledWith(ID_DE_TEST.prod, 'prod')
+})
+
+test('sans export relié, l’entrée est désactivée avec sa raison', async () => {
+  render(<Piloté initial={TOUT_DEPLIE} />)
+  await userEvent.click(screen.getByRole('button', { name: 'Actions de Atelier Nord' }))
+
+  const entree = screen.getByRole('button', { name: 'Exporter le dossier…' })
+  expect(entree).toBeDisabled()
+  expect(entree).toHaveAttribute('title', 'Cet écran n’est pas relié à l’export.')
+})
+
+test('« Importer des dossiers… » vit dans la bande, à côté de « Nouveau dossier »', async () => {
   // **Le second chemin de l'import** (`API-30`, 17 septembre 2026, à la demande) : il n'existait
   // que dans le menu natif, donc personne ne l'a trouvé. Les deux gestes de cette bande produisent
   // un projet — l'un le déclare, l'autre le reçoit —, et les voisiner est ce qui fait trouver le
@@ -1399,7 +1427,7 @@ test('« Importer des projets… » vit dans la bande, à côté de « Nouveau d
   render(<Piloté onNewFolder={async () => 'f-neuf'} onImportProjects={onImportProjects} />)
 
   const bande = screen.getByRole('toolbar', { name: 'Actions du panneau' })
-  await userEvent.click(within(bande).getByRole('button', { name: 'Importer des projets…' }))
+  await userEvent.click(within(bande).getByRole('button', { name: 'Importer des dossiers…' }))
 
   expect(onImportProjects).toHaveBeenCalledOnce()
 })
@@ -1410,5 +1438,5 @@ test('la bande ne rend pas l’import quand l’écran ne le relie à rien', () 
   // que de le désactiver avec sa raison comme le fait une entrée de menu, qui a la place de la dire.
   render(<Piloté onNewFolder={async () => 'f-neuf'} />)
 
-  expect(screen.queryByRole('button', { name: 'Importer des projets…' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Importer des dossiers…' })).toBeNull()
 })

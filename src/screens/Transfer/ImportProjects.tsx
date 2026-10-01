@@ -15,14 +15,15 @@ type ImportProjectsProps = {
 }
 
 /**
- * La modale d'import de projets (`API-30`).
+ * La modale d'import (`API-30`, portée sur les dossiers par #169).
  *
  * # Le fichier est **inspecté avant** d'être proposé
  *
  * L'inspection précède la confirmation, comme celle d'un dump : c'est elle qui refuse un fichier
  * d'une autre sorte ou d'une version trop récente, et la modale doit pouvoir le dire avant de
- * proposer d'importer. Elle dit aussi, projet par projet, **ce qui arrivera et ce qui n'arrivera
- * pas** — un import amputé en silence se lirait comme un import complet.
+ * proposer d'importer. Elle dit aussi, dossier de premier niveau par dossier, **ce qui arrivera et ce
+ * qui n'arrivera pas** — un import amputé en silence se lirait comme un import complet. Les
+ * connexions que le fichier range à la racine ont leur propre ligne, qui se retient comme les autres.
  *
  * # L'aperçu et l'écriture viennent du même calcul
  *
@@ -45,17 +46,10 @@ export function ImportProjects({
 
   /**
    * Les **écartés** et non les retenus, et c'est ce qui rend le défaut juste : un fichier fraîchement
-   * inspecté a tous ses projets cochés, et une liste de retenus aurait dû être remplie à l'arrivée
+   * inspecté a tous ses dossiers cochés, et une liste de retenus aurait dû être remplie à l'arrivée
    * du rapport — donc dans un effet, qui se serait rejoué à chaque rendu de l'hôte.
    */
-  const retenu = (nom: string) => !ecartes.includes(nom)
-
-  /*
-   * **Portage minimal pour #166** : le rapport parle désormais de dossiers de premier niveau
-   * (`FolderOutcome`), plus une ligne pour les connexions rangées à la racine du fichier. #169 refait
-   * cette modale ; d'ici là, la ligne racine se nomme par une clé à part et se retient comme les
-   * autres.
-   */
+  const retenu = (cle: string) => !ecartes.includes(cle)
 
   async function choisir() {
     setErreur(null)
@@ -74,7 +68,7 @@ export function ImportProjects({
   async function importer() {
     if (!fichier || !apercu) return
     const retenus = apercu.folders.filter(
-      (sort) => sort.verdict.kind !== 'rejected' && retenu(nomDe(sort)),
+      (sort) => sort.verdict.kind !== 'rejected' && retenu(cleDe(sort)),
     )
     const selection: ImportSelection = {
       folders: retenus.flatMap((sort) => (sort.folder === null ? [] : [sort.folder])),
@@ -89,7 +83,7 @@ export function ImportProjects({
 
   const rapport = resultat ?? apercu
   const importables = apercu
-    ? apercu.folders.filter((sort) => sort.verdict.kind !== 'rejected' && retenu(nomDe(sort)))
+    ? apercu.folders.filter((sort) => sort.verdict.kind !== 'rejected' && retenu(cleDe(sort)))
         .length
     : 0
 
@@ -144,15 +138,15 @@ export function ImportProjects({
           <div className={styles.projets}>
             {rapport.folders.map((sort) => (
               <Ligne
-                key={nomDe(sort)}
+                key={cleDe(sort)}
                 sort={sort}
                 fini={resultat !== null}
-                retenu={retenu(nomDe(sort))}
+                retenu={retenu(cleDe(sort))}
                 onRetenu={(garde) =>
                   setEcartes((precedents) =>
                     garde
-                      ? precedents.filter((nom) => nom !== nomDe(sort))
-                      : [...precedents, nomDe(sort)],
+                      ? precedents.filter((cle) => cle !== cleDe(sort))
+                      : [...precedents, cleDe(sort)],
                   )
                 }
               />
@@ -164,7 +158,7 @@ export function ImportProjects({
   )
 }
 
-/** Une ligne du rapport : le projet, son sort, et ce qu'il apporte ou n'apporte pas. */
+/** Une ligne du rapport : le dossier, son sort, et ce qu'il apporte ou n'apporte pas. */
 function Ligne({
   sort,
   fini,
@@ -179,10 +173,16 @@ function Ligne({
 }) {
   const t = useT()
   const refuse = sort.verdict.kind === 'rejected'
+  const nom = sort.folder ?? t('transfer.import.rootConnections')
+  /* La ligne de la racine ne se dit pas « dossier existant » : la racine n'est pas un dossier. */
+  const verdict =
+    sort.folder === null && sort.verdict.kind === 'merged'
+      ? t('transfer.import.verdict.rootMerged')
+      : t(`transfer.import.verdict.${sort.verdict.kind}`)
   /**
    * L'identifiant qui apparie la case et son nom.
    *
-   * `useId` et non le nom du projet : celui-ci accepte n'importe quel caractère, et un identifiant
+   * `useId` et non le nom du dossier : celui-ci accepte n'importe quel caractère, et un identifiant
    * HTML dérivé d'une saisie libre peut collisionner ou être invalide. C'est React qui garantit
    * l'unicité.
    */
@@ -198,8 +198,8 @@ function Ligne({
    * `<button role="checkbox">` aurait redit ce que la plateforme sait faire, en perdant
    * l'appariement au libellé — et Biome le refuse, avec raison.
    *
-   * **Aucune case sur un projet refusé, plutôt qu'une case grisée.** Un contrôle désactivé annonce
-   * « pas maintenant » ; celui-ci ne pourra jamais retenir ce projet-là. Sa raison est déjà
+   * **Aucune case sur un dossier refusé, plutôt qu'une case grisée.** Un contrôle désactivé annonce
+   * « pas maintenant » ; celui-ci ne pourra jamais retenir ce dossier-là. Sa raison est déjà
    * **écrite** sur la ligne, ce qui vaut mieux qu'une infobulle sur un contrôle mort — c'est
    * l'arbitrage du bouton « Valider » d'une transaction abandonnée.
    */
@@ -216,20 +216,20 @@ function Ligne({
       )}
       <div className={styles.projetTexte}>
         {fini || refuse ? (
-          <span className={styles.projetNom}>{nomDe(sort)}</span>
+          <span className={styles.projetNom}>{nom}</span>
         ) : (
           <label className={styles.projetNom} htmlFor={identifiant}>
-            {nomDe(sort)}
+            {nom}
           </label>
         )}
         <span className={styles.detail}>
-          {t(`transfer.import.verdict.${sort.verdict.kind}`)}
+          {verdict}
           {/* Ce qui **arrive**. Les trois comptes ensemble, pour tenir sur une ligne : un fichier de
-              trente projets ferait sinon trente cartes de six lignes. */}
+              trente dossiers ferait sinon trente cartes de six lignes. */}
           {!refuse &&
             sort.verdict.kind !== 'skipped' &&
             ` · ${t('transfer.import.brings', {
-              environments: sort.foldersAdded.length,
+              folders: sort.foldersAdded.length,
               connections: sort.connectionsAdded.length,
               consoles: sort.consolesAdded.length,
             })}`}
@@ -251,7 +251,15 @@ function Ligne({
         )}
         {sort.foldersKept.length > 0 && (
           <span className={styles.reserve} title={sort.foldersKept.join('\n')}>
-            {t('transfer.import.environmentsKept', { count: sort.foldersKept.length })}
+            {t('transfer.import.foldersKept', { count: sort.foldersKept.length })}
+          </span>
+        )}
+        {/* **La seule chose qu'un import change à ce qui était déjà là** (#169) : la lecture seule
+            fusionne en « locale OU fichier », jamais affaiblie. Une réserve, parce qu'elle ferme les
+            connexions ouvertes de ces dossiers, et l'infobulle les nomme. */}
+        {sort.readOnlyFromFile.length > 0 && (
+          <span className={styles.reserve} title={sort.readOnlyFromFile.join('\n')}>
+            {t('transfer.import.readOnlyFromFile', { count: sort.readOnlyFromFile.length })}
           </span>
         )}
         {sort.passwordsMissing.length > 0 && (
@@ -304,7 +312,15 @@ function Ligne({
   )
 }
 
-/** Le nom d'une ligne du rapport : le dossier de premier niveau, ou la ligne des connexions racine. */
-function nomDe(sort: FolderOutcome): string {
-  return sort.folder ?? '—'
+/**
+ * La clé d'une ligne du rapport : le nom du dossier de premier niveau, ou la chaîne vide pour la
+ * ligne des connexions à la racine.
+ *
+ * **La chaîne vide ne peut pas être le nom d'un dossier** — `FolderTree::valider` refuse un nom vide
+ * ou blanc —, donc elle ne peut pas désigner deux lignes. Un libellé traduit servirait mal de clé :
+ * il changerait avec la langue, et une langue changée pendant que la modale est ouverte
+ * recocherait la ligne.
+ */
+function cleDe(sort: FolderOutcome): string {
+  return sort.folder ?? ''
 }

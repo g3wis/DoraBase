@@ -17,8 +17,8 @@
 //! **Une seule sortie** depuis #165 : [`migrer_vers_la_v7`], qui rend l'arbre de dossiers et le plan
 //! des mots de passe à déplacer. [`document_v6`] est la chaîne jusqu'à la v6, qu'elle compose.
 //!
-//! **Le fichier de transfert (`API-30`) n'y passe plus pour l'instant** : `transfert.rs` est retiré
-//! du build jusqu'à #169, qui le portera sur l'arbre — et le fera passer par la même chaîne.
+//! **Le fichier de transfert (`API-30`) passe par la même chaîne** depuis #169 :
+//! [`arbre_du_document`] la compose pour une enveloppe antérieure à la v7.
 
 use super::arbre::FolderTree;
 use super::model::{Kubeconfigs, ManagedInstance, Preferences};
@@ -133,6 +133,43 @@ pub(crate) fn migrer_vers_la_v7(
         instances: fichier.instances,
         kubeconfigs: fichier.kubeconfigs,
         secrets_a_deplacer,
+    })
+}
+
+/// Ce qu'un fichier de transfert antérieur à la v7 devient (#169) : l'arbre, le plan des mots de
+/// passe, et les kubeconfigs que la chaîne a déclarés.
+#[derive(Debug)]
+pub(crate) struct TransfertV7 {
+    pub arbre: FolderTree,
+    /// Les couples `(ancienne, nouvelle)` : c'est par eux que `passwords` est **réindexé**, faute de
+    /// quoi aucun mot de passe du fichier ne serait retrouvé sous la référence de sa connexion.
+    pub secrets: PlanDeSecrets,
+    /// Les déclarations que le cran v5 → v6 a créées. **Vides pour un fichier déjà en v6**, qui
+    /// porte les siennes dans son enveloppe.
+    pub kubeconfigs: Kubeconfigs,
+}
+
+/// La chaîne de migration, appliquée à l'enveloppe d'un fichier de transfert (#169).
+///
+/// **La même chaîne que la configuration, sans adaptateur** — c'est la décision d'`API-30` à ne pas
+/// défaire : l'enveloppe porte `version` et `projects` à la racine, exactement comme un
+/// `config.json` v6, donc les crans la lisent telle quelle.
+///
+/// **Une seule clé est retirée d'abord, `kubeconfigs`** : l'enveloppe la porte en **liste** de
+/// déclarations, là où la configuration porte un objet `{ declarations, default }`. La laisser ferait
+/// échouer la relecture v6 sur une forme qui n'est pas la sienne ; l'appelant la relit lui-même.
+pub(crate) fn arbre_du_document(
+    mut valeur: serde_json::Value,
+    depuis: u32,
+) -> Result<TransfertV7, String> {
+    if let Some(objet) = valeur.as_object_mut() {
+        objet.remove("kubeconfigs");
+    }
+    let document = migrer_vers_la_v7(valeur, depuis)?;
+    Ok(TransfertV7 {
+        arbre: document.arbre,
+        secrets: document.secrets_a_deplacer,
+        kubeconfigs: document.kubeconfigs,
     })
 }
 

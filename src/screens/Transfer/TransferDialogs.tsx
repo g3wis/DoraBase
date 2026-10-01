@@ -6,10 +6,10 @@ import * as pont from './transferCommands'
 /**
  * Ce que la modale de transfert fait, et sur quoi.
  *
- * **Une seule forme pour les deux sens**, et la portée voyage avec l'export : `null` pour tous les
- * projets, un nom pour un seul. Deux états jumeaux — « quel sens » et « quel projet » — auraient
- * permis un import portant un nom de projet, qui ne veut rien dire : ce qu'un import verse est ce
- * que le fichier porte.
+ * **Une seule forme pour les deux sens**, et la portée voyage avec l'export : `null` pour tout
+ * l'arbre, un dossier pour lui seul (#169). Deux états jumeaux — « quel sens » et « quel dossier » —
+ * auraient permis un import portant un dossier, qui ne veut rien dire : ce qu'un import verse est ce
+ * que le fichier porte, et il le verse à la racine.
  */
 export type DemandeDeTransfert =
   | { sens: 'export'; dossier: { id: FolderId; nom: string } | null }
@@ -17,13 +17,13 @@ export type DemandeDeTransfert =
 
 type TransferDialogsProps = {
   demande: DemandeDeTransfert
-  /** Le nombre de projets déclarés, pour l'annonce d'un export complet. */
+  /** Le nombre de dossiers racines, pour l'annonce d'un export complet. */
   total: number
   onClose: () => void
   /**
-   * Ce qu'un import a rendu : les projets à jour, que `App` repose.
+   * Ce qu'un import a rendu : l'arbre à jour, que `App` repose.
    *
-   * **Remonté plutôt que gardé** : c'est ce changement de `projects` qui fait relire les états du
+   * **Remonté plutôt que gardé** : c'est ce changement d'arbre qui fait relire les états du
    * registre et purger le cache de l'arbre. Une modale qui garderait la nouvelle configuration pour
    * elle laisserait l'arbre sur celle d'avant jusqu'au prochain « Rafraîchir ».
    */
@@ -33,12 +33,12 @@ type TransferDialogsProps = {
 }
 
 /**
- * Ce que « Exporter les projets… », « Importer des projets… » et « Exporter le projet… » ouvrent
- * (`API-30`).
+ * Ce que « Tout exporter… », « Importer des dossiers… » et « Exporter le dossier… » ouvrent
+ * (`API-30`, #169).
  *
  * **Aucune cible à résoudre**, contrairement aux modales de dump : celles-là doivent deviner de
  * quelle base il s'agit, parce que le menu natif n'émet qu'un identifiant d'item et que rien ne
- * transmet la sélection de l'arbre. Ici la portée est soit « tous les projets », soit le projet dont
+ * transmet la sélection de l'arbre. Ici la portée est soit « tout l'arbre », soit le dossier dont
  * la ligne a ouvert le menu — qui la passe. Il n'y a donc pas de cas « sans cible unique ».
  */
 export function TransferDialogs({
@@ -51,7 +51,7 @@ export function TransferDialogs({
   if (demande.sens === 'export') {
     return (
       <ExportProjects
-        projet={demande.dossier?.nom ?? null}
+        dossier={demande.dossier?.nom ?? null}
         total={total}
         onClose={onClose}
         onChoisirFichier={commandes.choisirDestination}

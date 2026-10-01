@@ -156,6 +156,8 @@ type WorkbenchProps = {
    * vit au niveau de l'application, avec les deux entrées du menu natif.
    */
   onImportProjects?: () => void
+  /** Exporte un dossier depuis le menu de sa ligne (#169). **Relayé**, comme l'import. */
+  onExportFolder?: (folder: FolderId, nom: string) => void
   /**
    * Renomme une connexion (`26`). **Rejette avec le refus du cœur**, et la sidebar l'affiche. Rien
    * d'autre à rapporter depuis #166 : le nom n'est dans aucune identité.
@@ -256,6 +258,7 @@ export function Workbench({
   onSetFolderReadOnly,
   onEditDatabase,
   onImportProjects,
+  onExportFolder,
   onRenameDatabase,
   onArbre,
   onDelete,
@@ -1628,6 +1631,7 @@ export function Workbench({
                   onRecolorFolder={onRecolorFolder}
                   onSetFolderReadOnly={onSetFolderReadOnly}
                   onImportProjects={onImportProjects}
+                  onExportFolder={onExportFolder}
                   consoles={
                     onCreateConsole === undefined
                       ? undefined

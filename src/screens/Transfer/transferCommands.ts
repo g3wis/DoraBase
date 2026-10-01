@@ -42,13 +42,15 @@ export function importer(
 /**
  * Le sélecteur de **destination** natif, sur `dialog:allow-save` — celle du dump.
  *
- * Le nom proposé est celui du projet, ou `projets` pour un export complet. **Sans horodatage** :
+ * Le nom proposé est celui du dossier, ou `dossiers` pour un export complet. **Sans horodatage** :
  * le fichier n'en porte pas non plus, ce qui rend deux exports comparables par un `diff`, et un
  * nom daté ferait accumuler des fichiers dont aucun n'a l'air d'être le bon.
  */
-export async function choisirDestination(projet: string | null): Promise<string | null> {
+export async function choisirDestination(dossier: string | null): Promise<string | null> {
   const choisi = await save({
-    defaultPath: `${projet ?? 'projets'}.dorabase.${EXTENSION}`,
+    // `defaultPath` est un **chemin** : un dossier nommé « ventes / 2026 » y désignerait un
+    // répertoire inexistant. Le séparateur est remplacé, comme pour le nom d'une console (`API-29`).
+    defaultPath: `${dossier === null ? 'dossiers' : dossier.replace(/[/\\]/g, '-')}.dorabase.${EXTENSION}`,
     filters: [{ name: 'DoraBase', extensions: [EXTENSION] }],
   })
   return typeof choisi === 'string' ? choisi : null

@@ -50,7 +50,7 @@ const LONGUEUR_MAXIMALE: usize = 64;
 /// dans la clé du registre et dans la référence du secret, `connexion/<id>` : un `/` y fabriquerait
 /// une clé à trois segments, qui pourrait se confondre avec autre chose. C'est l'argument de
 /// `reference_de_instance`, porté par le jeu de caractères plutôt que par la discipline des appelants.
-fn identifiant_valable(valeur: &str) -> bool {
+pub(crate) fn identifiant_valable(valeur: &str) -> bool {
     !valeur.is_empty()
         && valeur.len() <= LONGUEUR_MAXIMALE
         && valeur
@@ -577,7 +577,7 @@ fn descendre<'a>(dossier: &'a Folder, sortie: &mut Descendance<'a>) {
 /// Le nom qu'une connexion affiche : son libellé s'il en a un, son nom sinon.
 ///
 /// La même règle que l'arbre du front (`base.label?.trim() || base.name`).
-fn nom_affiche(base: &Database) -> &str {
+pub(crate) fn nom_affiche(base: &Database) -> &str {
     base.label
         .as_deref()
         .map(str::trim)

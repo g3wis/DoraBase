@@ -95,6 +95,16 @@ export type ExplorerSidebarProps = {
    */
   onImportProjects?: () => void
   /**
+   * Exporte **ce dossier** et son sous-arbre dans un fichier de transfert (#169).
+   *
+   * **Depuis le menu de sa ligne**, comme la création d'une console part du menu de sa connexion : le
+   * geste part du palier qui connaît son contexte. « Tout exporter » vit dans le menu natif, où il
+   * n'a rien à deviner. Le nom voyage avec l'identifiant pour que la modale nomme la portée.
+   *
+   * Absent, l'entrée est désactivée avec sa raison — c'est le cas de la galerie.
+   */
+  onExportFolder?: (folder: FolderId, nom: string) => void
+  /**
    * Retirer la déclaration d'une connexion, ou un dossier entier (`08j`).
    *
    * Une seule prop pour les deux : la cible dit lequel, et deux props jumelles se seraient
@@ -169,6 +179,7 @@ export function ExplorerSidebar({
   onManageSchemas,
   onRenameDatabase,
   onImportProjects,
+  onExportFolder,
   onDelete,
   modificationsEnAttenteDe,
   columns,
@@ -265,6 +276,7 @@ export function ExplorerSidebar({
       onSetFolderReadOnly,
       refuserLaLectureSeule: (nom: string, refus: unknown) =>
         setRapport({ nom, refus: messageDuRefus(refus), sorte: 'lectureSeule' }),
+      onExportFolder,
       demanderLeRetrait,
       onRefresh,
       consoles,
@@ -664,6 +676,7 @@ type Cablage = {
   onSetFolderReadOnly: ExplorerSidebarProps['onSetFolderReadOnly']
   /** Rapporte un refus de « Passer en / Lever la lecture seule » (#168), qu'aucune ligne ne peut dire. */
   refuserLaLectureSeule: (dossier: string, refus: unknown) => void
+  onExportFolder: ExplorerSidebarProps['onExportFolder']
   demanderLeRetrait: ((cible: CibleDeSuppression) => void) | undefined
   onRefresh: ExplorerSidebarProps['onRefresh']
   consoles: ExplorerSidebarProps['consoles']
@@ -686,9 +699,9 @@ function entreesDe(noeud: Noeud, c: Cablage): readonly EntreeDeMenu[] | undefine
   /*
    * **Le menu d'un dossier** (#166), dans cet ordre — le geste destructeur reste le dernier :
    * « Nouvelle connexion… », « Nouveau dossier », « Renommer… », « Couleur… », la lecture seule,
-   * « Retirer… ». « Déplacer vers… » (#167) et « Exporter le dossier… » (#169) n'y sont pas encore,
-   * et ne sont pas posés désactivés : une entrée qui n'aboutit à rien d'ici à son ticket se lirait
-   * comme une panne.
+   * « Exporter le dossier… » (#169), « Retirer… ». « Déplacer vers… » (#167) arrivera juste avant
+   * « Retirer… » ; elle n'est pas posée désactivée d'ici là : une entrée qui n'aboutit à rien d'ici à
+   * son ticket se lirait comme une panne.
    *
    * **« Rafraîchir l'arborescence » reste en tête des dossiers de premier niveau**, là où il vivait
    * sur les projets : sa portée est l'arbre entier, et la racine est l'endroit le moins mensonger
@@ -763,6 +776,17 @@ function entreesDe(noeud: Noeud, c: Cablage): readonly EntreeDeMenu[] | undefine
             : c.onSetFolderReadOnly
               ? undefined
               : RAISONS.dossierIndisponible,
+      },
+      {
+        /* **Exporter ce dossier et son sous-arbre** (#169) : il devient un dossier racine du
+           fichier, sa lecture seule et ses libellés hérités matérialisés par le cœur. Il ne
+           configure rien et n'ouvre rien — il produit un fichier —, donc il vient après les
+           réglages et avant le geste destructeur, qui reste le dernier. `dl`, le glyphe de l'export
+           dans tout le produit, apparié à `ul` de l'import. */
+        libelle: t('transfer.export.menu'),
+        icone: 'dl',
+        onClick: c.onExportFolder ? () => c.onExportFolder?.(folder, noeud.label) : undefined,
+        raison: c.onExportFolder ? undefined : RAISONS.exportIndisponible,
       },
       {
         // **« Retirer… » et non « Supprimer… »** : ce qui part est une déclaration sur cet
@@ -928,6 +952,7 @@ function raisons(t: ReturnType<typeof useT>) {
     diagrammeIndisponible: t('explorer.sidebar.raisons.diagramUnavailable'),
     schemasIndisponible: t('explorer.sidebar.raisons.schemasUnavailable'),
     schemasHorsPostgres: t('explorer.sidebar.raisons.schemasPostgresOnly'),
+    exportIndisponible: t('explorer.sidebar.raisons.exportUnavailable'),
   }
 }
 

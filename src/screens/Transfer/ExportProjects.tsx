@@ -15,26 +15,26 @@ type Avancement =
 
 type ExportProjectsProps = {
   /**
-   * Le projet à exporter seul, ou `null` pour tous.
+   * Le nom du dossier à exporter seul, ou `null` pour tout l'arbre (#169).
    *
-   * **Le nom, pas un objet** : c'est l'identité, la même qui voyage vers la commande, et un projet
-   * complet ici ferait croire que la modale lit son contenu — or les projets sont relus au disque
-   * par le cœur, comme partout ailleurs.
+   * **Le nom, pas un objet** : la modale le montre, et c'est tout. Un dossier complet ici ferait
+   * croire qu'elle lit son contenu — or l'arbre est relu au disque par le cœur, qui reçoit
+   * l'identifiant.
    */
-  projet: string | null
-  /** Combien de projets la configuration porte, pour l'annonce d'un export complet. */
+  dossier: string | null
+  /** Combien de dossiers la configuration porte, pour l'annonce d'un export complet. */
   total: number
   onClose: () => void
   /** Ouvre le sélecteur de destination **natif** et rend le chemin choisi, ou `null`. */
-  onChoisirFichier: (projet: string | null) => Promise<string | null>
+  onChoisirFichier: (dossier: string | null) => Promise<string | null>
   onExporter: (fichier: string, avecLesMotsDePasse: boolean) => Promise<ExportReport>
 }
 
 /**
- * La modale d'export de projets (`API-30`).
+ * La modale d'export (`API-30`, portée sur les dossiers par #169).
  *
  * **Aucun pixel inventé** : le handoff ne maquette pas cet écran — c'est pourquoi le point d'entrée
- * est le menu natif et le menu d'une ligne de projet. La modale réemploie la primitive `Modal` et
+ * est le menu natif et le menu d'une ligne de dossier. La modale réemploie la primitive `Modal` et
  * les blocs des modales de dump.
  *
  * # L'interrupteur des mots de passe
@@ -45,7 +45,7 @@ type ExportProjectsProps = {
  * qu'il dit est le seul fait qui compte : le fichier ne peut pas être « dé-partagé ».
  */
 export function ExportProjects({
-  projet,
+  dossier,
   total,
   onClose,
   onChoisirFichier,
@@ -56,7 +56,7 @@ export function ExportProjects({
   const [avancement, setAvancement] = useState<Avancement>({ phase: 'choix' })
 
   async function exporter() {
-    const fichier = await onChoisirFichier(projet)
+    const fichier = await onChoisirFichier(dossier)
     // Annulation dans le sélecteur natif : rien à dire, la modale reste au choix.
     if (!fichier) return
     try {
@@ -85,11 +85,17 @@ export function ExportProjects({
     >
       <div className={styles.body}>
         {/* La portée est **nommée**, comme la cible d'un dump : c'est la seule chose qui distingue
-            l'export d'un projet de celui de toute la configuration. */}
+            l'export d'un dossier de celui de tout l'arbre. */}
         <p className={styles.portee}>
-          {projet ?? t('transfer.export.allProjects', { count: total })}
+          {dossier ?? t('transfer.export.everything', { count: total })}
         </p>
         <p className={styles.explication}>{t('transfer.export.what')}</p>
+        {/* **Dit avant le geste** (#169) : un dossier exporté seul perd ses ancêtres, et le cœur fige
+            dans le fichier ce qu'il leur devait. Sans cette phrase, un « prod » arrivé en lecture
+            seule sur l'autre poste se lirait comme un défaut. */}
+        {dossier !== null && !fini && (
+          <p className={styles.explication}>{t('transfer.export.inherited')}</p>
+        )}
 
         {!fini && (
           <div className={styles.reglage}>
@@ -113,7 +119,7 @@ export function ExportProjects({
           <>
             <p className={styles.explication}>
               {t('transfer.export.done', {
-                projects: avancement.report.folders,
+                folders: avancement.report.folders,
                 connections: avancement.report.connections,
                 consoles: avancement.report.consoles,
               })}

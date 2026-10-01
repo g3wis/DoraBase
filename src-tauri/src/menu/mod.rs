@@ -151,13 +151,14 @@ impl MenuSpec {
                             accelerateur: Some("CmdOrCtrl+Shift+I"),
                         },
                         Item::Separateur,
-                        /* **Les projets, et non « les collections »** (`API-30`). La demande
-                        compare le fichier à une collection Postman, et c'est la bonne analogie
-                        — mais « collection » est déjà le mot de MongoDB pour une table, que
-                        l'arbre affiche sous une connexion mongo. « Exporter les collections… »
-                        dans ce menu se lirait comme un export de données. Ce qui voyage est un
-                        projet, et la demande le dit elle-même : « everything or only a specific
-                        project ».
+                        /* **Des dossiers, et non « des collections »** (`API-30`, #169). La
+                        demande d'origine comparait le fichier à une collection Postman, et c'est
+                        la bonne analogie — mais « collection » est déjà le mot de MongoDB pour une
+                        table, que l'arbre affiche sous une connexion mongo. « Tout exporter… »
+                        porte l'arbre entier ; l'export d'un seul dossier part du menu de sa ligne,
+                        le seul palier qui connaisse sa portée. Les identifiants d'item gardent le
+                        mot « projets » : ce sont des identifiants, que le front écoute, et les
+                        renommer n'apprendrait rien à personne.
 
                         **Aucun accélérateur.** `⇧⌘E` et `⇧⌘I` appartiennent au dump, et les
                         chords libres qui resteraient — `⌥⌘E`, `⌃⌘E` — ne sont le geste de
@@ -169,12 +170,12 @@ impl MenuSpec {
                         place et leurs raccourcis, où la mémoire des doigts les cherche. */
                         Item::Commande {
                             id: "fichier.exporter-projets",
-                            libelle: "Exporter les projets…",
+                            libelle: "Tout exporter…",
                             accelerateur: None,
                         },
                         Item::Commande {
                             id: "fichier.importer-projets",
-                            libelle: "Importer des projets…",
+                            libelle: "Importer des dossiers…",
                             accelerateur: None,
                         },
                         Item::Separateur,

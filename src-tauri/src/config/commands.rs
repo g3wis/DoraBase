@@ -18,7 +18,8 @@ use super::arbre::{cle_de_connexion, tirage_du_systeme, ConnectionId, FolderId, 
 use super::model::{Kubeconfigs, ManagedInstance, Preferences};
 use super::requetes::{
     ConfigLoad, ConsoleRequest, CreateFolderRequest, CreateFolderResult, DeleteDatabaseRequest,
-    DeleteFolderRequest, DeleteResult, RecolorFolderRequest, RenameDatabaseRequest,
+    DeleteFolderRequest, DeleteResult, ExportProjectsRequest, ExportReport, ImportProjectsRequest,
+    ImportProjectsResult, ImportReport, RecolorFolderRequest, RenameDatabaseRequest,
     RenameFolderRequest, SaveDatabaseRequest, SaveDatabaseResult, SetFolderReadOnlyRequest,
     UpdateVariantRequest, ValueLabelsRequest, VisibleSchemasRequest,
 };
@@ -789,6 +790,176 @@ fn ecrire_les_kubeconfigs(store: &ConfigStore, kubeconfigs: &Kubeconfigs) -> Res
         .map_err(|erreur| erreur.to_string())
 }
 
+// ---------------------------------------------------------------------------------------------
+// Transfert (#169)
+// ---------------------------------------------------------------------------------------------
+
+/// Écrit un fichier de transfert : un dossier et son sous-arbre, ou tout l'arbre (`API-30`, #169).
+///
+/// **L'arbre vient du disque, pas de l'écran** — comme partout ailleurs dans ce module : un arbre
+/// envoyé par la webview pourrait être périmé.
+#[tauri::command]
+pub fn export_projects(
+    request: ExportProjectsRequest,
+    state: State<'_, ConfigState>,
+) -> Result<ExportReport, String> {
+    let report = avec_le_magasin(&state, |store| {
+        let magasin = magasin_de(store)?;
+        exporter_les_dossiers(store, magasin.store.as_ref(), &request)
+    })?;
+    // Le **chemin n'est pas journalisé** : il vient d'un sélecteur natif, donc il nomme un répertoire
+    // de l'utilisateur, et le journal du plugin est écrit sur disque en développement.
+    log::info!(
+        "export_projects → {} dossier(s), {} connexion(s), {} console(s), {} mot(s) de passe",
+        report.folders,
+        report.connections,
+        report.consoles,
+        report.passwords_carried
+    );
+    Ok(report)
+}
+
+/// Le corps d'`export_projects`, sans Tauri : le magasin est passé, pour que les tests le posent.
+pub(crate) fn exporter_les_dossiers(
+    store: &ConfigStore,
+    magasin: &dyn crate::secrets::SecretStore,
+    request: &ExportProjectsRequest,
+) -> Result<ExportReport, String> {
+    let arbre = store.load_tree()?;
+    let retenu = super::transfert::composer(&arbre, request.folder.as_ref())
+        .map_err(|erreur| erreur.to_string())?;
+    // Relues ici plutôt que reçues : l'export porte le chemin de celles que l'arbre retenu
+    // référence (`API-70`).
+    let kubeconfigs = store.load_kubeconfigs()?;
+    let (fichier, report) =
+        super::transfert::preparer(retenu, request.include_passwords, magasin, &kubeconfigs)
+            .map_err(|erreur| erreur.to_string())?;
+    super::transfert::ecrire(std::path::Path::new(&request.file), &fichier)
+        .map_err(|erreur| erreur.to_string())?;
+    Ok(report)
+}
+
+/// Lit un fichier de transfert et dit **ce qu'un import ferait**, sans rien écrire.
+///
+/// Le rapport vient de la même fonction que l'import lui-même, tout retenu : l'aperçu et l'écriture
+/// ne peuvent pas se contredire. Voir `transfert::fusionner`.
+#[tauri::command]
+pub fn inspect_projects_file(
+    file: String,
+    state: State<'_, ConfigState>,
+) -> Result<ImportReport, String> {
+    avec_le_magasin(&state, |store| inspecter_le_fichier(store, &file))
+}
+
+pub(crate) fn inspecter_le_fichier(
+    store: &ConfigStore,
+    file: &str,
+) -> Result<ImportReport, String> {
+    let arbre = store.load_tree()?;
+    let kubeconfigs = store.load_kubeconfigs()?;
+    let fichier =
+        super::transfert::lire(std::path::Path::new(file)).map_err(|erreur| erreur.to_string())?;
+    Ok(super::transfert::fusionner(&arbre, &kubeconfigs, &fichier, None).report)
+}
+
+/// Verse les dossiers d'un fichier de transfert dans l'arbre (`API-30`, #169).
+///
+/// **Le versement est recalculé ici**, sur la configuration telle qu'elle est *maintenant* : rejouer
+/// l'aperçu écraserait une connexion créée entre-temps dans un autre écran.
+///
+/// **Et il peut fermer des connexions**, ce que l'import de projets ne faisait jamais : la lecture
+/// seule fusionne en « locale OU fichier », donc un dossier local peut **passer en lecture seule**
+/// parce que le fichier la déclare. Ses connexions ouvertes l'ont été inscriptibles côté moteur, et
+/// ne le perdraient pas d'elles-mêmes — c'est le patron de `set_folder_read_only`, jusqu'au refus
+/// quand une transaction manuelle est ouverte sur l'une d'elles.
+#[tauri::command]
+pub async fn import_projects(
+    request: ImportProjectsRequest,
+    state: State<'_, ConfigState>,
+    registry: State<'_, ConnectionRegistry>,
+) -> Result<ImportProjectsResult, String> {
+    let magasin = avec_le_magasin(&state, magasin_de)?;
+    let resultat =
+        importer_les_dossiers(&state, &registry, magasin.store.as_ref(), &request).await?;
+    for sort in &resultat.report.folders {
+        log::info!(
+            "import_projects → {} : {:?}, +{} dossier(s), +{} connexion(s), +{} console(s)",
+            sort.folder.as_deref().unwrap_or("(racine)"),
+            sort.verdict,
+            sort.folders_added.len(),
+            sort.connections_added.len(),
+            sort.consoles_added.len()
+        );
+    }
+    Ok(resultat)
+}
+
+/// Le corps d'`import_projects`, sans Tauri.
+pub(crate) async fn importer_les_dossiers(
+    state: &ConfigState,
+    registry: &ConnectionRegistry,
+    magasin: &dyn crate::secrets::SecretStore,
+    request: &ImportProjectsRequest,
+) -> Result<ImportProjectsResult, String> {
+    let chemin = std::path::Path::new(&request.file);
+    let fichier = super::transfert::lire(chemin).map_err(|erreur| erreur.to_string())?;
+
+    // D'abord **sans écrire** : ce qu'il faudrait fermer, pour savoir si c'est permis.
+    let (avant, projete) = avec_le_magasin(state, |store| {
+        let arbre = store.load_tree()?;
+        let kubeconfigs = store.load_kubeconfigs()?;
+        let fusion =
+            super::transfert::fusionner(&arbre, &kubeconfigs, &fichier, request.selection.as_ref());
+        Ok((arbre, fusion.arbre))
+    })?;
+    for id in avant.lecture_seule_changee(&projete) {
+        if registry.transaction_ouverte(&cle_de_connexion(&id)).await {
+            let nom = avant
+                .chemin_de(&id)
+                .map(|morceaux| morceaux.join(" › "))
+                .unwrap_or_else(|| id.to_string());
+            return Err(format!(
+                "une transaction manuelle est ouverte dans une console de « {nom} », que cet import \
+                 ferait passer en lecture seule : validez-la ou annulez-la avant d'importer. La \
+                 connexion doit être rouverte pour suivre le réglage, et la fermer emporterait \
+                 cette transaction."
+            ));
+        }
+    }
+
+    let mut changees = Vec::new();
+    let (arbre, report) = avec_le_magasin(state, |store| {
+        let locaux = store.load_tree()?;
+        let kubeconfigs = store.load_kubeconfigs()?;
+        let fusion = super::transfert::fusionner(
+            &locaux,
+            &kubeconfigs,
+            &fichier,
+            request.selection.as_ref(),
+        );
+        changees = locaux.lecture_seule_changee(&fusion.arbre);
+        super::transfert::appliquer(fusion, magasin, &mut |arbre, kubeconfigs| {
+            // **Pas par `ecrire_le_reste_intact`**, et c'est le seul appelant dans ce cas : le
+            // versement vient de faire grandir les kubeconfigs, et les relire écraserait les
+            // déclarations que l'import pose. Le reste — préférences, instances — est relu.
+            let preferences = store.load_preferences().unwrap_or_default();
+            let instances = store.load_instances().unwrap_or_default();
+            store
+                .save(arbre, &preferences, &instances, kubeconfigs)
+                .map_err(|erreur| erreur.to_string())
+        })
+        .map_err(|erreur| erreur.to_string())
+    })?;
+
+    for id in &changees {
+        registry.fermer(&cle_de_connexion(id)).await;
+    }
+    Ok(ImportProjectsResult {
+        tree: arbre,
+        report,
+    })
+}
+
 /// Les instances déclarées, relues du disque (`API-32`).
 pub(crate) fn instances_declarees(
     state: &State<'_, ConfigState>,
@@ -934,5 +1105,199 @@ mod tests {
         ));
         assert_eq!(arbre.folders[0].name, "Atelier");
         assert_eq!(store.load_tree().expect("relecture"), arbre);
+    }
+}
+
+/// L'import peut faire passer un dossier local en lecture seule, donc **fermer** ses connexions
+/// ouvertes (#169) — le patron de `set_folder_read_only`, sur un vrai fichier SQLite.
+#[cfg(test)]
+mod tests_import {
+    use super::*;
+    use crate::config::arbre::tests::{base, dossier};
+    use crate::config::doubles::MagasinSync;
+    use crate::config::model::{Engine, SslMode};
+    use crate::config::requetes::ImportProjectsRequest;
+    use crate::engine::registry::ConnectionState;
+    use crate::engine::{RowLimit, TransactionMode};
+
+    struct Decor {
+        _repertoire: tempfile::TempDir,
+        config: ConfigState,
+        registre: ConnectionRegistry,
+        fichier: std::path::PathBuf,
+        chemin_config: std::path::PathBuf,
+    }
+
+    fn cle() -> String {
+        cle_de_connexion(&ConnectionId::brut("jetons"))
+    }
+
+    /// Un dossier « prod » **inscriptible** portant une connexion SQLite ouverte, et un fichier de
+    /// transfert qui déclare un « prod » homonyme, en lecture seule ou non.
+    async fn monter(fichier_en_lecture_seule: bool) -> Decor {
+        let repertoire = tempfile::tempdir().expect("répertoire temporaire");
+        let base_sqlite = repertoire.path().join("atelier.db");
+        rusqlite::Connection::open(&base_sqlite)
+            .expect("fichier")
+            .execute_batch("create table jetons (valeur integer)")
+            .expect("décor");
+        let mut connexion = base("jetons", false);
+        connexion.engine = Engine::Sqlite;
+        connexion.connection.default_database = base_sqlite.to_string_lossy().into_owned();
+        connexion.connection.ssl_mode = SslMode::Disable;
+        let mut prod = dossier("prod", "prod", false);
+        prod.connections.push(connexion.clone());
+        let chemin_config = repertoire.path().join("config.json");
+        let (store, _) = ConfigStore::open(&chemin_config);
+        ecrire_le_reste_intact(
+            &store,
+            &FolderTree {
+                folders: vec![prod],
+                connections: Vec::new(),
+            },
+        )
+        .expect("écrit");
+
+        let fichier = repertoire.path().join("export.json");
+        std::fs::write(
+            &fichier,
+            serde_json::json!({
+                "kind": "dorabase.projects",
+                "version": 7,
+                "folders": [{ "id": "ailleurs", "name": "prod", "readOnly": fichier_en_lecture_seule }],
+            })
+            .to_string(),
+        )
+        .expect("export");
+
+        let registre = ConnectionRegistry::new();
+        registre
+            .ouvrir(
+                &cle(),
+                Engine::Sqlite,
+                &connexion.connection,
+                None,
+                &crate::engine::proxy::ContexteDeProxy::pour_les_tests(),
+            )
+            .await
+            .expect("un fichier SQLite doit s'ouvrir");
+        Decor {
+            _repertoire: repertoire,
+            config: ConfigState::ouvert(store),
+            registre,
+            fichier,
+            chemin_config,
+        }
+    }
+
+    fn requete(decor: &Decor) -> ImportProjectsRequest {
+        ImportProjectsRequest {
+            file: decor.fichier.to_string_lossy().into_owned(),
+            selection: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn un_import_qui_pose_la_lecture_seule_ferme_la_connexion_et_attend_la_transaction() {
+        let decor = monter(true).await;
+        let magasin = MagasinSync::default();
+        decor
+            .registre
+            .executer_une_requete(
+                &cle(),
+                "insert into jetons values (1)",
+                RowLimit::OneHundred,
+                TransactionMode::Manual,
+                "console",
+            )
+            .await
+            .expect("retenue");
+
+        let refus =
+            importer_les_dossiers(&decor.config, &decor.registre, &magasin, &requete(&decor))
+                .await
+                .expect_err("refus attendu");
+        assert!(refus.contains("transaction manuelle"), "{refus}");
+        let (store, _) = ConfigStore::open(&decor.chemin_config);
+        assert!(
+            !store.load_tree().expect("relu").folders[0].read_only,
+            "rien n'est écrit"
+        );
+
+        decor
+            .registre
+            .annuler_la_transaction(&cle(), "console")
+            .await
+            .expect("annulée");
+        let resultat =
+            importer_les_dossiers(&decor.config, &decor.registre, &magasin, &requete(&decor))
+                .await
+                .expect("importé");
+
+        assert!(resultat.tree.folders[0].read_only);
+        assert_eq!(
+            resultat.report.folders[0].read_only_from_file,
+            vec!["prod".to_owned()]
+        );
+        // **La connexion est fermée**, pour se rouvrir avec la session en lecture seule.
+        assert!(matches!(
+            decor.registre.etat(&cle()).await,
+            ConnectionState::Never
+        ));
+    }
+
+    #[tokio::test]
+    async fn un_import_qui_ne_change_aucune_lecture_seule_ne_ferme_rien() {
+        let decor = monter(false).await;
+        let magasin = MagasinSync::default();
+
+        importer_les_dossiers(&decor.config, &decor.registre, &magasin, &requete(&decor))
+            .await
+            .expect("importé");
+
+        assert_eq!(decor.registre.ouvertes().await, 1);
+    }
+
+    #[test]
+    fn exporter_puis_inspecter_rend_le_rapport_de_l_arbre_local() {
+        let repertoire = tempfile::tempdir().expect("répertoire temporaire");
+        let (store, _) = ConfigStore::open(repertoire.path().join("config.json"));
+        let mut prod = dossier("prod", "prod", true);
+        prod.connections.push(base("jetons", false));
+        let mut halle = dossier("halle", "Halle", false);
+        halle.folders.push(prod);
+        ecrire_le_reste_intact(
+            &store,
+            &FolderTree {
+                folders: vec![halle],
+                connections: Vec::new(),
+            },
+        )
+        .expect("écrit");
+        let fichier = repertoire.path().join("prod.json");
+
+        let report = exporter_les_dossiers(
+            &store,
+            &MagasinSync::default(),
+            &ExportProjectsRequest {
+                file: fichier.to_string_lossy().into_owned(),
+                folder: Some(FolderId::brut("prod")),
+                include_passwords: false,
+            },
+        )
+        .expect("exporté");
+        assert_eq!((report.folders, report.connections), (1, 1));
+
+        // Réinspecté sur le même poste : la connexion est reconnue par son identifiant, et le
+        // dossier « prod » arrive **à la racine**, à côté de « Halle ».
+        let apercu = inspecter_le_fichier(&store, &fichier.to_string_lossy()).expect("inspecté");
+        assert_eq!(
+            apercu.folders[0].verdict,
+            crate::config::requetes::FolderVerdict::Created
+        );
+        assert_eq!(
+            apercu.folders[0].connections_kept,
+            vec!["Halle › prod › base-jetons".to_owned()]
+        );
     }
 }
