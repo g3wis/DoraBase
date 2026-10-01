@@ -90,7 +90,9 @@ test('le fichier est inspecté avant que l’import soit proposé', async () => 
 
   expect(screen.getByText('/tmp/dossiers.json')).toBeVisible()
   expect(screen.getByText(/Dossier existant, complété/)).toBeVisible()
-  expect(screen.getByText(/\+1 dossier\(s\), \+1 connexion\(s\), \+1 console\(s\)/)).toBeVisible()
+  expect(
+    screen.getByText(/\+1 dossier\(s\), \+1 base\(s\) de données, \+1 console\(s\)/),
+  ).toBeVisible()
   // **Rien n'est écrit tant que personne n'a cliqué** : c'est l'aperçu, pas l'import.
   expect(onImporter).not.toHaveBeenCalled()
 })
@@ -141,7 +143,7 @@ test('les connexions de la racine ont leur ligne, nommée, et se retiennent à p
   const { unmount } = render(decor())
   await choisir()
 
-  expect(screen.getByRole('checkbox', { name: 'Connexions à la racine' })).toBeChecked()
+  expect(screen.getByRole('checkbox', { name: 'Bases de données à la racine' })).toBeChecked()
   expect(screen.getByText(/Ajoutées à la racine/)).toBeVisible()
   expect(screen.queryByText(/Dossier existant/)).toBeNull()
   await userEvent.click(screen.getByRole('button', { name: 'Importer 2 éléments' }))
@@ -152,7 +154,7 @@ test('les connexions de la racine ont leur ligne, nommée, et se retiennent à p
   appels.length = 0
   render(decor())
   await choisir()
-  await userEvent.click(screen.getByRole('checkbox', { name: 'Connexions à la racine' }))
+  await userEvent.click(screen.getByRole('checkbox', { name: 'Bases de données à la racine' }))
   await userEvent.click(screen.getByRole('button', { name: 'Importer 1 élément' }))
   expect(appels).toEqual([{ folders: ['Atelier Nord'], rootConnections: false }])
 })
@@ -230,7 +232,7 @@ test('ce qui n’arrivera pas est dit, avec sa liste en infobulle', async () => 
 
   // Le **compte** est visible, la liste est dans l'infobulle : un nom par connexion dans une modale
   // serait illisible, et le compte dit d'abord s'il y a quelque chose à regarder.
-  expect(screen.getByText(/1 connexion\(s\) déjà déclarées ici/)).toHaveAttribute(
+  expect(screen.getByText(/1 base\(s\) de données déjà déclarées ici/)).toHaveAttribute(
     'title',
     'Ailleurs › catalogue',
   )

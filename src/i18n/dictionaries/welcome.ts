@@ -11,7 +11,7 @@ export const welcomeFr: Dictionnaire = {
   sidebar: {
     header: 'Mes dossiers',
     emptyTitle: 'Aucun dossier',
-    emptyText: 'Un dossier range des connexions, et d’autres dossiers — dev, staging, prod.',
+    emptyText: 'Un dossier range des bases de données, et d’autres dossiers — dev, staging, prod.',
     newFolder: 'Nouveau dossier',
   },
 }
@@ -26,7 +26,7 @@ export const welcomeEn: Dictionnaire = {
   sidebar: {
     header: 'My folders',
     emptyTitle: 'No folders',
-    emptyText: 'A folder holds connections, and other folders — dev, staging, prod.',
+    emptyText: 'A folder holds databases, and other folders — dev, staging, prod.',
     newFolder: 'New folder',
   },
 }

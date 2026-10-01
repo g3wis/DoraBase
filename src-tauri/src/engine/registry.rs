@@ -902,7 +902,7 @@ impl ConnectionRegistry {
     ) -> Result<(), EngineError> {
         if self.transaction_ouverte(cle).await {
             return Err(EngineError::local(format!(
-                "une transaction manuelle est ouverte dans une console de cette connexion : \
+                "une transaction manuelle est ouverte dans une console de cette base de données : \
                  validez-la ou annulez-la avant de {geste}. Sans cela, cette écriture attendrait \
                  les verrous qu'elle tient."
             )));

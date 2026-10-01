@@ -186,8 +186,8 @@ test('le clic droit sur un dossier mène à la déclaration d’une connexion', 
   // modale, cadrée par le dossier d'où l'on a cliqué (#166). Un test de la sidebar seule aurait
   // vérifié l'appel de la prop — c'est-à-dire un proxy du chemin, le piège d'`A4`.
   await page.getByRole('treeitem', { name: /^prod\b/ }).click({ button: 'right' })
-  await page.getByRole('menuitem', { name: /Nouvelle connexion/ }).click()
-  await expect(page.getByRole('dialog', { name: 'Nouvelle connexion' })).toBeVisible()
+  await page.getByRole('menuitem', { name: /Nouvelle base de données/ }).click()
+  await expect(page.getByRole('dialog', { name: 'Nouvelle base de données' })).toBeVisible()
   // `prod` et non `preprod` : c'est de `prod` que part le clic, et la modale ne le redemande pas.
   await expect(page.getByTestId('dossier-de-la-modale')).toHaveText('Atelier Nord › prod')
 })

@@ -16,7 +16,7 @@ export const transferFr: Dictionnaire = {
       p.count === 1
         ? 'Toute l’arborescence (1 dossier)'
         : `Toute l’arborescence (${p.count} dossiers)`,
-    what: 'Le fichier porte les dossiers, leurs connexions et leurs consoles. Ni les préférences, ni les instances, ni aucune donnée des bases.',
+    what: 'Le fichier porte les dossiers, leurs bases de données et leurs consoles. Ni les préférences, ni les instances, ni aucune donnée des bases.',
     // Un dossier exporté seul devient un dossier racine du fichier : ce qu'il héritait voyage avec
     // lui, et le dire évite de croire à une lecture seule tombée du ciel à l'arrivée.
     inherited:
@@ -24,14 +24,14 @@ export const transferFr: Dictionnaire = {
     choose: 'Choisir un fichier…',
     withPasswords: 'Inclure les mots de passe',
     withoutPasswords:
-      "Les connexions arriveront sans mot de passe, et l'import dira lesquelles en attendent un.",
+      "Les bases de données arriveront sans mot de passe, et l'import dira lesquelles en attendent un.",
     withPasswordsWarning:
       "Les mots de passe seront écrits en clair dans le fichier. Un fichier partagé ne se reprend pas : ne l'envoyez qu'à quelqu'un à qui vous confieriez ces accès.",
     done: (p) =>
-      `${p.folders} dossier(s), ${p.connections} connexion(s), ${p.consoles} console(s) écrits.`,
+      `${p.folders} dossier(s), ${p.connections} base(s) de données, ${p.consoles} console(s) écrits.`,
     carried: (p) => `${p.count} mot(s) de passe écrit(s) en clair dans le fichier.`,
     missing: (p) =>
-      `${p.count} connexion(s) déclarent un mot de passe introuvable dans le trousseau : ${p.list}`,
+      `${p.count} base(s) de données déclarent un mot de passe introuvable dans le trousseau : ${p.list}`,
   },
   import: {
     title: 'Importer des dossiers',
@@ -43,8 +43,8 @@ export const transferFr: Dictionnaire = {
     nothingSelected: 'Rien n’est retenu',
     emptyFile: 'Ce fichier ne porte aucun dossier.',
     carriesPasswords: 'Ce fichier porte des mots de passe en clair.',
-    /** La ligne des connexions que le fichier range à la racine, hors de tout dossier. */
-    rootConnections: 'Connexions à la racine',
+    /** La ligne des bases de données que le fichier range à la racine, hors de tout dossier. */
+    rootConnections: 'Bases de données à la racine',
     verdict: {
       created: 'Nouveau dossier',
       merged: 'Dossier existant, complété',
@@ -55,9 +55,9 @@ export const transferFr: Dictionnaire = {
       rejectedReason: 'Ce dossier ne peut pas être importé, voir la raison indiquée',
     },
     brings: (p) =>
-      `+${p.folders} dossier(s), +${p.connections} connexion(s), +${p.consoles} console(s)`,
+      `+${p.folders} dossier(s), +${p.connections} base(s) de données, +${p.consoles} console(s)`,
     connectionsKept: (p) =>
-      `${p.count} connexion(s) déjà déclarées ici : leurs réglages et leur place sont gardés`,
+      `${p.count} base(s) de données déjà déclarées ici : leurs réglages et leur place sont gardés`,
     consolesKept: (p) => `${p.count} console(s) homonymes : le texte local est gardé`,
     foldersKept: (p) =>
       `${p.count} dossier(s) déjà présents ici : leur nom et leur couleur sont gardés`,
@@ -65,12 +65,12 @@ export const transferFr: Dictionnaire = {
     // connexions sont déjà déclarées ici, ailleurs. Un dossier vide à la racine aurait été le seul
     // effet visible de l'import ; le taire ferait croire qu'il manque quelque chose.
     foldersOmitted: (p) =>
-      `${p.count} dossier(s) non créés : leurs connexions sont déjà ici, à leur place`,
+      `${p.count} dossier(s) non créés : leurs bases de données sont déjà ici, à leur place`,
     // **Une réserve, et non un détail** (#169) : la lecture seule fusionne en « locale OU fichier »,
     // donc un dossier local peut la **recevoir**. C'est la seule chose qu'un import change à ce qui
     // était déjà là, et elle ferme les connexions concernées.
     readOnlyFromFile: (p) => `${p.count} dossier(s) local(aux) passent en lecture seule`,
-    passwordsMissing: (p) => `${p.count} connexion(s) attendent leur mot de passe`,
+    passwordsMissing: (p) => `${p.count} base(s) de données attendent leur mot de passe`,
     passwordsStored: (p) => `${p.count} mot(s) de passe rangés depuis le fichier`,
     localPaths: (p) => `${p.count} chemin(s) à vérifier sur cette machine`,
     // Les libellés de valeurs (`API-75`) : ce qui arrive est un **détail**, ce qui est gardé est une
@@ -78,9 +78,10 @@ export const transferFr: Dictionnaire = {
     valueLabelsAdded: (p) => `${p.count} colonne(s) reçoivent leurs libellés de valeurs`,
     valueLabelsKept: (p) =>
       `${p.count} colonne(s) déjà libellées : les libellés locaux sont gardés`,
-    kubeconfigsMissing: (p) => `${p.count} connexion(s) sans kubeconfig déclaré dans le fichier`,
+    kubeconfigsMissing: (p) =>
+      `${p.count} base(s) de données sans kubeconfig déclaré dans le fichier`,
     connectionsRejected: (p) =>
-      `${p.count} connexion(s) refusées : leur identifiant n'est pas valable`,
+      `${p.count} base(s) de données refusées : leur identifiant n'est pas valable`,
   },
 }
 
@@ -91,20 +92,20 @@ export const transferEn: Dictionnaire = {
     menu: 'Export folder…',
     everything: (p) =>
       p.count === 1 ? 'The whole tree (1 folder)' : `The whole tree (${p.count} folders)`,
-    what: 'The file carries folders, their connections and their consoles. Neither preferences, nor instances, nor any database data.',
+    what: 'The file carries folders, their databases and their consoles. Neither preferences, nor instances, nor any database data.',
     inherited:
       'Exported on its own, the folder carries the read-only mode and value labels it inherits from its parent folders.',
     choose: 'Choose a file…',
     withPasswords: 'Include passwords',
     withoutPasswords:
-      'Connections will arrive without a password, and the import will name the ones still waiting for one.',
+      'Databases will arrive without a password, and the import will name the ones still waiting for one.',
     withPasswordsWarning:
       'Passwords will be written to the file in cleartext. A shared file cannot be taken back: only send it to someone you would trust with these credentials.',
     done: (p) =>
-      `${p.folders} folder(s), ${p.connections} connection(s), ${p.consoles} console(s) written.`,
+      `${p.folders} folder(s), ${p.connections} database(s), ${p.consoles} console(s) written.`,
     carried: (p) => `${p.count} password(s) written to the file in cleartext.`,
     missing: (p) =>
-      `${p.count} connection(s) declare a password the keychain does not hold: ${p.list}`,
+      `${p.count} database(s) declare a password the keychain does not hold: ${p.list}`,
   },
   import: {
     title: 'Import folders',
@@ -115,7 +116,7 @@ export const transferEn: Dictionnaire = {
     nothingSelected: 'Nothing selected',
     emptyFile: 'This file carries no folder.',
     carriesPasswords: 'This file carries passwords in cleartext.',
-    rootConnections: 'Connections at the root',
+    rootConnections: 'Databases at the root',
     verdict: {
       created: 'New folder',
       merged: 'Existing folder, completed',
@@ -126,21 +127,20 @@ export const transferEn: Dictionnaire = {
       rejectedReason: 'This folder cannot be imported, see the stated reason',
     },
     brings: (p) =>
-      `+${p.folders} folder(s), +${p.connections} connection(s), +${p.consoles} console(s)`,
+      `+${p.folders} folder(s), +${p.connections} database(s), +${p.consoles} console(s)`,
     connectionsKept: (p) =>
-      `${p.count} connection(s) already declared here: settings and place are kept`,
+      `${p.count} database(s) already declared here: settings and place are kept`,
     consolesKept: (p) => `${p.count} console(s) with the same name: the local text is kept`,
     foldersKept: (p) => `${p.count} folder(s) already here: their name and colour are kept`,
     foldersOmitted: (p) =>
-      `${p.count} folder(s) not created: their connections are already here, in place`,
+      `${p.count} folder(s) not created: their databases are already here, in place`,
     readOnlyFromFile: (p) => `${p.count} local folder(s) become read-only`,
-    passwordsMissing: (p) => `${p.count} connection(s) are waiting for their password`,
+    passwordsMissing: (p) => `${p.count} database(s) are waiting for their password`,
     passwordsStored: (p) => `${p.count} password(s) stored from the file`,
     localPaths: (p) => `${p.count} path(s) to check on this machine`,
     valueLabelsAdded: (p) => `${p.count} column(s) receive their value labels`,
     valueLabelsKept: (p) => `${p.count} column(s) already labelled: the local labels are kept`,
-    kubeconfigsMissing: (p) =>
-      `${p.count} connection(s) whose kubeconfig the file does not declare`,
-    connectionsRejected: (p) => `${p.count} connection(s) refused: their identifier is not valid`,
+    kubeconfigsMissing: (p) => `${p.count} database(s) whose kubeconfig the file does not declare`,
+    connectionsRejected: (p) => `${p.count} database(s) refused: their identifier is not valid`,
   },
 }
