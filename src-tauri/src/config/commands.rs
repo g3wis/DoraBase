@@ -23,8 +23,8 @@ use super::requetes::{
     DeleteFolderRequest, DeleteResult, ExportProjectsRequest, ExportReport, ImportProjectsRequest,
     ImportProjectsResult, ImportReport, MoveDatabaseRequest, MoveFolderRequest, MoveResult,
     RecolorFolderRequest, RenameDatabaseRequest, RenameFolderRequest, SaveDatabaseRequest,
-    SaveDatabaseResult, SetFolderReadOnlyRequest, UpdateVariantRequest, ValueLabelsRequest,
-    VisibleSchemasRequest,
+    SaveDatabaseResult, SetFolderIconRequest, SetFolderReadOnlyRequest, UpdateVariantRequest,
+    ValueLabelsRequest, VisibleSchemasRequest,
 };
 use super::store::{ConfigStore, LoadOutcome};
 use crate::engine::registry::ConnectionRegistry;
@@ -334,6 +334,19 @@ pub fn recolor_folder(
 ) -> Result<FolderTree, String> {
     ecrire_l_arbre(&state, |arbre| {
         super::enregistrer::recolorier_dossier(arbre, &request.folder, request.color)
+            .map_err(|erreur| erreur.to_string())
+    })
+}
+
+/// Change l'icône d'un dossier (#171) ; `None` la rend à `pin`. Aucune connexion n'est touchée : c'est
+/// un réglage d'affichage, comme la couleur.
+#[tauri::command]
+pub fn set_folder_icon(
+    request: SetFolderIconRequest,
+    state: State<'_, ConfigState>,
+) -> Result<FolderTree, String> {
+    ecrire_l_arbre(&state, |arbre| {
+        super::enregistrer::regler_l_icone(arbre, &request.folder, request.icon.as_deref())
             .map_err(|erreur| erreur.to_string())
     })
 }

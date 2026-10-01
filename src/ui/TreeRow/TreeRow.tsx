@@ -1,4 +1,10 @@
-import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from 'react'
+import {
+  type ButtonHTMLAttributes,
+  type HTMLAttributes,
+  type ReactNode,
+  type RefObject,
+  useRef,
+} from 'react'
 import { Icon } from '../../design/icons/Icon'
 import type { IconName } from '../../design/icons/names'
 import { ChampDeRenommage } from '../ChampDeRenommage/ChampDeRenommage'
@@ -76,6 +82,29 @@ type TreeRowProps = {
    * — voir le corps du composant pour ce que cette enveloppe coûte à l'arbre ARIA.
    */
   actions?: ReactNode
+  /**
+   * Fait de l'icône **un contrôle à part entière** (#171) : le clic sur elle n'est plus un clic sur la
+   * ligne — il ne sélectionne ni ne déplie —, il ouvre le panneau que l'appelant fournit.
+   *
+   * **Un frère posé par-dessus, jamais un bouton dans le bouton** : c'est la parade du « … » et du
+   * bouton de saut d'une clé étrangère (`API-55`). La ligne garde à la place de l'icône une case vide
+   * de la même taille, pour que rien ne bouge d'un pixel, et le contrôle se pose exactement sur elle
+   * — son abscisse vient de la même indentation, plus la gouttière du chevron.
+   *
+   * Conséquence voulue : le `pointerdown` qui arme le glisser-déposer (#167) est écouté sur la ligne,
+   * dont le contrôle n'est pas un descendant. Presser l'icône ne saisit donc jamais la ligne.
+   */
+  iconControl?: {
+    /** Le nom accessible — « Changer la couleur et l'icône de « X » ». */
+    label: string
+    onClick: () => void
+    /**
+     * Le panneau ouvert, **rendu à côté du contrôle** et non en fin de document : `Tab` en ressort
+     * vers le « … » de la même ligne, l'ordre de `Popover` sans portail. Il reçoit le
+     * contrôle pour s'y ancrer et y rendre le focus. Absent : fermé.
+     */
+    panneau?: (ancre: RefObject<HTMLButtonElement | null>) => ReactNode
+  }
   /** Cible courante : aplat d'accent atténué, filet gauche, encre pleine et graisse 700. */
   selected?: boolean
   /** Encre pleine et graisse 700 sans aplat — le projet actif déplié du mockup. */
@@ -137,6 +166,7 @@ export function TreeRow({
   metaBadge = false,
   trailing,
   actions,
+  iconControl,
   selected,
   strong,
   muted,
@@ -145,6 +175,26 @@ export function TreeRow({
   onChevron,
   ...rest
 }: TreeRowProps) {
+  const controleDIcone = useRef<HTMLButtonElement>(null)
+  // Le contrôle n'existe que sur la branche interactive : pendant un renommage, la ligne n'est plus
+  // un bouton et l'icône redevient un dessin, comme le « … » disparaît.
+  const avecControle =
+    iconControl !== undefined &&
+    icon !== undefined &&
+    onClick !== undefined &&
+    edition === undefined
+  const tailleDIcone = selected === true ? 12 : 13
+  const dessin =
+    icon === undefined ? null : (
+      <Icon
+        name={icon}
+        size={tailleDIcone}
+        // Trait plus épais sur la ligne sélectionnée : 2 contre 1,8 dans le mockup.
+        strokeWidth={selected === true ? 2 : 1.8}
+        className={styles.icon}
+        style={{ color: muted === true ? 'var(--ink-meta)' : iconColor }}
+      />
+    )
   const contenu = (
     <>
       {chevron !== undefined && (
@@ -161,15 +211,15 @@ export function TreeRow({
           />
         </span>
       )}
-      {icon !== undefined && (
-        <Icon
-          name={icon}
-          size={selected === true ? 12 : 13}
-          // Trait plus épais sur la ligne sélectionnée : 2 contre 1,8 dans le mockup.
-          strokeWidth={selected === true ? 2 : 1.8}
+      {avecControle ? (
+        // La place de l'icône, gardée vide : le contrôle posé par-dessus la dessine.
+        <span
           className={styles.icon}
-          style={{ color: muted === true ? 'var(--ink-meta)' : iconColor }}
+          style={{ width: tailleDIcone, height: tailleDIcone }}
+          data-icon-slot=""
         />
+      ) : (
+        dessin
       )}
       {edition === undefined ? (
         <span className={styles.label}>{label}</span>
@@ -265,7 +315,7 @@ export function TreeRow({
     </button>
   )
 
-  if (actions === undefined) return bouton
+  if (actions === undefined && !avecControle) return bouton
 
   // **L'enveloppe n'apparaît que pour les lignes qui ont un menu**, et elle a un coût qu'il vaut
   // mieux nommer : le `role="treeitem"` que l'écran pose via `rest` reste sur le `<button>`, donc le
@@ -277,11 +327,42 @@ export function TreeRow({
   return (
     <span role="presentation" className={styles.wrap}>
       {bouton}
-      {/* `presentation` aussi : cette boîte ne fait que positionner, et un `<span>` nu ajouterait
-          un nœud générique dans l'arbre annoncé. */}
-      <span role="presentation" className={styles.actions}>
-        {actions}
-      </span>
+      {avecControle && iconControl !== undefined && (
+        <>
+          <button
+            ref={controleDIcone}
+            type="button"
+            className={styles.iconControl}
+            // Centré sur la case vide : l'indentation, la gouttière du chevron (11 + 5), puis la
+            // moitié de l'icône, moins la moitié du contrôle de 18 px.
+            style={{
+              left: `calc(${indent ?? indentation(depth)} + ${
+                (chevron === undefined ? 0 : 16) + tailleDIcone / 2 - 9
+              }px)`,
+            }}
+            aria-label={iconControl.label}
+            // **Hors du parcours de tabulation**, comme le bouton de saut d'une clé étrangère
+            // (`API-55`) : le chemin clavier est l'entrée « Couleur et icône… » du menu, qui ouvre le
+            // même panneau. Un arrêt de plus par dossier entre la ligne et son « … » allongerait tout
+            // parcours de l'arbre pour un geste rare. Il reste focalisable par le code : c'est là que
+            // `Échap` rend le focus.
+            tabIndex={-1}
+            aria-haspopup="dialog"
+            aria-expanded={iconControl.panneau !== undefined}
+            onClick={iconControl.onClick}
+          >
+            {dessin}
+          </button>
+          {iconControl.panneau?.(controleDIcone)}
+        </>
+      )}
+      {actions !== undefined && (
+        // `presentation` aussi : cette boîte ne fait que positionner, et un `<span>` nu ajouterait
+        // un nœud générique dans l'arbre annoncé.
+        <span role="presentation" className={styles.actions}>
+          {actions}
+        </span>
+      )}
     </span>
   )
 }

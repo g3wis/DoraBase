@@ -74,6 +74,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     arbre::CreateFolderResult::export_all(&config)?;
     arbre::RenameFolderRequest::export_all(&config)?;
     arbre::RecolorFolderRequest::export_all(&config)?;
+    arbre::SetFolderIconRequest::export_all(&config)?;
     arbre::SetFolderReadOnlyRequest::export_all(&config)?;
     arbre::DeleteFolderRequest::export_all(&config)?;
     arbre::DeleteResult::export_all(&config)?;

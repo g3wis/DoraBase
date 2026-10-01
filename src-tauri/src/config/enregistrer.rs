@@ -260,6 +260,10 @@ pub enum EditError {
     ConnexionALaRacine {
         connection: ConnectionId,
     },
+    /// Un nom d'icône qui ne peut pas être celui d'un symbole du sprite (#171).
+    IconeInvalide {
+        icon: String,
+    },
     /// L'arbre d'après ne tiendrait pas ses invariants — deux dossiers frères homonymes, le plus
     /// souvent. Le message vient de l'arbre, qui nomme le fautif.
     Arbre(ArbreError),
@@ -280,6 +284,9 @@ impl std::fmt::Display for EditError {
                 "cette connexion n'est rangée dans aucun dossier : rangez-la dans un dossier pour \
                  lui déclarer des libellés de valeurs"
             ),
+            Self::IconeInvalide { icon } => {
+                write!(f, "« {icon} » n'est pas un nom d'icône")
+            }
             Self::Arbre(erreur) => write!(f, "{erreur}"),
         }
     }
@@ -343,6 +350,7 @@ pub fn creer_dossier(
         id,
         name,
         color: None,
+        icon: None,
         read_only: false,
         folders: Vec::new(),
         connections: Vec::new(),
@@ -377,6 +385,44 @@ pub fn recolorier_dossier(
     let mut candidat = arbre.clone();
     dossier_mut(&mut candidat, id)?.color = couleur;
     valide(candidat)
+}
+
+/// Change l'icône d'un dossier (#171) ; `None` la rend à `pin`.
+///
+/// **Le cœur vérifie la forme, pas l'appartenance à la liste offerte.** La liste vit à l'écran
+/// (`iconesDeDossier.ts`) : la recopier ici ferait deux sources qui divergeraient à la première icône
+/// ajoutée, et une version plus ancienne refuserait alors ce qu'une plus récente a écrit. Ce que la
+/// forme refuse est ce qui ne peut être le nom d'**aucun** symbole — `[a-z0-9-]`, 1 à 40 caractères,
+/// la grammaire des identifiants `i-…` du sprite —, c'est-à-dire ce qu'un appelant autre que l'écran
+/// pourrait glisser dans le fichier. **Une chaîne vide vaut `None`** : c'est « aucune icône choisie »,
+/// pas un nom.
+///
+/// La lecture, elle, ne vérifie rien : un nom mal formé écrit à la main se relit et retombe sur `pin`
+/// à l'affichage — voir `Folder::icon`.
+pub fn regler_l_icone(
+    arbre: &FolderTree,
+    id: &FolderId,
+    icone: Option<&str>,
+) -> Result<FolderTree, EditError> {
+    let icone = match icone.map(str::trim) {
+        None | Some("") => None,
+        Some(nom) if forme_d_icone(nom) => Some(nom.to_owned()),
+        Some(nom) => {
+            return Err(EditError::IconeInvalide {
+                icon: nom.to_owned(),
+            })
+        }
+    };
+    let mut candidat = arbre.clone();
+    dossier_mut(&mut candidat, id)?.icon = icone;
+    valide(candidat)
+}
+
+fn forme_d_icone(nom: &str) -> bool {
+    (1..=40).contains(&nom.len())
+        && nom
+            .bytes()
+            .all(|octet| octet.is_ascii_lowercase() || octet.is_ascii_digit() || octet == b'-')
 }
 
 /// Pose ou lève la lecture seule d'un dossier — **la seule écriture de ce drapeau**. Ce qu'elle
@@ -877,6 +923,52 @@ mod tests {
         assert!(!apres.dossier(&dossier_id("prod")).unwrap().read_only);
         let apres = recolorier_dossier(&apres, &dossier_id("prod"), None).unwrap();
         assert_eq!(apres.dossier(&dossier_id("prod")).unwrap().color, None);
+    }
+
+    #[test]
+    fn l_icone_se_regle_et_se_retire_sans_toucher_a_la_couleur() {
+        let avant =
+            recolorier_dossier(&arbre(), &dossier_id("prod"), Some(FolderColor::Amber)).unwrap();
+        let apres = regler_l_icone(&avant, &dossier_id("prod"), Some("rocket")).unwrap();
+        let prod = apres.dossier(&dossier_id("prod")).unwrap();
+        assert_eq!(prod.icon.as_deref(), Some("rocket"));
+        assert_eq!(
+            prod.color,
+            Some(FolderColor::Amber),
+            "deux gestes, deux champs"
+        );
+
+        // Un nom que cette version ne connaît pas est **accepté** : la liste vit à l'écran.
+        let apres = regler_l_icone(&apres, &dossier_id("prod"), Some("chart-column-2")).unwrap();
+        assert_eq!(
+            apres.dossier(&dossier_id("prod")).unwrap().icon.as_deref(),
+            Some("chart-column-2")
+        );
+
+        for vide in [None, Some(""), Some("  ")] {
+            let apres = regler_l_icone(&apres, &dossier_id("prod"), vide).unwrap();
+            assert_eq!(
+                apres.dossier(&dossier_id("prod")).unwrap().icon,
+                None,
+                "{vide:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn une_icone_mal_formee_est_refusee_a_l_ecriture() {
+        let long = "a".repeat(41);
+        for fautive in ["Rocket", "i-rocket\"", "../pin", "fusée", long.as_str()] {
+            assert_eq!(
+                regler_l_icone(&arbre(), &dossier_id("prod"), Some(fautive)).unwrap_err(),
+                EditError::IconeInvalide {
+                    icon: fautive.to_owned()
+                },
+                "{fautive}"
+            );
+        }
+        // Contrôle positif : la borne haute est incluse.
+        assert!(regler_l_icone(&arbre(), &dossier_id("prod"), Some(&"a".repeat(40))).is_ok());
     }
 }
 

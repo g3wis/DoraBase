@@ -1,0 +1,31 @@
+/*
+ * Le panneau de couleur et d'icône d'un dossier (#171). Aucune maquette : c'est un panneau flottant
+ * de la **famille des menus** — fond `--paper`, filet `--border`, rayon `--radius-field` et ombre
+ * `--shadow-popover`, exactement ceux de `MenuContextuel` et de `ListeDeroulante` (arbitré par le
+ * propriétaire après revue). Il portait le `--field` blanc et le rayon de 10 px d'un panneau, et se
+ * lisait comme une seconde sorte de surface flottante à côté du « … » qui l'ouvre. Seul le
+ * rembourrage diffère, 9 px contre 3 : il encadre une grille, non une liste d'entrées arrondies.
+ */
+.panneau {
+  /* Voir le composant : `fixed`, parce que l'arbre défile dans une zone qui rognerait le reste. */
+  position: fixed;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-field);
+  background: var(--paper);
+  box-shadow: var(--shadow-popover);
+}
+
+.refus {
+  /* Bornée à la largeur de la grille : un refus long ne doit pas élargir le panneau. */
+  width: 0;
+  min-width: 100%;
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: var(--text-label);
+  color: var(--danger-ink);
+}

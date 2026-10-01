@@ -1,9 +1,22 @@
-/* Les pastilles, serrées : c'est un nuancier, pas cinq contrôles à viser un par un. Extrait de
- * l'éditeur de projet (#166), qui les posait sur chaque environnement. */
+/* Les pastilles, **dans les colonnes de la grille d'icônes** (#171, revue de design) : huit pistes de
+ * 22 px, le même écart de 3 px que `GrilleDIcones`, et chaque pastille centrée dans sa case. Espacées
+ * d'abord par un `gap` de 9 px, elles tombaient entre les colonnes des icônes du dessous : deux
+ * rangées voisines sur deux rythmes différents se lisent comme un défaut d'alignement. Le centre à
+ * centre vaut désormais 25 px, et l'anneau de la choisie garde 16 px d'air de chaque côté. */
 .nuancier {
+  display: grid;
+  grid-template-columns: repeat(8, var(--h-tree-row));
+  grid-auto-rows: var(--h-tree-row);
+  gap: var(--space-1);
+}
+
+/* La case : **la cible, pas le dessin**. 22 px se visent comme une case d'icône, là où la pastille de
+ * 9 px se ratait. Sans filet ni fond, et sans survol — aucun n'est dessiné pour ce geste. */
+.case {
   display: flex;
-  gap: 3px;
   align-items: center;
+  justify-content: center;
+  cursor: pointer;
 }
 
 /*
@@ -11,8 +24,8 @@
  * fond porte la couleur. C'est ce qui garde la navigation aux flèches du groupe natif tout en
  * dessinant ce que le handoff dessine.
  *
- * 9 px : la pastille **se clique**, et une cible de 7 px se rate. Le bord transparent réserve la place
- * de l'anneau du choix, pour que la rangée ne se décale pas d'un pixel quand on change de couleur.
+ * 9 px de dessin ; la cible est la case autour. Le bord transparent réserve la place de l'anneau de
+ * « aucune », pour que les six pastilles aient la même boîte.
  */
 .pastille {
   appearance: none;
@@ -25,12 +38,27 @@
   cursor: pointer;
 }
 
+/* « Aucune » est **creuse** : son bord devient un anneau fin à la teinte par défaut de l'arbre, sur un
+ * fond transparent. Le bord de 1 px est celui que toutes les pastilles réservent déjà. */
+.aucune {
+  border-color: var(--accent-deep);
+  background: transparent;
+}
+
 /* La couleur choisie porte un anneau, **et non une simple taille différente** : un daltonien doit
- * pouvoir lire laquelle est active. L'état ne vit jamais dans la seule couleur. */
+ * pouvoir lire laquelle est active. L'état ne vit jamais dans la seule couleur.
+ *
+ * Le liseré entre la pastille et l'anneau est le fond du panneau d'apparence, son seul appelant —
+ * `--paper`, celui des menus (#171). C'est lui qui sépare l'anneau de sélection de l'anneau de
+ * « aucune » : 2 px de fond entre les deux, sans quoi les deux traits se fondraient en un.
+ *
+ * L'anneau est `--ink-2`, et non plus `--ink-4` : à 40 % d'encre il tombait à 2,4:1 sur le fond clair,
+ * sous le 3:1 qu'un indicateur d'état doit tenir ; `--ink-2` le porte à 3,6:1 en clair et 5,5:1 en
+ * « Nuit » (calculés sur l'encre composée sur `--paper`). */
 .choisie {
   box-shadow:
-    0 0 0 2px var(--bar),
-    0 0 0 3px var(--ink-4);
+    0 0 0 2px var(--paper),
+    0 0 0 3px var(--ink-2);
 }
 
 .pastille:focus-visible {

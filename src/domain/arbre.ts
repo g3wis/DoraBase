@@ -287,6 +287,19 @@ name: string, engine: Engine, variant: ConnectionSettings, password: string | nu
 export type SaveDatabaseResult = { tree: FolderTree, connection: ConnectionId, };
 
 /**
+ * `set_folder_icon` (#171).
+ *
+ * **Une commande à part plutôt qu'un `recolor_folder` élargi** : la modale applique chaque choix au
+ * clic, et une commande qui réglerait les deux ferait renvoyer la couleur *affichée* à chaque clic
+ * d'icône — donc écraser une couleur encore en vol, si les deux gestes se suivent de près.
+ */
+export type SetFolderIconRequest = { folder: FolderId, 
+/**
+ * `None` rend l'icône par défaut (`pin`).
+ */
+icon: string | null, };
+
+/**
  * `set_folder_read_only` — l'effet sur les écrans est celui de #168.
  *
  * Refusé tant qu'une console d'une connexion dont la lecture seule changerait tient une transaction

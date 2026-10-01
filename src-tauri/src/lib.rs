@@ -60,6 +60,7 @@ pub fn run() {
             config::commands::create_folder,
             config::commands::rename_folder,
             config::commands::recolor_folder,
+            config::commands::set_folder_icon,
             config::commands::set_folder_read_only,
             config::commands::move_folder,
             config::commands::move_database,

@@ -251,6 +251,17 @@ pub struct Folder {
     /// `None` : aucune pastille — la teinte par défaut de l'arbre.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<FolderColor>,
+    /// L'icône du dossier (#171) : le **nom** d'un symbole du sprite, `None` pour `pin`.
+    ///
+    /// **Une chaîne, pas une énumération fermée** — l'écart avec [`FolderColor`] est voulu. Un nom
+    /// que cette version ne connaît pas (écrit à la main, ou par une version plus récente qui offre
+    /// d'autres icônes) doit se relire, se garder tel quel et retomber sur `pin` **à l'affichage** :
+    /// une énumération ferait échouer la lecture, donc mettre toute la configuration en quarantaine
+    /// pour un glyphe. La liste des icônes offertes vit à l'écran seulement (`iconesDeDossier.ts`) ;
+    /// le cœur n'en vérifie que la **forme**, et seulement quand on l'écrit — voir
+    /// [`super::enregistrer::regler_l_icone`]. `valider` ne la regarde pas, pour la même raison.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
     /// La lecture seule, qui s'impose à **tous** les descendants (#108) : un sous-dossier ou une
     /// connexion ne peut pas la lever pour lui-même.
     ///
@@ -1118,6 +1129,7 @@ pub(crate) mod tests {
             id: FolderId::brut(id),
             name: nom.to_owned(),
             color: None,
+            icon: None,
             read_only: lecture_seule,
             folders: Vec::new(),
             connections: Vec::new(),

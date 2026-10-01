@@ -1,0 +1,73 @@
+/*
+ * La grille des icônes d'un dossier (#171). Aucune maquette : la cellule choisie porte la pastille
+ * sombre du segment actif de `SegmentedControl` — ce que le produit dessine déjà pour « un choix
+ * parmi plusieurs » —, les autres sont nues, comme les entrées d'un panneau flottant.
+ */
+
+.grille {
+  display: grid;
+  /* **Huit colonnes de 22 px** (#171) : 56 icônes en sept rangées, dans un panneau de 217 px qui
+   * s'ouvre sous l'icône d'une ligne d'arbre sans sortir de la sidebar de 252 px. La grille de la
+   * modale d'avant en faisait quatorze de 25 : une rangée de 390 px, qu'aucun panneau ancré sous une
+   * ligne d'arbre ne peut porter. L'icône reste à 14 px — plus petite, les tracés de Lucide se
+   * referment —, et 22 px lui laisse 4 px de chaque côté : à 20, comparé côte à côte à
+   * `deviceScaleFactor: 2`, la pastille sombre de la choisie venait presque toucher ses voisines.
+   * C'est aussi la hauteur d'une ligne d'arbre, d'où le jeton : la case se vise comme la ligne. */
+  grid-template-columns: repeat(8, var(--h-tree-row));
+  grid-auto-rows: var(--h-tree-row);
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+/* La légende nomme le groupe pour la voix sans occuper de place — le dispositif de `SegmentedControl`. */
+.legende {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.cellule {
+  /* **Pas de `position: relative`**, et un sabotage l'a montré : la case en absolu, sans décalage,
+   * reste à sa place statique — 1 px, transparente — et la grille ne défile jamais, donc aucun
+   * `overflow` n'a rien à rogner. La déclaration serait inerte (le motif du `grid-column` mort).
+   *
+   * **Sans filet** (#171) : cinquante-six cases bordées dans un panneau de 215 px faisaient un
+   * quadrillage plus présent que les icônes. C'est la forme des entrées d'un panneau flottant du
+   * produit — celles du « … » n'ont ni filet ni fond —, et le panneau est le cadre. La choisie garde la
+   * pastille sombre de `SegmentedControl`. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-control);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.cellule:has(.input:focus-visible) {
+  box-shadow: var(--shadow-focus);
+}
+
+/* La choisie : **fond et encre**, jamais la couleur seule. **Elle s'inverse en « Nuit »** (#171,
+ * arbitré par le propriétaire après revue) : `--btn-strong-*`, le bouton plein, le plus contrasté avec
+ * la page — sombre sur le papier, clair sur la nuit. `--dark` y restait une surface sombre relevée, à
+ * peine distincte du panneau : la case choisie se perdait parmi cinquante-cinq autres. En clair, les
+ * deux paires valent la même chose au caractère près (`#23201C` / `#FBF7EF`) : rien n'y bouge. */
+.choisie {
+  background: var(--btn-strong-bg);
+  color: var(--btn-strong-ink);
+}
+
+/* Visuellement absente mais focalisable : `display: none` casserait la navigation aux flèches. */
+.input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}

@@ -235,6 +235,7 @@ pub fn vers_v7(mut projets: Vec<Projet>) -> (FolderTree, PlanDeSecrets) {
                     id,
                     name: nom,
                     color: Some(environnement.color),
+                    icon: None,
                     read_only: environnement.production,
                     folders: Vec::new(),
                     connections: Vec::new(),
@@ -282,6 +283,7 @@ pub fn vers_v7(mut projets: Vec<Projet>) -> (FolderTree, PlanDeSecrets) {
             id: id_racine,
             name: nom_racine,
             color: None,
+            icon: None,
             read_only: false,
             folders: sous_dossiers
                 .into_iter()
