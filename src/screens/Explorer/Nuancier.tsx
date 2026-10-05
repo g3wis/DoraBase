@@ -14,6 +14,12 @@ type NuancierProps = {
   labelAucune: string
   /** Le nom du groupe de cases radio : deux nuanciers dans la même page ne doivent pas se mêler. */
   name: string
+  /**
+   * L'anneau de « aucune » : la teinte que l'arbre donne à la ligne sans couleur — `--accent-deep`
+   * pour un dossier, le jeton du moteur pour une connexion (#179). L'anneau dit ce que l'arbre
+   * montrera ; il ne peut le dire que s'il le suit.
+   */
+  teinteAucune?: string
 }
 
 /**
@@ -39,7 +45,14 @@ type NuancierProps = {
  * **De vraies cases radio, non des `<button role="radio">`** : le groupe natif apporte la navigation
  * aux flèches sans une ligne de code, là où le rôle ARIA l'aurait seulement *promise*.
  */
-export function Nuancier({ valeur, onChange, label, labelAucune, name }: NuancierProps) {
+export function Nuancier({
+  valeur,
+  onChange,
+  label,
+  labelAucune,
+  name,
+  teinteAucune,
+}: NuancierProps) {
   const t = useT()
   const options: { couleur: FolderColor | null; fond: string | null; nom: string }[] = [
     { couleur: null, fond: null, nom: labelAucune },
@@ -63,7 +76,13 @@ export function Nuancier({ valeur, onChange, label, labelAucune, name }: Nuancie
               option.fond === null && styles.aucune,
               valeur === option.couleur && styles.choisie,
             )}
-            style={option.fond === null ? undefined : { background: option.fond }}
+            style={
+              option.fond !== null
+                ? { background: option.fond }
+                : teinteAucune === undefined
+                  ? undefined
+                  : { borderColor: teinteAucune }
+            }
             onChange={() => onChange(option.couleur)}
           />
         </label>

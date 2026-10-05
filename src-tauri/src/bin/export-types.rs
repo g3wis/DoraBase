@@ -85,6 +85,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     arbre::SaveDatabaseResult::export_all(&config)?;
     arbre::UpdateVariantRequest::export_all(&config)?;
     arbre::RenameDatabaseRequest::export_all(&config)?;
+    arbre::RecolorDatabaseRequest::export_all(&config)?;
+    arbre::SetDatabaseIconRequest::export_all(&config)?;
     arbre::DeleteDatabaseRequest::export_all(&config)?;
     arbre::ConsoleRequest::export_all(&config)?;
     arbre::VisibleSchemasRequest::export_all(&config)?;

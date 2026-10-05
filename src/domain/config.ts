@@ -124,7 +124,23 @@ id: ConnectionId, name: string,
  * **`#[serde(default)]` : aucune migration.** Une configuration écrite avant ce champ n'en a
  * simplement pas — `27a` en tient la règle.
  */
-label?: string | null, engine: Engine, connection: ConnectionSettings, 
+label?: string | null, 
+/**
+ * La pastille de la connexion (#179) — **la palette des dossiers**, et rien de plus : deux
+ * palettes finiraient par proposer deux verts. `None` : les couleurs du moteur, celles de son
+ * logo ou de son jeton `--engine-*`.
+ *
+ * **Un réglage d'affichage**, comme celle d'un dossier : ni la clé du registre, ni la référence
+ * du secret, ni la recette d'ouverture ne la lisent, donc la changer ne ferme rien.
+ */
+color?: FolderColor | null, 
+/**
+ * L'icône de la connexion (#179) : le **nom** d'un symbole du sprite, `None` pour le logo de son
+ * moteur. La règle est celle de `Folder::icon` — une chaîne et non une énumération, le repli au
+ * seul affichage, la liste offerte à l'écran (`iconesDeConnexion.ts`) et la forme vérifiée à
+ * l'écriture ([`super::enregistrer::regler_l_icone_de_la_connexion`]).
+ */
+icon?: string | null, engine: Engine, connection: ConnectionSettings, 
 /**
  * Les consoles SQL de cette connexion, telles que l'arbre les montre sous elle.
  *

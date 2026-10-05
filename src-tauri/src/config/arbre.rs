@@ -1117,6 +1117,8 @@ pub(crate) mod tests {
             id: ConnectionId::brut(id),
             name: format!("base-{id}"),
             label: None,
+            color: None,
+            icon: None,
             engine: Engine::PostgreSql,
             connection: reglages(lecture_seule),
             consoles: Vec::new(),

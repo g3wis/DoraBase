@@ -1,9 +1,10 @@
+import type { CSSProperties } from 'react'
+import { dessinDeConnexion, teinteDeConnexion } from '../../data/iconesDeConnexion'
 import { Icon } from '../../design/icons/Icon'
-import type { Engine } from '../../domain/config'
+import type { Database, Engine } from '../../domain/config'
 import { useT } from '../../i18n/LanguageContext'
 import { SANS_CORRECTION } from '../../ui/Field/Field'
 import { type Segment, SegmentedControl } from '../../ui/SegmentedControl/SegmentedControl'
-import { ENGINES } from '../NewConnection/engines'
 import styles from './BreadcrumbBar.module.css'
 
 export type TypeObjet = 'tables' | 'views' | 'functions' | 'indexes'
@@ -13,6 +14,12 @@ type BreadcrumbBarProps = {
   /** Le moteur de la base ouverte (27 août 2026), pour l'icône devant `database`. Absent tant
    * qu'aucune base n'est ouverte : l'icône générique `db` reste alors le repli. */
   engine?: Engine
+  /**
+   * L'icône et la couleur choisies pour cette connexion (#179) : **le fil d'Ariane montre ce que la
+   * ligne de l'arbre montre** (tranché par le demandeur). Absentes, le logo du moteur.
+   */
+  icon?: Database['icon']
+  color?: Database['color']
   schema: string
   /** Les quatre comptes, **issus des données** — jamais de constantes. */
   counts: Record<TypeObjet, number>
@@ -34,6 +41,8 @@ const ORDRE: readonly TypeObjet[] = ['tables', 'views', 'functions', 'indexes']
 export function BreadcrumbBar({
   database,
   engine,
+  icon,
+  color,
   schema,
   counts,
   type,
@@ -48,6 +57,7 @@ export function BreadcrumbBar({
     functions: t('explorer.breadcrumb.types.functions'),
     indexes: t('explorer.breadcrumb.types.indexes'),
   }
+  const teinte = engine === undefined ? undefined : teinteDeConnexion({ engine, color })
   const segments: Segment<TypeObjet>[] = ORDRE.map((typeObjet) => ({
     value: typeObjet,
     label: LIBELLES[typeObjet],
@@ -60,10 +70,20 @@ export function BreadcrumbBar({
     <div className={styles.root}>
       <nav className={styles.breadcrumb} aria-label={t('explorer.breadcrumb.path')}>
         <Icon
-          name={(engine && ENGINES[engine].icon) || 'db'}
+          name={engine === undefined ? 'db' : dessinDeConnexion({ engine, icon })}
           size={13}
           strokeWidth={1.8}
           className={styles.dbIcon}
+          // La teinte de la ligne de l'arbre, logo compris quand une couleur est choisie : la même
+          // résolution, `teinteDeConnexion`, et non une seconde règle.
+          style={
+            teinte === undefined
+              ? undefined
+              : ({
+                  color: teinte.couleur,
+                  ...(teinte.teinterLeLogo ? { '--logo-tint': 'currentColor' } : {}),
+                } as CSSProperties)
+          }
         />
         {database}
         <Icon name="chevr" size={11} strokeWidth={2.4} className={styles.separator} />

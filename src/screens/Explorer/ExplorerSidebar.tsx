@@ -9,14 +9,20 @@ import {
 } from 'react'
 import {
   type ArriveeDuDeplacement,
+  connexion,
   dossier,
   type EffetSurLaLectureSeule,
   type SujetDuDeplacement,
 } from '../../data/dossiers'
+import {
+  iconeParDefautDeConnexion,
+  iconesDeConnexion,
+  jetonDeMoteur,
+} from '../../data/iconesDeConnexion'
 import { Icon } from '../../design/icons/Icon'
 import type { IconName } from '../../design/icons/names'
 import type { MoveResult } from '../../domain/arbre'
-import type { ConnectionId, FolderColor, FolderId, FolderTree } from '../../domain/config'
+import type { ConnectionId, Database, FolderColor, FolderId, FolderTree } from '../../domain/config'
 import type { ColumnInfo, ConnectionState } from '../../domain/engine'
 import { useT } from '../../i18n/LanguageContext'
 import { raccourci } from '../../shell/plateforme'
@@ -30,6 +36,7 @@ import { SidebarSectionTitle } from '../../ui/SidebarSectionTitle/SidebarSection
 import { SidebarToolbar, SidebarToolbarButton } from '../../ui/SidebarToolbar/SidebarToolbar'
 import { TreeRow } from '../../ui/TreeRow/TreeRow'
 import { vitesseAuBord } from '../../ui/VirtualGrid/defilementAuBord'
+import { ENGINES } from '../NewConnection/engines'
 import { aplatir, type Charge, type Deplies, idDossier, type Noeud } from './arbre'
 import { type CibleDeSuppression, DeleteConnectionDialog } from './DeleteConnectionDialog'
 import { DeplacerVers } from './DeplacerVers'
@@ -116,6 +123,13 @@ export type ExplorerSidebarProps = {
    * Depuis #166 il n'y a plus de réserve à rapporter : le nom n'est dans aucune identité.
    */
   onRenameDatabase?: (connection: ConnectionId, nouveau: string) => Promise<void>
+  /** Change la pastille d'une connexion (#179) ; `null` rend les couleurs du moteur. */
+  onRecolorDatabase?: (connection: ConnectionId, couleur: FolderColor | null) => Promise<void>
+  /**
+   * Change l'icône d'une connexion (#179) ; `null` rend le logo du moteur. **Exigé avec
+   * `onRecolorDatabase`**, pour la raison des deux gestionnaires de dossier.
+   */
+  onSetDatabaseIcon?: (connection: ConnectionId, icone: IconName | null) => Promise<void>
   /**
    * Ouvre l'import de projets (`API-30`), depuis la bande en tête de l'arbre.
    *
@@ -225,6 +239,8 @@ export function ExplorerSidebar({
   onEditDatabase,
   onManageSchemas,
   onRenameDatabase,
+  onRecolorDatabase,
+  onSetDatabaseIcon,
   onImportProjects,
   onExportFolder,
   onMove,
@@ -253,10 +269,12 @@ export function ExplorerSidebar({
     if (renommageInitial !== undefined) setEnRenommage(renommageInitial)
   }, [renommageInitial])
   /**
-   * Le dossier dont le panneau « Couleur et icône » est ouvert, par identifiant (#171) — ouvert par
-   * son icône comme par l'entrée du menu, sous la même icône.
+   * La ligne dont le panneau « Couleur et icône » est ouvert, par **identité de nœud** (#171) —
+   * ouvert par son icône comme par l'entrée du menu, sous la même icône. Un dossier ou, depuis #179,
+   * une connexion : l'identité de nœud et non l'identifiant nu, que rien n'empêche de valoir pour
+   * l'un et l'autre.
    */
-  const [aColorer, setAColorer] = useState<FolderId | null>(null)
+  const [aColorer, setAColorer] = useState<string | null>(null)
   const [aRetirer, setARetirer] = useState<CibleDeSuppression | null>(null)
   /**
    * Ce qu'un renommage a eu à dire (`26`) — un refus, ou une réserve sur le Trousseau.
@@ -330,34 +348,72 @@ export function ExplorerSidebar({
   // dans le filtre — passe par un clic ou un focus hors du panneau, qui l'ont déjà fermé. Une garde
   // écrite pour ce cas a été retirée le jour même : aucun test ne pouvait l'atteindre.
   const apparenceDisponible = onRecolorFolder !== undefined && onSetFolderIcon !== undefined
+  const apparenceDeConnexionDisponible =
+    onRecolorDatabase !== undefined && onSetDatabaseIcon !== undefined
 
   /**
-   * L'icône d'une ligne de dossier, devenue contrôle (#171) : son clic ouvre — ou referme — le
-   * panneau, sans sélectionner ni déplier la ligne. Absent quand le panneau ne pourrait rien écrire :
-   * l'icône redevient alors un dessin, plutôt qu'un contrôle inerte (défaut n° 36).
+   * L'icône d'une ligne de dossier ou de connexion, devenue contrôle (#171, #179) : son clic ouvre —
+   * ou referme — le panneau, sans sélectionner ni déplier la ligne. Absent quand le panneau ne
+   * pourrait rien écrire : l'icône redevient alors un dessin, plutôt qu'un contrôle inerte (défaut
+   * n° 36).
    */
   const controleDIcone = (noeud: Noeud) => {
-    const folder = noeud.folder
-    if (noeud.kind !== 'folder' || folder === undefined) return undefined
-    if (onRecolorFolder === undefined || onSetFolderIcon === undefined) return undefined
-    const ouvert = aColorer === folder
+    const panneau = panneauDApparence(noeud)
+    if (panneau === undefined) return undefined
+    const ouvert = aColorer === noeud.id
     return {
       label: t('explorer.sidebar.appearanceFor', { cible: noeud.label }),
-      onClick: () => setAColorer(ouvert ? null : folder),
-      panneau: ouvert
-        ? (ancre: RefObject<HTMLButtonElement | null>) => (
-            <PanneauDApparence
-              nom={noeud.label}
-              couleur={couleurDe(arbre, folder)}
-              icone={dossier(arbre, folder)?.dossier.icon ?? null}
-              ancre={ancre}
-              onRecolorer={(couleur) => onRecolorFolder(folder, couleur)}
-              onChangerDIcone={(icone) => onSetFolderIcon(folder, icone)}
-              onFermer={() => setAColorer(null)}
-            />
-          )
-        : undefined,
+      onClick: () => setAColorer(ouvert ? null : noeud.id),
+      panneau: ouvert ? panneau : undefined,
     }
+  }
+
+  /**
+   * Le panneau d'apparence d'une ligne, ou rien quand elle n'en a pas. **Un seul panneau pour les deux
+   * sortes** (règle n° 17) : seuls changent les icônes offertes, celle par défaut et la teinte de
+   * « Aucune ». Une connexion offre le logo de **son** moteur en tête, et son « Aucune » porte le jeton
+   * du moteur — la teinte que l'arbre lui donne sans couleur.
+   */
+  const panneauDApparence = (
+    noeud: Noeud,
+  ): ((ancre: RefObject<HTMLButtonElement | null>) => ReactNode) | undefined => {
+    const fermer = () => setAColorer(null)
+    if (noeud.kind === 'folder' && noeud.folder !== undefined) {
+      const folder = noeud.folder
+      if (onRecolorFolder === undefined || onSetFolderIcon === undefined) return undefined
+      return (ancre) => (
+        <PanneauDApparence
+          nom={noeud.label}
+          couleur={couleurDe(arbre, folder)}
+          icone={dossier(arbre, folder)?.dossier.icon ?? null}
+          ancre={ancre}
+          onRecolorer={(couleur) => onRecolorFolder(folder, couleur)}
+          onChangerDIcone={(icone) => onSetFolderIcon(folder, icone)}
+          onFermer={fermer}
+        />
+      )
+    }
+    if (noeud.kind === 'database' && noeud.connection !== undefined) {
+      const connection = noeud.connection
+      const base = connexion(arbre, connection)?.base
+      if (base === undefined) return undefined
+      if (onRecolorDatabase === undefined || onSetDatabaseIcon === undefined) return undefined
+      return (ancre) => (
+        <PanneauDApparence
+          nom={noeud.label}
+          couleur={base.color ?? null}
+          icone={base.icon ?? null}
+          ancre={ancre}
+          onRecolorer={(couleur) => onRecolorDatabase(connection, couleur)}
+          onChangerDIcone={(icone) => onSetDatabaseIcon(connection, icone)}
+          onFermer={fermer}
+          icones={iconesDeConnexion(base.engine)}
+          nomsDIcones={nomsDuMoteur(base)}
+          teinteAucune={jetonDeMoteur(base.engine)}
+        />
+      )
+    }
+    return undefined
   }
 
   /**
@@ -375,7 +431,14 @@ export function ExplorerSidebar({
       renommageDisponible:
         noeud.kind === 'folder' ? onRenameFolder !== undefined : onRenameDatabase !== undefined,
       creerUnDossier,
-      colorer: apparenceDisponible ? setAColorer : undefined,
+      colorer:
+        noeud.kind === 'database'
+          ? apparenceDeConnexionDisponible
+            ? setAColorer
+            : undefined
+          : apparenceDisponible
+            ? setAColorer
+            : undefined,
       onSetFolderReadOnly,
       refuserLaLectureSeule: (nom: string, refus: unknown) =>
         setRapport({ nom, refus: messageDuRefus(refus), sorte: 'lectureSeule' }),
@@ -817,6 +880,7 @@ export function ExplorerSidebar({
                 }
                 icon={noeud.icon}
                 iconColor={noeud.iconColor}
+                tintLogo={noeud.tintLogo}
                 chevron={noeud.chevron}
                 meta={compteDe(noeud, modifications) ?? noeud.meta}
                 metaVariant={compteDe(noeud, modifications) ? 'caps' : noeud.metaVariant}
@@ -994,7 +1058,8 @@ type Cablage = {
    */
   renommageDisponible: boolean
   creerUnDossier: ((parent: Noeud | null) => void) | undefined
-  colorer: ((dossier: FolderId) => void) | undefined
+  /** Ouvre le panneau « Couleur et icône » de la ligne, par son identité de nœud (#171, #179). */
+  colorer: ((noeud: string) => void) | undefined
   onSetFolderReadOnly: ExplorerSidebarProps['onSetFolderReadOnly']
   /** Rapporte un refus de « Passer en / Lever la lecture seule » (#168), qu'aucune ligne ne peut dire. */
   refuserLaLectureSeule: (dossier: string, refus: unknown) => void
@@ -1072,7 +1137,7 @@ function entreesDe(noeud: Noeud, c: Cablage): readonly EntreeDeMenu[] | undefine
            cherche à côté de sa couleur. Nommer les deux est ce qui rend le second geste trouvable. */
         libelle: t('explorer.sidebar.menu.appearance'),
         icone: 'paint',
-        onClick: c.colorer ? () => c.colorer?.(folder) : undefined,
+        onClick: c.colorer ? () => c.colorer?.(noeud.id) : undefined,
         raison: c.colorer ? undefined : RAISONS.dossierIndisponible,
       },
       {
@@ -1239,6 +1304,16 @@ function entreesDe(noeud: Noeud, c: Cablage): readonly EntreeDeMenu[] | undefine
       raison: c.onEditDatabase ? undefined : RAISONS.modifierIndisponible,
     },
     {
+      /* **« Couleur et icône… », le libellé et le glyphe du dossier** (#179) : le même geste, sous le
+         même nom. **Après « Modifier… »**, et non entre lui et « Renommer… », qui vont par deux
+         (`26`). C'est le chemin clavier du panneau : l'icône de la ligne est hors du parcours de
+         tabulation. */
+      libelle: t('explorer.sidebar.menu.appearance'),
+      icone: 'paint',
+      onClick: c.colorer ? () => c.colorer?.(noeud.id) : undefined,
+      raison: c.colorer ? undefined : RAISONS.apparenceIndisponible,
+    },
+    {
       // **Le même geste que sur un dossier** (#167), à la même place : juste avant « Retirer… ».
       libelle: t('explorer.sidebar.menu.moveTo'),
       icone: 'goto',
@@ -1288,6 +1363,7 @@ function raisons(t: ReturnType<typeof useT>) {
     retirerIndisponible: t('explorer.sidebar.raisons.removeUnavailable'),
     modifierIndisponible: t('explorer.sidebar.raisons.editUnavailable'),
     dossierIndisponible: t('explorer.sidebar.raisons.folderUnavailable'),
+    apparenceIndisponible: t('explorer.sidebar.raisons.appearanceUnavailable'),
     lectureSeuleImposee: (dossier: string) =>
       t('explorer.sidebar.raisons.readOnlyImposed', { dossier }),
     rafraichirIndisponible: t('explorer.sidebar.raisons.refreshUnavailable'),
@@ -1322,6 +1398,15 @@ function estDeduit(colonnes: readonly ColumnInfo[]): boolean {
 function frequenceLisible(colonne: ColumnInfo): string | null {
   if (colonne.frequency === null || colonne.frequency >= 0.995) return null
   return `${Math.round(colonne.frequency * 100)} %`
+}
+
+/**
+ * Le nom de l'icône par défaut d'une connexion — celui de son moteur, « PostgreSQL » (#179). C'est le
+ * nom que le sélecteur de moteur d'`A2` donne au même logo ; un moteur sans logo garde `db`, que la
+ * grille nomme alors par son moteur aussi : la case dit « l'icône de ce moteur ».
+ */
+function nomsDuMoteur(base: Database): Partial<Record<IconName, string>> {
+  return { [iconeParDefautDeConnexion(base.engine)]: ENGINES[base.engine].label }
 }
 
 /** La couleur d'un dossier telle que l'arbre la porte — la modale s'ouvre sur elle. */

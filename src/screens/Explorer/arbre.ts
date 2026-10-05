@@ -1,4 +1,5 @@
 import { connexionsDescendantes, idDeConnexion } from '../../data/dossiers'
+import { dessinDeConnexion, teinteDeConnexion } from '../../data/iconesDeConnexion'
 import { dessinDeDossier } from '../../data/iconesDeDossier'
 import type { IconName } from '../../design/icons/names'
 import type {
@@ -13,7 +14,6 @@ import type { ConnectionState, SchemaInfo, TableSummary } from '../../domain/eng
 import type { useT } from '../../i18n/LanguageContext'
 import { formatRowCount } from '../../ui/format'
 import { indentation } from '../../ui/TreeRow/TreeRow'
-import { ENGINES } from '../NewConnection/engines'
 import { COULEURS_DE_DOSSIER } from '../NewConnection/environments'
 
 /**
@@ -107,6 +107,8 @@ export type Noeud = {
   /** Le glyphe de la ligne, **typé sur le sprite** et non sur `string`. */
   icon?: IconName
   iconColor?: string
+  /** Vrai quand `iconColor` doit s'imposer au logo du moteur — une connexion colorée (#179). */
+  tintLogo?: boolean
   meta?: string
   metaVariant?: 'mono' | 'caps'
   /** L'état d'une connexion. */
@@ -287,6 +289,7 @@ function noeudsDeConnexion(base: Database, niveau: number, contexte: Contexte): 
   // **Affichage seulement** : `label`, s'il est renseigné, remplace `name` partout où l'arbre le
   // montre. `database` reste `base.name` — c'est ce que « Renommer… » édite.
   const libelle = base.label?.trim() || base.name
+  const teinte = teinteDeConnexion(base)
 
   noeuds.push({
     id,
@@ -295,8 +298,15 @@ function noeudsDeConnexion(base: Database, niveau: number, contexte: Contexte): 
     indent: indentation(niveau),
     label: libelle,
     chevron: deplie ? 'open' : 'closed',
-    icon: ENGINES[base.engine].icon ?? 'db',
-    iconColor: `var(--engine-${abregeMoteur(base.engine)})`,
+    /*
+     * **L'icône et la couleur de la connexion, le logo du moteur à défaut** (#179) : un nom inconnu
+     * retombe sur le logo dans `iconeDeConnexion`, jamais sur une case vide. Une couleur choisie
+     * s'impose au logo lui-même — c'est ce qui distingue deux connexions PostgreSQL sans changer leur
+     * icône —, et sans couleur le logo garde sa teinte de marque.
+     */
+    icon: dessinDeConnexion(base),
+    iconColor: teinte.couleur,
+    ...(teinte.teinterLeLogo ? { tintLogo: true } : {}),
     badge: badgeEtat(t, etat),
     // L'état est **dans le nom accessible**, pas seulement dans une couleur : un point vert et un
     // point rouge sont indiscernables pour une part des utilisateurs.
@@ -490,18 +500,4 @@ function resumeEtat(t: Traduire, etat: ConnectionState): string {
     case 'offline':
       return t('explorer.arbre.statusOffline', { reason: etat.reason })
   }
-}
-
-/** L'abrégé de moteur employé par les jetons de couleur (`--engine-pg`, `--engine-my`, …). */
-function abregeMoteur(engine: string): string {
-  const abreges: Record<string, string> = {
-    postgresql: 'pg',
-    mysql: 'my',
-    sqlite: 'sq',
-    mongodb: 'mg',
-    redis: 'rd',
-    snowflake: 'sf',
-    bigquery: 'bq',
-  }
-  return abreges[engine] ?? 'pg'
 }

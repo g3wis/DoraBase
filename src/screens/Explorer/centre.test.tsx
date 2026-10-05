@@ -9,7 +9,9 @@ import { ObjectTable } from './ObjectTable'
 
 const COMPTES = { tables: 4, views: 1, functions: 2, indexes: 6 }
 
-function BarrePilotée() {
+function BarrePilotée(
+  apparence: Pick<Parameters<typeof BreadcrumbBar>[0], 'engine' | 'icon' | 'color'>,
+) {
   const [type, setType] = useState<TypeObjet>('tables')
   const [filtre, setFiltre] = useState('')
   return (
@@ -18,6 +20,7 @@ function BarrePilotée() {
       <LanguageProvider preferences={{ language: 'fr' }}>
         <BreadcrumbBar
           database="analytics"
+          {...apparence}
           schema="public"
           counts={COMPTES}
           type={type}
@@ -49,6 +52,35 @@ test('le chemin montre la base puis le schéma', () => {
   const fil = screen.getByRole('navigation', { name: /Chemin/ })
   expect(fil).toHaveTextContent('analytics')
   expect(fil).toHaveTextContent('public')
+})
+
+/** Le glyphe devant le nom de la base : son symbole, sa teinte, et la teinte imposée au logo. */
+function glypheDuFil() {
+  const svg = screen.getByRole('navigation', { name: /Chemin/ }).querySelector('svg')
+  return {
+    href: svg?.querySelector('use')?.getAttribute('href'),
+    couleur: svg?.style.color,
+    teinte: svg?.style.getPropertyValue('--logo-tint'),
+  }
+}
+
+test('sans réglage, le fil d’Ariane porte le logo du moteur dans sa teinte de marque', () => {
+  render(<BarrePilotée engine="postgresql" />)
+  expect(glypheDuFil()).toEqual({ href: '#i-pg', couleur: 'var(--engine-pg)', teinte: '' })
+})
+
+test('le fil d’Ariane montre l’icône et la couleur choisies, comme la ligne de l’arbre (#179)', () => {
+  const { unmount } = render(<BarrePilotée engine="postgresql" color="red" />)
+  // La couleur s'impose au logo lui-même.
+  expect(glypheDuFil()).toEqual({ href: '#i-pg', couleur: 'var(--danger)', teinte: 'currentColor' })
+  unmount()
+  render(<BarrePilotée engine="mysql" icon="rocket" />)
+  expect(glypheDuFil()).toEqual({ href: '#i-rocket', couleur: 'var(--engine-my)', teinte: '' })
+})
+
+test('sans base ouverte, le fil d’Ariane garde l’icône générique', () => {
+  render(<BarrePilotée />)
+  expect(glypheDuFil().href).toBe('#i-db')
 })
 
 // --- Les comptes ---

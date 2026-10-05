@@ -10,6 +10,7 @@ import {
   listKubernetesResources,
   moveDatabase,
   moveFolder,
+  recolorDatabase,
   recolorFolder,
   renameConsole,
   renameFolder,
@@ -17,6 +18,7 @@ import {
   saveInstance,
   saveKubeconfigs,
   savePreferences,
+  setDatabaseIcon,
   setFolderIcon,
   setFolderReadOnly,
 } from '../data/commandes'
@@ -458,6 +460,12 @@ export function App() {
             // Le renommage d'une connexion (`26`) : l'arbre rendu est reposé tel quel.
             onRenameDatabase={async (connection, name) => {
               setArbre(await renommerLaConnexion({ connection, name }))
+            }}
+            onRecolorDatabase={async (connection, color) => {
+              setArbre(await recolorDatabase({ connection, color }))
+            }}
+            onSetDatabaseIcon={async (connection, icon) => {
+              setArbre(await setDatabaseIcon({ connection, icon }))
             }}
           />
           {dump && <DumpDialogs sens={dump} arbre={arbre} onClose={() => setDump(null)} />}

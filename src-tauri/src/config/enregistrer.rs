@@ -147,6 +147,10 @@ pub fn enregistrer(
         id,
         name,
         label: libelle_net(label),
+        // Une connexion neuve porte le logo et les couleurs de son moteur (#179) : l'apparence se
+        // règle ensuite, depuis l'arbre, comme celle d'un dossier.
+        color: None,
+        icon: None,
         engine,
         connection: variant,
         // Une connexion neuve n'a aucune console : elles se créent depuis son menu « … ».
@@ -404,18 +408,51 @@ pub fn regler_l_icone(
     id: &FolderId,
     icone: Option<&str>,
 ) -> Result<FolderTree, EditError> {
-    let icone = match icone.map(str::trim) {
-        None | Some("") => None,
-        Some(nom) if forme_d_icone(nom) => Some(nom.to_owned()),
-        Some(nom) => {
-            return Err(EditError::IconeInvalide {
-                icon: nom.to_owned(),
-            })
-        }
-    };
+    let icone = icone_nette(icone)?;
     let mut candidat = arbre.clone();
     dossier_mut(&mut candidat, id)?.icon = icone;
     valide(candidat)
+}
+
+/// Change la pastille d'une connexion (#179) ; `None` rend les couleurs de son moteur.
+///
+/// **Ne ferme rien** : la couleur n'entre ni dans la recette d'ouverture ni dans aucune identité —
+/// c'est un réglage d'affichage, comme celle d'un dossier.
+pub fn recolorier_connexion(
+    arbre: &FolderTree,
+    id: &ConnectionId,
+    couleur: Option<FolderColor>,
+) -> Result<FolderTree, EditError> {
+    let mut candidat = arbre.clone();
+    connexion_mut(&mut candidat, id)?.color = couleur;
+    valide(candidat)
+}
+
+/// Change l'icône d'une connexion (#179) ; `None` rend le logo de son moteur.
+///
+/// **La règle de [`regler_l_icone`], par la même fonction** : la forme seule est vérifiée, la liste
+/// offerte vit à l'écran (`iconesDeConnexion.ts`), et une chaîne vide vaut `None`. Deux vérifications
+/// de forme finiraient par accepter des noms différents pour un dossier et pour une connexion.
+pub fn regler_l_icone_de_la_connexion(
+    arbre: &FolderTree,
+    id: &ConnectionId,
+    icone: Option<&str>,
+) -> Result<FolderTree, EditError> {
+    let icone = icone_nette(icone)?;
+    let mut candidat = arbre.clone();
+    connexion_mut(&mut candidat, id)?.icon = icone;
+    valide(candidat)
+}
+
+/// Le nom d'icône à écrire : `None` pour le vide, refusé s'il ne peut être celui d'aucun symbole.
+fn icone_nette(icone: Option<&str>) -> Result<Option<String>, EditError> {
+    match icone.map(str::trim) {
+        None | Some("") => Ok(None),
+        Some(nom) if forme_d_icone(nom) => Ok(Some(nom.to_owned())),
+        Some(nom) => Err(EditError::IconeInvalide {
+            icon: nom.to_owned(),
+        }),
+    }
 }
 
 fn forme_d_icone(nom: &str) -> bool {
@@ -970,6 +1007,86 @@ mod tests {
         // Contrôle positif : la borne haute est incluse.
         assert!(regler_l_icone(&arbre(), &dossier_id("prod"), Some(&"a".repeat(40))).is_ok());
     }
+
+    /// Une connexion de `arbre()`, désignée par son identifiant — celle que les tests d'apparence
+    /// règlent (#179).
+    fn une_connexion(arbre: &FolderTree) -> ConnectionId {
+        arbre
+            .connexions()
+            .next()
+            .map(|(base, _)| base.id.clone())
+            .expect("le décor porte au moins une connexion")
+    }
+
+    #[test]
+    fn la_couleur_et_l_icone_d_une_connexion_se_reglent_chacune_sans_toucher_a_l_autre() {
+        let depart = arbre();
+        let id = une_connexion(&depart);
+
+        let apres = recolorier_connexion(&depart, &id, Some(FolderColor::Red)).unwrap();
+        let apres = regler_l_icone_de_la_connexion(&apres, &id, Some("rocket")).unwrap();
+        let base = apres.connexion(&id).unwrap().0;
+        assert_eq!(
+            base.color,
+            Some(FolderColor::Red),
+            "deux gestes, deux champs"
+        );
+        assert_eq!(base.icon.as_deref(), Some("rocket"));
+
+        // Rien d'autre ne bouge : ni le nom, ni les réglages, ni la place dans l'arbre.
+        let avant = depart.connexion(&id).unwrap().0;
+        assert_eq!(base.name, avant.name);
+        assert_eq!(base.connection, avant.connection);
+
+        // Un nom que cette version ne connaît pas est **accepté** : la liste vit à l'écran.
+        let apres = regler_l_icone_de_la_connexion(&apres, &id, Some("chart-column-2")).unwrap();
+        assert_eq!(
+            apres.connexion(&id).unwrap().0.icon.as_deref(),
+            Some("chart-column-2")
+        );
+
+        let apres = recolorier_connexion(&apres, &id, None).unwrap();
+        for vide in [None, Some(""), Some("  ")] {
+            let apres = regler_l_icone_de_la_connexion(&apres, &id, vide).unwrap();
+            let base = apres.connexion(&id).unwrap().0;
+            assert_eq!(base.icon, None, "{vide:?}");
+            assert_eq!(base.color, None);
+        }
+    }
+
+    #[test]
+    fn l_icone_d_une_connexion_suit_la_forme_de_celle_d_un_dossier() {
+        let depart = arbre();
+        let id = une_connexion(&depart);
+        let long = "a".repeat(41);
+        for fautive in ["Rocket", "i-rocket\"", "../pin", "fusée", long.as_str()] {
+            assert_eq!(
+                regler_l_icone_de_la_connexion(&depart, &id, Some(fautive)).unwrap_err(),
+                EditError::IconeInvalide {
+                    icon: fautive.to_owned()
+                },
+                "{fautive}"
+            );
+        }
+        assert!(regler_l_icone_de_la_connexion(&depart, &id, Some(&"a".repeat(40))).is_ok());
+    }
+
+    #[test]
+    fn une_connexion_inconnue_est_refusee_par_les_deux_gestes() {
+        let inconnue = ConnectionId::brut("absente");
+        assert_eq!(
+            recolorier_connexion(&arbre(), &inconnue, Some(FolderColor::Green)).unwrap_err(),
+            EditError::ConnexionInconnue {
+                connection: inconnue.clone()
+            }
+        );
+        assert_eq!(
+            regler_l_icone_de_la_connexion(&arbre(), &inconnue, Some("rocket")).unwrap_err(),
+            EditError::ConnexionInconnue {
+                connection: inconnue.clone()
+            }
+        );
+    }
 }
 
 #[cfg(test)]
@@ -1123,6 +1240,34 @@ mod tests_ecritures {
         );
         assert_eq!(a.label.as_deref(), Some("Catalogue"));
         assert_eq!(magasin.appels(), 0);
+    }
+
+    #[test]
+    fn modifier_les_reglages_garde_la_couleur_et_l_icone() {
+        // #179 : `A2` ne porte ni la couleur ni l'icône. Un « Enregistrer » qui reconstruirait la
+        // connexion depuis le formulaire les effacerait — la modification mute en place, et ce test
+        // le garde.
+        let mut courant = recolorier_connexion(&arbre(), &id("a"), Some(FolderColor::Violet))
+            .and_then(|apres| regler_l_icone_de_la_connexion(&apres, &id("a"), Some("rocket")))
+            .expect("apparence");
+        let mut reglages = reglages(true);
+        reglages.port = 6543;
+        mettre_a_jour(
+            &mut courant,
+            Modification {
+                connection: &id("a"),
+                reglages: &reglages,
+                password: None,
+                label: None,
+            },
+            &MagasinSync::default(),
+            &mut |_| Ok(()),
+        )
+        .expect("modification");
+        let (a, _) = courant.connexion(&id("a")).unwrap();
+        assert_eq!(a.connection.port, 6543, "la modification a bien eu lieu");
+        assert_eq!(a.color, Some(FolderColor::Violet));
+        assert_eq!(a.icon.as_deref(), Some("rocket"));
     }
 
     #[test]

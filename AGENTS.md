@@ -163,7 +163,9 @@ qu'il portait et que le rendu ne dit pas.
   **L'icône d'une ligne de dossier en a un depuis #171**, et c'est encore le même argument :
   devenue le contrôle qui ouvre le panneau de couleur et d'icône, elle reprend à la lettre le
   survol du « … » de la même ligne — `--hover-row` sur une boîte de 18 px —, et son encre ne bouge
-  pas, puisqu'elle porte la couleur du dossier.
+  pas, puisqu'elle porte la couleur du dossier. **Celle d'une ligne de connexion aussi depuis
+  #179** : le même contrôle, posé par le même `TreeRow`, donc le même survol — ce n'en est pas un
+  de plus.
 - **Aucune couleur littérale hors `src/design/tokens.json`.** Garde-fou : `pnpm tokens:check`.
 - **L'échelle d'espacement n'a pas de 8 px** : 3, 5, 6, 7, 9, 11, 14, 16. Un littéral
   commenté vaut mieux qu'un jeton approximatif choisi « parce que ça se ressemble ».
@@ -1470,6 +1472,70 @@ lecture seule » ou « Lever la lecture seule », « Exporter le dossier… », 
 déplace, et **le geste destructeur en dernier**, comme partout dans le produit. Sous un ancêtre en
 lecture seule, l'entrée de lecture seule est **désactivée avec sa raison** — « Imposée par « X » » —,
 et **X est le plus extérieur** des dossiers qui l'imposent : c'est celui qu'il faut aller lever.
+
+#### L'icône et la couleur d'une connexion (5 octobre 2026, #179)
+
+Rapporté à l'usage : « i want to be able to edit icon and color of database connexions, as if it
+were a regular folder. otherwise it's all postgres icons everywhere with same color ». Le logo d'un
+moteur est un aplat dont la couleur est **peinte dans le sprite** : le `iconColor` de la ligne ne
+l'atteignait pas, et trois connexions PostgreSQL voisines étaient trois éléphants bleus identiques.
+**Tout est réemployé de #171** — le panneau, la grille, le nuancier, la palette des dossiers, le
+contrôle posé sur l'icône — et aucune maquette n'a été dessinée. Neuf décisions à ne pas défaire,
+dont trois tranchées par le demandeur :
+
+- **une couleur choisie s'impose au logo** (tranché) : l'éléphant est dessiné d'une seule teinte,
+  celle de la pastille, et « Aucune » rend la teinte de marque. C'est ce qui distingue deux
+  connexions PostgreSQL sans changer leur icône — la demande même. Le mécanisme est celui de la
+  plaque du logo : les quatre logos sont peints en `fill="var(--logo-tint,#…)"`, **personne ne pose
+  la variable par défaut**, et la ligne d'une connexion colorée la pose à `currentColor`
+  (`TreeRow.tintLogo`). Une icône en trait suit déjà `currentColor`, donc la variable ne lui fait
+  rien ;
+- **une icône choisie sans couleur prend le jeton du moteur** (`--engine-*`, tranché) : l'icône dit
+  encore de quel moteur il s'agit une fois le logo parti. C'est la teinte que la ligne portait déjà
+  — inopérante sur le logo, qui l'ignorait. L'anneau de « Aucune » suit ce jeton dans le panneau
+  d'une connexion, et non `--accent-deep` : il dit ce que l'arbre montrera sans couleur ;
+- **le fil d'Ariane suit la connexion** (tranché) : il montre ce que la ligne montre, par la même
+  résolution (`teinteDeConnexion`), et non une seconde règle ;
+- **le logo de son moteur en tête, puis les icônes des dossiers sans `pin`** : `pin` nomme un
+  dossier, la règle qui refuse `db` à un dossier. Le logo prend sa place, donc la grille garde ses
+  **56 cases** et le panneau la géométrie de celui d'un dossier, au pixel. **Les logos des autres
+  moteurs ne sont pas offerts** : un éléphant sur une connexion MySQL mentirait. La case du logo
+  s'appelle par son moteur, « PostgreSQL », le nom que lui donne le sélecteur d'`A2` ;
+- **dans la grille, le logo se dessine à l'encre**, comme ses voisines : la grille pose
+  `--logo-tint: currentColor` sur toutes ses cases. En teinte de marque, il serait la seule case
+  colorée, et le navy de SQLite disparaîtrait sur la pastille sombre de la case choisie. La grille
+  choisit une forme ; la couleur se choisit dans la rangée du dessus ;
+- **la palette est celle des dossiers**, `FolderColor` réemployé sans être renommé : une seconde
+  palette finirait par proposer deux verts, et renommer un type public est une autre décision ;
+- **deux champs facultatifs sur `Database`, `color` et `icon`**, avec `serde(default,
+  skip_serializing_if)` : aucun cran de migration, et une connexion qui n'a rien réglé n'écrit aucune
+  clé — l'export le vérifie. L'icône est une **chaîne**, pour la raison de `Folder.icon` ; sa forme
+  est vérifiée par **la même fonction** que celle d'un dossier (`icone_nette`), le repli se fait à
+  l'affichage (`iconeDeConnexion`), et un `pg` écrit à la main sur une connexion MySQL y retombe sur
+  le dauphin : il n'est pas dans **sa** liste ;
+- **deux commandes, `recolor_database` et `set_database_icon`**, pour la raison de
+  `set_folder_icon` : un geste n'écrit que ce qu'il règle. Ni l'une ni l'autre ne ferme la connexion
+  — rien de ce qui décrit le serveur n'a changé —, et `update_variant`, qui mute la connexion en
+  place, les garde. **L'import suit la règle d'un dossier homonyme** sans une ligne de plus : une
+  connexion déjà déclarée garde ses réglages, donc son apparence, absence comprise, et une connexion
+  créée par l'import arrive avec la sienne ;
+- **l'état du panneau ouvert est une identité de nœud**, `f:…` ou `d:…`, et non plus un
+  `FolderId` : rien n'empêche un identifiant de dossier et un identifiant de connexion de valoir la
+  même chaîne. **« Couleur et icône… » vient après « Modifier… »** dans le menu d'une connexion, et non
+  entre lui et « Renommer… », qui vont par deux (`26`).
+
+**Mesuré aux pixels, et c'est la seule mesure qui le dise** : jsdom ne peint rien, et la variable
+posée sur la ligne ne prouve pas que le `<use>` en hérite. `e2e/179-icone-de-connexion.spec.ts`
+capture le logo, le décode dans la page par `createImageBitmap` et lit son pixel le plus saturé —
+bleu, puis rouge après la pastille, puis bleu après « Aucune ». **Un piège rencontré en l'écrivant** :
+le panneau s'ouvre sous l'icône et **couvre la ligne suivante**, donc la capture de la connexion
+voisine lisait le panneau ; elle se mesure panneau fermé. Quinze sabotages, tous tombés.
+
+**Ce qui reste à voir à l'œil** : le logo teint sous WKWebView — `var()` dans un attribut de
+présentation, hérité à travers un `<use>`, est la forme de `--logo-plate`, déjà en place, mais rien
+ne l'a mesuré sous WebKit pour une ligne d'arbre —, en clair et en « Nuit », sur une ligne
+sélectionnée ; et le contraste des cinq teintes sur l'aplat d'un logo, que `couleursDeDossier.test.ts`
+ne calcule que pour des traits.
 
 #### La lecture seule remplace `production`, et elle refuse au lieu de confirmer
 

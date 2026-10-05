@@ -1402,6 +1402,37 @@ mod tests {
     }
 
     #[test]
+    fn la_couleur_et_l_icone_d_une_connexion_voyagent_avec_son_export() {
+        // #179 : deux champs de la connexion, donc clonés par `composer` comme ses réglages — et
+        // **aucune clé** pour une connexion qui n'a rien réglé, sans quoi chaque export écrirait des
+        // `null` qu'une version plus ancienne relirait sans rien en faire.
+        let mut arbre = halle();
+        let dev = &mut arbre.folders[0].folders[0].connections[0];
+        dev.color = Some(crate::config::FolderColor::Violet);
+        dev.icon = Some("rocket".into());
+
+        let retenu = composer(&arbre, None).expect("export");
+        let fichier = fichier_de(retenu.folders, retenu.connections);
+        let texte = serde_json::to_string(&fichier).expect("écriture");
+        let relu: FichierDeDossiers = serde_json::from_str(&texte).expect("relecture");
+
+        let dev = &relu.folders[0].folders[0].connections[0];
+        assert_eq!(dev.color, Some(crate::config::FolderColor::Violet));
+        assert_eq!(dev.icon.as_deref(), Some("rocket"));
+
+        let brut: serde_json::Value = serde_json::from_str(&texte).expect("relecture brute");
+        let prod = &brut["folders"][0]["folders"][1]["connections"][0];
+        assert_eq!(
+            prod["id"], "c-prod",
+            "le décor désigne bien la connexion sans apparence"
+        );
+        assert!(
+            prod.get("color").is_none() && prod.get("icon").is_none(),
+            "{prod}"
+        );
+    }
+
+    #[test]
     fn tout_exporter_porte_les_connexions_a_la_racine() {
         let mut arbre = halle();
         arbre.connections.push(base("c-racine", false));
@@ -2147,6 +2178,44 @@ mod tests {
             fusion.secrets_a_ranger.is_empty(),
             "aucun mot de passe local n'est écrasé"
         );
+    }
+
+    #[test]
+    fn une_connexion_deja_declaree_garde_son_apparence_et_une_neuve_apporte_la_sienne() {
+        // #179, la règle de la couleur d'un dossier homonyme : ce qui est déclaré ici garde ce qu'il
+        // a, **absence comprise** — un import ne complète pas ce qu'on a laissé vide —, et ce que
+        // l'import crée arrive avec ce que le fichier porte, même une icône inconnue d'ici.
+        let locaux = FolderTree {
+            folders: Vec::new(),
+            connections: vec![base("c-prod", false)],
+        };
+        let mut entrant = halle().folders.remove(0);
+        let prod = &mut entrant.folders[1].connections[0];
+        prod.color = Some(crate::config::FolderColor::Red);
+        prod.icon = Some("flame".into());
+        let dev = &mut entrant.folders[0].connections[0];
+        dev.color = Some(crate::config::FolderColor::Green);
+        dev.icon = Some("un-nom-venu-d-ailleurs".into());
+
+        let fusion = fusionner(
+            &locaux,
+            &Kubeconfigs::default(),
+            &fichier_de(vec![entrant], Vec::new()),
+            None,
+        );
+
+        let (gardee, _) = fusion
+            .arbre
+            .connexion(&ConnectionId::brut("c-prod"))
+            .expect("toujours là");
+        assert_eq!(gardee.color, None, "l'absence locale de couleur est gardée");
+        assert_eq!(gardee.icon, None, "l'absence locale d'icône est gardée");
+        let (neuve, _) = fusion
+            .arbre
+            .connexion(&ConnectionId::brut("c-dev"))
+            .expect("versée par l'import");
+        assert_eq!(neuve.color, Some(crate::config::FolderColor::Green));
+        assert_eq!(neuve.icon.as_deref(), Some("un-nom-venu-d-ailleurs"));
     }
 
     #[test]

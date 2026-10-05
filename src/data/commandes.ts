@@ -16,8 +16,10 @@ import type {
   MoveDatabaseRequest,
   MoveFolderRequest,
   MoveResult,
+  RecolorDatabaseRequest,
   RecolorFolderRequest,
   RenameFolderRequest,
+  SetDatabaseIconRequest,
   SetFolderIconRequest,
   SetFolderReadOnlyRequest,
   ValueLabelsRequest,
@@ -372,6 +374,16 @@ export async function recolorFolder(request: RecolorFolderRequest): Promise<Fold
 /** L'icône d'un dossier (#171) ; `icon: null` la rend à `pin`. */
 export async function setFolderIcon(request: SetFolderIconRequest): Promise<FolderTree> {
   return appeler<FolderTree>('set_folder_icon', { request })
+}
+
+/** La pastille d'une connexion (#179) ; `color: null` rend les couleurs de son moteur. */
+export async function recolorDatabase(request: RecolorDatabaseRequest): Promise<FolderTree> {
+  return appeler<FolderTree>('recolor_database', { request })
+}
+
+/** L'icône d'une connexion (#179) ; `icon: null` rend le logo de son moteur. */
+export async function setDatabaseIcon(request: SetDatabaseIconRequest): Promise<FolderTree> {
+  return appeler<FolderTree>('set_database_icon', { request })
 }
 
 /** Passe un dossier en lecture seule, ou la lève. Elle s'impose à tous ses descendants. */

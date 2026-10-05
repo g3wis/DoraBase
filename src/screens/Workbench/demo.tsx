@@ -1882,6 +1882,13 @@ export function WorkbenchDemo() {
             surConnexion(precedent, connection, (d) => ({ ...d, name: nouveau })),
           )
         }}
+        // #179 : la démo écrit dans son état, comme pour un dossier ; `null` rend le moteur.
+        onRecolorDatabase={async (connection, color) =>
+          setArbre((precedent) => surConnexion(precedent, connection, (d) => ({ ...d, color })))
+        }
+        onSetDatabaseIcon={async (connection, icon) =>
+          setArbre((precedent) => surConnexion(precedent, connection, (d) => ({ ...d, icon })))
+        }
         onArbre={setArbre}
         /* Les libellés de valeurs (`API-75`) : la démo écrit **dans son état**, pour la même raison.
            Elle rejoue la règle du cœur — le dossier qui fournit la table, sinon le dossier racine —,

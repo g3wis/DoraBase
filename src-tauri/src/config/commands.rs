@@ -22,9 +22,9 @@ use super::requetes::{
     ConfigLoad, ConsoleRequest, CreateFolderRequest, CreateFolderResult, DeleteDatabaseRequest,
     DeleteFolderRequest, DeleteResult, ExportProjectsRequest, ExportReport, ImportProjectsRequest,
     ImportProjectsResult, ImportReport, MoveDatabaseRequest, MoveFolderRequest, MoveResult,
-    RecolorFolderRequest, RenameDatabaseRequest, RenameFolderRequest, SaveDatabaseRequest,
-    SaveDatabaseResult, SetFolderIconRequest, SetFolderReadOnlyRequest, UpdateVariantRequest,
-    ValueLabelsRequest, VisibleSchemasRequest,
+    RecolorDatabaseRequest, RecolorFolderRequest, RenameDatabaseRequest, RenameFolderRequest,
+    SaveDatabaseRequest, SaveDatabaseResult, SetDatabaseIconRequest, SetFolderIconRequest,
+    SetFolderReadOnlyRequest, UpdateVariantRequest, ValueLabelsRequest, VisibleSchemasRequest,
 };
 use super::store::{ConfigStore, LoadOutcome};
 use crate::engine::registry::ConnectionRegistry;
@@ -829,6 +829,36 @@ pub fn rename_console(
     ecrire_l_arbre(&state, |arbre| {
         super::enregistrer::renommer_console(arbre, &request.connection, &request.name, &nouveau)
             .map_err(|erreur| erreur.to_string())
+    })
+}
+
+/// Change la pastille d'une connexion (#179) ; `None` rend les couleurs de son moteur. **Ne ferme
+/// pas la connexion** : rien de ce qui décrit le serveur n'a changé.
+#[tauri::command]
+pub fn recolor_database(
+    request: RecolorDatabaseRequest,
+    state: State<'_, ConfigState>,
+) -> Result<FolderTree, String> {
+    ecrire_l_arbre(&state, |arbre| {
+        super::enregistrer::recolorier_connexion(arbre, &request.connection, request.color)
+            .map_err(|erreur| erreur.to_string())
+    })
+}
+
+/// Change l'icône d'une connexion (#179) ; `None` rend le logo de son moteur. Ne ferme rien, comme la
+/// couleur.
+#[tauri::command]
+pub fn set_database_icon(
+    request: SetDatabaseIconRequest,
+    state: State<'_, ConfigState>,
+) -> Result<FolderTree, String> {
+    ecrire_l_arbre(&state, |arbre| {
+        super::enregistrer::regler_l_icone_de_la_connexion(
+            arbre,
+            &request.connection,
+            request.icon.as_deref(),
+        )
+        .map_err(|erreur| erreur.to_string())
     })
 }
 

@@ -1,5 +1,6 @@
 import {
   type ButtonHTMLAttributes,
+  type CSSProperties,
   type HTMLAttributes,
   type ReactNode,
   type RefObject,
@@ -60,6 +61,12 @@ type TreeRowProps = {
   label: string
   icon?: IconName
   iconColor?: string
+  /**
+   * Fait prendre `iconColor` **aux logos de moteur** aussi (#179) — sans quoi ils gardent leur teinte
+   * de marque, peinte dans le sprite. Pose `--logo-tint: currentColor` sur l'icône ; une icône en trait
+   * suit déjà `currentColor`, donc rien ne change pour elle.
+   */
+  tintLogo?: boolean
   chevron?: 'open' | 'closed'
   /** Métadonnée de fin de ligne : taille, comptage, nombre de bases. */
   meta?: string
@@ -160,6 +167,7 @@ export function TreeRow({
   label,
   icon,
   iconColor,
+  tintLogo = false,
   chevron,
   meta,
   metaVariant = 'mono',
@@ -192,7 +200,12 @@ export function TreeRow({
         // Trait plus épais sur la ligne sélectionnée : 2 contre 1,8 dans le mockup.
         strokeWidth={selected === true ? 2 : 1.8}
         className={styles.icon}
-        style={{ color: muted === true ? 'var(--ink-meta)' : iconColor }}
+        style={
+          {
+            color: muted === true ? 'var(--ink-meta)' : iconColor,
+            ...(tintLogo ? { '--logo-tint': 'currentColor' } : {}),
+          } as CSSProperties
+        }
       />
     )
   const contenu = (

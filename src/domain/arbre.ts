@@ -246,6 +246,16 @@ leavesReadOnly: Array<ConnectionId>,
 folders: Array<FolderId>, };
 
 /**
+ * `recolor_database` (#179) : la pastille d'une connexion, dans la palette des dossiers. **Ne ferme
+ * rien** — un réglage d'affichage.
+ */
+export type RecolorDatabaseRequest = { connection: ConnectionId, 
+/**
+ * `None` rend les couleurs du moteur.
+ */
+color: FolderColor | null, };
+
+/**
  * `recolor_folder`.
  */
 export type RecolorFolderRequest = { folder: FolderId, 
@@ -285,6 +295,19 @@ name: string, engine: Engine, variant: ConnectionSettings, password: string | nu
  * l'écran la sélectionne ou la déplie.
  */
 export type SaveDatabaseResult = { tree: FolderTree, connection: ConnectionId, };
+
+/**
+ * `set_database_icon` (#179).
+ *
+ * **Une commande à part, pour la raison de [`SetFolderIconRequest`]** : le panneau applique chaque
+ * choix au clic, et une commande qui réglerait les deux renverrait la couleur *affichée* à chaque
+ * clic d'icône.
+ */
+export type SetDatabaseIconRequest = { connection: ConnectionId, 
+/**
+ * `None` rend le logo du moteur.
+ */
+icon: string | null, };
 
 /**
  * `set_folder_icon` (#171).

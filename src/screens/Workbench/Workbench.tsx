@@ -176,6 +176,10 @@ type WorkbenchProps = {
    * d'autre à rapporter depuis #166 : le nom n'est dans aucune identité.
    */
   onRenameDatabase?: (connection: ConnectionId, nouveau: string) => Promise<void>
+  /** La pastille d'une connexion (#179) ; `null` rend les couleurs du moteur. */
+  onRecolorDatabase?: (connection: ConnectionId, couleur: FolderColor | null) => Promise<void>
+  /** L'icône d'une connexion (#179) ; `null` rend le logo du moteur. */
+  onSetDatabaseIcon?: (connection: ConnectionId, icone: IconName | null) => Promise<void>
   /** Le pont vers `preview_updates` (`11c`). Injectable : il ne répond pas hors de la webview. */
   passerellePreview?: PasserellePreview
   /** Le pont vers `apply_changes` (`11d`), la seule commande qui **écrit**. */
@@ -276,6 +280,8 @@ export function Workbench({
   onExportFolder,
   onMove,
   onRenameDatabase,
+  onRecolorDatabase,
+  onSetDatabaseIcon,
   onArbre,
   onDelete,
   onCreateConsole,
@@ -745,6 +751,8 @@ export function Workbench({
    * déclaration, jamais devinée depuis ce que l'écran montre.
    */
   const libelleActuel = contexte ? libelleDeConnexion(arbre, contexte.connection) : undefined
+  /** La connexion du contexte, pour l'icône et la couleur que le fil d'Ariane reprend de l'arbre (#179). */
+  const baseActuelle = contexte ? connexion(arbre, contexte.connection)?.base : undefined
 
   // Le détail sert deux endroits : le panneau droit de `A4` (l'objet sélectionné) et la section
   // « Colonnes de *table* » de la sidebar (la table de l'onglet actif). Une seule lecture, deux
@@ -1445,6 +1453,8 @@ export function Workbench({
           <BreadcrumbBar
             database={libelleActuel ?? '—'}
             engine={moteurActuel}
+            icon={baseActuelle?.icon}
+            color={baseActuelle?.color}
             schema={contexte?.schema ?? '—'}
             counts={comptes(objets)}
             type={type}
@@ -1668,6 +1678,8 @@ export function Workbench({
                      geste part du palier qui connaît son contexte. */
                   onManageSchemas={setSchemasAGerer}
                   onRenameDatabase={onRenameDatabase}
+                  onRecolorDatabase={onRecolorDatabase}
+                  onSetDatabaseIcon={onSetDatabaseIcon}
                   onNewFolder={onNewFolder}
                   renommageInitial={renommageInitial}
                   onRenameFolder={onRenameFolder}

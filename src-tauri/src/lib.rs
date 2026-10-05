@@ -68,6 +68,8 @@ pub fn run() {
             config::commands::save_database,
             config::commands::update_variant,
             config::commands::rename_database,
+            config::commands::recolor_database,
+            config::commands::set_database_icon,
             config::commands::delete_database,
             config::commands::create_console,
             config::commands::save_console,

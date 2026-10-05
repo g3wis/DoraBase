@@ -481,6 +481,25 @@ describe('Workbench', () => {
     expect(await screen.findByRole('treeitem', { name: /orders/ })).toBeInTheDocument()
   })
 
+  it('le fil d’Ariane montre l’icône et la couleur que la ligne de la connexion montre (#179)', async () => {
+    const utilisateur = userEvent.setup()
+    monter({
+      arbre: surConnexion(PROJETS, ANALYTICS, (base) => ({
+        ...base,
+        icon: 'rocket',
+        color: 'red',
+      })),
+    })
+
+    await ouvrirLArbreJusquAuSchema(utilisateur)
+
+    const fil = await screen.findByRole('navigation', { name: 'Chemin de l’objet affiché' })
+    const svg = fil.querySelector('svg')
+    expect(svg?.querySelector('use')?.getAttribute('href')).toBe('#i-rocket')
+    expect(svg?.style.color).toBe('var(--danger)')
+    expect(svg?.style.getPropertyValue('--logo-tint')).toBe('currentColor')
+  })
+
   it('double-cliquer une table de la liste ouvre un onglet', async () => {
     const utilisateur = userEvent.setup()
     monter()
