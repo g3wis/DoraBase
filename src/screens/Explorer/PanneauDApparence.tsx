@@ -1,5 +1,5 @@
 import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { iconeDeDossier } from '../../data/iconesDeDossier'
+import { ICONE_PAR_DEFAUT, ICONES_DE_DOSSIER } from '../../data/iconesDeDossier'
 import type { IconName } from '../../design/icons/names'
 import type { FolderColor } from '../../domain/config'
 import { useT } from '../../i18n/LanguageContext'
@@ -8,7 +8,7 @@ import { Nuancier } from './Nuancier'
 import styles from './PanneauDApparence.module.css'
 
 type PanneauDApparenceProps = {
-  /** Le nom du dossier, pour nommer le panneau et ses deux groupes. */
+  /** Le nom du dossier ou de la connexion, pour nommer le panneau et ses deux groupes. */
   nom: string
   couleur: FolderColor | null
   /** L'icône **enregistrée**, telle que le fichier la porte — un nom inconnu compris. */
@@ -17,9 +17,19 @@ type PanneauDApparenceProps = {
   ancre: RefObject<HTMLElement | null>
   /** Applique la couleur ; rejette avec le refus du cœur. */
   onRecolorer: (couleur: FolderColor | null) => Promise<void>
-  /** Applique l'icône ; `null` la rend à `pin`. Rejette avec le refus du cœur. */
+  /** Applique l'icône ; `null` la rend à celle par défaut. Rejette avec le refus du cœur. */
   onChangerDIcone: (icone: IconName | null) => Promise<void>
   onFermer: () => void
+  /**
+   * Les icônes offertes, **celle par défaut en tête** — celles d'un dossier à défaut, `pin` en tête.
+   * Une connexion passe les siennes, le logo de son moteur en tête (#179). La première est celle
+   * qu'un nom inconnu dessine, et la choisir écrit `null`.
+   */
+  icones?: readonly IconName[]
+  /** Les noms d'icônes propres à cet objet — le logo d'un moteur (voir `GrilleDIcones`). */
+  nomsDIcones?: Partial<Record<IconName, string>>
+  /** L'anneau de « Aucune », la teinte d'une ligne sans couleur (voir `Nuancier`). */
+  teinteAucune?: string
 }
 
 /** L'écart entre l'icône et le panneau — celui de `Popover`, `--space-1`. */
@@ -28,7 +38,8 @@ const ECART = 3
 const MARGE = 8
 
 /**
- * La couleur et l'icône d'un dossier (#171), **dans un petit panneau ancré sous l'icône** de la
+ * La couleur et l'icône d'un dossier (#171) — et d'une connexion depuis #179, avec ses propres
+ * icônes —, **dans un petit panneau ancré sous l'icône** de la
  * ligne — et non plus dans une modale (rapporté à l'usage le 30 septembre 2026 : « pas de grosse
  * fenêtre, juste une petite modale sous l'icône lorsqu'on clique dessus »). Une modale de 780 px pour
  * deux rangées de choix cachait l'arbre même dont on réglait une ligne : on choisissait une icône sans
@@ -51,7 +62,7 @@ const MARGE = 8
  * second clic sur l'icône referment. Chaque geste n'écrit **que ce qu'il règle**, deux commandes,
  * sans quoi un clic d'icône renverrait la couleur affichée et écraserait une couleur encore en vol.
  *
- * **Choisir `pin` écrit `null`**, et non « pin » : c'est l'icône par défaut, donc l'absence de choix.
+ * **Choisir l'icône par défaut écrit `null`**, et non « pin » ni « pg » : c'est l'absence de choix.
  */
 export function PanneauDApparence({
   nom,
@@ -61,11 +72,18 @@ export function PanneauDApparence({
   onRecolorer,
   onChangerDIcone,
   onFermer,
+  icones = ICONES_DE_DOSSIER,
+  nomsDIcones,
+  teinteAucune,
 }: PanneauDApparenceProps) {
   const t = useT()
   const panneau = useRef<HTMLDivElement>(null)
   const [choisie, setChoisie] = useState<FolderColor | null>(couleur)
-  const [dessinee, setDessinee] = useState<IconName>(iconeDeDossier({ icon: icone }))
+  // La première icône offerte est celle par défaut : un nom inconnu — ou absent — la dessine.
+  const parDefaut = icones[0] ?? ICONE_PAR_DEFAUT
+  const [dessinee, setDessinee] = useState<IconName>(
+    icone !== null && icones.includes(icone as IconName) ? (icone as IconName) : parDefaut,
+  )
   const [refus, setRefus] = useState<string | null>(null)
   // Les fermetures sont écoutées sur le document : la dernière version de `onFermer` sans relancer
   // les écouteurs à chaque rendu de l'hôte (le piège de `10d`).
@@ -158,7 +176,7 @@ export function PanneauDApparence({
     setDessinee(suivante)
     setRefus(null)
     try {
-      await onChangerDIcone(suivante === iconeDeDossier({ icon: null }) ? null : suivante)
+      await onChangerDIcone(suivante === parDefaut ? null : suivante)
     } catch (erreur) {
       setDessinee(avant)
       setRefus(String(erreur))
@@ -185,12 +203,15 @@ export function PanneauDApparence({
         onChange={(suivante) => void choisirLaCouleur(suivante)}
         label={t('explorer.appearancePanel.colorLabel', { nom })}
         labelAucune={t('explorer.appearancePanel.none')}
+        teinteAucune={teinteAucune}
       />
       <GrilleDIcones
         name="icone-du-dossier"
         valeur={dessinee}
         onChange={(suivante) => void choisirLIcone(suivante)}
         label={t('explorer.appearancePanel.iconLabel', { nom })}
+        icones={icones}
+        noms={nomsDIcones}
       />
       {refus !== null && (
         <p className={styles.refus} role="alert">

@@ -1,8 +1,9 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
+import { surConnexion } from '../../data/dossiers'
 import { Sprite } from '../../design/icons/Sprite'
-import type { ConnectionId, FolderTree } from '../../domain/config'
+import type { ConnectionId, Database, FolderTree } from '../../domain/config'
 import type { ColumnInfo, ConnectionState, SchemaInfo, TableSummary } from '../../domain/engine'
 import { LanguageProvider } from '../../i18n/LanguageContext'
 import { arbreDeTest, connexionDeTest, ID_DE_TEST, trioDeTest } from '../NewConnection/pourLesTests'
@@ -97,6 +98,8 @@ function Piloté({
   onOpenDiagram,
   onManageSchemas,
   onMove,
+  onRecolorDatabase,
+  onSetDatabaseIcon,
   arbre = ARBRE,
 }: {
   charge?: Charge
@@ -121,6 +124,8 @@ function Piloté({
   onOpenDiagram?: ExplorerSidebarProps['onOpenDiagram']
   onManageSchemas?: ExplorerSidebarProps['onManageSchemas']
   onMove?: ExplorerSidebarProps['onMove']
+  onRecolorDatabase?: ExplorerSidebarProps['onRecolorDatabase']
+  onSetDatabaseIcon?: ExplorerSidebarProps['onSetDatabaseIcon']
   arbre?: FolderTree
 }) {
   const [deplies, setDeplies] = useState(new Set(initial))
@@ -153,6 +158,8 @@ function Piloté({
           onOpenDiagram={onOpenDiagram}
           onManageSchemas={onManageSchemas}
           onMove={onMove}
+          onRecolorDatabase={onRecolorDatabase}
+          onSetDatabaseIcon={onSetDatabaseIcon}
           onSelect={(n) => setChoisi(n.id)}
           onToggle={(n) => {
             onToggleSpy?.(n)
@@ -1128,6 +1135,173 @@ test('un choix dans le panneau s’applique au clic, et le panneau reste ouvert'
   expect(screen.getByRole('dialog', { name: 'Couleur et icône de staging' })).toBe(panneau)
 })
 
+// --- L'apparence d'une connexion (#179) ---
+
+const ICONE_D_ANALYTICS = 'Changer la couleur et l’icône de « analytics »'
+
+/** Les deux gestes d'une connexion, rapportés dans l'ordre où ils partent. */
+function PilotéAvecApparenceDeConnexion({
+  arbre,
+  gestes = [],
+  onToggleSpy,
+}: {
+  arbre?: FolderTree
+  gestes?: [string, string, string | null][]
+  onToggleSpy?: (n: Noeud) => void
+}) {
+  return (
+    <Piloté
+      initial={JUSQU_AUX_CONNEXIONS}
+      arbre={arbre}
+      onToggleSpy={onToggleSpy}
+      onRecolorDatabase={async (connection, couleur) => {
+        gestes.push(['couleur', connection, couleur])
+      }}
+      onSetDatabaseIcon={async (connection, icone) => {
+        gestes.push(['icone', connection, icone])
+      }}
+    />
+  )
+}
+
+/** L'arbre de test, une connexion réécrite. */
+function avecConnexion(id: string, over: Partial<Database>): FolderTree {
+  return surConnexion(ARBRE, id, (base) => ({ ...base, ...over }))
+}
+
+test('cliquer l’icône d’une connexion ouvre le panneau, sans sélectionner ni déplier la ligne', async () => {
+  const bascules: string[] = []
+  render(<PilotéAvecApparenceDeConnexion onToggleSpy={(n) => bascules.push(n.id)} />)
+  const ligne = screen.getByRole('treeitem', { name: /^analytics\b/ })
+  const icone = screen.getByRole('button', { name: ICONE_D_ANALYTICS })
+  expect(ligne.contains(icone)).toBe(false)
+  expect(icone).toHaveAttribute('tabindex', '-1')
+
+  await userEvent.click(icone)
+  const panneau = screen.getByRole('dialog', { name: 'Couleur et icône de analytics' })
+  const grille = within(panneau).getByRole('group', { name: 'Icône de analytics' })
+  // **La géométrie d'un dossier** : 56 cases, le logo du moteur prenant la place de `pin`.
+  const cases = within(grille).getAllByRole('radio')
+  expect(cases).toHaveLength(56)
+  expect(cases[0]).toHaveAccessibleName('PostgreSQL')
+  expect(cases[0]).toBeChecked()
+  expect(within(grille).queryByRole('radio', { name: 'Repère' })).toBeNull()
+  expect(ligne).toHaveAttribute('aria-selected', 'false')
+  expect(bascules).toEqual([])
+})
+
+test('chaque geste sur une connexion part seul, et revenir au moteur écrit null', async () => {
+  const gestes: [string, string, string | null][] = []
+  render(<PilotéAvecApparenceDeConnexion gestes={gestes} />)
+  await userEvent.click(screen.getByRole('button', { name: ICONE_D_ANALYTICS }))
+  const panneau = screen.getByRole('dialog', { name: 'Couleur et icône de analytics' })
+
+  await userEvent.click(within(panneau).getByRole('radio', { name: 'Rouge' }))
+  await userEvent.click(within(panneau).getByRole('radio', { name: 'Fusée' }))
+  await userEvent.click(within(panneau).getByRole('radio', { name: 'PostgreSQL' }))
+  await userEvent.click(within(panneau).getByRole('radio', { name: 'Aucune' }))
+  // **L'identifiant de la connexion**, jamais son nom ; et **une commande par geste** — choisir une
+  // icône n'a renvoyé aucune couleur.
+  expect(gestes).toEqual([
+    ['couleur', ANALYTICS, 'red'],
+    ['icone', ANALYTICS, 'rocket'],
+    ['icone', ANALYTICS, null],
+    ['couleur', ANALYTICS, null],
+  ])
+  expect(screen.getByRole('dialog', { name: 'Couleur et icône de analytics' })).toBe(panneau)
+})
+
+test('une connexion MySQL offre le logo de son moteur, et aucun autre', async () => {
+  render(<PilotéAvecApparenceDeConnexion />)
+  await userEvent.click(
+    screen.getByRole('button', { name: 'Changer la couleur et l’icône de « shop »' }),
+  )
+  const grille = within(screen.getByRole('dialog')).getByRole('group', { name: 'Icône de shop' })
+  const cases = within(grille).getAllByRole('radio')
+  expect(cases[0]).toHaveAccessibleName('MySQL')
+  expect(within(grille).queryByRole('radio', { name: 'PostgreSQL' })).toBeNull()
+  // Le dessin de la case est celui du dauphin.
+  expect(cases[0]?.closest('label')?.querySelector('use')?.getAttribute('href')).toBe('#i-mysql')
+})
+
+test('« Couleur et icône… » d’une connexion ouvre le même panneau, sous son icône', async () => {
+  render(<PilotéAvecApparenceDeConnexion />)
+  await userEvent.click(screen.getByRole('button', { name: 'Actions de analytics' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Couleur et icône…' }))
+  const panneau = screen.getByRole('dialog', { name: 'Couleur et icône de analytics' })
+  const icone = screen.getByRole('button', { name: ICONE_D_ANALYTICS })
+  expect(icone).toHaveAttribute('aria-expanded', 'true')
+  expect(icone.parentElement?.contains(panneau)).toBe(true)
+})
+
+test('sans ses deux gestionnaires, une connexion n’a qu’un dessin, et l’entrée dit pourquoi', async () => {
+  render(<Piloté initial={JUSQU_AUX_CONNEXIONS} onRecolorDatabase={async () => {}} />)
+  // **Un seul ne suffit pas** : le panneau annoncerait par son nom ce qu'il n'offre pas.
+  expect(screen.queryByRole('button', { name: ICONE_D_ANALYTICS })).toBeNull()
+  await userEvent.click(screen.getByRole('button', { name: 'Actions de analytics' }))
+  const entree = screen.getByRole('button', { name: 'Couleur et icône…' })
+  expect(entree).toBeDisabled()
+  expect(entree).toHaveAttribute('title', 'Cet écran n’est pas relié aux réglages d’apparence.')
+})
+
+test('la ligne d’une connexion dessine son icône, et sa couleur s’impose au logo', () => {
+  const glyphe = (nom: string) => {
+    const svg = screen
+      .getByRole('button', { name: `Changer la couleur et l’icône de « ${nom} »` })
+      .querySelector('svg')
+    return {
+      href: svg?.querySelector('use')?.getAttribute('href'),
+      couleur: svg?.style.color,
+      teinte: svg?.style.getPropertyValue('--logo-tint'),
+    }
+  }
+  const { unmount } = render(<PilotéAvecApparenceDeConnexion />)
+  // **Sans réglage, rien ne change** : le logo, et aucune teinte imposée — sa couleur de marque.
+  expect(glyphe('analytics')).toEqual({
+    href: '#i-pg',
+    couleur: 'var(--engine-pg)',
+    teinte: '',
+  })
+  unmount()
+
+  render(
+    <PilotéAvecApparenceDeConnexion
+      arbre={avecConnexion(ANALYTICS, { color: 'red', icon: null })}
+    />,
+  )
+  expect(glyphe('analytics')).toEqual({
+    href: '#i-pg',
+    couleur: 'var(--danger)',
+    teinte: 'currentColor',
+  })
+  // L'autre connexion n'est pas touchée.
+  expect(glyphe('shop').teinte).toBe('')
+})
+
+test('une icône choisie sans couleur prend le jeton du moteur, et un nom inconnu retombe sur le logo', () => {
+  const arbre = surConnexion(avecConnexion(ANALYTICS, { icon: 'rocket' }), SHOP, (base) => ({
+    ...base,
+    icon: 'une-icone-de-demain',
+  }))
+  render(<PilotéAvecApparenceDeConnexion arbre={arbre} />)
+  const svg = (nom: string) =>
+    screen
+      .getByRole('button', { name: `Changer la couleur et l’icône de « ${nom} »` })
+      .querySelector('svg')
+  expect(svg('analytics')?.querySelector('use')?.getAttribute('href')).toBe('#i-rocket')
+  expect(svg('analytics')?.style.color).toBe('var(--engine-pg)')
+  expect(svg('shop')?.querySelector('use')?.getAttribute('href')).toBe('#i-mysql')
+})
+
+test('« Aucune » porte l’anneau du moteur dans le panneau d’une connexion', async () => {
+  render(<PilotéAvecApparenceDeConnexion />)
+  await userEvent.click(screen.getByRole('button', { name: ICONE_D_ANALYTICS }))
+  const aucune = within(screen.getByRole('dialog')).getByRole('radio', { name: 'Aucune' })
+  // L'anneau dit ce que l'arbre montrera sans couleur : le jeton du moteur, pas l'accent.
+  expect(aucune.style.borderColor).toBe('var(--engine-pg)')
+  expect(aucune).toBeChecked()
+})
+
 test('la ligne d’un dossier dessine son icône, et retombe sur pin pour un nom inconnu', () => {
   const arbre = structuredClone(ARBRE)
   const racine = arbre.folders[0]
@@ -1538,6 +1712,8 @@ describe('le clic droit ouvre le même menu, au pointeur (`26`)', () => {
       'Gérer les schémas…',
       'Renommer…',
       'Modifier…',
+      // #179 : le geste du dossier, sous le même nom, après la paire « Renommer » / « Modifier ».
+      'Couleur et icône…',
       'Déplacer vers…',
       'Retirer de DoraBase…',
     ])

@@ -35,6 +35,8 @@
 //! | `save_database` | [`SaveDatabaseRequest`] | [`SaveDatabaseResult`] |
 //! | `update_variant` (async) | [`UpdateVariantRequest`] | `FolderTree` |
 //! | `rename_database` | [`RenameDatabaseRequest`] | `FolderTree` |
+//! | `recolor_database` | [`RecolorDatabaseRequest`] | `FolderTree` |
+//! | `set_database_icon` | [`SetDatabaseIconRequest`] | `FolderTree` |
 //! | `delete_database` (async) | [`DeleteDatabaseRequest`] | [`DeleteResult`] |
 //! | `create_console`, `save_console`, `rename_console`, `delete_console` | [`ConsoleRequest`] | `FolderTree` |
 //! | `save_visible_schemas` | [`VisibleSchemasRequest`] | `FolderTree` |
@@ -363,6 +365,31 @@ pub struct UpdateVariantRequest {
 pub struct RenameDatabaseRequest {
     pub connection: ConnectionId,
     pub name: String,
+}
+
+/// `recolor_database` (#179) : la pastille d'une connexion, dans la palette des dossiers. **Ne ferme
+/// rien** — un réglage d'affichage.
+#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "arbre.ts")]
+pub struct RecolorDatabaseRequest {
+    pub connection: ConnectionId,
+    /// `None` rend les couleurs du moteur.
+    pub color: Option<FolderColor>,
+}
+
+/// `set_database_icon` (#179).
+///
+/// **Une commande à part, pour la raison de [`SetFolderIconRequest`]** : le panneau applique chaque
+/// choix au clic, et une commande qui réglerait les deux renverrait la couleur *affichée* à chaque
+/// clic d'icône.
+#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "arbre.ts")]
+pub struct SetDatabaseIconRequest {
+    pub connection: ConnectionId,
+    /// `None` rend le logo du moteur.
+    pub icon: Option<String>,
 }
 
 /// `delete_database`.

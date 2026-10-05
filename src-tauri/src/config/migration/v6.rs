@@ -265,6 +265,9 @@ pub fn vers_v7(mut projets: Vec<Projet>) -> (FolderTree, PlanDeSecrets) {
                 id,
                 name: base.name,
                 label: base.label,
+                // Une connexion v6 n'avait ni pastille ni icône (#179) : les couleurs du moteur.
+                color: None,
+                icon: None,
                 engine: base.engine,
                 connection,
                 consoles: base.consoles,

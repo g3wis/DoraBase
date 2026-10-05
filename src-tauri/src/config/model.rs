@@ -422,6 +422,20 @@ pub struct Database {
     /// simplement pas — `27a` en tient la règle.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// La pastille de la connexion (#179) — **la palette des dossiers**, et rien de plus : deux
+    /// palettes finiraient par proposer deux verts. `None` : les couleurs du moteur, celles de son
+    /// logo ou de son jeton `--engine-*`.
+    ///
+    /// **Un réglage d'affichage**, comme celle d'un dossier : ni la clé du registre, ni la référence
+    /// du secret, ni la recette d'ouverture ne la lisent, donc la changer ne ferme rien.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<super::arbre::FolderColor>,
+    /// L'icône de la connexion (#179) : le **nom** d'un symbole du sprite, `None` pour le logo de son
+    /// moteur. La règle est celle de `Folder::icon` — une chaîne et non une énumération, le repli au
+    /// seul affichage, la liste offerte à l'écran (`iconesDeConnexion.ts`) et la forme vérifiée à
+    /// l'écriture ([`super::enregistrer::regler_l_icone_de_la_connexion`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
     pub engine: Engine,
     pub connection: ConnectionSettings,
     /// Les consoles SQL de cette connexion, telles que l'arbre les montre sous elle.
