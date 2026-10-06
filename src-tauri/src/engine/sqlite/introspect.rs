@@ -279,6 +279,7 @@ pub fn detail(connexion: &Connection, table: &str) -> Result<TableDetail, Engine
         // stocke le texte du `CREATE` dans `sqlite_master`, sans le normaliser. La mention
         // « reconstruit » de `A9` (`14c`) serait donc fausse ici, et `17b` demande de la distinguer.
         ddl: ddl.unwrap_or_else(|| format!("-- SQLite ne garde pas de DDL pour « {table} »")),
+        word_similarity: false,
     })
 }
 

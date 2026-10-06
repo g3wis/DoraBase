@@ -192,6 +192,7 @@ pub async fn detail(
         // PostgreSQL oblige à réassembler, avec les défauts que `14c` a documentés — identité perdue,
         // index oubliés. MySQL le rend tel qu'il le tient.
         ddl: ddl(connexion, base, table, vue).await?,
+        word_similarity: false,
     })
 }
 

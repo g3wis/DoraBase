@@ -89,6 +89,7 @@ function detail(colonnesCible: ColumnInfo[]): TableDetail {
     triggers: [],
     relations: [],
     ddl: '',
+    wordSimilarity: false,
   }
 }
 

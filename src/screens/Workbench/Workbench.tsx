@@ -1400,6 +1400,7 @@ export function Workbench({
           moteur={moteurActuel}
           columns={detail?.columns ?? []}
           relations={detail?.relations ?? []}
+          wordSimilarity={detail?.wordSimilarity ?? false}
           onSuivreLaReference={suivreLaReference}
           // **Seulement quand le saut vise *cette* table** — une précondition écrite, non un
           // correctif. React groupe `setSaut` et `setEtatOnglets` du même gestionnaire, donc il

@@ -186,15 +186,43 @@ export const BOOLEENS: Operateur[] = [
 ]
 
 /**
+ * La similarité de mots de `pg_trgm` (#181), **réservée au texte d'une base qui l'a installée**.
+ *
+ * Masquée partout ailleurs plutôt que grisée : la base n'a réellement pas la fonction, comme un
+ * moteur de fichier n'a réellement pas de port. Et elle ne vaut que pour le texte — la proximité
+ * de trigrammes de deux dates n'est pas une proximité de dates.
+ *
+ * **Le signe est `≈`**, celui de « à peu près égal » : c'est ce que le filtre rend, et l'opérateur
+ * `<%` de `pg_trgm` ne se lirait que par qui le connaît déjà.
+ */
+export const SIMILAIRE: Operateur = { valeur: 'wordSimilar', signe: '≈', cle: 'wordSimilar' }
+
+/**
  * Les opérateurs que le popover propose pour une colonne — sa **catégorie** décide des
- * suppléments, sa **nullité** de la présence des deux prédicats de nullité.
+ * suppléments, sa **nullité** de la présence des deux prédicats de nullité, et `similarite` — la
+ * base a `pg_trgm` — de celle de `≈` sur une colonne de texte.
  *
  * L'ordre est celui du mockup : les quatre de base, `is null` et `is not null`, puis ce que la
  * catégorie ajoute. Un booléen sort de ce moule et n'a que ses propres entrées.
+ *
+ * **`similarite` est obligatoire, et c'est délibéré** : c'est une propriété de la *base*, que
+ * l'écran reçoit du détail de la table. Un défaut à `false` aurait laissé un appelant l'oublier
+ * sans que rien le dise — l'opérateur aurait simplement manqué, ce qui ne se remarque pas.
  */
-export function operateursPour(category: TypeCategory, nullable: boolean): Operateur[] {
+export function operateursPour(
+  category: TypeCategory,
+  nullable: boolean,
+  similarite: boolean,
+): Operateur[] {
   if (category === 'boolean') return nullable ? [...BOOLEENS, ...NULLITE] : BOOLEENS
-  const supplements = category === 'number' ? COMPARAISONS : category === 'timestamp' ? DATES : []
+  const supplements =
+    category === 'number'
+      ? COMPARAISONS
+      : category === 'timestamp'
+        ? DATES
+        : category === 'text' && similarite
+          ? [SIMILAIRE]
+          : []
   return [...OPERATEURS, ...(nullable ? NULLITE : []), ...supplements]
 }
 
@@ -233,6 +261,7 @@ const SIGNES: Record<FilterOperator, string> = {
   gte: '≥',
   lte: '≤',
   lt: '<',
+  wordSimilar: '≈',
 }
 
 export function signeDe(operator: FilterOperator): string {

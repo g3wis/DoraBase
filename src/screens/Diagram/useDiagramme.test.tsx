@@ -58,6 +58,7 @@ const detailDe = (name: string): TableDetail => ({
   triggers: [],
   relations: [],
   ddl: '',
+  wordSimilarity: false,
 })
 
 /**

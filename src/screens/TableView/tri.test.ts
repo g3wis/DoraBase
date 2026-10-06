@@ -122,7 +122,7 @@ describe('filtres', () => {
   })
 
   it('les quatre comparaisons ne rejoignent le popover que pour une colonne numérique', () => {
-    expect(operateursPour('text', true).map((o) => o.valeur)).toEqual([
+    expect(operateursPour('text', true, false).map((o) => o.valeur)).toEqual([
       'eq',
       'ne',
       'in',
@@ -130,7 +130,7 @@ describe('filtres', () => {
       'isNull',
       'isNotNull',
     ])
-    expect(operateursPour('number', true).map((o) => o.valeur)).toEqual([
+    expect(operateursPour('number', true, false).map((o) => o.valeur)).toEqual([
       'eq',
       'ne',
       'in',
@@ -149,8 +149,8 @@ describe('filtres', () => {
     // table vide plutôt que comme un filtre vide — et `is not null` rendrait **toutes** les lignes,
     // ce qui se lit comme un filtre inopérant. Les deux faces du même fait, donc la même porte.
     for (const category of ['text', 'number', 'timestamp', 'boolean'] as const) {
-      const sans = operateursPour(category, false).map((o) => o.valeur)
-      const avec = operateursPour(category, true).map((o) => o.valeur)
+      const sans = operateursPour(category, false, false).map((o) => o.valeur)
+      const avec = operateursPour(category, true, false).map((o) => o.valeur)
       expect(sans).not.toContain('isNull')
       expect(sans).not.toContain('isNotNull')
       expect(avec).toContain('isNull')
@@ -159,7 +159,7 @@ describe('filtres', () => {
   })
 
   it('une colonne temporelle reçoit « avant » et « après », pas les quatre comparaisons', () => {
-    const dates = operateursPour('timestamp', true)
+    const dates = operateursPour('timestamp', true, false)
     expect(dates.map((o) => o.cle)).toEqual([
       'eq',
       'ne',
@@ -181,13 +181,44 @@ describe('filtres', () => {
   it('une colonne booléenne n’a que ses prédicats', () => {
     // Un champ de saisie n'a rien à recevoir d'une colonne à deux valeurs, et `= true` / `= 1`
     // dépendent du moteur.
-    expect(operateursPour('boolean', true).map((o) => o.valeur)).toEqual([
+    expect(operateursPour('boolean', true, false).map((o) => o.valeur)).toEqual([
       'isTrue',
       'isFalse',
       'isNull',
       'isNotNull',
     ])
-    expect(operateursPour('boolean', false).map((o) => o.valeur)).toEqual(['isTrue', 'isFalse'])
+    expect(operateursPour('boolean', false, false).map((o) => o.valeur)).toEqual([
+      'isTrue',
+      'isFalse',
+    ])
+  })
+
+  it('≈ ne rejoint le popover que sur une colonne de texte d’une base qui a pg_trgm', () => {
+    // Après les quatre de base et la nullité, comme tout supplément de catégorie.
+    expect(operateursPour('text', true, true).map((o) => o.valeur)).toEqual([
+      'eq',
+      'ne',
+      'in',
+      'matches',
+      'isNull',
+      'isNotNull',
+      'wordSimilar',
+    ])
+    expect(operateursPour('text', false, true).map((o) => o.valeur)).toContain('wordSimilar')
+    // Masqué, pas grisé, là où la base ne l'a pas : la fonction n'y existe pas.
+    expect(operateursPour('text', true, false).map((o) => o.valeur)).not.toContain('wordSimilar')
+    // Et jamais hors du texte : la proximité de trigrammes de deux dates n'en est pas une.
+    for (const category of ['number', 'timestamp', 'boolean', 'json', 'uuid', 'other'] as const) {
+      expect(operateursPour(category, true, true).map((o) => o.valeur)).not.toContain('wordSimilar')
+    }
+  })
+
+  it('≈ prend une valeur et se lit par son signe dans un chip', () => {
+    expect(prendUneValeur('wordSimilar')).toBe(true)
+    expect(signeDe('wordSimilar')).toBe('≈')
+    expect(libelleDeFiltre({ column: 'name', operator: 'wordSimilar', value: 'jhon' })).toBe(
+      'name ≈ jhon',
+    )
   })
 
   it('l’opérateur par défaut est le premier de la liste de la colonne', () => {
@@ -195,10 +226,10 @@ describe('filtres', () => {
     // désactivé d'emblée — sans filtre appliqué pour autant.
     for (const category of ['text', 'number', 'timestamp'] as const) {
       expect(operateurParDefaut(category)).toBe('eq')
-      expect(operateursPour(category, true)[0]?.valeur).toBe(operateurParDefaut(category))
+      expect(operateursPour(category, true, false)[0]?.valeur).toBe(operateurParDefaut(category))
     }
     expect(operateurParDefaut('boolean')).toBe('isTrue')
-    expect(operateursPour('boolean', false)[0]?.valeur).toBe(operateurParDefaut('boolean'))
+    expect(operateursPour('boolean', false, false)[0]?.valeur).toBe(operateurParDefaut('boolean'))
   })
 
   it('chaque opérateur a un signe, y compris les comparaisons et les prédicats', () => {

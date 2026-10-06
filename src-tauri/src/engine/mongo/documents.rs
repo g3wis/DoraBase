@@ -80,6 +80,11 @@ pub fn critere(filtres: &[Filter], colonnes: &[ColumnInfo]) -> Result<Document, 
                 };
                 Bson::Document(doc! { operateur: borne })
             }
+            // **Refusé, pas approché** (#181) : `$text` exige un index texte et cherche des mots
+            // racinisés, ce qui n'est pas la similarité de trigrammes que le signe promet.
+            FilterOperator::WordSimilar => {
+                return Err(filtre.operator.refus_hors_pg_trgm("MongoDB"))
+            }
         };
         critere.insert(champ, condition);
     }
@@ -401,6 +406,18 @@ mod tests {
             let critere = critere(&[filtre("actif", operateur, None)], &colonnes()).unwrap();
             assert_eq!(critere.get_bool("actif").unwrap(), attendu);
         }
+    }
+
+    #[test]
+    fn la_similarite_de_mots_est_refusee_en_disant_ou_elle_existe() {
+        // **Refusée, pas remplacée par un `$regex`** (#181), même sur un champ texte.
+        let erreur = critere(
+            &[filtre("statut", FilterOperator::WordSimilar, Some("paye"))],
+            &colonnes(),
+        )
+        .expect_err("doit être refusé");
+        assert!(erreur.message.contains("pg_trgm"), "{erreur}");
+        assert!(erreur.message.contains("MongoDB"), "{erreur}");
     }
 
     #[test]

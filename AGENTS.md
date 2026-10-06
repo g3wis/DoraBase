@@ -4667,6 +4667,31 @@ pas deux, et « jamais tentée » n'est pas « hors ligne ».
 cinq cents lignes déjà lues serait immédiat et faux : l'utilisateur croirait voir toutes
 les lignes qui correspondent. Les tests portent donc sur la **requête envoyée**.
 
+**La similarité de mots est une propriété de la base, pas du moteur** (#181, 6 octobre 2026). `≈`
+(`FilterOperator::WordSimilar`) n'existe que là où `pg_trgm` est installée, et `pg_extension` est
+un catalogue **par base** : `TableDetail.word_similarity` le dit à l'écran, relu à chaque détail —
+donc une extension installée depuis le gestionnaire d'instances paraît sans reconnexion. Quatre
+décisions à ne pas défaire :
+
+- **masqué, pas grisé**, là où l'extension manque et sur les quatre autres moteurs : la fonction n'y
+  existe réellement pas, comme le port d'un moteur de fichier. Et seulement sur une colonne de
+  texte — la proximité de trigrammes de deux dates n'est pas une proximité de dates ;
+- **le seuil est celui du serveur** : `<%` lit `pg_trgm.word_similarity_threshold` (0,6 par défaut)
+  et c'est la seule forme qu'un index trigramme sache servir. Un `word_similarity(…) >= x` écrit par
+  DoraBase donnerait le même résultat partout et ne serait servi par aucun index ;
+- **l'opérateur est qualifié par le schéma de l'extension**, lu au moment de la lecture :
+  `operator("extensions".<%)`. Plusieurs hébergeurs rangent leurs extensions hors du `search_path`,
+  où un `<%` nu échoue sur « operator does not exist » — et le test réel installe l'extension dans
+  un schéma `extensions` pour que l'oubli se voie ;
+- **les plus proches d'abord, mais seulement sans tri choisi.** C'est le seul ordre que l'écran
+  impose sans l'afficher, et il s'efface devant n'importe quel tri de colonne, qui lui est affiché.
+  Une recherche approchée rendue dans l'ordre de la clé primaire laisserait le bon résultat à la
+  quatre-centième ligne.
+
+Les quatre autres moteurs **refusent** `≈` plutôt que de l'approcher — `like`, `SOUNDEX`, `$text`
+répondent à une autre question, et un filtre remplacé en silence sous le même signe ne se voit
+jamais. C'est ce qui a rendu `requete_de` faillible en SQLite, MySQL et BigQuery.
+
 **Le stockage des identifiants est abstrait derrière une interface** : Trousseau en release
 signée, fichier chiffré en développement. Les ACL du Trousseau sont liées à la signature
 de code, et une signature ad-hoc change à chaque build. L'abstraction est de toute façon

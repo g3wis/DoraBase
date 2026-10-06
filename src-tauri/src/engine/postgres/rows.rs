@@ -32,7 +32,19 @@ pub async fn rows(
     requete: &RowQuery,
     colonnes: &[ColumnInfo],
 ) -> Result<RowWindow, EngineError> {
-    let (sql, valeurs) = construire_sql(requete, colonnes)?;
+    // **Un aller-retour de plus, et seulement quand un filtre `≈` le demande** (#181). Lu ici
+    // plutôt que repris de l'écran : une extension retirée depuis le dernier rafraîchissement doit
+    // donner le refus qui la nomme, pas « operator does not exist ».
+    let trigrammes = if requete
+        .filters
+        .iter()
+        .any(|filtre| filtre.operator == FilterOperator::WordSimilar)
+    {
+        super::introspect::schema_de_pg_trgm(client).await?
+    } else {
+        None
+    };
+    let (sql, valeurs) = construire_sql(requete, colonnes, trigrammes.as_deref())?;
 
     let parametres: Vec<&(dyn ToSql + Sync)> =
         valeurs.iter().map(|v| v as &(dyn ToSql + Sync)).collect();
@@ -64,16 +76,39 @@ pub async fn rows(
 ///
 /// Rendu séparément de l'exécution pour être **testable sans base** : c'est ici que se joue
 /// la protection contre l'injection, et elle mérite des tests unitaires exhaustifs.
+///
+/// `trigrammes` est le schéma de `pg_trgm` dans cette base, ou `None` quand elle ne l'a pas — voir
+/// `introspect::schema_de_pg_trgm`.
 pub(super) fn construire_sql(
     requete: &RowQuery,
     colonnes: &[ColumnInfo],
+    trigrammes: Option<&str>,
 ) -> Result<(String, Vec<String>), EngineError> {
     let mut valeurs: Vec<String> = Vec::new();
     let mut conditions: Vec<String> = Vec::new();
+    let mut rapprochements: Vec<String> = Vec::new();
 
     for filtre in &requete.filters {
         let colonne = valider_colonne(&filtre.column, colonnes)?;
-        conditions.push(condition_de(filtre, colonne, &mut valeurs)?);
+        conditions.push(condition_de(filtre, colonne, trigrammes, &mut valeurs)?);
+
+        // **Les plus proches d'abord, tant que personne n'a choisi de tri** (#181). Une recherche
+        // approchée rendue dans l'ordre de la clé primaire laisserait le meilleur résultat à la
+        // quatre-centième ligne. Un tri choisi l'emporte : il est affiché, celui-ci ne l'est pas, et
+        // c'est le seul des deux que l'utilisateur ait demandé.
+        //
+        // `condition_de` vient de lier la valeur cherchée, en dernier : `$N` la désigne, et le
+        // même paramètre sert deux fois plutôt que d'être lié deux fois.
+        if filtre.operator == FilterOperator::WordSimilar && requete.sort.is_empty() {
+            if let Some(schema) = trigrammes {
+                rapprochements.push(format!(
+                    "{}.word_similarity(${}, {}::text) desc",
+                    identifiant(schema),
+                    valeurs.len(),
+                    identifiant(&colonne.name)
+                ));
+            }
+        }
     }
 
     let ou = if conditions.is_empty() {
@@ -82,7 +117,7 @@ pub(super) fn construire_sql(
         format!(" where {}", conditions.join(" and "))
     };
 
-    let tri = construire_tri(requete, colonnes)?;
+    let tri = construire_tri(requete, colonnes, rapprochements)?;
 
     // `LIMIT` et `OFFSET` sont écrits en clair, non paramétrés : ce sont des entiers issus
     // d'une énumération fermée et d'un `u64`, donc aucune chaîne utilisateur n'y entre.
@@ -103,8 +138,16 @@ pub(super) fn construire_sql(
 /// Une pagination par décalage sur un tri non total rend des lignes en ordre indéfini d'une
 /// page à l'autre : donc des doublons et des oublis, silencieux. La clé primaire est ajoutée
 /// en dernier critère quand elle existe — comportement documenté plutôt que subi.
-fn construire_tri(requete: &RowQuery, colonnes: &[ColumnInfo]) -> Result<String, EngineError> {
-    let mut criteres: Vec<String> = Vec::new();
+///
+/// `premiers` passe devant le tri choisi : ce sont les rangs de similarité d'un filtre `≈`, que
+/// `construire_sql` ne pose que lorsque ce tri est vide. Deux rangs égaux restent départagés par
+/// la clé primaire, donc la pagination reste stable.
+fn construire_tri(
+    requete: &RowQuery,
+    colonnes: &[ColumnInfo],
+    premiers: Vec<String>,
+) -> Result<String, EngineError> {
+    let mut criteres: Vec<String> = premiers;
 
     for cle in &requete.sort {
         let colonne = valider_colonne(&cle.column, colonnes)?;
@@ -141,6 +184,7 @@ fn construire_tri(requete: &RowQuery, colonnes: &[ColumnInfo]) -> Result<String,
 fn condition_de(
     filtre: &Filter,
     colonne: &ColumnInfo,
+    trigrammes: Option<&str>,
     valeurs: &mut Vec<String>,
 ) -> Result<String, EngineError> {
     let nom = identifiant(&colonne.name);
@@ -198,6 +242,34 @@ fn condition_de(
         FilterOperator::Matches => {
             valeurs.push(valeur.clone());
             Ok(format!("{nom}::text ~ ${}", valeurs.len()))
+        }
+        FilterOperator::WordSimilar => {
+            // Réservé au texte, comme l'écran le propose : la similarité de trigrammes d'un nombre
+            // ou d'une date rendrait « 2026-03-01 » proche de « 2026-03-10 », ce qui n'est pas une
+            // proximité de dates.
+            if colonne.category != TypeCategory::Text {
+                return Err(EngineError::local(format!(
+                    "l'opérateur {:?} n'est proposé que pour une colonne de texte, et « {} » ne l'est pas",
+                    filtre.operator, colonne.name
+                )));
+            }
+            let schema = trigrammes.ok_or_else(|| {
+                EngineError::local(
+                    "la similarité de mots demande l'extension pg_trgm, qui n'est pas installée dans cette base",
+                )
+            })?;
+            valeurs.push(valeur.clone());
+            // **La valeur cherchée à gauche, la colonne à droite** : `a <% b` mesure `a` contre
+            // le meilleur passage de `b`, donc un mot tapé contre un texte plus long. Inversé, il
+            // demanderait si toute la cellule tient dans le mot tapé.
+            //
+            // **L'opérateur est qualifié par son schéma** : `operator(schéma.<%)` le trouve hors du
+            // `search_path`, là où un `<%` nu échouerait sur « operator does not exist ».
+            Ok(format!(
+                "${} operator({}.<%) {nom}::text",
+                valeurs.len(),
+                identifiant(schema)
+            ))
         }
         FilterOperator::In => {
             // Une liste séparée par des virgules, chaque élément **paramétré** séparément :
@@ -944,7 +1016,7 @@ mod tests {
         // récupération, ces mots n'apparaîtraient pas.
         let mut r = requete();
         r.offset = 1000;
-        let (sql, _) = construire_sql(&r, &colonnes()).unwrap();
+        let (sql, _) = construire_sql(&r, &colonnes(), None).unwrap();
         assert!(sql.contains("limit 500"), "{sql}");
         assert!(sql.contains("offset 1000"), "{sql}");
     }
@@ -958,7 +1030,7 @@ mod tests {
             value: Some("payé".into()),
         }];
 
-        let (sql, valeurs) = construire_sql(&r, &colonnes()).unwrap();
+        let (sql, valeurs) = construire_sql(&r, &colonnes(), None).unwrap();
         assert!(sql.contains("$1"), "{sql}");
         assert!(
             !sql.contains("payé"),
@@ -976,7 +1048,7 @@ mod tests {
             value: Some("' or 1=1 --".into()),
         }];
 
-        let (sql, valeurs) = construire_sql(&r, &colonnes()).unwrap();
+        let (sql, valeurs) = construire_sql(&r, &colonnes(), None).unwrap();
         assert!(!sql.contains("or 1=1"), "injection dans le SQL : {sql}");
         assert_eq!(valeurs, vec!["' or 1=1 --".to_owned()]);
     }
@@ -990,7 +1062,7 @@ mod tests {
             value: Some("x".into()),
         }];
 
-        let erreur = construire_sql(&r, &colonnes()).expect_err("doit être refusé");
+        let erreur = construire_sql(&r, &colonnes(), None).expect_err("doit être refusé");
         assert!(erreur.message.contains("colonne_inventee"), "{erreur}");
     }
 
@@ -1001,7 +1073,7 @@ mod tests {
             column: "id; drop table users --".into(),
             direction: SortDirection::Ascending,
         }];
-        assert!(construire_sql(&r, &colonnes()).is_err());
+        assert!(construire_sql(&r, &colonnes(), None).is_err());
     }
 
     #[test]
@@ -1013,7 +1085,7 @@ mod tests {
             value: None,
         }];
 
-        let (sql, valeurs) = construire_sql(&r, &colonnes()).unwrap();
+        let (sql, valeurs) = construire_sql(&r, &colonnes(), None).unwrap();
         assert!(sql.contains("is null"), "{sql}");
         assert!(valeurs.is_empty());
     }
@@ -1027,7 +1099,7 @@ mod tests {
             value: None,
         }];
 
-        let (sql, valeurs) = construire_sql(&r, &colonnes()).unwrap();
+        let (sql, valeurs) = construire_sql(&r, &colonnes(), None).unwrap();
         assert!(sql.contains("is not null"), "{sql}");
         assert!(valeurs.is_empty());
     }
@@ -1042,7 +1114,7 @@ mod tests {
             value: Some("payé, en attente ,annulé".into()),
         }];
 
-        let (sql, valeurs) = construire_sql(&r, &colonnes()).unwrap();
+        let (sql, valeurs) = construire_sql(&r, &colonnes(), None).unwrap();
         assert!(sql.contains("in ($1, $2, $3)"), "{sql}");
         assert_eq!(valeurs, vec!["payé", "en attente", "annulé"]);
     }
@@ -1051,8 +1123,11 @@ mod tests {
     fn les_operateurs_universels_produisent_du_sql_sur_une_colonne_texte() {
         for operateur in FilterOperator::tous() {
             // Les comparaisons demandent une colonne numérique ou temporelle, les deux prédicats
-            // booléens une colonne booléenne : les uns et les autres ont leur test de refus.
-            if operateur.est_une_comparaison() || operateur.est_un_predicat_booleen() {
+            // booléens une colonne booléenne, `≈` la base qui a `pg_trgm` : chacun a son test.
+            if operateur.est_une_comparaison()
+                || operateur.est_un_predicat_booleen()
+                || operateur == FilterOperator::WordSimilar
+            {
                 continue;
             }
             let mut r = requete();
@@ -1062,7 +1137,7 @@ mod tests {
                 value: operateur.prend_une_valeur().then(|| "x".to_owned()),
             }];
             assert!(
-                construire_sql(&r, &colonnes()).is_ok(),
+                construire_sql(&r, &colonnes(), None).is_ok(),
                 "{operateur:?} devrait produire du SQL"
             );
         }
@@ -1080,7 +1155,7 @@ mod tests {
                 operator: operateur,
                 value: Some("10".into()),
             }];
-            let (sql, valeurs) = construire_sql(&r, &colonnes()).unwrap_or_else(|erreur| {
+            let (sql, valeurs) = construire_sql(&r, &colonnes(), None).unwrap_or_else(|erreur| {
                 panic!("{operateur:?} devrait produire du SQL : {erreur}")
             });
             assert!(sql.contains("::numeric"), "{sql}");
@@ -1106,7 +1181,7 @@ mod tests {
                 operator: operateur,
                 value: Some("2026-03-01".into()),
             }];
-            let (sql, valeurs) = construire_sql(&r, &colonnes()).unwrap_or_else(|erreur| {
+            let (sql, valeurs) = construire_sql(&r, &colonnes(), None).unwrap_or_else(|erreur| {
                 panic!("{operateur:?} devrait produire du SQL : {erreur}")
             });
             // La condition entière, signe compris : c'est la **colonne nue** à gauche qui garde son
@@ -1129,7 +1204,7 @@ mod tests {
             operator: FilterOperator::Gt,
             value: Some("10".into()),
         }];
-        let erreur = construire_sql(&r, &colonnes()).expect_err("doit être refusé");
+        let erreur = construire_sql(&r, &colonnes(), None).expect_err("doit être refusé");
         assert!(erreur.message.contains("statut"), "{erreur}");
     }
 
@@ -1145,7 +1220,7 @@ mod tests {
                 operator: operateur,
                 value: None,
             }];
-            let (sql, valeurs) = construire_sql(&r, &colonnes()).unwrap();
+            let (sql, valeurs) = construire_sql(&r, &colonnes(), None).unwrap();
             assert!(sql.contains(attendu), "{sql}");
             // `is true` plutôt que `= true` : un prédicat rend toujours vrai ou faux, là où
             // `<> true` garderait les nuls hors du compte sans le dire.
@@ -1164,7 +1239,7 @@ mod tests {
             operator: FilterOperator::IsTrue,
             value: None,
         }];
-        let erreur = construire_sql(&r, &colonnes()).expect_err("doit être refusé");
+        let erreur = construire_sql(&r, &colonnes(), None).expect_err("doit être refusé");
         assert!(erreur.message.contains("statut"), "{erreur}");
     }
 
@@ -1176,7 +1251,118 @@ mod tests {
             operator: FilterOperator::Eq,
             value: None,
         }];
-        assert!(construire_sql(&r, &colonnes()).is_err());
+        assert!(construire_sql(&r, &colonnes(), None).is_err());
+    }
+
+    fn similaire(colonne: &str, valeur: &str) -> Filter {
+        Filter {
+            column: colonne.into(),
+            operator: FilterOperator::WordSimilar,
+            value: Some(valeur.into()),
+        }
+    }
+
+    #[test]
+    fn la_similarite_de_mots_qualifie_son_operateur_par_le_schema_de_pg_trgm() {
+        // **Un schéma qui n'est pas `public`**, comme chez les hébergeurs qui rangent leurs
+        // extensions à part : un `<%` nu n'y serait pas trouvé hors du `search_path`.
+        let mut r = requete();
+        r.filters = vec![similaire("statut", "payé")];
+
+        let (sql, valeurs) = construire_sql(&r, &colonnes(), Some("extensions")).unwrap();
+        // La valeur à gauche : `a <% b` cherche `a` dans le meilleur passage de `b`.
+        assert!(
+            sql.contains(r#"where $1 operator("extensions".<%) "statut"::text"#),
+            "{sql}"
+        );
+        assert!(
+            !sql.contains("payé"),
+            "la valeur ne doit pas être dans le SQL : {sql}"
+        );
+        assert_eq!(valeurs, vec!["payé".to_owned()]);
+    }
+
+    #[test]
+    fn sans_pg_trgm_la_similarite_de_mots_est_refusee_en_nommant_l_extension() {
+        let mut r = requete();
+        r.filters = vec![similaire("statut", "payé")];
+
+        let erreur = construire_sql(&r, &colonnes(), None).expect_err("doit être refusé");
+        assert!(erreur.message.contains("pg_trgm"), "{erreur}");
+    }
+
+    #[test]
+    fn la_similarite_de_mots_hors_d_une_colonne_de_texte_est_refusee() {
+        for colonne in ["id", "livre_le", "actif"] {
+            let mut r = requete();
+            r.filters = vec![similaire(colonne, "10")];
+            let erreur =
+                construire_sql(&r, &colonnes(), Some("public")).expect_err("doit être refusé");
+            assert!(erreur.message.contains(colonne), "{erreur}");
+        }
+    }
+
+    #[test]
+    fn sans_tri_choisi_les_plus_proches_viennent_d_abord() {
+        let mut r = requete();
+        r.filters = vec![similaire("statut", "payé")];
+
+        let (sql, valeurs) = construire_sql(&r, &colonnes(), Some("extensions")).unwrap();
+        // La clé primaire suit : deux rangs égaux restent dans un ordre stable d'une page à
+        // l'autre.
+        assert!(
+            sql.contains(
+                r#"order by "extensions".word_similarity($1, "statut"::text) desc, "id" asc"#
+            ),
+            "{sql}"
+        );
+        // Le même paramètre sert au filtre et au rang : lié une fois.
+        assert_eq!(valeurs, vec!["payé".to_owned()]);
+    }
+
+    #[test]
+    fn le_rang_de_similarite_designe_sa_propre_valeur_parmi_d_autres_filtres() {
+        // Un filtre lié avant lui décale son paramètre : le rang doit suivre, sans quoi il
+        // mesurerait la similarité au mauvais mot.
+        let mut r = requete();
+        r.filters = vec![
+            Filter {
+                column: "id".into(),
+                operator: FilterOperator::Gt,
+                value: Some("10".into()),
+            },
+            similaire("statut", "payé"),
+        ];
+
+        let (sql, valeurs) = construire_sql(&r, &colonnes(), Some("public")).unwrap();
+        assert!(
+            sql.contains(r#"$2 operator("public".<%) "statut"::text"#),
+            "{sql}"
+        );
+        assert!(
+            sql.contains(r#"order by "public".word_similarity($2, "statut"::text) desc"#),
+            "{sql}"
+        );
+        assert_eq!(valeurs, vec!["10".to_owned(), "payé".to_owned()]);
+    }
+
+    #[test]
+    fn un_tri_choisi_l_emporte_sur_le_rang_de_similarite() {
+        // Le tri choisi est affiché, le rang ne l'est pas : c'est le seul des deux que
+        // l'utilisateur ait demandé.
+        let mut r = requete();
+        r.filters = vec![similaire("statut", "payé")];
+        r.sort = vec![SortKey {
+            column: "livre_le".into(),
+            direction: SortDirection::Descending,
+        }];
+
+        let (sql, _) = construire_sql(&r, &colonnes(), Some("public")).unwrap();
+        assert!(!sql.contains("word_similarity("), "{sql}");
+        assert!(
+            sql.contains(r#"order by "livre_le" desc, "id" asc"#),
+            "{sql}"
+        );
     }
 
     #[test]
@@ -1189,7 +1375,7 @@ mod tests {
             direction: SortDirection::Descending,
         }];
 
-        let (sql, _) = construire_sql(&r, &colonnes()).unwrap();
+        let (sql, _) = construire_sql(&r, &colonnes(), None).unwrap();
         assert!(sql.contains(r#"order by "statut" desc, "id" asc"#), "{sql}");
     }
 
@@ -1201,7 +1387,7 @@ mod tests {
             direction: SortDirection::Descending,
         }];
 
-        let (sql, _) = construire_sql(&r, &colonnes()).unwrap();
+        let (sql, _) = construire_sql(&r, &colonnes(), None).unwrap();
         assert_eq!(
             sql.matches(r#""id""#).count(),
             2,
@@ -1225,7 +1411,7 @@ mod tests {
             },
         ];
 
-        let (sql, _) = construire_sql(&r, &colonnes()).unwrap();
+        let (sql, _) = construire_sql(&r, &colonnes(), None).unwrap();
         assert!(sql.contains(r#"order by "statut" asc, "id" desc"#), "{sql}");
     }
 

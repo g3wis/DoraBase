@@ -168,7 +168,7 @@ impl EngineAdapter for SqliteAdapter {
 
     async fn rows(&self, query: &RowQuery) -> Result<RowWindow, EngineError> {
         let debut = Instant::now();
-        let (sql, parametres) = rows::requete_de(query);
+        let (sql, parametres) = rows::requete_de(query)?;
         let table = query.table.clone();
         let offset = query.offset;
         let a_executer = sql.clone();

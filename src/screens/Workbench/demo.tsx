@@ -411,6 +411,7 @@ const DETAIL: TableDetail = {
     CONSTRAINT orders_pkey PRIMARY KEY (id),
     CONSTRAINT orders_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
 );`,
+  wordSimilarity: false,
 }
 
 /**
@@ -550,6 +551,7 @@ const DETAIL_MONGO: TableDetail = {
 db.createCollection("evenements");
 
 db.evenements.createIndex({ "sorte": 1, "horodatage": -1 }, { name: "evenements_sorte_date_idx" });`,
+  wordSimilarity: false,
 }
 
 /** Vrai pour la base documentaire du décor — voir `ARBRE_DEMO`. */

@@ -199,7 +199,7 @@ impl EngineAdapter for BigQueryAdapter {
             .map_err(erreur::traduire)?;
         let colonnes = introspect::colonnes_de(&table);
 
-        let (sql, parametres) = rows::requete_de(&self.projet, &query.schema, query, &colonnes);
+        let (sql, parametres) = rows::requete_de(&self.projet, &query.schema, query, &colonnes)?;
         let (_, lignes, _) = self.executer(&sql, parametres).await?;
 
         let total = table

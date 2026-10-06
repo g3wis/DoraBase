@@ -163,6 +163,7 @@ pub async fn detail(
             .and_then(|n| n.parse::<u64>().ok()),
         comment: table_bq.description.clone(),
         ddl: ddl_reconstruit(projet, jeu, table, &champs),
+        word_similarity: false,
         columns: colonnes,
         indexes: Vec::new(),
         constraints: Vec::new(),

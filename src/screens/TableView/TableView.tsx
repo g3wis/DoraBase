@@ -110,6 +110,14 @@ type TableViewProps = {
    */
   relations?: readonly Relation[]
   /**
+   * La base sait filtrer par similarité de mots — `pg_trgm` installée (#181) : les colonnes de
+   * texte reçoivent alors `≈` dans leur popover d'opérateur.
+   *
+   * Absent, le popover est celui d'avant. C'est ce que rendent les quatre autres moteurs, et une
+   * base PostgreSQL sans l'extension : la fonction n'y existe pas, donc rien n'est grisé.
+   */
+  wordSimilarity?: boolean
+  /**
    * Suivre une clé étrangère. La vue rend **où aller** ; ouvrir un onglet appartient à l'écran,
    * seul à tenir la bande d'onglets.
    */
@@ -299,6 +307,7 @@ export function TableView({
   moteur,
   columns,
   relations = [],
+  wordSimilarity = false,
   onSuivreLaReference,
   arrivee = null,
   onArriveeAppliquee,
@@ -1047,6 +1056,7 @@ export function TableView({
                 applique={filtre !== undefined}
                 onApply={(operator, saisie) => appliquerFiltre(colonne.name, operator, saisie)}
                 nullable={colonne.nullable}
+                similarite={wordSimilarity}
               />
             ),
             cell: (ligne: Ligne) => {
@@ -1215,6 +1225,7 @@ export function TableView({
       onAttenteChange,
       columns,
       relations,
+      wordSimilarity,
       onSuivreLaReference,
       t,
       moteur,
