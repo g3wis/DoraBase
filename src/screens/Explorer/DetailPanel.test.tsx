@@ -31,6 +31,7 @@ const detail = (over: Partial<TableDetail> = {}): TableDetail => ({
   triggers: [],
   relations: [],
   ddl: '',
+  wordSimilarity: false,
   ...over,
 })
 

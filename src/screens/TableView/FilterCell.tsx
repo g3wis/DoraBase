@@ -26,6 +26,8 @@ type FilterCellProps = {
   category: TypeCategory
   /** `is null` et `is not null` ne sont proposés que pour une colonne qui peut porter un nul. */
   nullable: boolean
+  /** La base sait filtrer par similarité de mots — `pg_trgm` installée (#181). */
+  similarite: boolean
 }
 
 /**
@@ -47,11 +49,12 @@ export function FilterCell({
   onApply,
   category,
   nullable,
+  similarite,
 }: FilterCellProps) {
   const t = useT()
   const [saisie, setSaisie] = useState(value)
   const champ = useRef<HTMLInputElement>(null)
-  const operateurs = operateursPour(category, nullable)
+  const operateurs = operateursPour(category, nullable, similarite)
   const saisissable = prendUneValeur(operator)
   // Le sélecteur de date ne sert qu'aux deux bornes d'une colonne temporelle. Sur `=`, `~` ou `in`,
   // la saisie reste libre : un `~` cherche un motif — « 2026-03 » —, et `in` une liste, deux choses

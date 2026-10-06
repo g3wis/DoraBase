@@ -19,7 +19,8 @@ use gcp_bigquery_client::model::query_parameter_type::QueryParameterType;
 use gcp_bigquery_client::model::query_parameter_value::QueryParameterValue;
 
 use crate::engine::{
-    ColumnInfo, Filter, FilterOperator, RowLimit, RowQuery, SortDirection, TypeCategory, Value,
+    ColumnInfo, EngineError, Filter, FilterOperator, RowLimit, RowQuery, SortDirection,
+    TypeCategory, Value,
 };
 
 /// Cite un identifiant simple — une colonne. Le guillemet du dialecte BigQuery est le backtick,
@@ -59,7 +60,7 @@ pub fn requete_de(
     jeu: &str,
     query: &RowQuery,
     colonnes: &[ColumnInfo],
-) -> (String, Vec<QueryParameter>) {
+) -> Result<(String, Vec<QueryParameter>), EngineError> {
     let mut parametres = Vec::new();
     let mut sql = format!("select * from {}", citer_table(projet, jeu, &query.table));
 
@@ -67,7 +68,7 @@ pub fn requete_de(
         .filters
         .iter()
         .map(|filtre| condition_de(filtre, colonnes, &mut parametres))
-        .collect();
+        .collect::<Result<_, _>>()?;
     if !conditions.is_empty() {
         sql.push_str(" where ");
         sql.push_str(&conditions.join(" and "));
@@ -98,7 +99,7 @@ pub fn requete_de(
         query.limit.value(),
         query.offset
     ));
-    (sql, parametres)
+    Ok((sql, parametres))
 }
 
 fn colonne_en_texte(nom: &str) -> String {
@@ -141,9 +142,9 @@ fn condition_de(
     filtre: &Filter,
     colonnes: &[ColumnInfo],
     parametres: &mut Vec<QueryParameter>,
-) -> String {
+) -> Result<String, EngineError> {
     let colonne = colonne_en_texte(&filtre.column);
-    match filtre.operator {
+    Ok(match filtre.operator {
         FilterOperator::Eq => {
             let param = parametre_texte(
                 parametres.len() + 1,
@@ -236,7 +237,10 @@ fn condition_de(
                 }
             }
         }
-    }
+        // **Refusé, pas approché** (#181) : BigQuery n'a pas de similarité de mots, et
+        // `edit_distance` mesure une chaîne entière, pas le meilleur passage d'un texte.
+        FilterOperator::WordSimilar => return Err(filtre.operator.refus_hors_pg_trgm("BigQuery")),
+    })
 }
 
 /// Le type BigQuery de la colonne quand elle est temporelle, `None` sinon — le discriminant des
@@ -354,8 +358,22 @@ mod tests {
     }
 
     #[test]
+    fn la_similarite_de_mots_est_refusee_en_disant_ou_elle_existe() {
+        // **Refusée, pas approchée** (#181), même sur une colonne de texte.
+        let mut r = requete();
+        r.filters = vec![Filter {
+            column: "statut".into(),
+            operator: FilterOperator::WordSimilar,
+            value: Some("paye".into()),
+        }];
+        let erreur = requete_de("p", "jeu", &r, &colonnes()).expect_err("doit être refusé");
+        assert!(erreur.message.contains("pg_trgm"), "{erreur}");
+        assert!(erreur.message.contains("BigQuery"), "{erreur}");
+    }
+
+    #[test]
     fn une_lecture_simple_cite_la_table_en_un_seul_jeton() {
-        let (sql, parametres) = requete_de("mon-projet", "jeu", &requete(), &colonnes());
+        let (sql, parametres) = requete_de("mon-projet", "jeu", &requete(), &colonnes()).unwrap();
         assert_eq!(
             sql,
             "select * from `mon-projet.jeu.commandes` limit 500 offset 0"
@@ -371,7 +389,7 @@ mod tests {
             operator: FilterOperator::Eq,
             value: Some("'; drop table commandes; --".into()),
         }];
-        let (sql, parametres) = requete_de("p", "jeu", &r, &colonnes());
+        let (sql, parametres) = requete_de("p", "jeu", &r, &colonnes()).unwrap();
         assert!(!sql.contains("drop table"), "{sql}");
         assert!(sql.contains("= @p1"), "{sql}");
         assert_eq!(
@@ -393,7 +411,7 @@ mod tests {
             operator: FilterOperator::Matches,
             value: Some("100_%".into()),
         }];
-        let (sql, parametres) = requete_de("p", "jeu", &r, &colonnes());
+        let (sql, parametres) = requete_de("p", "jeu", &r, &colonnes()).unwrap();
         assert!(sql.contains("lower("), "{sql}");
         assert_eq!(
             parametres[0]
@@ -414,7 +432,7 @@ mod tests {
             operator: FilterOperator::In,
             value: Some("  ,  ".into()),
         }];
-        let (sql, _) = requete_de("p", "jeu", &r, &colonnes());
+        let (sql, _) = requete_de("p", "jeu", &r, &colonnes()).unwrap();
         assert!(sql.contains("0 = 1"), "{sql}");
     }
 
@@ -434,7 +452,7 @@ mod tests {
                 operator: operateur,
                 value: Some("10".into()),
             }];
-            let (sql, parametres) = requete_de("p", "jeu", &r, &colonnes());
+            let (sql, parametres) = requete_de("p", "jeu", &r, &colonnes()).unwrap();
             assert!(
                 sql.contains(&format!("cast(`montant` as bignumeric) {signe} @p1")),
                 "{sql}"
@@ -458,7 +476,7 @@ mod tests {
                 operator: operateur,
                 value: None,
             }];
-            let (sql, parametres) = requete_de("p", "jeu", &r, &colonnes());
+            let (sql, parametres) = requete_de("p", "jeu", &r, &colonnes()).unwrap();
             assert!(sql.contains(attendu), "{sql}");
             // Aucun paramètre nommé : un `@p1` déclaré sans valeur ferait refuser la requête par
             // l'API avant même de joindre la table.
@@ -478,7 +496,7 @@ mod tests {
                 operator: operateur,
                 value: None,
             }];
-            let (sql, parametres) = requete_de("p", "jeu", &r, &colonnes());
+            let (sql, parametres) = requete_de("p", "jeu", &r, &colonnes()).unwrap();
             assert!(sql.contains(attendu), "{sql}");
             // Pas de `cast(… as string)` : BigQuery a un vrai type `BOOL`.
             assert!(!sql.contains("cast(`actif`"), "{sql}");
@@ -498,7 +516,7 @@ mod tests {
                 operator: FilterOperator::Lt,
                 value: Some("2026-03-01".into()),
             }];
-            let (sql, parametres) = requete_de("p", "jeu", &r, &colonnes());
+            let (sql, parametres) = requete_de("p", "jeu", &r, &colonnes()).unwrap();
             assert!(
                 sql.contains(&format!("`{colonne}` < cast(@p1 as {type_bq})")),
                 "{sql}"
@@ -519,7 +537,7 @@ mod tests {
             column: "cree le".into(),
             direction: SortDirection::Descending,
         }];
-        let (sql, _) = requete_de("p", "jeu", &r, &colonnes());
+        let (sql, _) = requete_de("p", "jeu", &r, &colonnes()).unwrap();
         assert!(sql.contains("order by `cree le` desc"), "{sql}");
     }
 

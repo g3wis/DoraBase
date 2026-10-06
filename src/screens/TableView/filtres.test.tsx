@@ -48,7 +48,7 @@ const COLONNES = [
 /** 2026-03-05 00:00:00 UTC, en millisecondes — la valeur d'`expedie_ms` dans le décor. */
 const MINUIT_MS = 1_772_668_800_000
 
-function monter() {
+function monter({ wordSimilarity = false }: { wordSimilarity?: boolean } = {}) {
   const readRows = vi.fn(async (_cle: DatabaseKey, requete: RowQuery) => ({
     offset: 0,
     rows: [
@@ -75,6 +75,7 @@ function monter() {
           schema="public"
           table="orders"
           columns={COLONNES}
+          wordSimilarity={wordSimilarity}
           passerelle={passerelle}
         />
       </LanguageProvider>
@@ -183,6 +184,8 @@ describe('filtres par en-tête', () => {
 
     const panneau = await screen.findByRole('dialog', { name: 'Opérateur · status' })
     expect(panneau.querySelectorAll('li')).toHaveLength(6)
+    // Sans `pg_trgm`, `≈` est **masqué**, pas grisé : la fonction n'existe pas dans la base.
+    expect(screen.queryByRole('button', { name: /^≈/ })).toBeNull()
   })
 
   it('ni « is null » ni « is not null » ne paraissent sur une colonne NOT NULL', async () => {
@@ -366,6 +369,35 @@ describe('filtres par en-tête', () => {
     const panneau = await screen.findByRole('dialog', { name: 'Opérateur · total_cents' })
     // Les six de base, plus `>`, `≥`, `≤`, `<` — réservées aux colonnes numériques.
     expect(panneau.querySelectorAll('li')).toHaveLength(10)
+  })
+
+  it('≈ « mot similaire » paraît sur une colonne texte quand la base a pg_trgm, et part au serveur', async () => {
+    const utilisateur = userEvent.setup()
+    const { readRows } = monter({ wordSimilarity: true })
+    await waitFor(() => expect(readRows).toHaveBeenCalledTimes(1))
+
+    await utilisateur.click(await screen.findByRole('button', { name: 'Opérateur de status' }))
+    const panneau = await screen.findByRole('dialog', { name: 'Opérateur · status' })
+    // Les six de base, plus `≈` — et nulle part ailleurs que sur le texte (test suivant).
+    expect(panneau.querySelectorAll('li')).toHaveLength(7)
+    await utilisateur.click(screen.getByRole('button', { name: /^≈ mot similaire$/ }))
+    await utilisateur.type(await screen.findByLabelText('Filtrer status'), 'piad{Enter}')
+
+    await waitFor(() =>
+      expect(derniereRequete(readRows).filters).toEqual([
+        { column: 'status', operator: 'wordSimilar', value: 'piad' },
+      ]),
+    )
+  })
+
+  it('≈ ne paraît pas hors du texte, même quand la base a pg_trgm', async () => {
+    const utilisateur = userEvent.setup()
+    monter({ wordSimilarity: true })
+    await utilisateur.click(await screen.findByRole('button', { name: 'Opérateur de total_cents' }))
+
+    const panneau = await screen.findByRole('dialog', { name: 'Opérateur · total_cents' })
+    expect(panneau.querySelectorAll('li')).toHaveLength(10)
+    expect(screen.queryByRole('button', { name: /^≈/ })).toBeNull()
   })
 
   it('une comparaison numérique part au serveur', async () => {

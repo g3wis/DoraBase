@@ -268,7 +268,7 @@ impl EngineAdapter for MysqlAdapter {
     async fn rows(&self, query: &RowQuery) -> Result<RowWindow, EngineError> {
         let debut = Instant::now();
         let categories = self.categories(&query.schema, &query.table).await?;
-        let (sql, parametres) = rows::requete_de(query);
+        let (sql, parametres) = rows::requete_de(query)?;
 
         let mut connexion = self.connexion().await?;
         let lignes: Vec<Row> = connexion

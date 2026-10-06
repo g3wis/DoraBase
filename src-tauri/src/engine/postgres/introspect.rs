@@ -372,6 +372,32 @@ select sujet.oid                                          as relid,
   join pg_namespace cn on cn.oid = ct.relnamespace
  order by sujet.oid, con.conname";
 
+/// Le schéma où `pg_trgm` est installée dans **cette** base, ou `None` (#181).
+///
+/// **Le schéma, pas un booléen** : l'extension peut vivre ailleurs que dans `public` — un schéma
+/// `extensions` est l'usage de plusieurs hébergeurs —, et hors du `search_path` de la session son
+/// opérateur `<%` n'est pas trouvé. La lecture des lignes le qualifie donc par ce schéma ; l'écran,
+/// lui, n'a besoin que de savoir s'il existe.
+///
+/// `pg_extension` est un catalogue **par base**, comme le gestionnaire d'instances le dit déjà : une
+/// extension installée dans une base voisine ne compte pas.
+pub async fn schema_de_pg_trgm(client: &Client) -> Result<Option<String>, EngineError> {
+    let ligne = client
+        .query_opt(
+            "select n.nspname::text
+               from pg_extension e
+               join pg_namespace n on n.oid = e.extnamespace
+              where e.extname = 'pg_trgm'",
+            &[],
+        )
+        .await
+        .map_err(|e| traduire(&e))?;
+    ligne
+        .map(|ligne| ligne.try_get::<_, String>(0))
+        .transpose()
+        .map_err(|e| traduire(&e))
+}
+
 /// Le détail d'une table — tout ce que `A9` affiche, DDL compris.
 ///
 /// **Un cas particulier de `table_details`**, et non une seconde implémentation : la SQL est la
@@ -392,14 +418,15 @@ pub async fn table_detail(
         })
 }
 
-/// Le détail de **plusieurs** tables, en six allers-retours quel qu'en soit le nombre.
+/// Le détail de **plusieurs** tables, en sept allers-retours quel qu'en soit le nombre.
 ///
 /// # Ce que ça remplace
 ///
 /// Décrire soixante tables coûtait soixante fois six allers-retours, tous sérialisés par le verrou
 /// du registre, dont soixante balayages du schéma entier pour lire soixante lignes de résumé. Ici :
 /// un aller-retour pour les résumés, cinq pour les colonnes, index, contraintes, triggers et
-/// relations de **toutes** les tables demandées. Trois cent soixante allers-retours deviennent six.
+/// relations de **toutes** les tables demandées, un pour `pg_trgm`, qui vaut pour la base entière.
+/// Trois cent soixante allers-retours deviennent sept.
 ///
 /// # Ce qui n'existe pas se tait, il n'échoue pas
 ///
@@ -505,6 +532,8 @@ pub async fn table_details(
         }
     }
 
+    let similarite_de_mots = schema_de_pg_trgm(client).await?.is_some();
+
     let mut par_nom: HashMap<String, TableDetail> = HashMap::with_capacity(resumes.len());
     for (oid, resume) in resumes {
         let colonnes = colonnes.remove(&oid).unwrap_or_default();
@@ -525,6 +554,7 @@ pub async fn table_details(
                 triggers: triggers.remove(&oid).unwrap_or_default(),
                 relations: relations.remove(&oid).unwrap_or_default(),
                 ddl,
+                word_similarity: similarite_de_mots,
             },
         );
     }

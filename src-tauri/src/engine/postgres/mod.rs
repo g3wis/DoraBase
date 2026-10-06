@@ -222,7 +222,7 @@ fn abreger_version(complete: &str) -> String {
 }
 
 impl PostgresAdapter {
-    /// Le détail de **plusieurs** tables, en six allers-retours quel qu'en soit leur nombre.
+    /// Le détail de **plusieurs** tables, en sept allers-retours quel qu'en soit leur nombre.
     ///
     /// **Une méthode inhérente et non une entrée du contrat de moteur** : c'est une lecture
     /// ensembliste que seul un catalogue SQL rend possible, et l'inscrire au contrat obligerait les
@@ -1420,6 +1420,137 @@ mod tests_db {
             "ref (uuid) lu comme {:?}",
             ligne[5]
         );
+    }
+
+    // --- La similarité de mots (#181) ---
+
+    /// Un client brut sur la base nommée, pour ce qu'aucun adaptateur n'exécute : `create database`
+    /// ne tourne ni dans une transaction, ni depuis la base qu'il vise.
+    async fn client_brut(base: &str) -> tokio_postgres::Client {
+        let (variante, secret) = variante_de_test();
+        let mut config = tokio_postgres::Config::new();
+        config
+            .host(&variante.host)
+            .port(variante.port)
+            .user(&variante.username)
+            .dbname(base);
+        if let Some(secret) = &secret {
+            config.password(secret.expose());
+        }
+        let (client, connexion) = config
+            .connect(tokio_postgres::NoTls)
+            .await
+            .expect("le décor doit répondre");
+        tokio::spawn(async move {
+            let _ = connexion.await;
+        });
+        client
+    }
+
+    /// Les `id` d'une fenêtre, dans l'ordre rendu.
+    fn ids(fenetre: &crate::engine::RowWindow) -> Vec<i64> {
+        fenetre
+            .rows
+            .iter()
+            .map(|ligne| match &ligne[0] {
+                crate::engine::Value::Int { value } => *value,
+                autre => panic!("id lu comme {autre:?}"),
+            })
+            .collect()
+    }
+
+    /// **Une base à elle**, et non le décor partagé : `pg_extension` est un catalogue par base, et
+    /// ce test doit voir la même table **avant et après** `create extension`. L'installer dans
+    /// `dorabase_test` ôterait le premier état à tout jamais, et aux autres tests leur décor.
+    ///
+    /// **L'extension est rangée dans un schéma `extensions`**, hors du `search_path` : installée dans
+    /// `public`, un `<%` non qualifié passerait aussi, et le test ne dirait pas si l'opérateur suit
+    /// son schéma (règle n° 5).
+    ///
+    /// **Les rangs sont mesurés, pas supposés** : contre `bousole`, `bousole` vaut 1, `boussole` et
+    /// `une boussole ancienne` 0,7, `bouée` 0,375 et `carte du ciel` 0, pour le seuil par défaut de
+    /// 0,6. Le plus proche a la clé la plus haute, donc un classement oublié rendrait `[2, 3, 5]` et
+    /// non `[3, 2, 5]`. Et `une boussole ancienne` ne passe que dans **un** sens : le mot cherché
+    /// tient dans un passage du texte, le texte entier ne tient pas dans le mot — des opérandes
+    /// inversés la perdraient.
+    #[tokio::test]
+    async fn la_similarite_de_mots_suit_pg_trgm_et_rend_les_plus_proches_d_abord() {
+        const BASE: &str = "dorabase_test_similarite";
+        let admin = client_brut("postgres").await;
+        let _ = admin
+            .batch_execute(&format!("drop database if exists {BASE} with (force)"))
+            .await;
+        admin
+            .batch_execute(&format!("create database {BASE}"))
+            .await
+            .expect("la base du test doit se créer");
+
+        let brut = client_brut(BASE).await;
+        brut.batch_execute(
+            "create table mots (id integer primary key, libelle text not null);
+             insert into mots values
+               (1, 'carte du ciel'), (2, 'boussole'), (3, 'bousole'), (4, 'bouée'),
+               (5, 'une boussole ancienne');",
+        )
+        .await
+        .expect("le décor du test doit se poser");
+
+        let (mut variante, secret) = variante_de_test();
+        variante.default_database = BASE.to_owned();
+        let adaptateur = PostgresAdapter::connect(&variante, secret.as_ref())
+            .await
+            .expect("la base du test doit répondre");
+
+        let mut requete = RowQuery::new("public", "mots", crate::engine::RowLimit::OneHundred);
+        requete.filters = vec![crate::engine::Filter {
+            column: "libelle".into(),
+            operator: crate::engine::FilterOperator::WordSimilar,
+            value: Some("bousole".into()),
+        }];
+
+        // Sans l'extension : l'écran ne la propose pas, et la lecture la refuse en la nommant.
+        let detail = adaptateur.table_detail("public", "mots").await.unwrap();
+        assert!(
+            !detail.word_similarity,
+            "pg_trgm n'est pas encore installée"
+        );
+        let erreur = adaptateur
+            .rows(&requete)
+            .await
+            .expect_err("doit être refusé");
+        assert!(erreur.message.contains("pg_trgm"), "{erreur}");
+
+        brut.batch_execute("create schema extensions; create extension pg_trgm schema extensions;")
+            .await
+            .expect("pg_trgm doit s'installer");
+
+        // **Le même adaptateur, sans reconnexion** : l'extension se lit à chaque détail.
+        let detail = adaptateur.table_detail("public", "mots").await.unwrap();
+        assert!(detail.word_similarity, "pg_trgm vient d'être installée");
+
+        let fenetre = adaptateur
+            .rows(&requete)
+            .await
+            .expect("la lecture doit passer");
+        // 2 et 5 sont à égalité : la clé primaire les départage, donc la page reste stable.
+        assert_eq!(ids(&fenetre), vec![3, 2, 5], "{}", fenetre.sql);
+
+        // Un tri choisi l'emporte sur le rang de similarité.
+        requete.sort = vec![crate::engine::SortKey {
+            column: "id".into(),
+            direction: crate::engine::SortDirection::Ascending,
+        }];
+        let fenetre = adaptateur
+            .rows(&requete)
+            .await
+            .expect("la lecture doit passer");
+        assert_eq!(ids(&fenetre), vec![2, 3, 5], "{}", fenetre.sql);
+
+        drop(brut);
+        drop(adaptateur);
+        let _ = admin
+            .batch_execute(&format!("drop database if exists {BASE} with (force)"))
+            .await;
     }
 
     // --- INSERT copiable (10f) ---

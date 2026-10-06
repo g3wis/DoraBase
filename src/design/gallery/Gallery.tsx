@@ -2059,6 +2059,7 @@ const DETAIL_DEMO = {
     },
   ],
   ddl: '',
+  wordSimilarity: false,
 }
 
 /**

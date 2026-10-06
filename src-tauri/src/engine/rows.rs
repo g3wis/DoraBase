@@ -8,6 +8,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use super::error::EngineError;
 use super::introspection::RowCount;
 
 /// Les paliers de `LIMIT` du stepper de `A5` : 100 / 500 / 1000 / 5000.
@@ -45,13 +46,14 @@ impl RowLimit {
     }
 }
 
-/// Les douze opérateurs du popover de `A5` : `=`, `≠`, `in`, `~`, `is null`, `is not null`,
-/// `is true`, `is false`, et les quatre comparaisons `>`, `>=`, `<=`, `<`.
+/// Les treize opérateurs du popover de `A5` : `=`, `≠`, `in`, `~`, `is null`, `is not null`,
+/// `is true`, `is false`, les quatre comparaisons `>`, `>=`, `<=`, `<`, et `≈`.
 ///
 /// **Tous ne valent pas pour toutes les colonnes, et l'écran ne propose que ceux qui valent**
 /// (`operateursPour`) : `is null` et `is not null` demandent une colonne `nullable`, `is true` /
 /// `is false` une colonne
-/// booléenne, et les comparaisons une colonne numérique ou temporelle. Chaque adaptateur **refuse**
+/// booléenne, les comparaisons une colonne numérique ou temporelle, et `≈` une colonne de texte
+/// d'une base PostgreSQL où `pg_trgm` est installée. Chaque adaptateur **refuse**
 /// ce qui lui arriverait quand même, pour la raison de `AGENTS.md` sur les modes SSL : l'écran qui
 /// cache et le moteur qui refuse gardent deux chemins différents — une requête peut venir d'une
 /// configuration écrite à la main.
@@ -82,6 +84,17 @@ pub enum FilterOperator {
     Gte,
     Lte,
     Lt,
+    /// La similarité de mots de `pg_trgm` — `valeur <% colonne` (#181).
+    ///
+    /// **PostgreSQL seulement, et seulement là où l'extension est installée** : c'est une fonction
+    /// de la *base*, pas du moteur, et `pg_extension` est un catalogue par base. Les quatre autres
+    /// moteurs n'ont rien d'équivalent sans index dédié — un `FULLTEXT` MySQL, un `$text` MongoDB
+    /// ne répondent pas à la même question —, donc ils la refusent plutôt que d'en approcher une.
+    ///
+    /// **Le seuil est celui du serveur** (`pg_trgm.word_similarity_threshold`, 0,6 par défaut) :
+    /// l'opérateur `<%` le lit de lui-même, et c'est aussi la forme qu'un index trigramme sait
+    /// servir — un `word_similarity(…) >= x` écrit ici ne le pourrait pas.
+    WordSimilar,
 }
 
 impl FilterOperator {
@@ -108,7 +121,7 @@ impl FilterOperator {
         matches!(self, Self::IsTrue | Self::IsFalse)
     }
 
-    pub fn tous() -> [Self; 12] {
+    pub fn tous() -> [Self; 13] {
         [
             Self::Eq,
             Self::Ne,
@@ -122,7 +135,18 @@ impl FilterOperator {
             Self::Gte,
             Self::Lte,
             Self::Lt,
+            Self::WordSimilar,
         ]
+    }
+
+    /// Le refus commun des quatre moteurs qui n'ont pas `pg_trgm` (#181).
+    ///
+    /// Écrit une fois parce que le message est le même pour les quatre, et qu'il doit dire **où**
+    /// l'opérateur existe — sans quoi « non pris en charge » se lirait comme un défaut à corriger.
+    pub fn refus_hors_pg_trgm(self, moteur: &str) -> EngineError {
+        EngineError::local(format!(
+            "l'opérateur {self:?} demande l'extension pg_trgm de PostgreSQL, que {moteur} n'a pas"
+        ))
     }
 }
 
@@ -492,8 +516,8 @@ mod tests {
     }
 
     #[test]
-    fn les_douze_operateurs_de_a5_existent() {
-        assert_eq!(FilterOperator::tous().len(), 12);
+    fn les_treize_operateurs_de_a5_existent() {
+        assert_eq!(FilterOperator::tous().len(), 13);
     }
 
     #[test]

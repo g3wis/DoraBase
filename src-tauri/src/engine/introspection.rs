@@ -357,6 +357,13 @@ pub struct TableDetail {
     pub relations: Vec<Relation>,
     /// Le `CREATE TABLE` de `A9`, assemblé depuis ce que le catalogue rend déjà formaté.
     pub ddl: String,
+    /// Vrai quand la base sait filtrer par similarité de mots — `pg_trgm` installée (#181).
+    ///
+    /// **Une propriété de la base, portée par la table** parce que c'est ici que `A5` lit ce qu'il
+    /// peut proposer, et que le détail est relu à chaque rafraîchissement de structure : une
+    /// extension installée depuis le gestionnaire d'instances paraît donc sans rouvrir la connexion.
+    /// Faux pour les quatre autres moteurs, qui n'ont pas d'équivalent.
+    pub word_similarity: bool,
 }
 
 #[cfg(test)]

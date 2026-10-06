@@ -49,6 +49,7 @@ export const tableViewFr: Dictionnaire = {
       // comprend, mais ce n'est pas le mot qu'on cherche en filtrant un journal.
       before: 'avant le',
       after: 'après le',
+      wordSimilar: 'mot similaire',
     },
   },
   editableCell: {
@@ -251,6 +252,7 @@ export const tableViewEn: Dictionnaire = {
       lt: 'less than',
       before: 'before',
       after: 'after',
+      wordSimilar: 'similar word',
     },
   },
   editableCell: {

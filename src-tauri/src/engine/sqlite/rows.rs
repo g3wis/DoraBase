@@ -19,7 +19,7 @@ use super::introspect::citer;
 /// **Les valeurs sont des paramètres, les identifiants sont cités.** Un nom de colonne ne peut pas
 /// être paramétré en SQL ; il vient de l'introspection et est cité par `citer`. Une valeur de filtre
 /// vient de l'utilisateur et n'est **jamais** interpolée.
-pub fn requete_de(query: &RowQuery) -> (String, Vec<String>) {
+pub fn requete_de(query: &RowQuery) -> Result<(String, Vec<String>), EngineError> {
     let mut parametres = Vec::new();
     let mut sql = format!("select * from {}", citer(&query.table));
 
@@ -27,7 +27,7 @@ pub fn requete_de(query: &RowQuery) -> (String, Vec<String>) {
         .filters
         .iter()
         .map(|filtre| condition_de(filtre, &mut parametres))
-        .collect();
+        .collect::<Result<_, _>>()?;
     if !conditions.is_empty() {
         sql.push_str(" where ");
         sql.push_str(&conditions.join(" and "));
@@ -59,13 +59,13 @@ pub fn requete_de(query: &RowQuery) -> (String, Vec<String>) {
         query.limit.value(),
         query.offset
     ));
-    (sql, parametres)
+    Ok((sql, parametres))
 }
 
-fn condition_de(filtre: &Filter, parametres: &mut Vec<String>) -> String {
+fn condition_de(filtre: &Filter, parametres: &mut Vec<String>) -> Result<String, EngineError> {
     let colonne = citer(&filtre.column);
     let valeur = filtre.value.clone().unwrap_or_default();
-    match filtre.operator {
+    Ok(match filtre.operator {
         FilterOperator::Eq => {
             parametres.push(valeur);
             format!("{colonne} = ?{}", parametres.len())
@@ -131,7 +131,11 @@ fn condition_de(filtre: &Filter, parametres: &mut Vec<String>) -> String {
             parametres.push(valeur);
             format!("{colonne} < ?{}", parametres.len())
         }
-    }
+        // **Refusé, pas approché** (#181) : SQLite n'a pas de similarité de mots, et la remplacer
+        // par un `like` rendrait un autre filtre sous le même signe — un mode remplacé en silence,
+        // que personne ne voit.
+        FilterOperator::WordSimilar => return Err(filtre.operator.refus_hors_pg_trgm("SQLite")),
+    })
 }
 
 fn echapper_pour_like(valeur: &str) -> String {
@@ -427,8 +431,24 @@ mod tests {
     }
 
     #[test]
+    fn la_similarite_de_mots_est_refusee_en_disant_ou_elle_existe() {
+        // **Refusée, pas remplacée par un `like`** (#181) : l'écran ne la propose pas ici, et une
+        // requête écrite à la main qui la porterait doit l'apprendre plutôt que recevoir un autre
+        // filtre sous le même signe.
+        let mut r = requete();
+        r.filters = vec![Filter {
+            column: "statut".into(),
+            operator: FilterOperator::WordSimilar,
+            value: Some("paye".into()),
+        }];
+        let erreur = requete_de(&r).expect_err("doit être refusé");
+        assert!(erreur.message.contains("pg_trgm"), "{erreur}");
+        assert!(erreur.message.contains("SQLite"), "{erreur}");
+    }
+
+    #[test]
     fn une_lecture_simple_porte_toujours_sa_limite() {
-        let (sql, parametres) = requete_de(&requete());
+        let (sql, parametres) = requete_de(&requete()).unwrap();
         assert_eq!(sql, "select * from \"commandes\" limit 500 offset 0");
         assert!(parametres.is_empty());
     }
@@ -441,7 +461,7 @@ mod tests {
             operator: FilterOperator::Eq,
             value: Some("'; drop table commandes; --".into()),
         }];
-        let (sql, parametres) = requete_de(&r);
+        let (sql, parametres) = requete_de(&r).unwrap();
         // La valeur n'apparaît **pas** dans le texte : c'est ce qui rend l'injection impossible par
         // construction, et non par échappement.
         assert!(!sql.contains("drop table"), "{sql}");
@@ -457,7 +477,7 @@ mod tests {
             operator: FilterOperator::Matches,
             value: Some("100_%".into()),
         }];
-        let (sql, parametres) = requete_de(&r);
+        let (sql, parametres) = requete_de(&r).unwrap();
         // Sans échappement, `_` et `%` sont des jokers : « 100_% » trouverait n'importe quoi.
         assert_eq!(parametres, vec!["%100\\_\\%%".to_owned()]);
         assert!(sql.contains("escape '\\'"), "{sql}");
@@ -471,7 +491,7 @@ mod tests {
             operator: FilterOperator::In,
             value: Some("  ,  ".into()),
         }];
-        let (sql, _) = requete_de(&r);
+        let (sql, _) = requete_de(&r).unwrap();
         // `in ()` est une erreur de syntaxe en SQLite. Une condition fausse est ce qui a été demandé.
         assert!(sql.contains("0 = 1"), "{sql}");
     }
@@ -491,7 +511,7 @@ mod tests {
                 operator: operateur,
                 value: None,
             }];
-            let (sql, parametres) = requete_de(&r);
+            let (sql, parametres) = requete_de(&r).unwrap();
             assert!(sql.contains(attendu), "{sql}");
             assert!(parametres.is_empty(), "{parametres:?}");
         }
@@ -511,7 +531,7 @@ mod tests {
                 operator: operateur,
                 value: None,
             }];
-            let (sql, parametres) = requete_de(&r);
+            let (sql, parametres) = requete_de(&r).unwrap();
             assert!(sql.contains(attendu), "{sql}");
             assert!(!sql.contains("= 1"), "{sql}");
             assert!(parametres.is_empty());
@@ -529,7 +549,7 @@ mod tests {
             operator: FilterOperator::Lt,
             value: Some("2026-03-01".into()),
         }];
-        let (sql, parametres) = requete_de(&r);
+        let (sql, parametres) = requete_de(&r).unwrap();
         assert!(sql.contains("\"ouvert_le\" < ?1"), "{sql}");
         assert!(!sql.contains("cast("), "{sql}");
         assert_eq!(parametres, vec!["2026-03-01".to_owned()]);
@@ -549,7 +569,7 @@ mod tests {
                 operator: operateur,
                 value: Some("10".into()),
             }];
-            let (sql, parametres) = requete_de(&r);
+            let (sql, parametres) = requete_de(&r).unwrap();
             assert!(sql.contains(&format!("\"montant\" {signe} ?1")), "{sql}");
             assert_eq!(parametres, vec!["10".to_owned()]);
         }
@@ -562,7 +582,7 @@ mod tests {
             column: "cree le".into(),
             direction: SortDirection::Descending,
         }];
-        let (sql, _) = requete_de(&r);
+        let (sql, _) = requete_de(&r).unwrap();
         // Une colonne à espace, ou nommée `order`, casserait la requête sans citation.
         assert!(sql.contains("order by \"cree le\" desc"), "{sql}");
     }

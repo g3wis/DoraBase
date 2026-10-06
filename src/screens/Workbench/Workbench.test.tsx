@@ -138,6 +138,7 @@ const DETAIL: TableDetail = {
   triggers: [],
   relations: [],
   ddl: '',
+  wordSimilarity: false,
 }
 
 function passerelles() {
@@ -510,6 +511,25 @@ describe('Workbench', () => {
 
     expect(screen.getByRole('tab', { name: /orders/ })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByRole('grid', { name: 'Lignes de public.orders' })).toBeInTheDocument()
+  })
+
+  /**
+   * **L'assemblage, pas la vitrine** (règle n° 8) : `TableView` sait offrir `≈`, encore faut-il que
+   * l'écran lui transmette ce que le détail de la table dit de la base. Les tests de la vue la
+   * montent avec la prop posée à la main ; celui-ci part de l'arbre.
+   */
+  it('le détail de la table décide si `≈` paraît dans le popover d’une colonne texte (#181)', async () => {
+    const utilisateur = userEvent.setup()
+    monter({
+      passerelleDetail: {
+        describeTable: vi.fn(async () => ({ ...DETAIL, wordSimilarity: true })),
+      },
+    })
+    await ouvrirLArbreJusquAuSchema(utilisateur)
+    await utilisateur.dblClick(within(await screen.findByRole('table')).getByText('orders'))
+
+    await utilisateur.click(await screen.findByRole('button', { name: 'Opérateur de status' }))
+    expect(await screen.findByRole('button', { name: /^≈ mot similaire$/ })).toBeInTheDocument()
   })
 
   it('rouvrir la même table active l’onglet existant sans le dupliquer', async () => {

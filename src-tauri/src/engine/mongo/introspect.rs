@@ -242,6 +242,7 @@ pub async fn detail(
         // établi qu'une suggestion fausse est pire qu'une absence.
         relations: Vec::new(),
         ddl,
+        word_similarity: false,
     })
 }
 

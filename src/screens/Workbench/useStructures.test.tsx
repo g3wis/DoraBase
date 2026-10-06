@@ -41,6 +41,7 @@ const detail = (table: string): TableDetail => ({
   triggers: [],
   relations: [],
   ddl: `create table ${table}()`,
+  wordSimilarity: false,
 })
 
 /**
