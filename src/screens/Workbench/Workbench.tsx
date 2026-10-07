@@ -751,6 +751,25 @@ export function Workbench({
    * déclaration, jamais devinée depuis ce que l'écran montre.
    */
   const libelleActuel = contexte ? libelleDeConnexion(arbre, contexte.connection) : undefined
+  /**
+   * La connexion que l'écran **nomme** (#183) — barre de titre, pied de la console, modales
+   * d'exécution : celle de la console active, sinon celle du contexte.
+   *
+   * **Une console n'a pas de schéma, donc pas de `contexte` à elle** : celui-ci retombe sur la
+   * sélection de l'arbre. La barre de titre perdait donc le nom de la connexion tant qu'aucun schéma
+   * n'était sélectionné, et prenait celui d'une autre dès que l'arbre en montrait une. C'est la leçon
+   * de `cleConsole`, appliquée à ce qui s'affiche.
+   */
+  const connexionNommee = consoleActive?.key.connection ?? contexte?.connection
+  /**
+   * Son libellé : `analytics · public` sur une table, `analytics` seul sur une console — le schéma
+   * qu'elle prendrait à l'arbre n'est pas celui sur lequel elle exécute.
+   */
+  const cibleNommee = consoleActive
+    ? libelleDeConnexion(arbre, consoleActive.key.connection)
+    : contexte
+      ? `${libelleActuel} · ${contexte.schema}`
+      : undefined
   /** La connexion du contexte, pour l'icône et la couleur que le fil d'Ariane reprend de l'arbre (#179). */
   const baseActuelle = contexte ? connexion(arbre, contexte.connection)?.base : undefined
 
@@ -1283,7 +1302,7 @@ export function Workbench({
               }, DELAI_ECRITURE)
             }
           }}
-          contexte={contexte ? `${libelleActuel} · ${contexte.schema}` : undefined}
+          contexte={cibleNommee}
           onExecuter={execution.demander}
           onExecuterLaSelection={execution.demander}
           enCours={execution.enCours}
@@ -1564,8 +1583,8 @@ export function Workbench({
               chemin={ancetresIndiques.map((ancetre) => ancetre.name)}
               couleur={couleurLaPlusProche(ancetresIndiques)}
               readOnly={lectureSeuleIndiquee}
-              breadcrumb={contexte ? `${libelleActuel} · ${contexte.schema}` : undefined}
-              connection={contexte ? etatDeBase(contexte.connection) : undefined}
+              breadcrumb={cibleNommee}
+              connection={connexionNommee ? etatDeBase(connexionNommee) : undefined}
             />
           )
         }
@@ -1585,7 +1604,7 @@ export function Workbench({
              chose. La requête part dans la transaction en cours, donc rien n'est écrit avant sa
              validation. */
           dansUneTransaction={transaction.mode(consoleDeTransaction) === 'manual'}
-          cible={contexte ? `${libelleActuel} · ${contexte.schema}` : '—'}
+          cible={cibleNommee ?? '—'}
           enCours={execution.enCours}
           onClose={execution.annulerLaConfirmation}
           onConfirmer={execution.executer}
@@ -1596,7 +1615,9 @@ export function Workbench({
       {transaction.aValider !== null && (
         <CommitConfirm
           validation={transaction.aValider}
-          cible={libelleActuel ?? '—'}
+          // **La connexion de la console qui valide**, que la validation porte : celle que l'arbre
+          // montre peut être une autre.
+          cible={libelleDeConnexion(arbre, transaction.aValider.console.cle.connection) ?? '—'}
           enCours={transaction.enCours}
           onClose={transaction.annulerLaValidation}
           onConfirmer={() => {
@@ -1887,7 +1908,7 @@ export function Workbench({
                 end={
                   <TransactionPanel
                     etat={transaction.etat(consoleDeTransaction)}
-                    contexte={libelleActuel ?? undefined}
+                    contexte={cibleNommee}
                     erreur={transaction.erreur(consoleDeTransaction)}
                     enCours={transaction.enCours}
                     /* **Demander, non valider** (`API-38`) : une transaction qui a écrit passe par
