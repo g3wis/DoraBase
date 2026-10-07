@@ -146,6 +146,10 @@ export function SelectionIndicator({
           aria-hidden="true"
         />
       )}
+      {/* **Le chemin se poursuit jusqu'à la connexion** (#183) : le `›` d'entre deux dossiers, dans
+          leur encre, après la pastille qui appartient au dossier. Du texte comme eux, et ses espaces
+          sont explicites — la flexbox les retire à l'écran, pas du texte qu'on lit (piège n° 1). */}
+      {breadcrumb && <span className={styles.separateur}>{' › '}</span>}
       {breadcrumb && base && teinte && (
         <Icon
           name={dessinDeConnexion(base)}

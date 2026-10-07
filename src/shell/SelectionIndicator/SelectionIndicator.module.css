@@ -7,6 +7,7 @@
  *               couleur (#183)
  *   chemin      700 11.5px Nunito, raccourci à gauche
  *   pastille    7px, couleur du dossier coloré le plus proche
+ *   séparateur  `›` du chemin, même police et même encre, avant la connexion (#183)
  *   connexion   12px, trait 2 : l'icône et la teinte de sa ligne d'arbre (#183)
  *   fil         500 11px JetBrains Mono, --ink-meta (.45)
  *
@@ -65,6 +66,15 @@
 .bag {
   flex: none;
   color: var(--accent-deep);
+}
+
+/* Le `›` entre le chemin et la connexion : la police et l'encre du chemin, dont il est la suite. */
+.separateur {
+  flex: none;
+  font-family: var(--font-ui);
+  font-size: var(--text-dense);
+  font-weight: var(--weight-bold);
+  color: var(--ink);
 }
 
 /* La teinte arrive de la connexion, en style : `teinteDeConnexion` la résout pour l'arbre aussi. */

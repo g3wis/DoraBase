@@ -166,6 +166,25 @@ test('le nom de la connexion est précédé de son icône, le logo du moteur à 
   expect(screen.getByText('catalogue · public').previousElementSibling?.tagName).toBe('svg')
 })
 
+test('un `›` mène du chemin à la connexion, et se lit avec ses espaces', () => {
+  monter({
+    chemin: ['Atelier Nord', 'prod'],
+    breadcrumb: 'catalogue · public',
+    base: { engine: 'postgresql', icon: null, color: null },
+  })
+  const fleche = screen.getByText('›')
+  // **Le texte lu, pas l'écran** : sans espaces explicites, « prod›catalogue » (piège n° 1). La
+  // racine depuis la flèche : `racine()` cherche le chemin d'un seul dossier.
+  expect(fleche.parentElement?.textContent).toContain('Atelier Nord › prod › catalogue · public')
+  // Avant l'icône de la connexion, qui précède son nom.
+  expect(fleche.nextElementSibling?.querySelector('use')).toHaveAttribute('href', '#i-pg')
+})
+
+test('sans connexion, le chemin ne mène nulle part', () => {
+  monter({ chemin: ['Atelier Nord', 'prod'] })
+  expect(screen.queryByText('›')).toBeNull()
+})
+
 test('une icône choisie et une couleur choisie s’appliquent à la connexion', () => {
   monter({
     breadcrumb: 'catalogue · public',
