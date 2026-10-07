@@ -50,6 +50,9 @@ export const tableViewFr: Dictionnaire = {
       before: 'avant le',
       after: 'après le',
       wordSimilar: 'mot similaire',
+      // La forme de la saisie est dans le libellé : rien d'autre ne dit que `3 = 1` est attendu, et
+      // un `3` seul — divisible par 3 — est le cas courant.
+      modulo: 'modulo (n ou n = r)',
     },
   },
   editableCell: {
@@ -253,6 +256,7 @@ export const tableViewEn: Dictionnaire = {
       before: 'before',
       after: 'after',
       wordSimilar: 'similar word',
+      modulo: 'modulo (n or n = r)',
     },
   },
   editableCell: {

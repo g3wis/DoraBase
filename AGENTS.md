@@ -4692,6 +4692,24 @@ Les quatre autres moteurs **refusent** `≈` plutôt que de l'approcher — `lik
 répondent à une autre question, et un filtre remplacé en silence sous le même signe ne se voit
 jamais. C'est ce qui a rendu `requete_de` faillible en SQLite, MySQL et BigQuery.
 
+**Le modulo tient en une seule chaîne, lue une seule fois** (#186, 7 octobre 2026). `%`
+(`FilterOperator::Modulo`), offert sur une colonne numérique seulement, attend `n` — divisible par
+`n` — ou `n = r`, et le chip écrit `id % 3 = 1`, la condition même qui part. Trois décisions à ne
+pas défaire :
+
+- **pas de second champ dans `Filter`** : les treize autres opérateurs l'auraient porté vide, et la
+  saisie reste ce que l'utilisateur a tapé, comme pour `in` ;
+- **`Modulo::depuis_la_saisie` refuse avant le serveur** un diviseur nul ou négatif et un reste hors
+  de portée. Laissé aux moteurs, `% 0` rendait une erreur en PostgreSQL et **zéro ligne sans un mot**
+  en MySQL et SQLite, qui y voient un `NULL` ; et `3 = 5` ne trouve jamais rien, ce qui se lit comme
+  une table vide — la raison qui réserve `is null` aux colonnes `nullable` ;
+- **SQLite transtype les deux paramètres en `integer`, et ce n'est pas une précaution.** Les
+  comparaisons s'en passent parce que la colonne prête son affinité au paramètre ; un `col % ?` est
+  une *expression*, sans affinité, donc l'entier calculé est comparé au texte lié et SQLite range tout
+  entier avant tout texte. Mesuré contre un vrai fichier : zéro ligne, aucune erreur. Le test
+  `un_filtre_modulo_trouve_les_lignes_de_chaque_reste` tombe si le `cast` disparaît. MySQL transtype
+  aussi, en `signed`, pour une autre raison : une chaîne y ferait calculer le reste en `double`.
+
 **Le stockage des identifiants est abstrait derrière une interface** : Trousseau en release
 signée, fichier chiffré en développement. Les ACL du Trousseau sont liées à la signature
 de code, et une signature ad-hoc change à chaque build. L'abstraction est de toute façon

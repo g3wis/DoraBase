@@ -19,7 +19,7 @@ use gcp_bigquery_client::model::query_parameter_type::QueryParameterType;
 use gcp_bigquery_client::model::query_parameter_value::QueryParameterValue;
 
 use crate::engine::{
-    ColumnInfo, EngineError, Filter, FilterOperator, RowLimit, RowQuery, SortDirection,
+    ColumnInfo, EngineError, Filter, FilterOperator, Modulo, RowLimit, RowQuery, SortDirection,
     TypeCategory, Value,
 };
 
@@ -240,6 +240,24 @@ fn condition_de(
         // **Refusé, pas approché** (#181) : BigQuery n'a pas de similarité de mots, et
         // `edit_distance` mesure une chaîne entière, pas le meilleur passage d'un texte.
         FilterOperator::WordSimilar => return Err(filtre.operator.refus_hors_pg_trgm("BigQuery")),
+        // `mod()` plutôt que `%`, que BigQuery n'a pas. La colonne passe en `bignumeric` comme pour
+        // les comparaisons : `mod` refuse un `float64`, et un entier y garde son reste exact.
+        FilterOperator::Modulo => {
+            let modulo = Modulo::depuis_la_saisie(
+                &filtre.value.clone().unwrap_or_default(),
+                &filtre.column,
+            )?;
+            let diviseur = parametre_numerique(parametres.len() + 1, &modulo.diviseur.to_string());
+            let nom_diviseur = diviseur.name.clone().unwrap();
+            parametres.push(diviseur);
+            let reste = parametre_numerique(parametres.len() + 1, &modulo.reste.to_string());
+            let nom_reste = reste.name.clone().unwrap();
+            parametres.push(reste);
+            format!(
+                "mod({}, @{nom_diviseur}) = @{nom_reste}",
+                colonne_en_numerique(&filtre.column)
+            )
+        }
     })
 }
 
@@ -462,6 +480,34 @@ mod tests {
                 "BIGNUMERIC"
             );
         }
+    }
+
+    #[test]
+    fn un_modulo_passe_par_mod_avec_deux_parametres_numeriques() {
+        let mut r = requete();
+        r.filters = vec![Filter {
+            column: "montant".into(),
+            operator: FilterOperator::Modulo,
+            value: Some("3 = 1".into()),
+        }];
+        let (sql, parametres) = requete_de("p", "jeu", &r, &colonnes()).unwrap();
+        assert!(
+            sql.contains("mod(cast(`montant` as bignumeric), @p1) = @p2"),
+            "{sql}"
+        );
+        let lus: Vec<(&str, Option<&str>)> = parametres
+            .iter()
+            .map(|p| {
+                (
+                    p.parameter_type.as_ref().unwrap().r#type.as_str(),
+                    p.parameter_value.as_ref().unwrap().value.as_deref(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            lus,
+            vec![("BIGNUMERIC", Some("3")), ("BIGNUMERIC", Some("1"))]
+        );
     }
 
     #[test]

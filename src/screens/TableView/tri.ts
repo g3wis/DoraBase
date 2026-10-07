@@ -161,6 +161,17 @@ export const COMPARAISONS: Operateur[] = [
 ]
 
 /**
+ * Le reste d'une division entière (#186), **réservé aux colonnes numériques** comme les
+ * comparaisons.
+ *
+ * La saisie est `n` — divisible par `n` — ou `n = r`, et c'est le moteur qui la lit
+ * (`Modulo::depuis_la_saisie`) : un seul endroit refuse `0` ou un reste hors de portée, avec le
+ * même message pour les cinq moteurs. Le chip de la toolbar écrit alors `id % 3 = 1`, la condition
+ * même qui part.
+ */
+export const MODULO: Operateur = { valeur: 'modulo', signe: '%', cle: 'modulo' }
+
+/**
  * « Avant » et « après » d'une colonne temporelle — le même `lt`/`gt` que les nombres, dit
  * autrement.
  *
@@ -217,7 +228,7 @@ export function operateursPour(
   if (category === 'boolean') return nullable ? [...BOOLEENS, ...NULLITE] : BOOLEENS
   const supplements =
     category === 'number'
-      ? COMPARAISONS
+      ? [...COMPARAISONS, MODULO]
       : category === 'timestamp'
         ? DATES
         : category === 'text' && similarite
@@ -262,6 +273,7 @@ const SIGNES: Record<FilterOperator, string> = {
   lte: '≤',
   lt: '<',
   wordSimilar: '≈',
+  modulo: '%',
 }
 
 export function signeDe(operator: FilterOperator): string {

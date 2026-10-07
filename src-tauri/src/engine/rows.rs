@@ -46,14 +46,14 @@ impl RowLimit {
     }
 }
 
-/// Les treize opérateurs du popover de `A5` : `=`, `≠`, `in`, `~`, `is null`, `is not null`,
-/// `is true`, `is false`, les quatre comparaisons `>`, `>=`, `<=`, `<`, et `≈`.
+/// Les quatorze opérateurs du popover de `A5` : `=`, `≠`, `in`, `~`, `is null`, `is not null`,
+/// `is true`, `is false`, les quatre comparaisons `>`, `>=`, `<=`, `<`, `≈` et `%`.
 ///
 /// **Tous ne valent pas pour toutes les colonnes, et l'écran ne propose que ceux qui valent**
 /// (`operateursPour`) : `is null` et `is not null` demandent une colonne `nullable`, `is true` /
 /// `is false` une colonne
-/// booléenne, les comparaisons une colonne numérique ou temporelle, et `≈` une colonne de texte
-/// d'une base PostgreSQL où `pg_trgm` est installée. Chaque adaptateur **refuse**
+/// booléenne, les comparaisons une colonne numérique ou temporelle, `%` une colonne numérique, et
+/// `≈` une colonne de texte d'une base PostgreSQL où `pg_trgm` est installée. Chaque adaptateur **refuse**
 /// ce qui lui arriverait quand même, pour la raison de `AGENTS.md` sur les modes SSL : l'écran qui
 /// cache et le moteur qui refuse gardent deux chemins différents — une requête peut venir d'une
 /// configuration écrite à la main.
@@ -95,6 +95,12 @@ pub enum FilterOperator {
     /// l'opérateur `<%` le lit de lui-même, et c'est aussi la forme qu'un index trigramme sait
     /// servir — un `word_similarity(…) >= x` écrit ici ne le pourrait pas.
     WordSimilar,
+    /// Le reste d'une division entière — `colonne % n = r`, réservé à une colonne numérique (#186).
+    ///
+    /// **La valeur porte deux entiers, et une seule chaîne** : `n`, ou `n = r` (voir `Modulo`).
+    /// Ajouter un second champ à `Filter` pour le seul opérateur qui en a besoin aurait obligé les
+    /// treize autres à le porter vide.
+    Modulo,
 }
 
 impl FilterOperator {
@@ -121,7 +127,7 @@ impl FilterOperator {
         matches!(self, Self::IsTrue | Self::IsFalse)
     }
 
-    pub fn tous() -> [Self; 13] {
+    pub fn tous() -> [Self; 14] {
         [
             Self::Eq,
             Self::Ne,
@@ -136,6 +142,7 @@ impl FilterOperator {
             Self::Lte,
             Self::Lt,
             Self::WordSimilar,
+            Self::Modulo,
         ]
     }
 
@@ -147,6 +154,59 @@ impl FilterOperator {
         EngineError::local(format!(
             "l'opérateur {self:?} demande l'extension pg_trgm de PostgreSQL, que {moteur} n'a pas"
         ))
+    }
+}
+
+/// Le diviseur et le reste d'un filtre `%` — `colonne % diviseur = reste`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Modulo {
+    pub diviseur: i64,
+    pub reste: i64,
+}
+
+impl Modulo {
+    /// Lit la saisie d'un filtre `%` : `n`, ou `n = r`.
+    ///
+    /// **`n` seul vaut `n = 0`** — « divisible par n », la question qu'on pose le plus souvent : une
+    /// ligne sur deux, une sur dix. `n = r` est aussi la forme que le chip de la toolbar affiche, donc
+    /// `id % 3 = 1` s'y lit comme la condition qui part.
+    ///
+    /// **Lue ici, une fois, plutôt que dans chaque adaptateur** : les cinq moteurs reçoivent deux
+    /// entiers déjà vérifiés, donc la même saisie y est refusée de la même façon. Laissée au serveur,
+    /// `% 0` aurait rendu une erreur de division en PostgreSQL et zéro ligne en MySQL et en SQLite,
+    /// qui y voient un `NULL`.
+    pub fn depuis_la_saisie(saisie: &str, colonne: &str) -> Result<Self, EngineError> {
+        let illisible = || {
+            EngineError::local(format!(
+                "« {saisie} » ne se lit pas comme un modulo pour « {colonne} » — la forme attendue est n ou n = r, par exemple 2 ou 3 = 1"
+            ))
+        };
+        let (diviseur, reste) = match saisie.split_once('=') {
+            Some((diviseur, reste)) => (diviseur, Some(reste)),
+            None => (saisie, None),
+        };
+        let diviseur: i64 = diviseur.trim().parse().map_err(|_| illisible())?;
+        let reste: i64 = match reste {
+            Some(reste) => reste.trim().parse().map_err(|_| illisible())?,
+            None => 0,
+        };
+        // **Strictement positif** : le signe du diviseur ne change rien au reste quand celui-ci suit
+        // la colonne, donc un diviseur négatif n'ajouterait qu'une seconde écriture du même filtre.
+        if diviseur <= 0 {
+            return Err(EngineError::local(format!(
+                "le diviseur d'un modulo doit être un entier strictement positif, et {diviseur} ne l'est pas"
+            )));
+        }
+        // **Un reste hors de portée est refusé, pas envoyé** : il ne trouverait jamais rien, et zéro
+        // ligne se lit comme une table vide plutôt que comme un filtre impossible — la raison qui
+        // réserve `is null` aux colonnes `nullable`. Un reste **négatif** reste permis : le signe du
+        // reste suit celui de la colonne, et `-7 % 3` vaut `-1`.
+        if reste.unsigned_abs() >= diviseur.unsigned_abs() {
+            return Err(EngineError::local(format!(
+                "un reste de {reste} n'arrive jamais pour un diviseur de {diviseur} : le filtre ne trouverait aucune ligne"
+            )));
+        }
+        Ok(Self { diviseur, reste })
     }
 }
 
@@ -516,8 +576,66 @@ mod tests {
     }
 
     #[test]
-    fn les_treize_operateurs_de_a5_existent() {
-        assert_eq!(FilterOperator::tous().len(), 13);
+    fn les_quatorze_operateurs_de_a5_existent() {
+        assert_eq!(FilterOperator::tous().len(), 14);
+    }
+
+    #[test]
+    fn un_modulo_se_lit_n_ou_n_egal_r() {
+        let lu = |saisie: &str| Modulo::depuis_la_saisie(saisie, "id");
+        assert_eq!(
+            lu("2").unwrap(),
+            Modulo {
+                diviseur: 2,
+                reste: 0
+            }
+        );
+        assert_eq!(
+            lu(" 3 = 1 ").unwrap(),
+            Modulo {
+                diviseur: 3,
+                reste: 1
+            }
+        );
+        assert_eq!(
+            lu("3=-2").unwrap(),
+            Modulo {
+                diviseur: 3,
+                reste: -2
+            }
+        );
+    }
+
+    #[test]
+    fn un_modulo_illisible_est_refuse_en_donnant_la_forme_attendue() {
+        for saisie in ["", "pair", "2.5", "3 =", "= 1", "3 = 1 = 0", "3, 1"] {
+            let erreur = Modulo::depuis_la_saisie(saisie, "id").expect_err(saisie);
+            assert!(erreur.message.contains("n = r"), "{saisie} : {erreur}");
+        }
+    }
+
+    #[test]
+    fn un_diviseur_nul_ou_negatif_est_refuse() {
+        for saisie in ["0", "-3", "0 = 0"] {
+            let erreur = Modulo::depuis_la_saisie(saisie, "id").expect_err(saisie);
+            assert!(
+                erreur.message.contains("strictement positif"),
+                "{saisie} : {erreur}"
+            );
+        }
+    }
+
+    #[test]
+    fn un_reste_hors_de_portee_est_refuse_plutot_que_de_ne_rien_trouver() {
+        for saisie in ["3 = 3", "3 = -3", "3 = 7"] {
+            let erreur = Modulo::depuis_la_saisie(saisie, "id").expect_err(saisie);
+            assert!(
+                erreur.message.contains("n'arrive jamais"),
+                "{saisie} : {erreur}"
+            );
+        }
+        // Le bord inverse, pour qu'un `>` à la place du `>=` ne passe pas.
+        assert!(Modulo::depuis_la_saisie("3 = 2", "id").is_ok());
     }
 
     #[test]

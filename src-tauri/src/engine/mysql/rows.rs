@@ -6,7 +6,7 @@
 use mysql_async::{Row, Value as MysqlValue};
 
 use crate::engine::{
-    EngineError, Filter, FilterOperator, PendingUpdate, RowLimit, RowQuery, SortDirection,
+    EngineError, Filter, FilterOperator, Modulo, PendingUpdate, RowLimit, RowQuery, SortDirection,
     UpdatePlan, Value,
 };
 
@@ -137,6 +137,15 @@ fn condition_de(filtre: &Filter, parametres: &mut Vec<String>) -> Result<String,
         // **Refusé, pas approché** (#181) : ni `SOUNDEX` ni un `FULLTEXT` ne répondent à la même
         // question, et le second exige un index que la table n'a pas forcément.
         FilterOperator::WordSimilar => return Err(filtre.operator.refus_hors_pg_trgm("MySQL")),
+        // **`cast(? as signed)`, contrairement aux comparaisons** : laissé en chaîne, le paramètre
+        // ferait calculer le reste en flottant — MySQL convertit une chaîne en `double` dans une
+        // opération arithmétique —, et un `bigint` au-delà de 2^53 y perdrait ses derniers chiffres.
+        FilterOperator::Modulo => {
+            let modulo = Modulo::depuis_la_saisie(&valeur, &filtre.column)?;
+            parametres.push(modulo.diviseur.to_string());
+            parametres.push(modulo.reste.to_string());
+            format!("{colonne} % cast(? as signed) = cast(? as signed)")
+        }
     })
 }
 
@@ -644,6 +653,35 @@ mod tests {
             assert!(sql.contains(&format!("`capacite` {signe} ?")), "{sql}");
             assert_eq!(parametres, vec!["10".to_owned()]);
         }
+    }
+
+    #[test]
+    fn un_modulo_calcule_en_entiers_avec_deux_parametres() {
+        let mut r = requete();
+        r.filters = vec![Filter {
+            column: "capacite".into(),
+            operator: FilterOperator::Modulo,
+            value: Some("4 = 2".into()),
+        }];
+        let (sql, parametres) = requete_de(&r).unwrap();
+        assert!(
+            sql.contains("`capacite` % cast(? as signed) = cast(? as signed)"),
+            "{sql}"
+        );
+        assert_eq!(parametres, vec!["4".to_owned(), "2".to_owned()]);
+    }
+
+    #[test]
+    fn un_modulo_par_zero_est_refuse_avant_le_serveur() {
+        // MySQL rendrait `NULL` pour `% 0`, donc zéro ligne sans un mot : la lecture commune le
+        // refuse avant.
+        let mut r = requete();
+        r.filters = vec![Filter {
+            column: "capacite".into(),
+            operator: FilterOperator::Modulo,
+            value: Some("0".into()),
+        }];
+        assert!(requete_de(&r).is_err());
     }
 
     #[test]

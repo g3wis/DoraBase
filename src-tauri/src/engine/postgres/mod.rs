@@ -2378,6 +2378,35 @@ mod tests_db {
     }
 
     #[tokio::test]
+    async fn un_filtre_modulo_garde_exactement_les_valeurs_de_ce_reste() {
+        let adaptateur = adaptateur().await;
+        let mut requete = RowQuery::new(
+            "introspection",
+            "petite",
+            crate::engine::RowLimit::OneThousand,
+        );
+        requete.filters = vec![crate::engine::Filter {
+            column: "rang".into(),
+            operator: crate::engine::FilterOperator::Modulo,
+            value: Some("3 = 2".into()),
+        }];
+
+        let f = adaptateur.rows(&requete).await.unwrap();
+        // `rang` vaut `g % 7`, donc de 0 à 6 : le reste 2 par 3 ne garde que 2 et 5. Les **deux**,
+        // et elles seules — un filtre ignoré rendrait les sept, un `= 2` mal écrit oublierait 5.
+        // Comparer l'ensemble plutôt qu'un compte laisse les autres tests écrire dans la table.
+        let rangs: std::collections::BTreeSet<i64> = f
+            .rows
+            .iter()
+            .map(|ligne| match &ligne[2] {
+                crate::engine::Value::Int { value } => *value,
+                autre => panic!("rang devrait être un entier : {autre:?}"),
+            })
+            .collect();
+        assert_eq!(rangs, [2, 5].into_iter().collect());
+    }
+
+    #[tokio::test]
     async fn une_tentative_d_injection_ne_trouve_rien_et_ne_casse_rien() {
         let adaptateur = adaptateur().await;
         let mut requete = RowQuery::new(

@@ -7,7 +7,7 @@ use rusqlite::types::ValueRef;
 use rusqlite::Connection;
 
 use crate::engine::{
-    EngineError, Filter, FilterOperator, PendingUpdate, RowLimit, RowQuery, SortDirection,
+    EngineError, Filter, FilterOperator, Modulo, PendingUpdate, RowLimit, RowQuery, SortDirection,
     UpdatePlan, Value,
 };
 
@@ -135,6 +135,21 @@ fn condition_de(filtre: &Filter, parametres: &mut Vec<String>) -> Result<String,
         // par un `like` rendrait un autre filtre sous le même signe — un mode remplacé en silence,
         // que personne ne voit.
         FilterOperator::WordSimilar => return Err(filtre.operator.refus_hors_pg_trgm("SQLite")),
+        // **`cast(… as integer)` sur les deux paramètres, et ce n'est pas une précaution.** Les
+        // comparaisons s'en passent parce que la colonne y prête son affinité au paramètre ; ici
+        // le membre de gauche est une *expression*, qui n'en a aucune. Le reste entier serait
+        // comparé au texte « 0 » sans conversion, et SQLite range tout entier avant tout texte :
+        // le filtre ne trouverait jamais rien, sans erreur.
+        FilterOperator::Modulo => {
+            let modulo = Modulo::depuis_la_saisie(&valeur, &filtre.column)?;
+            parametres.push(modulo.diviseur.to_string());
+            let diviseur = parametres.len();
+            parametres.push(modulo.reste.to_string());
+            format!(
+                "{colonne} % cast(?{diviseur} as integer) = cast(?{} as integer)",
+                parametres.len()
+            )
+        }
     })
 }
 
@@ -573,6 +588,22 @@ mod tests {
             assert!(sql.contains(&format!("\"montant\" {signe} ?1")), "{sql}");
             assert_eq!(parametres, vec!["10".to_owned()]);
         }
+    }
+
+    #[test]
+    fn un_modulo_transtype_ses_deux_parametres_en_entiers() {
+        let mut r = requete();
+        r.filters = vec![Filter {
+            column: "places".into(),
+            operator: FilterOperator::Modulo,
+            value: Some("4 = 2".into()),
+        }];
+        let (sql, parametres) = requete_de(&r).unwrap();
+        assert!(
+            sql.contains("\"places\" % cast(?1 as integer) = cast(?2 as integer)"),
+            "{sql}"
+        );
+        assert_eq!(parametres, vec!["4".to_owned(), "2".to_owned()]);
     }
 
     #[test]

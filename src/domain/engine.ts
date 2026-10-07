@@ -174,19 +174,19 @@ export type Filter = { column: string, operator: FilterOperator,
 value: string | null, };
 
 /**
- * Les treize opérateurs du popover de `A5` : `=`, `≠`, `in`, `~`, `is null`, `is not null`,
- * `is true`, `is false`, les quatre comparaisons `>`, `>=`, `<=`, `<`, et `≈`.
+ * Les quatorze opérateurs du popover de `A5` : `=`, `≠`, `in`, `~`, `is null`, `is not null`,
+ * `is true`, `is false`, les quatre comparaisons `>`, `>=`, `<=`, `<`, `≈` et `%`.
  *
  * **Tous ne valent pas pour toutes les colonnes, et l'écran ne propose que ceux qui valent**
  * (`operateursPour`) : `is null` et `is not null` demandent une colonne `nullable`, `is true` /
  * `is false` une colonne
- * booléenne, les comparaisons une colonne numérique ou temporelle, et `≈` une colonne de texte
- * d'une base PostgreSQL où `pg_trgm` est installée. Chaque adaptateur **refuse**
+ * booléenne, les comparaisons une colonne numérique ou temporelle, `%` une colonne numérique, et
+ * `≈` une colonne de texte d'une base PostgreSQL où `pg_trgm` est installée. Chaque adaptateur **refuse**
  * ce qui lui arriverait quand même, pour la raison de `AGENTS.md` sur les modes SSL : l'écran qui
  * cache et le moteur qui refuse gardent deux chemins différents — une requête peut venir d'une
  * configuration écrite à la main.
  */
-export type FilterOperator = "eq" | "ne" | "in" | "matches" | "isNull" | "isNotNull" | "isTrue" | "isFalse" | "gt" | "gte" | "lte" | "lt" | "wordSimilar";
+export type FilterOperator = "eq" | "ne" | "in" | "matches" | "isNull" | "isNotNull" | "isTrue" | "isFalse" | "gt" | "gte" | "lte" | "lt" | "wordSimilar" | "modulo";
 
 /**
  * Les deux formes d'identité de la norme SQL, que PostgreSQL distingue.
