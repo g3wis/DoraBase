@@ -4,6 +4,8 @@ import { useState } from 'react'
 import { expect, test, vi } from 'vitest'
 import type { QueryResult } from '../../domain/engine'
 import { LanguageProvider } from '../../i18n/LanguageContext'
+import { estWindows } from '../../shell/plateforme'
+import { auModificateur } from '../../test/raccourcis'
 import { ConsoleView } from './ConsoleView'
 
 // jsdom ne définit pas `elementFromPoint`, que la grille lit au relâchement d'un glissement — le
@@ -374,4 +376,62 @@ test('l’export porte les colonnes visibles, dans l’ordre affiché', async ()
       ],
     ],
   )
+})
+
+// --- ⌘F (#185) ---------------------------------------------------------------------------------
+
+const bandeDeRecherche = () =>
+  screen.queryByRole('search', { name: 'Rechercher et remplacer dans la requête' })
+
+test('⌘F ouvre la recherche depuis n’importe où dans l’onglet', async () => {
+  const utilisateur = userEvent.setup()
+  monter('select id from commandes')
+  // Le focus sur la barre d'outils, hors de l'éditeur : c'est le cas que CodeMirror seul ne voyait
+  // pas, une liaison de l'éditeur ne répondant que curseur dans le texte.
+  screen.getByRole('button', { name: /Exécuter/ }).focus()
+
+  await utilisateur.keyboard(auModificateur('f'))
+
+  expect(await screen.findByRole('search')).toBeInTheDocument()
+  expect(screen.getByRole('textbox', { name: 'Rechercher dans la requête' })).toHaveFocus()
+})
+
+test('⌘F sans rien de focalisé ouvre aussi la recherche', async () => {
+  const utilisateur = userEvent.setup()
+  monter('select 1')
+  ;(document.activeElement as HTMLElement | null)?.blur()
+
+  await utilisateur.keyboard(auModificateur('f'))
+
+  expect(await screen.findByRole('search')).toBeInTheDocument()
+})
+
+test('⌘F est consommé : la recherche de page du navigateur ne s’ouvre pas par-dessus', () => {
+  monter('select 1')
+  const consomme = !fireEvent.keyDown(document.body, {
+    key: 'f',
+    metaKey: !estWindows(),
+    ctrlKey: estWindows(),
+  })
+  expect(consomme).toBe(true)
+})
+
+test('⌘F ne fait rien derrière une modale', async () => {
+  const utilisateur = userEvent.setup()
+  monter('select 1')
+  const modale = document.createElement('div')
+  modale.setAttribute('role', 'dialog')
+  document.body.append(modale)
+
+  await utilisateur.keyboard(auModificateur('f'))
+
+  expect(bandeDeRecherche()).toBeNull()
+  modale.remove()
+})
+
+test('⇧⌘F n’est pas à nous', async () => {
+  const utilisateur = userEvent.setup()
+  monter('select 1')
+  await utilisateur.keyboard(auModificateur('{Shift>}F{/Shift}'))
+  expect(bandeDeRecherche()).toBeNull()
 })
