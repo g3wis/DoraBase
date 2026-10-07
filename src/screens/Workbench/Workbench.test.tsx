@@ -752,6 +752,57 @@ describe('la console SQL (`12a`)', () => {
     )
   })
 
+  /**
+   * **La barre de titre nomme la connexion d'une console**, comme celle d'une table.
+   *
+   * Le fil d'Ariane venait de `contexte`, qui exige un schéma : une console ouverte depuis le menu de
+   * sa connexion, sans schéma sélectionné, n'avait au-dessus d'elle que le chemin de dossiers.
+   */
+  it('la barre de titre nomme la connexion de la console, sans schéma sélectionné', async () => {
+    const utilisateur = userEvent.setup()
+    monter({ passerelleExecution: PASSERELLE_SQL })
+    await ouvrirUneConsoleSansDeplierLaBase(utilisateur)
+    await screen.findByLabelText('Requête SQL')
+
+    const barre = document.querySelector('[data-tauri-drag-region]') as HTMLElement
+    expect(within(barre).getByText('analytics')).toBeInTheDocument()
+  })
+
+  it('la barre de titre nomme la connexion de la console, pas celle que l’arbre montre', async () => {
+    const utilisateur = userEvent.setup()
+    monter({ passerelleExecution: PASSERELLE_SQL })
+    await ouvrirUneConsoleSansDeplierLaBase(utilisateur)
+    await screen.findByLabelText('Requête SQL')
+    // Un schéma d'une **autre** connexion, sélectionné pendant que la console reste l'onglet actif.
+    await utilisateur.dblClick(screen.getByRole('treeitem', { name: /^shop/ }))
+    await utilisateur.click(await screen.findByRole('treeitem', { name: /^public/ }))
+    expect(screen.getByRole('tab', { name: /console 1/ })).toHaveAttribute('aria-selected', 'true')
+
+    const barre = document.querySelector('[data-tauri-drag-region]') as HTMLElement
+    expect(within(barre).getByText('analytics')).toBeInTheDocument()
+    expect(within(barre).queryByText(/shop/)).toBeNull()
+  })
+
+  it('la barre de titre dessine le projet et la connexion comme l’arbre (#183)', async () => {
+    const utilisateur = userEvent.setup()
+    const arbre = surConnexion(
+      surDossier(PROJETS, ID_DE_TEST.racine, (dossier) => ({ ...dossier, icon: 'rocket' })),
+      ANALYTICS,
+      (base) => ({ ...base, icon: 'store' }),
+    )
+    monter({ arbre, passerelleExecution: PASSERELLE_SQL })
+    await ouvrirUneConsoleSansDeplierLaBase(utilisateur)
+    await screen.findByLabelText('Requête SQL')
+
+    const barre = document.querySelector('[data-tauri-drag-region]') as HTMLElement
+    const dessins = [...barre.querySelectorAll('svg use')].map((use) => use.getAttribute('href'))
+    // Le projet est le dossier le plus extérieur du chemin, pas le plus proche.
+    expect(dessins).toContain('#i-rocket')
+    expect(dessins).not.toContain('#i-pin')
+    const icone = within(barre).getByText('analytics').previousElementSibling
+    expect(icone?.querySelector('use')).toHaveAttribute('href', '#i-store')
+  })
+
   it('deux consoles créées de suite n’ouvrent la connexion qu’une fois', async () => {
     const utilisateur = userEvent.setup()
     const { passerelle } = passerelles()

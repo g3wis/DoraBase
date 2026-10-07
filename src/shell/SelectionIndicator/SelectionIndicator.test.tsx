@@ -139,6 +139,68 @@ test('sans connexion ouverte, aucun fil d’Ariane', () => {
   expect(screen.queryByText(/·/)).not.toBeInTheDocument()
 })
 
+// --- Les icônes de l'arbre (#183) ---
+
+/** Les symboles dessinés par l'indicateur, dans l'ordre du document. */
+const dessins = () =>
+  [...racine().querySelectorAll('svg use')].map((use) => use.getAttribute('href'))
+
+test('le chemin porte l’icône et la couleur du projet, comme sa ligne d’arbre', () => {
+  monter({ projet: { icon: 'rocket', color: 'green' } })
+  expect(dessins()).toEqual(['#i-rocket'])
+  expect(racine().querySelector('svg')).toHaveStyle({ color: 'var(--success)' })
+})
+
+test('un projet sans icône choisie garde le `pin`', () => {
+  monter({ projet: { icon: null, color: null } })
+  expect(dessins()).toEqual(['#i-pin'])
+})
+
+test('le nom de la connexion est précédé de son icône, le logo du moteur à défaut', () => {
+  monter({
+    breadcrumb: 'catalogue · public',
+    base: { engine: 'postgresql', icon: null, color: null },
+  })
+  // Le projet, le chevron qui mène à la connexion, puis la connexion.
+  expect(dessins()).toEqual(['#i-pin', '#i-chevr', '#i-pg'])
+  // **Avant le nom** : l'icône est le voisin immédiat du fil d'Ariane.
+  expect(screen.getByText('catalogue · public').previousElementSibling?.tagName).toBe('svg')
+})
+
+test('un chevron mène du chemin à la connexion, et un `›` se lit à sa place', () => {
+  monter({
+    chemin: ['Atelier Nord', 'prod'],
+    breadcrumb: 'catalogue · public',
+    base: { engine: 'postgresql', icon: null, color: null },
+  })
+  const fleche = screen.getByText('›')
+  // **Le texte lu, pas l'écran** : sans espaces explicites, « prod›catalogue » (piège n° 1). La
+  // racine depuis la flèche : `racine()` cherche le chemin d'un seul dossier.
+  expect(fleche.parentElement?.textContent).toContain('Atelier Nord › prod › catalogue · public')
+  // **Masqué par `clip-path`, jamais `display: none`** (piège n° 2) : le chevron se voit, le `›` se lit.
+  expect(fleche).toHaveClass(/srOnly/)
+  expect(fleche.previousElementSibling?.querySelector('use')).toHaveAttribute('href', '#i-chevr')
+  // Avant l'icône de la connexion, qui précède son nom.
+  expect(fleche.nextElementSibling?.querySelector('use')).toHaveAttribute('href', '#i-pg')
+})
+
+test('sans connexion, le chemin ne mène nulle part', () => {
+  monter({ chemin: ['Atelier Nord', 'prod'] })
+  expect(screen.queryByText('›')).toBeNull()
+  const chemin = screen.getByText('Atelier Nord › prod').parentElement?.parentElement
+  expect(chemin?.querySelector('use[href="#i-chevr"]')).toBeNull()
+})
+
+test('une icône choisie et une couleur choisie s’appliquent à la connexion', () => {
+  monter({
+    breadcrumb: 'catalogue · public',
+    base: { engine: 'postgresql', icon: 'rocket', color: 'violet' },
+  })
+  const icone = screen.getByText('catalogue · public').previousElementSibling as SVGElement
+  expect(icone.querySelector('use')).toHaveAttribute('href', '#i-rocket')
+  expect(icone).toHaveStyle({ color: 'var(--violet)' })
+})
+
 // --- Le point d'état ---
 
 // Un dossier n'a pas d'état de connexion — ses connexions en ont. Sans connexion ouverte, **aucun
