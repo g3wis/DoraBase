@@ -1,8 +1,8 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Icon } from '../../design/icons/Icon'
 import type { ExportFormat, QueryResult, TransactionMode, Value } from '../../domain/engine'
 import { useT } from '../../i18n/LanguageContext'
-import { raccourci } from '../../shell/plateforme'
+import { raccourci, seulLeModificateur } from '../../shell/plateforme'
 import { cx } from '../../ui/cx'
 import { SplitPane } from '../../ui/SplitPane/SplitPane'
 import { Toggle } from '../../ui/Toggle/Toggle'
@@ -139,6 +139,29 @@ export function ConsoleView({
   // effet, donc corriger sa requête ne défait pas la mise en page.
   const [masquees, setMasquees] = useState<ReadonlySet<string>>(new Set())
   const [ordre, setOrdre] = useState<readonly string[] | null>(null)
+
+  /**
+   * `⌘F` cherche dans la requête (#185), **d'où qu'on soit dans l'onglet** : le texte, la grille du
+   * résultat, la barre d'outils, ou rien de focalisé. Écouté sur la fenêtre parce qu'une console
+   * n'est montée que tant qu'elle est l'onglet actif — l'écouteur part avec elle.
+   *
+   * **Rien pendant qu'une modale est ouverte**, la règle de `useRaccourcisDeCreation` : la bande
+   * s'ouvrirait derrière une confirmation d'exécution, et prendrait le focus qu'elle tient.
+   *
+   * Et le geste est **consommé** : sans `preventDefault`, WebView2 ouvrirait par-dessus sa propre
+   * barre de recherche de page, qui ne voit pas le texte de CodeMirror.
+   */
+  useEffect(() => {
+    function auClavier(evenement: KeyboardEvent) {
+      if (evenement.key.toLowerCase() !== 'f') return
+      if (!seulLeModificateur(evenement)) return
+      if (document.querySelector('[role=dialog]') !== null) return
+      evenement.preventDefault()
+      editeur.current?.ouvrirLaRecherche()
+    }
+    window.addEventListener('keydown', auClavier)
+    return () => window.removeEventListener('keydown', auClavier)
+  }, [])
 
   /** Les colonnes visibles, dans l'ordre d'affichage — ce que la projection de la requête devient. */
   function projectionVisible(

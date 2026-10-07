@@ -94,6 +94,23 @@ export const habillage = EditorView.theme(
       backgroundColor: 'var(--info)',
     },
     '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--syn-keyword)' },
+    // **La bande de recherche (#185) est du chrome clair posé sur l'éditeur sombre** : le conteneur
+    // de panneaux de CodeMirror prend le fond et l'encre de la bande d'outils du diagramme, et le
+    // filet d'une barre. Sans cela, le thème de base le peindrait en `#333338` littéral — ce que
+    // `{ dark: true }` lui fait choisir.
+    '.cm-panels': { backgroundColor: 'var(--bar)', color: 'var(--ink)' },
+    '.cm-panels-top': { borderBottom: '1px solid var(--divider)' },
+    // **Les occurrences sont cerclées, l'occurrence courante est peinte.** Une teinte de fond pour
+    // toutes aurait demandé un jeton de plus, et se serait confondue avec la ligne active
+    // (`--dark-2`). La courante prend le fond de la sélection : le focus est dans la bande pendant
+    // qu'on cherche, donc la sélection native de l'éditeur ne se voit pas — c'est cette marque qui
+    // dit où `Entrée` a mené.
+    '.cm-searchMatch': {
+      backgroundColor: 'transparent',
+      outline: '1px solid var(--syn-keyword)',
+      borderRadius: '2px',
+    },
+    '.cm-searchMatch.cm-searchMatch-selected': { backgroundColor: 'var(--info)' },
   },
   { dark: true },
 )

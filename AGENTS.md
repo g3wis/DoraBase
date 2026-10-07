@@ -165,7 +165,8 @@ qu'il portait et que le rendu ne dit pas.
   survol du « … » de la même ligne — `--hover-row` sur une boîte de 18 px —, et son encre ne bouge
   pas, puisqu'elle porte la couleur du dossier. **Celle d'une ligne de connexion aussi depuis
   #179** : le même contrôle, posé par le même `TreeRow`, donc le même survol — ce n'en est pas un
-  de plus.
+  de plus. **Les carrés d'action de la bande de recherche de la console en ont un depuis #185**, et
+  c'est encore la bande de sidebar à la lettre : `--hover-row` sur un carré nu de 22 px.
 - **Aucune couleur littérale hors `src/design/tokens.json`.** Garde-fou : `pnpm tokens:check`.
 - **L'échelle d'espacement n'a pas de 8 px** : 3, 5, 6, 7, 9, 11, 14, 16. Un littéral
   commenté vaut mieux qu'un jeton approximatif choisi « parce que ça se ressemble ».
@@ -2805,6 +2806,70 @@ créé ni aggravé.
 **Ce qui reste à voir à l'œil** : la bande sous WKWebView et en « Nuit » — même réserve que les dix
 écrans. Et une vraie base : le décor de `?demo` rend une réponse plausible à tout SQL, donc une
 procédure MySQL ou un trigger SQLite n'ont été découpés **que** par les tests purs, jamais exécutés.
+
+### Chercher dans la requête (7 octobre 2026, #185)
+
+`⌘F` ne faisait rien dans la console : une longue requête se cherchait à l'œil. Demandé : « add
+support for command + f (search) in console view », précisé en **recherche et remplacement dans le
+texte de la requête** — la grille du résultat n'est pas fouillée —, avec une bande **à la facture du
+champ du diagramme**. Neuf décisions à ne pas défaire :
+
+- **le moteur est `@codemirror/search`, la bande est la nôtre.** Le moteur apporte ce qu'un éditeur
+  maison casse discrètement — la normalisation des caractères accentués, la casse, le surlignage des
+  occurrences visibles, et un remplacement inscrit dans l'historique, donc `⌘Z`. Son panneau, lui,
+  est un formulaire anglais en gris littéraux avec trois cases que personne n'a demandées : il est
+  remplacé par `createPanel`, dont l'élément reçoit la bande **par un portail React**. La bande reste
+  ainsi dans l'arbre React (i18n, `Icon`, `Button`) sans quitter le conteneur de panneaux de
+  CodeMirror, en tête de l'éditeur (`top: true`) ;
+- **la bande lit l'état de l'éditeur, elle n'en tient pas de copie** (`useSyncExternalStore` sur
+  `vue.state`, l'abonnement passant par le `update` du panneau). La requête vit dans le
+  `searchState`, que `⌘F` réécrit depuis la sélection : deux vérités divergeraient au premier `⌘F`
+  frappé bande ouverte. Le compte suit donc aussi la frappe **dans le texte** ;
+- **`⌘F` est écouté par `ConsoleView` sur la fenêtre, et nulle part ailleurs** — pas de liaison
+  `Mod-f` dans CodeMirror. Il répond d'où qu'on soit dans l'onglet (texte, grille, barre d'outils, rien
+  de focalisé), une console n'étant montée que tant qu'elle est l'onglet actif ; il lit le
+  modificateur de `shell/plateforme` (`seulLeModificateur`), là où une liaison de CodeMirror lirait
+  celui du navigateur ; **rien derrière une modale**, la règle de `useRaccourcisDeCreation` ; et il est
+  **consommé**, sans quoi WebView2 ouvrirait par-dessus sa recherche de page, qui ne voit pas le texte
+  de CodeMirror ;
+- **le focus est donné par la bande à son montage.** `openSearchPanel` cherche le champ
+  (`main-field`) juste après avoir ouvert le panneau, or le portail n'est rendu qu'ensuite : sans ce
+  relais, `⌘F` ouvrirait une bande où il faudrait cliquer. Bande ouverte, `ouvrirLaRecherche`
+  sélectionne le texte du champ — le second `⌘F` de partout ;
+- **la frappe marque, `Entrée` emmène, `⇧Entrée` revient** — l'idiome du diagramme. « 2 / 7 » une fois
+  qu'`Entrée` a mené, « 7 occurrences » avant, « aucune » sans résultat, rien sur un champ vide ; au-delà
+  de mille, « 1000+ » (`recherche.ts`), le compte étant refait à chaque transaction ;
+- **`Échap` ferme, il ne vide pas**, depuis la bande comme depuis le texte, et rend le focus à
+  l'éditeur. C'est l'écart voulu avec le champ du diagramme : une bande de recherche d'éditeur se
+  ferme à `Échap` partout, et le texte cherché reste au prochain `⌘F`. Pour la même raison, le bouton
+  de vidage du diagramme est devenu la **croix de fermeture** de la bande — deux croix voisines se
+  seraient lues comme le même geste ;
+- **les gestes sans occurrence sont en `aria-disabled`, sans garde dans le gestionnaire.** `disabled`
+  ferait perdre le focus au bouton qui le porte — après « Tout remplacer », il tomberait sur le `body`,
+  d'où ni `Échap` ni `Tab` ne ramènent dans la bande —, et les quatre commandes de
+  `@codemirror/search` ne font rien d'elles-mêmes sans occurrence. Une garde de plus aurait été
+  couverte par elles, donc muette sous sabotage ;
+- **les occurrences sont cerclées de `--syn-keyword`, la courante peinte en `--info`** (`theme.ts`).
+  Aucun jeton de plus : une teinte de fond pour toutes se serait confondue avec la ligne active
+  (`--dark-2`), et la courante a besoin de sa propre marque parce que le focus est dans la bande —
+  la sélection native de l'éditeur ne se voit pas pendant qu'on cherche. Le conteneur de panneaux
+  prend `--bar` et le filet `--divider`, que le thème de base peindrait sinon en gris littéral ;
+- **ni bouton dans la barre d'outils, ni entrée « Édition › Rechercher… »** (tranché dans #185).
+  `⌘F` est le geste de recherche universel, et la bande montre le remplacement dès qu'elle s'ouvre ;
+  une entrée de menu natif paraîtrait sur tous les écrans en ne faisant rien hors d'une console — le
+  défaut n° 36. À rouvrir si l'usage dit qu'on ne la trouve pas.
+
+**`role="search"` et non `<search>`** : l'élément n'existe qu'à partir de Safari 17, sous le plancher
+du produit (16.4) ; il y serait inconnu et le repère perdu. Biome le signale, l'exception est écrite
+sur place.
+
+**Hors périmètre** : chercher dans la grille du résultat, chercher d'une console à l'autre, et les
+réglages de casse, d'expression régulière et de mot entier — le moteur les sait, mais trois bascules
+de plus demandent un dessin que personne n'a fait.
+
+**Ce qui reste à voir à l'œil** : la bande sous WKWebView et en « Nuit » ; et sous WebView2, que le
+`preventDefault` de `Ctrl+F` suffit bien à retenir la barre de recherche du navigateur — c'est le
+raisonnement, rien ici ne l'a mesuré.
 
 ### Un panneau ne se quitte pas en allant vers lui (9 septembre 2026, `API-35`)
 
