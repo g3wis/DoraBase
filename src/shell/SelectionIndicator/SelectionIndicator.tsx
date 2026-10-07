@@ -146,10 +146,16 @@ export function SelectionIndicator({
           aria-hidden="true"
         />
       )}
-      {/* **Le chemin se poursuit jusqu'à la connexion** (#183) : le `›` d'entre deux dossiers, dans
-          leur encre, après la pastille qui appartient au dossier. Du texte comme eux, et ses espaces
-          sont explicites — la flexbox les retire à l'écran, pas du texte qu'on lit (piège n° 1). */}
-      {breadcrumb && <span className={styles.separateur}>{' › '}</span>}
+      {/* **Le chemin se poursuit jusqu'à la connexion** (#183), après la pastille qui appartient au
+          dossier. Le chevron du fil d'Ariane de l'explorateur, et non le `›` du chemin : en texte à
+          11,5 px, il se voyait à peine. Le chevron est une décoration, donc le `›` reste pour qui
+          lit — masqué, avec ses espaces explicites (pièges n° 1 et 2). */}
+      {breadcrumb && (
+        <>
+          <Icon name="chevr" size={12} strokeWidth={2.4} className={styles.separateur} />
+          <span className={styles.srOnly}>{' › '}</span>
+        </>
+      )}
       {breadcrumb && base && teinte && (
         <Icon
           name={dessinDeConnexion(base)}

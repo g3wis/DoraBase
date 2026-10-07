@@ -161,12 +161,13 @@ test('le nom de la connexion est précédé de son icône, le logo du moteur à 
     breadcrumb: 'catalogue · public',
     base: { engine: 'postgresql', icon: null, color: null },
   })
-  expect(dessins()).toEqual(['#i-pin', '#i-pg'])
+  // Le projet, le chevron qui mène à la connexion, puis la connexion.
+  expect(dessins()).toEqual(['#i-pin', '#i-chevr', '#i-pg'])
   // **Avant le nom** : l'icône est le voisin immédiat du fil d'Ariane.
   expect(screen.getByText('catalogue · public').previousElementSibling?.tagName).toBe('svg')
 })
 
-test('un `›` mène du chemin à la connexion, et se lit avec ses espaces', () => {
+test('un chevron mène du chemin à la connexion, et un `›` se lit à sa place', () => {
   monter({
     chemin: ['Atelier Nord', 'prod'],
     breadcrumb: 'catalogue · public',
@@ -176,6 +177,9 @@ test('un `›` mène du chemin à la connexion, et se lit avec ses espaces', () 
   // **Le texte lu, pas l'écran** : sans espaces explicites, « prod›catalogue » (piège n° 1). La
   // racine depuis la flèche : `racine()` cherche le chemin d'un seul dossier.
   expect(fleche.parentElement?.textContent).toContain('Atelier Nord › prod › catalogue · public')
+  // **Masqué par `clip-path`, jamais `display: none`** (piège n° 2) : le chevron se voit, le `›` se lit.
+  expect(fleche).toHaveClass(/srOnly/)
+  expect(fleche.previousElementSibling?.querySelector('use')).toHaveAttribute('href', '#i-chevr')
   // Avant l'icône de la connexion, qui précède son nom.
   expect(fleche.nextElementSibling?.querySelector('use')).toHaveAttribute('href', '#i-pg')
 })
@@ -183,6 +187,8 @@ test('un `›` mène du chemin à la connexion, et se lit avec ses espaces', () 
 test('sans connexion, le chemin ne mène nulle part', () => {
   monter({ chemin: ['Atelier Nord', 'prod'] })
   expect(screen.queryByText('›')).toBeNull()
+  const chemin = screen.getByText('Atelier Nord › prod').parentElement?.parentElement
+  expect(chemin?.querySelector('use[href="#i-chevr"]')).toBeNull()
 })
 
 test('une icône choisie et une couleur choisie s’appliquent à la connexion', () => {
