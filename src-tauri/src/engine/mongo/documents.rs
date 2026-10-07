@@ -4,7 +4,7 @@
 use mongodb::bson::{doc, Bson, Document};
 
 use crate::engine::{
-    ColumnInfo, EngineError, Filter, FilterOperator, PendingUpdate, SortDirection, SortKey,
+    ColumnInfo, EngineError, Filter, FilterOperator, Modulo, PendingUpdate, SortDirection, SortKey,
     TypeCategory,
 };
 
@@ -84,6 +84,18 @@ pub fn critere(filtres: &[Filter], colonnes: &[ColumnInfo]) -> Result<Document, 
             // racinisés, ce qui n'est pas la similarité de trigrammes que le signe promet.
             FilterOperator::WordSimilar => {
                 return Err(filtre.operator.refus_hors_pg_trgm("MongoDB"))
+            }
+            // `$mod` est natif, et réservé à un champ numérique pour la raison des comparaisons :
+            // contre une chaîne, il ne trouverait rien sans le dire.
+            FilterOperator::Modulo => {
+                verifier_la_categorie(
+                    &filtre.column,
+                    colonnes,
+                    TypeCategory::Number,
+                    "le modulo n'est proposé que pour un champ numérique",
+                )?;
+                let modulo = Modulo::depuis_la_saisie(&valeur, &filtre.column)?;
+                Bson::Document(doc! { "$mod": [modulo.diviseur, modulo.reste] })
             }
         };
         critere.insert(champ, condition);
@@ -591,6 +603,31 @@ mod tests {
         )
         .expect_err("doit être refusé");
         assert!(erreur.message.contains("pas un nombre"), "{erreur}");
+    }
+
+    #[test]
+    fn un_modulo_devient_un_mod_bson_a_deux_entiers() {
+        let critere = critere(
+            &[filtre("montant", FilterOperator::Modulo, Some("3 = 1"))],
+            &colonnes(),
+        )
+        .unwrap();
+        let condition = critere.get_document("montant").unwrap();
+        assert_eq!(
+            condition.get_array("$mod").unwrap(),
+            &vec![Bson::Int64(3), Bson::Int64(1)],
+            "{condition:?}"
+        );
+    }
+
+    #[test]
+    fn un_modulo_sur_un_champ_non_numerique_est_refuse() {
+        let erreur = critere(
+            &[filtre("statut", FilterOperator::Modulo, Some("2"))],
+            &colonnes(),
+        )
+        .expect_err("doit être refusé");
+        assert!(erreur.message.contains("statut"), "{erreur}");
     }
 
     #[test]

@@ -16,7 +16,7 @@ use tokio_postgres::types::ToSql;
 use tokio_postgres::{Client, Row};
 
 use crate::engine::{
-    ColumnInfo, EngineError, Filter, FilterOperator, RowQuery, RowWindow, SortDirection,
+    ColumnInfo, EngineError, Filter, FilterOperator, Modulo, RowQuery, RowWindow, SortDirection,
     TypeCategory, Value,
 };
 
@@ -347,6 +347,27 @@ fn condition_de(
                     filtre.operator, colonne.name
                 ))),
             }
+        }
+        FilterOperator::Modulo => {
+            // Réservé aux colonnes numériques, comme l'écran le propose : le reste d'une date n'a
+            // pas de sens, et celui d'un texte serait une erreur de type rendue telle quelle.
+            if colonne.category != TypeCategory::Number {
+                return Err(EngineError::local(format!(
+                    "l'opérateur {:?} n'est proposé que pour une colonne numérique, et « {} » ne l'est pas",
+                    filtre.operator, colonne.name
+                )));
+            }
+            let modulo = Modulo::depuis_la_saisie(valeur, &colonne.name)?;
+            valeurs.push(modulo.diviseur.to_string());
+            let diviseur = valeurs.len();
+            valeurs.push(modulo.reste.to_string());
+            // **`::numeric` des deux côtés, comme les comparaisons** : `%` n'existe ni pour `real`
+            // ni pour `double precision`, et `numeric` garde le reste exact d'un `bigint`. Le détour
+            // par `::text` est celui des comparaisons : `String` ne sait lier que du texte.
+            Ok(format!(
+                "{nom}::numeric % ${diviseur}::text::numeric = ${}::text::numeric",
+                valeurs.len()
+            ))
         }
         FilterOperator::IsNull
         | FilterOperator::IsNotNull
@@ -1123,10 +1144,12 @@ mod tests {
     fn les_operateurs_universels_produisent_du_sql_sur_une_colonne_texte() {
         for operateur in FilterOperator::tous() {
             // Les comparaisons demandent une colonne numérique ou temporelle, les deux prédicats
-            // booléens une colonne booléenne, `≈` la base qui a `pg_trgm` : chacun a son test.
+            // booléens une colonne booléenne, `≈` la base qui a `pg_trgm`, `%` une colonne
+            // numérique : chacun a son test.
             if operateur.est_une_comparaison()
                 || operateur.est_un_predicat_booleen()
                 || operateur == FilterOperator::WordSimilar
+                || operateur == FilterOperator::Modulo
             {
                 continue;
             }
@@ -1194,6 +1217,34 @@ mod tests {
             );
             assert_eq!(valeurs, vec!["2026-03-01".to_owned()]);
         }
+    }
+
+    #[test]
+    fn un_modulo_lie_son_diviseur_et_son_reste_en_parametres() {
+        let mut r = requete();
+        r.filters = vec![Filter {
+            column: "id".into(),
+            operator: FilterOperator::Modulo,
+            value: Some("3 = 1".into()),
+        }];
+        let (sql, valeurs) = construire_sql(&r, &colonnes(), None).unwrap();
+        assert!(
+            sql.contains(r#""id"::numeric % $1::text::numeric = $2::text::numeric"#),
+            "{sql}"
+        );
+        assert_eq!(valeurs, vec!["3".to_owned(), "1".to_owned()]);
+    }
+
+    #[test]
+    fn un_modulo_sur_une_colonne_texte_est_refuse() {
+        let mut r = requete();
+        r.filters = vec![Filter {
+            column: "statut".into(),
+            operator: FilterOperator::Modulo,
+            value: Some("2".into()),
+        }];
+        let erreur = construire_sql(&r, &colonnes(), None).expect_err("doit être refusé");
+        assert!(erreur.message.contains("statut"), "{erreur}");
     }
 
     #[test]

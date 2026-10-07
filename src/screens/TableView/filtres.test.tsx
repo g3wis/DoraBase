@@ -361,14 +361,14 @@ describe('filtres par en-tête', () => {
     expect(readRows).toHaveBeenCalledTimes(1)
   })
 
-  it('le popover ajoute les quatre comparaisons sur une colonne numérique', async () => {
+  it('le popover ajoute les quatre comparaisons et % sur une colonne numérique', async () => {
     const utilisateur = userEvent.setup()
     monter()
     await utilisateur.click(await screen.findByRole('button', { name: 'Opérateur de total_cents' }))
 
     const panneau = await screen.findByRole('dialog', { name: 'Opérateur · total_cents' })
-    // Les six de base, plus `>`, `≥`, `≤`, `<` — réservées aux colonnes numériques.
-    expect(panneau.querySelectorAll('li')).toHaveLength(10)
+    // Les six de base, plus `>`, `≥`, `≤`, `<` et `%` — réservés aux colonnes numériques.
+    expect(panneau.querySelectorAll('li')).toHaveLength(11)
   })
 
   it('≈ « mot similaire » paraît sur une colonne texte quand la base a pg_trgm, et part au serveur', async () => {
@@ -396,7 +396,7 @@ describe('filtres par en-tête', () => {
     await utilisateur.click(await screen.findByRole('button', { name: 'Opérateur de total_cents' }))
 
     const panneau = await screen.findByRole('dialog', { name: 'Opérateur · total_cents' })
-    expect(panneau.querySelectorAll('li')).toHaveLength(10)
+    expect(panneau.querySelectorAll('li')).toHaveLength(11)
     expect(screen.queryByRole('button', { name: /^≈/ })).toBeNull()
   })
 
@@ -414,6 +414,29 @@ describe('filtres par en-tête', () => {
         { column: 'total_cents', operator: 'gt', value: '5000' },
       ]),
     )
+  })
+
+  it('% « modulo » part au serveur avec sa saisie n = r, et ne paraît pas sur le texte', async () => {
+    const utilisateur = userEvent.setup()
+    const { readRows } = monter()
+    await waitFor(() => expect(readRows).toHaveBeenCalledTimes(1))
+
+    await utilisateur.click(await screen.findByRole('button', { name: 'Opérateur de total_cents' }))
+    // Le libellé porte la forme attendue : rien d'autre ne dit que `3 = 1` se tape.
+    await utilisateur.click(
+      await screen.findByRole('button', { name: /^% modulo \(n ou n = r\)$/ }),
+    )
+    await utilisateur.type(await screen.findByLabelText('Filtrer total_cents'), '3 = 1{Enter}')
+
+    await waitFor(() =>
+      expect(derniereRequete(readRows).filters).toEqual([
+        { column: 'total_cents', operator: 'modulo', value: '3 = 1' },
+      ]),
+    )
+
+    await utilisateur.click(screen.getByRole('button', { name: 'Opérateur de status' }))
+    await screen.findByRole('dialog', { name: 'Opérateur · status' })
+    expect(screen.queryByRole('button', { name: /^% modulo/ })).toBeNull()
   })
 })
 

@@ -121,7 +121,7 @@ describe('filtres', () => {
     )
   })
 
-  it('les quatre comparaisons ne rejoignent le popover que pour une colonne numérique', () => {
+  it('les quatre comparaisons et % ne rejoignent le popover que pour une colonne numérique', () => {
     expect(operateursPour('text', true, false).map((o) => o.valeur)).toEqual([
       'eq',
       'ne',
@@ -141,7 +141,23 @@ describe('filtres', () => {
       'gte',
       'lte',
       'lt',
+      'modulo',
     ])
+  })
+
+  it('% n’est proposé que pour un nombre, et son chip écrit la condition qui part', () => {
+    // Le reste d'une date ou d'un texte n'a pas de sens : le moteur le refuserait.
+    for (const category of ['text', 'timestamp', 'boolean', 'json', 'uuid', 'other'] as const) {
+      expect(operateursPour(category, true, true).map((o) => o.valeur)).not.toContain('modulo')
+    }
+    expect(prendUneValeur('modulo')).toBe(true)
+    expect(signeDe('modulo')).toBe('%')
+    expect(filtreDe('id', 'modulo', ' 3 = 1 ')).toEqual({
+      column: 'id',
+      operator: 'modulo',
+      value: '3 = 1',
+    })
+    expect(libelleDeFiltre({ column: 'id', operator: 'modulo', value: '3 = 1' })).toBe('id % 3 = 1')
   })
 
   it('les deux prédicats de nullité ne sont proposés que pour une colonne qui peut en porter', () => {

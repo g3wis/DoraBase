@@ -639,6 +639,33 @@ mod tests_fichier {
     }
 
     #[tokio::test]
+    async fn un_filtre_modulo_trouve_les_lignes_de_chaque_reste() {
+        // Contre un vrai fichier, parce que le défaut à craindre est un SQL **valide** qui ne
+        // trouve rien : sans transtypage du reste, l'entier calculé serait comparé au texte lié, et
+        // le test unitaire de la forme passerait quand même. `seances` porte les identifiants 1 à 5.
+        let (_dossier, chemin) = decor();
+        let adaptateur = adaptateur(&chemin).await;
+        let mut requete = RowQuery::new("main", "seances", RowLimit::OneHundred);
+        requete.filters = vec![Filter {
+            column: "id".into(),
+            operator: FilterOperator::Modulo,
+            value: Some("2".into()),
+        }];
+        assert_eq!(
+            adaptateur.rows(&requete).await.unwrap().rows.len(),
+            2,
+            "2 et 4"
+        );
+
+        requete.filters[0].value = Some("2 = 1".into());
+        assert_eq!(
+            adaptateur.rows(&requete).await.unwrap().rows.len(),
+            3,
+            "1, 3 et 5"
+        );
+    }
+
+    #[tokio::test]
     async fn une_modification_previsualisee_est_celle_qui_part() {
         let (_dossier, chemin) = decor();
         let adaptateur = adaptateur(&chemin).await;

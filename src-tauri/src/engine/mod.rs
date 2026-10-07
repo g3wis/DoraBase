@@ -65,7 +65,7 @@ pub use introspection::{
     TriggerInfo, TypeCategory,
 };
 pub use rows::{
-    ApplyOutcome, Filter, FilterOperator, PendingDelete, PendingInsert, PendingInsertValue,
+    ApplyOutcome, Filter, FilterOperator, Modulo, PendingDelete, PendingInsert, PendingInsertValue,
     PendingUpdate, QueryResult, RowLimit, RowQuery, RowWindow, SortDirection, SortKey, UpdatePlan,
     Value,
 };
