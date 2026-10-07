@@ -783,6 +783,26 @@ describe('la console SQL (`12a`)', () => {
     expect(within(barre).queryByText(/shop/)).toBeNull()
   })
 
+  it('la barre de titre dessine le projet et la connexion comme l’arbre (#183)', async () => {
+    const utilisateur = userEvent.setup()
+    const arbre = surConnexion(
+      surDossier(PROJETS, ID_DE_TEST.racine, (dossier) => ({ ...dossier, icon: 'rocket' })),
+      ANALYTICS,
+      (base) => ({ ...base, icon: 'store' }),
+    )
+    monter({ arbre, passerelleExecution: PASSERELLE_SQL })
+    await ouvrirUneConsoleSansDeplierLaBase(utilisateur)
+    await screen.findByLabelText('Requête SQL')
+
+    const barre = document.querySelector('[data-tauri-drag-region]') as HTMLElement
+    const dessins = [...barre.querySelectorAll('svg use')].map((use) => use.getAttribute('href'))
+    // Le projet est le dossier le plus extérieur du chemin, pas le plus proche.
+    expect(dessins).toContain('#i-rocket')
+    expect(dessins).not.toContain('#i-pin')
+    const icone = within(barre).getByText('analytics').previousElementSibling
+    expect(icone?.querySelector('use')).toHaveAttribute('href', '#i-store')
+  })
+
   it('deux consoles créées de suite n’ouvrent la connexion qu’une fois', async () => {
     const utilisateur = userEvent.setup()
     const { passerelle } = passerelles()

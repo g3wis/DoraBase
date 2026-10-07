@@ -3,9 +3,11 @@
  *
  *   rangée      24px · gap 7px · aucun cadre, aucun fond
  *   point       6px, --success quand connectée
- *   dossier     12px, --accent-deep, trait 2 (`pin`, #166)
+ *   projet      12px, trait 2 : l'icône et la couleur de sa ligne d'arbre, --accent-deep sans
+ *               couleur (#183)
  *   chemin      700 11.5px Nunito, raccourci à gauche
  *   pastille    7px, couleur du dossier coloré le plus proche
+ *   connexion   12px, trait 2 : l'icône et la teinte de sa ligne d'arbre (#183)
  *   fil         500 11px JetBrains Mono, --ink-meta (.45)
  *
  * **Le cadre a disparu, et c'est le troisième écart au handoff sur cette barre** — après le
@@ -63,6 +65,11 @@
 .bag {
   flex: none;
   color: var(--accent-deep);
+}
+
+/* La teinte arrive de la connexion, en style : `teinteDeConnexion` la résout pour l'arbre aussi. */
+.baseIcon {
+  flex: none;
 }
 
 .name {

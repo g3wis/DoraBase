@@ -1,5 +1,8 @@
+import type { CSSProperties } from 'react'
+import { dessinDeConnexion, teinteDeConnexion } from '../../data/iconesDeConnexion'
+import { dessinDeDossier, ICONE_PAR_DEFAUT } from '../../data/iconesDeDossier'
 import { Icon } from '../../design/icons/Icon'
-import type { FolderColor } from '../../domain/config'
+import type { Database, Folder, FolderColor } from '../../domain/config'
 import type { ConnectionState } from '../../domain/engine'
 import { shellFr } from '../../i18n/dictionaries/shell'
 import { useT } from '../../i18n/LanguageContext'
@@ -17,6 +20,16 @@ type SelectionIndicatorProps = {
    * plus proche, qui dit où l'on est.
    */
   chemin: readonly string[]
+  /**
+   * Le dossier le plus extérieur du chemin — le projet —, dont l'icône et la couleur précèdent le
+   * chemin, comme sur sa ligne d'arbre (#183). Absent, le `pin` par défaut.
+   */
+  projet?: Pick<Folder, 'icon' | 'color'>
+  /**
+   * La connexion que le fil d'Ariane nomme : son icône précède son nom, avec la teinte de sa ligne
+   * d'arbre — le logo de son moteur faute d'icône choisie (#179, #183).
+   */
+  base?: Pick<Database, 'icon' | 'engine' | 'color'>
   /**
    * La couleur du dossier coloré **le plus proche**, s'il y en a un — la pastille qui suit le
    * chemin. Absente, aucune pastille plutôt qu'un gris inventé.
@@ -89,6 +102,8 @@ type SelectionIndicatorProps = {
  */
 export function SelectionIndicator({
   chemin,
+  projet,
+  base,
   couleur = null,
   breadcrumb,
   connection,
@@ -96,6 +111,7 @@ export function SelectionIndicator({
   pendingChanges = 0,
 }: SelectionIndicatorProps) {
   const t = useT()
+  const teinte = base === undefined ? undefined : teinteDeConnexion(base)
   return (
     <div className={styles.root}>
       {(connection || pendingChanges > 0) && (
@@ -105,7 +121,16 @@ export function SelectionIndicator({
           aria-hidden="true"
         />
       )}
-      <Icon name="pin" size={12} strokeWidth={2} className={styles.bag} />
+      {/* **Les dessins de l'arbre, par ses propres résolutions** (#183) : un `pin` fixe ne
+          ressemblait ni au projet ni à la connexion dès que l'un d'eux avait choisi son icône. Sans
+          couleur, le dossier garde la teinte de `.bag`, qui est celle de sa ligne. */}
+      <Icon
+        name={projet ? dessinDeDossier(projet) : ICONE_PAR_DEFAUT}
+        size={12}
+        strokeWidth={2}
+        className={styles.bag}
+        style={projet?.color ? { color: COULEURS_DE_DOSSIER[projet.color] } : undefined}
+      />
       {/* **Raccourci à gauche** : le conteneur est en `rtl` pour que l'ellipse tombe au début, et le
           texte lui-même est isolé en `ltr` pour que la ponctuation ne se retourne pas. Les
           séparateurs sont du texte, donc le chemin se lit à voix haute tel qu'il s'écrit. */}
@@ -119,6 +144,21 @@ export function SelectionIndicator({
           className={styles.envDot}
           style={{ background: COULEURS_DE_DOSSIER[couleur] }}
           aria-hidden="true"
+        />
+      )}
+      {breadcrumb && base && teinte && (
+        <Icon
+          name={dessinDeConnexion(base)}
+          size={12}
+          strokeWidth={2}
+          className={styles.baseIcon}
+          // Une couleur choisie teint le logo lui-même, comme sur la ligne d'arbre.
+          style={
+            {
+              color: teinte.couleur,
+              ...(teinte.teinterLeLogo ? { '--logo-tint': 'currentColor' } : {}),
+            } as CSSProperties
+          }
         />
       )}
       {breadcrumb && <span className={styles.breadcrumb}>{breadcrumb}</span>}

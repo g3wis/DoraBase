@@ -1581,6 +1581,8 @@ export function Workbench({
             <SelectionIndicator
               pendingChanges={attente.length}
               chemin={ancetresIndiques.map((ancetre) => ancetre.name)}
+              projet={ancetresIndiques[0]}
+              base={connexionNommee ? connexion(arbre, connexionNommee)?.base : undefined}
               couleur={couleurLaPlusProche(ancetresIndiques)}
               readOnly={lectureSeuleIndiquee}
               breadcrumb={cibleNommee}
