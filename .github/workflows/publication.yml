@@ -19,6 +19,51 @@ permissions:
   contents: write
 
 jobs:
+  # ── Ce qui doit être vrai avant de publier quoi que ce soit ──────────────────────────────
+  #
+  # Le tag est censé être posé sur un `main` vert, et `scripts/version.sh` refuse de le poser
+  # ailleurs. Mais « censé » n'est pas une vérification, et une release est publique : ces
+  # vérifications-là sont celles qui tiennent en quelques minutes, et elles rendent vraie la phrase
+  # « rien n'est publié qui n'ait été vérifié ». Depuis #189, rien ne tourne plus sur `main` à la
+  # fusion : c'est ce job qui juge l'arbre fusionné, si `main` a bougé après la dernière exécution
+  # d'une PR.
+  #
+  # **Sous Linux, et avant la release** (17 octobre 2026). Elles tournaient dans le job `macos` —
+  # 6 min 40 de Vitest et de `cargo test`, au décuple, pour un verdict qui ne dépend pas du système
+  # — et **après** la création de la release : un test rouge laissait une release publique sans
+  # aucun asset. `release` l'attend désormais, donc un échec ici ne publie rien du tout.
+  #
+  # Playwright et les tests sur base réelle restent dans `ci.yml` : ils demandent un serveur et
+  # quatre décors, et ce job n'a pas à les remonter pour la seconde fois.
+  verifier:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      # **Le tag et les fichiers doivent dire le même numéro**, constaté en dix secondes avant de
+      # compiler quoi que ce soit.
+      - name: le tag correspond à la version des fichiers
+        run: python3 scripts/verifier-version.py "${GITHUB_REF_NAME#v}"
+
+      # La mise en place de `ci.yml`, et le même cache : celui que la chauffe hebdomadaire écrit
+      # sur `main`. **Rien n'est sauvé** — un cache écrit par un tag n'est visible que de ce tag.
+      - uses: ./.github/actions/preparer
+        with:
+          rust: "true"
+          pile-linux: "true"
+          cache-rust: linux
+          sauver-cache-rust: "false"
+
+      - run: ./scripts/verifier-aucun-sabotage.sh
+      # Du Python sur deux fichiers JSON : il n'a rien à faire sur le runner Windows, où il vivait.
+      - run: python3 scripts/verifier-conf-windows.py
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+      - run: cargo test
+        working-directory: src-tauri
+
   # ── La release, créée une fois, pour que macOS et Windows publient en parallèle ──────────
   #
   # **Avant le 2 septembre 2026**, c'était le job `macos` qui appelait `gh release create` en
@@ -36,6 +81,7 @@ jobs:
   # aucun ne dépend de l'autre : ils tournent en parallèle, et un échec de l'un ne retarde plus
   # le début de l'autre.
   release:
+    needs: verifier
     runs-on: ubuntu-latest
     # Aucune compilation ici — juste du texte et un appel à `gh`. Cinq minutes est déjà large.
     timeout-minutes: 5
@@ -171,7 +217,7 @@ jobs:
     # celle que `NOTARISE` gouverne.
     outputs:
       maj: ${{ steps.archive-maj.outputs.publiee }}
-    # Une stalle ne doit pas se déguiser en travail — même raison que le job `engine` de
+    # Une stalle ne doit pas se déguiser en travail — même raison que le job `rust` de
     # `ci.yml`. Une construction universelle compile la crate deux fois : quarante minutes
     # laissent de la marge, une heure trente n'en serait plus.
     timeout-minutes: 40
@@ -194,37 +240,26 @@ jobs:
           python3 scripts/verifier-version.py "$version"
           echo "VERSION=$version" >> "$GITHUB_ENV"
 
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      # La mise en place de `ci.yml`, plus le sidecar des deux architectures et sa fusion. Tauri ne
+      # fond rien : pour `--target universal-apple-darwin` il exige un fichier
+      # `cloud-sql-proxy-universal-apple-darwin` déjà universel, et son absence n'apparaît qu'au
+      # *bundling* — donc après cinq minutes de compilation. C'est `--tous` qui appelle `lipo`.
+      #
+      # **Aucun cache Rust** (#189). Un cache n'est visible que de la référence qui l'a écrit et de
+      # la branche par défaut : celui qu'écrivait ce job l'était sous le tag, donc relu par
+      # personne — et sa sauvegarde coûtait 67 secondes de macOS. Aucune exécution de `main` ne
+      # compile en release pour deux cibles, donc il n'y avait rien à relire non plus.
+      - uses: ./.github/actions/preparer
         with:
-          node-version: 26
-          cache: pnpm
-
-      - run: rustup show
-        working-directory: src-tauri
+          rust: "true"
+          cache-rust: aucun
+          sidecar: tous
 
       # Les deux cibles du bundle universel. `aarch64` est déjà celle du runner ; `x86_64` est
       # une construction croisée, et c'est elle qui rend le `.dmg` installable sur les Mac
       # Intel encore sous Ventura — le plancher que le projet s'est donné.
       - run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
         working-directory: src-tauri
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-          # Clé distincte de celle de `ci.yml` : ce job compile en `release` et pour deux
-          # cibles. Partager la clé ferait invalider un cache par l'autre à chaque tour.
-          key: publication
-
-      - run: pnpm install --frozen-lockfile
-
-      # **Les deux architectures du proxy, et leur fusion.** Tauri ne fond rien : pour
-      # `--target universal-apple-darwin` il exige un fichier
-      # `cloud-sql-proxy-universal-apple-darwin` déjà universel, et son absence n'apparaît
-      # qu'au *bundling* — donc après cinq minutes de compilation. C'est
-      # `telecharger-proxy.sh --tous` qui appelle `lipo`. Comme dans `ci.yml`, c'est une
-      # dépendance de compilation et non une étape de packaging (défaut n° 111).
-      - run: pnpm proxy:embarquer:tous
 
       # Le même fait, constaté en deux secondes plutôt qu'en cinq minutes. Le script vient de
       # produire ce fichier et vérifie déjà son contenu ; cette étape existe pour que l'échec
@@ -277,21 +312,10 @@ jobs:
           }
           echo "clé de signature des mises à jour : présente et bien formée"
 
-      # ── Ce qui doit être vrai avant de publier un binaire ──────────────────────────────
-      #
-      # Le tag est censé être posé sur un `main` déjà vert, et `scripts/version.sh` refuse de
-      # le poser ailleurs. Mais « censé » n'est pas une vérification : ces quatre étapes-là
-      # sont celles qui tiennent en quelques minutes, et elles rendent vraie la phrase « rien
-      # n'est publié qui n'ait été vérifié ». Playwright et les tests sur base réelle restent
-      # dans `ci.yml` : ils demandent un serveur et quatre décors, et ce job n'a pas à les
-      # remonter pour la seconde fois.
-      - run: ./scripts/verifier-aucun-sabotage.sh
+      # Ce qui doit être vrai avant de publier un binaire est jugé par le job `verifier`, sous
+      # Linux, avant même que la release existe. Reste ici ce qui ne se juge que sur macOS : le
+      # fond de la fenêtre du `.dmg`, que `sips` et `tiffutil` sont seuls à savoir mesurer.
       - run: ./scripts/verifier-fond-dmg.sh
-      - run: pnpm typecheck
-      - run: pnpm lint
-      - run: pnpm test
-      - run: cargo test
-        working-directory: src-tauri
 
       # ── Signature et notarisation Apple ────────────────────────────────────────────────
       #
@@ -705,37 +729,19 @@ jobs:
           python3 scripts/verifier-version.py "$version"
           echo "VERSION=$version" >> "$GITHUB_ENV"
 
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      # La mise en place de `ci.yml`, sidecar `.exe` compris. Le cache est celui du job `windows`
+      # de `ci.yml` — même nom de job, donc même clé —, que la chauffe hebdomadaire écrit sur
+      # `main`. Il est relu, **jamais sauvé** : un cache écrit par un tag n'est visible que de ce
+      # tag (#189).
+      - uses: ./.github/actions/preparer
         with:
-          node-version: 26
-          cache: pnpm
-
-      # `working-directory` est nécessaire : `rust-toolchain.toml` vit dans `src-tauri/`, et
-      # rustup résout la toolchain au répertoire courant.
-      - run: rustup show
-        working-directory: src-tauri
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-
-      - run: pnpm install --frozen-lockfile
-
-      # Avant toute commande cargo, et c'est structurel (défaut n° 111). Sous Windows le fichier
-      # attendu porte l'extension — `cloud-sql-proxy-x86_64-pc-windows-msvc.exe`.
-      - run: pnpm proxy:embarquer
-        shell: bash
+          rust: "true"
+          sauver-cache-rust: "false"
 
       # ── Ce qui doit être vrai avant de publier un binaire ─────────────────────────────
       #
-      # Le même principe que dans le job macOS : le tag est *censé* être posé sur un `main`
-      # vert, mais « censé » n'est pas une vérification et une release est publique. Ne sont
-      # rejouées ici que les vérifications qui disent quelque chose de **cette** plateforme —
-      # la moitié web est indépendante du système et le job macOS l'a déjà passée.
-      - run: ./scripts/verifier-aucun-sabotage.sh
-        shell: bash
-      - run: python3 scripts/verifier-conf-windows.py
+      # Le job `verifier` a déjà jugé, sous Linux, tout ce qui ne dépend pas du système. Ne sont
+      # rejouées ici que les vérifications qui disent quelque chose de **cette** plateforme.
       - run: cargo clippy --all-targets -- -D warnings
         working-directory: src-tauri
       - run: cargo test

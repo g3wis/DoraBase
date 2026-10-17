@@ -1,447 +1,165 @@
 name: CI
-# **Une exécution par commit, pas deux.** `[push, pull_request]` faisait tourner la CI
-# entière deux fois sur toute branche ayant une PR ouverte : le push et la PR déclenchent
-# deux exécutions du même arbre, à la seconde près, pour un verdict identique. Le push est
-# donc restreint à `main` — hors de `main`, c'est la PR qui décide, et c'est aussi elle qui
-# porte le verdict affiché sur la fusion.
+# **Ce que coûte une exécution est la première contrainte de ce fichier** (#189, 17 octobre 2026).
+# Une minute macOS se facture dix minutes Linux, une minute Windows deux. Mesuré avant : une PR
+# payait ~232 minutes pondérées à **chaque** push, puis la fusion rejouait exactement la même chose
+# sur `main`. Quatre décisions, dans l'ordre de ce qu'elles économisent :
 #
-# Conséquence assumée : **une branche poussée sans PR ne construit plus rien**, donc pas
-# d'artefact `.dmg` pour ce commit. `workflow_dispatch` est là pour ce cas — le lancer à la
-# main sur la branche — plutôt que de payer deux exécutions à chaque fois pour l'obtenir.
+# 1. **Plus rien ne tourne à la fusion.** La PR a vérifié le commit de fusion que GitHub compose
+#    avec la base ; le rejouer sur `main` donnait un second verdict identique, au prix du premier.
+#    Ce qui reste vrai et qu'il faut savoir : si `main` avance entre la dernière exécution d'une PR
+#    et sa fusion, l'arbre fusionné n'est vérifié que par la publication, qui rejoue les
+#    vérifications rapides avant de créer la release (voir `publication.yml`, job `verifier`).
+# 2. **Chaque job ne tourne que si ce qui a changé le concerne** — le job `perimetre`, et la règle
+#    dans `scripts/perimetre-ci.py`. Une PR qui ne change qu'`AGENTS.md` ne lance plus rien.
+# 3. **Ce qui ne dépend pas du système tourne sous Linux.** Vitest, `tsc`, Biome, les jetons, les
+#    projections, `cargo fmt`, et `cargo test` — que le job Linux rejouait déjà en entier, décors
+#    compris. macOS ne garde que ce qui exige macOS : les captures de fidélité de Playwright
+#    (`-darwin.png`) et le `.dmg`.
+# 4. **Un push par-dessus une exécution en cours l'annule** (`concurrency`). Une PR à quatre
+#    pushes en une demi-heure payait quatre CI entières.
+#
+# Les mises en place communes — Node, pnpm, Rust, son cache, le sidecar, la pile GTK — vivent dans
+# `.github/actions/preparer`, que `publication.yml` emploie aussi : ce qui ne tourne que sur un tag
+# est ainsi exercé à chaque PR.
 on:
-  push:
-    branches: [main]
   pull_request:
+  # **À la main, sur n'importe quelle branche** — c'est ainsi qu'on obtient le `.dmg` ou le `.exe`
+  # d'une branche dont la PR ne touche pas la chaîne de paquet.
   workflow_dispatch:
+    inputs:
+      portee:
+        description: "tout, ou seulement les bundles téléchargeables"
+        type: choice
+        default: paquets
+        options:
+          - paquets
+          - tout
+  # **La chauffe hebdomadaire du cache Rust.** Un cache n'est visible que de la référence qui l'a
+  # écrit et de la branche par défaut : depuis que rien ne tourne plus sur `main` à la fusion, sans
+  # cette exécution chaque PR recompilerait Rust à froid — plus cher qu'une exécution par semaine.
+  # Elle revérifie `main` au passage, sur les runners bon marché seulement (Linux et Windows), et
+  # elle garde le cache vivant : GitHub évince ce que personne n'a lu depuis sept jours.
+  schedule:
+    - cron: "17 5 * * 1"
+
+# Une exécution par PR : le push suivant annule la précédente. Hors PR, le groupe est l'exécution
+# elle-même, donc rien ne s'annule.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
-  build:
-    runs-on: macos-latest
+  # **Ce qui doit tourner**, lu dans le diff de la PR. Dix secondes de Linux pour décider de
+  # dizaines de minutes de macOS. La règle et ses raisons sont dans le script.
+  perimetre:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      web: ${{ steps.calcul.outputs.web }}
+      rust: ${{ steps.calcul.outputs.rust }}
+      windows: ${{ steps.calcul.outputs.windows }}
+      e2e: ${{ steps.calcul.outputs.e2e }}
+      paquet: ${{ steps.calcul.outputs.paquet }}
     steps:
       - uses: actions/checkout@v7
-
-      # Pas de `version:` ici : l'action lit `packageManager` de package.json,
-      # qui reste la seule source de vérité sur la version de pnpm.
-      - uses: pnpm/action-setup@v6
-
-      - uses: actions/setup-node@v7
         with:
-          node-version: 26
-          cache: pnpm
+          # Le commit de fusion **et ses parents** : `HEAD^1..HEAD` est ce que la PR apporte.
+          fetch-depth: 2
+      - id: calcul
+        run: python3 scripts/perimetre-ci.py
+        env:
+          EVENEMENT: ${{ github.event_name }}
+          PORTEE: ${{ inputs.portee }}
 
-      # La toolchain Rust est épinglée dans src-tauri/rust-toolchain.toml (canal +
-      # composants) : rustup l'installe elle-même à la première commande cargo/rustc
-      # exécutée dans ce dossier. Pas d'action dédiée ici, pour garder une seule
-      # source de vérité sur la version de Rust.
-      - run: rustup show
-        working-directory: src-tauri
+  # **Tout ce qui ne dépend pas du système**, sous Linux. Ces étapes tournaient sur macOS, au
+  # décuple, pour un verdict qui ne dépend pas de la machine — Vitest seul y prenait 2 min 14.
+  web:
+    needs: perimetre
+    if: needs.perimetre.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/preparer
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-
-      - run: pnpm install --frozen-lockfile
-
-      # **Avant toute commande cargo, et c'est structurel** (défaut n° 111). Déclarer un
-      # `externalBin` dans `tauri.conf.json` fait exiger le fichier par le script de
-      # construction de Tauri : sans lui, `cargo build`, `cargo test`, `cargo clippy` et
-      # `pnpm domain:check` échouent tous sur « resource path … doesn't exist », bien avant
-      # d'arriver au bundle. Ce n'est donc pas une étape de packaging, c'est une dépendance
-      # de compilation.
-      - run: pnpm proxy:embarquer
-      # Un marqueur de sabotage laissé par un contrôle négatif ne casse rien — c'est
-      # justement le problème. Voir l'en-tête du script.
+      # Un marqueur de sabotage laissé par un contrôle négatif ne casse rien — c'est justement le
+      # problème. Voir l'en-tête du script.
       - run: ./scripts/verifier-aucun-sabotage.sh
 
-      # Le fond de la fenêtre du `.dmg` est un bitmap committé : aucune compilation ne le relit,
-      # aucune ne comparerait ses cotes à celles que `tauri.conf.json` déclare.
-      - run: ./scripts/verifier-fond-dmg.sh
+      # Que ce fichier-ci et `publication.yml` décrivent ce qu'on croit, et que la règle du
+      # périmètre réponde ce qu'on attend d'elle. Jusqu'au 17 octobre 2026, ce garde ne tournait
+      # que dans `verifier-tout.sh` : rien ne l'imposait à une PR qui oubliait de le lancer.
+      - run: python3 scripts/verifier-ci.py
 
-      # Les trois fichiers qui portent le numéro de version doivent dire la même chose. Rien
-      # dans l'outillage ne les relie : `package.json` (que `tauri.conf.json` lit),
-      # `Cargo.toml` et `Cargo.lock`. Relevés à la main dans deux sur trois, ils laissent la CI
-      # verte et publient un `.dmg` dont le nom contredit son `Info.plist`.
+      # Les trois fichiers qui portent le numéro de version doivent dire la même chose. Rien dans
+      # l'outillage ne les relie : `package.json` (que `tauri.conf.json` lit), `Cargo.toml` et
+      # `Cargo.lock`. Relevés à la main dans deux sur trois, ils laissent la CI verte et publient un
+      # `.dmg` dont le nom contredit son `Info.plist`.
       - run: python3 scripts/verifier-version.py
+
+      # **Le recouvrement de configuration Windows ne doit rien perdre.** Tauri fusionne
+      # `tauri.windows.conf.json` par RFC 7386, où un tableau est **remplacé** : une clef absente
+      # du recouvrement retombe sur le défaut de Tauri (800 × 600, sans titre) sans que rien
+      # échoue. C'est du Python sur deux fichiers JSON — il n'a rien à faire sur un runner Windows.
+      - run: python3 scripts/verifier-conf-windows.py
 
       - run: pnpm typecheck
       - run: pnpm lint
 
-      # Garde-fous : ces fichiers sont générés, jamais édités à la main. Régénérer puis
-      # exiger un diff vide échoue si quelqu'un y a touché — ou si la source a bougé sans
-      # que la sortie soit reconstruite.
-      #   tokens : `tokens.css` et `tokens.ts` depuis `tokens.json`
+      # Garde-fou : `tokens.css` et `tokens.ts` sont générés depuis `tokens.json`, jamais édités à
+      # la main. Régénérer puis exiger un diff vide échoue si quelqu'un y a touché — ou si la source
+      # a bougé sans que la sortie soit reconstruite.
       - run: pnpm tokens:check
-
-      #   domaine : `src/domain/config.ts`, projeté depuis les types Rust par ts-rs.
-      #   `ts-rs` exporte pendant `cargo test`, et la sortie est reformatée par Biome —
-      #   chaîne déterministe, vérifiée par deux générations successives identiques.
-      - run: pnpm domain:check
 
       - run: pnpm test
 
-      # Playwright a son propre job, `e2e` — voir son en-tête pour la raison.
-
-      - run: cargo fmt --all --check
-        working-directory: src-tauri
-      - run: cargo clippy --all-targets -- -D warnings
-        working-directory: src-tauri
-
-      # `clippy --all-targets` **compile** les tests mais ne les exécute pas : un test
-      # qui échoue passait donc la CI en silence, jusqu'au 5 août 2026. Constaté par
-      # contrôle négatif — un `assert_eq!(1, 2)` laissait clippy vert.
-      - run: cargo test
-        working-directory: src-tauri
-      # `cargo run` sans `--bin` doit rester non ambigu : c'est ce que `tauri dev` appelle,
-      # et l'ajout du binaire `export-types` l'a cassé sans que la CI le voie — `tauri build`
-      # ne passe pas par ce chemin.
-      #
-      # La propriété est vérifiée par `cargo metadata`, et non en lançant `cargo run` : l'app
-      # ne traite aucun argument, donc elle ouvrirait une fenêtre et bloquerait le runner.
-      # `cargo run` sans `--bin` doit rester non ambigu : c'est ce que `tauri dev` appelle,
-      # et l'ajout du binaire `export-types` l'a cassé sans que la CI le voie — `tauri build`
-      # ne passe pas par ce chemin. Voir l'en-tête du script pour le détail.
-      - name: cargo run reste non ambigu (default-run)
-        working-directory: src-tauri
-        run: cargo metadata --format-version 1 --no-deps | python3 ../scripts/verifier-default-run.py
-
-      # **Une clé de mise à jour jetable, et c'est délibéré.** Depuis `createUpdaterArtifacts`,
-      # tout `tauri build` signe une archive de mise à jour — et **échoue** s'il trouve une clé
-      # publique dans `tauri.conf.json` sans clé privée en face. Trois voies possibles :
-      #
-      #   - retirer la clé de la copie de travail, comme le fait `publication.yml` pour
-      #     `signingIdentity` : la CI cesserait alors d'exercer le chemin qui produit l'archive,
-      #     et sa première exécution serait une publication ;
-      #   - donner le vrai secret à ce job : les PR venues d'un fork n'y ont pas accès, donc la
-      #     CI deviendrait rouge chez tout contributeur extérieur ;
-      #   - une paire jetée, régénérée à chaque tour. Le chemin complet est exercé, aucun secret
-      #     n'est requis, et l'archive produite est signée par une clé que personne ne connaît —
-      #     ce qui est exactement ce qu'on veut d'un artefact que rien ne propose en mise à jour.
-      #
-      # Sans mot de passe : celui d'une clé jetable ne protégerait rien de plus que sa durée de
-      # vie, qui est celle du runner.
-      #
-      # **Trois formes mesurées plutôt que supposées**, les trois ayant échoué au premier essai :
-      #   - `TAURI_SIGNING_PRIVATE_KEY` veut le **contenu** de la clé, pas son chemin : il décode
-      #     sa valeur en base64 sans regarder si c'est un fichier ;
-      #   - `TAURI_SIGNING_PRIVATE_KEY_PATH`, qui prend bien un chemin, n'est lu que par la
-      #     commande `tauri signer`. Le **bundler** ne connaît que la première, et son message
-      #     l'annonce sans dire que la seconde existe et ne s'applique pas ici ;
-      #   - la variable de mot de passe doit être **posée même vide**. Absente, la CLI demande le
-      #     mot de passe à l'invite — donc échoue sur un runner sans terminal, avec
-      #     « incorrect updater private key password: Device not configured », qui ne dit pas du
-      #     tout qu'il manque une variable.
-      #
-      # Et l'échec arrive **après** le bundling, sur un artefact déjà fabriqué : c'est la dernière
-      # étape de `tauri build`. D'où la même prudence que pour les secrets Apple — mais ici la
-      # clé est produite juste avant, donc il n'y a rien à contrôler en amont.
-      #
-      # Tauri remarque que cette clé ne correspond pas à la publique de `tauri.conf.json` et le
-      # dit — « does not match the public key », en **avertissement** et non en erreur. C'est
-      # exactement le fait qu'on veut : l'archive est fabriquée et signée, et elle ne sera
-      # acceptée par aucune installation.
-      - name: une clé de mise à jour jetable, le temps du build
-        run: |
-          set -euo pipefail
-          pnpm tauri signer generate --write-keys "$RUNNER_TEMP/jetable.key" --password '' --force
-          {
-            echo "TAURI_SIGNING_PRIVATE_KEY=$(cat "$RUNNER_TEMP/jetable.key")"
-            echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD="
-          } >> "$GITHUB_ENV"
-
-      # `TAURI_BUNDLER_DMG_IGNORE_CI` : **sans elle, le `.dmg` sort avec la vue Finder par
-      # défaut.** Le bundler DMG de Tauri ajoute `--skip-jenkins` dès qu'il voit `CI` dans
-      # l'environnement, et ce drapeau saute l'AppleScript qui pose le fond, la taille de
-      # fenêtre et la position des deux icônes. Rien n'échoue, rien ne l'annonce : la
-      # construction réussit et l'habillage a disparu. C'est le seul endroit du dépôt où une
-      # variable d'environnement décide de ce que voit l'utilisateur au téléchargement, d'où
-      # l'étape « la fenêtre d'installation est dans le .dmg » plus bas, qui le constate.
-      - run: pnpm tauri build
-        env:
-          TAURI_BUNDLER_DMG_IGNORE_CI: true
-
-      # La version affichée vient du build et elle est **figée sous Playwright** : sans quoi
-      # chaque publication périmerait les captures de fidélité. La contrepartie est de vérifier
-      # que le décor ne sort pas du décor — voir l'en-tête du script.
+      # **Le front livré, construit comme `tauri build` le construit** (`beforeBuildCommand`), et le
+      # garde sur la version de décor : elle est figée sous Playwright, sans quoi chaque publication
+      # périmerait les captures de fidélité, et elle ne doit pas sortir du décor. Ce garde vivait
+      # après le bundle macOS ; il ne regarde que `dist/`, que Linux produit à l'identique.
+      - run: pnpm build
       - run: ./scripts/verifier-aucun-decor-de-version.sh
 
-      # **La seule vérification automatisable d'`06h`.** Que le binaire du proxy soit
-      # *embarqué* se prouve ici ; qu'il soit *trouvé* par l'app lancée depuis le Finder
-      # demande un œil humain. Sans cette étape, un `externalBin`
-      # retiré de `tauri.conf.json` laisserait la CI verte et casserait Cloud SQL chez
-      # l'utilisateur — panne invisible en développement, où le `PATH` fournit le binaire.
-      - name: le proxy Cloud SQL est bien dans le bundle
-        run: |
-          set -euo pipefail
-          app=src-tauri/target/release/bundle/macos/DoraBase.app
-          test -x "$app/Contents/MacOS/cloud-sql-proxy"
-          test -f "$app/Contents/Resources/licences/cloud-sql-proxy/LICENSE"
-          test -f "$app/Contents/Resources/licences/cloud-sql-proxy/VERSION"
-          # Le binaire embarqué doit porter la version du verrou, et non celle qu'un cache
-          # aurait laissée : c'est tout l'objet du verrou.
-          attendue=$(sed -n 's/^version *= *//p' src-tauri/cloud-sql-proxy.lock | head -1)
-          "$app/Contents/MacOS/cloud-sql-proxy" --version | grep -F "$attendue"
-
-      # L'habillage de la fenêtre du volume (handoff « fenêtre d'installation DMG ») traverse
-      # une configuration déclarative, un script shell, un AppleScript et le Finder. Aucun de
-      # ces maillons ne rend d'erreur quand le fond n'arrive pas — le `.dmg` a l'air normal. Le
-      # script monte l'image et regarde.
-      - name: la fenêtre d'installation est dans le .dmg
-        run: ./scripts/verifier-dmg-monte.sh "$(ls src-tauri/target/release/bundle/dmg/*.dmg)"
-
-      # **Le build de chaque commit, téléchargeable.** Jusqu'ici `tauri build` prouvait que le
-      # bundle se construit, puis le jetait — or la question « est-ce que ça se lance ? » ne se
-      # tranche qu'en lançant, et Playwright ne pilote pas WKWebView (voir AGENTS.md). Sans cet
-      # artefact, essayer un commit demandait de le compiler soi-même.
-      #
-      # Ce n'est **pas** une publication : mono-architecture (celle du runner), nommé par le
-      # commit, gardé sept jours, et réservé aux comptes qui ont accès au dépôt. Les versions
-      # publiées sortent de `publication.yml`, sur tag, en bundle universel.
-      #
-      # Le `.dmg` seul, et non le `.app` : `upload-artifact` réempaquette dans un zip qui ne
-      # garde ni les bits d'exécution ni les liens symboliques du bundle — un `.app` ainsi
-      # transporté ne se lance pas. Le `.dmg` est une image opaque, il traverse intact.
-      - uses: actions/upload-artifact@v4
-        with:
-          name: DoraBase-${{ github.sha }}-dmg
-          path: src-tauri/target/release/bundle/dmg/*.dmg
-          retention-days: 7
-          # Un artefact vide serait un piège : on le télécharge, il ne contient rien, et on
-          # cherche la cause du côté du bundle.
-          if-no-files-found: error
-
-  # **Le pendant Windows du job `build`**, depuis le 31 août 2026.
+  # **Le Rust sous Linux, décors compris** — l'ancien job `engine`, qui fait désormais tout le Rust
+  # que le système ne décide pas.
   #
-  # Il existe pour une raison précise : `src/dump/discover.rs` employait `std::os::unix` sans
-  # garde, et **le job Linux ne pouvait pas le voir** — `std::os::unix` existe là aussi. Le seul
-  # moyen d'attraper cette famille de défauts est de compiler pour Windows, et « Windows tourne »
-  # ne tient que si quelque chose le vérifie à chaque commit.
+  # Pourquoi Linux : les *service containers* et Docker n'existent que là, et une minute y coûte le
+  # dixième d'une minute macOS. Ce que macOS a de propre côté Rust tient en trois lignes de
+  # `menu/mod.rs`, que `tauri build` compile dans `paquet-macos` et dans la publication, et que
+  # `verifier-tout.sh` compile sur chaque poste de développement — tous sous macOS.
   #
-  # **Il ne rejoue pas la moitié web.** Vitest, Biome, `tsc`, les jetons et les projections sont
-  # indépendants de la plateforme : le job `build` les couvre, et les remonter ici doublerait
-  # quatre minutes pour un verdict identique. Ce qui est propre à Windows, c'est la compilation
-  # Rust, la conformité du recouvrement de configuration, et le bundle NSIS.
-  #
-  # **Ni Playwright ni les captures de fidélité.** Les références portent `-darwin.png` : ici
-  # Playwright les *écrirait* au lieu de les comparer, et rendrait une suite verte qui ne compare
-  # rien. La coquille Windows est mesurée depuis macOS, par le projet `windows` de
-  # `playwright.config.ts` et son `DORABASE_PLATEFORME_DECOR`. Ce qui reste — que les dix écrans
-  # soient *beaux* sous WebView2 — se lit à l'œil, et c'est dit dans AGENTS.md.
-  windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: pnpm/action-setup@v6
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 26
-          cache: pnpm
-
-      # `working-directory` est **nécessaire** : `rust-toolchain.toml` vit dans `src-tauri/`, et
-      # rustup résout la toolchain au répertoire courant. Lancé depuis la racine, il en installe
-      # une autre — le piège consigné dans AGENTS.md pour `rustup target add`.
-      - run: rustup show
-        working-directory: src-tauri
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-
-      - run: pnpm install --frozen-lockfile
-
-      # **Avant toute commande cargo, et c'est structurel** (défaut n° 111) : un `externalBin`
-      # déclaré est exigé par le script de construction de Tauri, donc par `cargo build`,
-      # `cargo test` et `cargo clippy`. Sous Windows le fichier attendu porte l'extension —
-      # `cloud-sql-proxy-x86_64-pc-windows-msvc.exe` — et c'est le script qui la pose.
-      #
-      # `shell: bash` : le shell par défaut d'un runner Windows est PowerShell, et le script est
-      # du bash. Git Bash est présent sur l'image.
-      - run: pnpm proxy:embarquer
-        shell: bash
-
-      - run: ./scripts/verifier-aucun-sabotage.sh
-        shell: bash
-
-      # **Le recouvrement de configuration ne doit rien perdre.** Tauri fusionne
-      # `tauri.windows.conf.json` par RFC 7386, où un tableau est **remplacé** : `app.windows`
-      # étant un tableau, une clef absente du recouvrement retombe sur le défaut de Tauri
-      # (800 × 600, sans titre) sans que rien échoue. Voir l'en-tête du script.
-      - run: python3 scripts/verifier-conf-windows.py
-
-      - run: cargo fmt --all --check
-        working-directory: src-tauri
-      - run: cargo clippy --all-targets -- -D warnings
-        working-directory: src-tauri
-      # `clippy --all-targets` compile les tests sans les exécuter : sans cette ligne, un test
-      # rouge passerait la CI en silence (constaté le 5 août 2026 sur le job macOS).
-      - run: cargo test
-        working-directory: src-tauri
-
-      # Même clé jetable que sur macOS, et pour la même raison : `createUpdaterArtifacts` fait
-      # échouer tout `tauri build` qui trouve une clé publique sans privée en face. La paire est
-      # jetée à la fin du runner, donc l'archive produite n'est acceptée par aucune installation
-      # — ce qu'on veut d'un artefact que rien ne propose en mise à jour. Le détail des trois
-      # formes de variable mesurées est dans le job `build`.
-      - name: une clé de mise à jour jetable, le temps du build
-        shell: bash
-        run: |
-          set -euo pipefail
-          pnpm tauri signer generate --write-keys "$RUNNER_TEMP/jetable.key" --password '' --force
-          {
-            echo "TAURI_SIGNING_PRIVATE_KEY=$(cat "$RUNNER_TEMP/jetable.key")"
-            echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD="
-          } >> "$GITHUB_ENV"
-
-      - run: pnpm tauri build
-
-      # Le proxy embarqué, vérifié dans le bundle plutôt que supposé — le pendant de l'étape
-      # « le proxy Cloud SQL est bien dans le bundle » du job macOS. NSIS empaquette dans un
-      # installateur, donc c'est l'arborescence de `release/` qu'on regarde : c'est elle que le
-      # bundler copie.
-      - name: le proxy Cloud SQL porte bien son extension
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -f src-tauri/target/release/cloud-sql-proxy.exe
-          attendue=$(sed -n 's/^version *= *//p' src-tauri/cloud-sql-proxy.lock | head -1)
-          src-tauri/target/release/cloud-sql-proxy.exe --version | grep -F "$attendue"
-
-      # **L'installateur de chaque commit, téléchargeable.** Même raison que le `.dmg` du job
-      # macOS : « est-ce que ça se lance ? » ne se tranche qu'en lançant, et rien dans ce dépôt
-      # ne pilote WebView2. Ce n'est pas une publication — il n'est pas signé (pas de certificat
-      # Authenticode), donc SmartScreen avertira au téléchargement.
-      - uses: actions/upload-artifact@v4
-        with:
-          name: DoraBase-${{ github.sha }}-nsis
-          path: src-tauri/target/release/bundle/nsis/*.exe
-          retention-days: 7
-          if-no-files-found: error
-
-  # **Playwright, dans son propre job et en tranches parallèles.** Les 247 tests d'alors prenaient
-  # six minutes en tête du job `build`, en un seul worker, et le bundle attendait derrière :
-  # la moitié du temps de mur de la CI pour des tests qui n'ont besoin ni de Rust, ni du
-  # proxy, ni du bundle — seulement d'un serveur Vite. Sorti de là, il ne rallonge plus rien,
-  # et `--shard` le découpe entre plusieurs runners.
-  #
-  # **Le job reste sur macOS**, et ce n'est pas un reste d'histoire : les captures de fidélité
-  # portent le suffixe de plateforme (`a1-accueil-darwin.png`). Sur Linux, Playwright
-  # chercherait des références `-linux` qui n'existent pas, et les *écrirait* — une suite verte
-  # qui ne compare rien.
-  #
-  # Le découpage se fait par fichier, équilibré au **nombre** de tests et non à leur durée, et
-  # les deux ne coïncident pas : mesuré en local, 131 tests en 1 min 48 contre 120 en 1 min 12.
-  # C'est la tranche qui porte `geometrie-reelle` et `a2-nouvelle-connexion` — 43 tests à elles
-  # deux, et les plus lents — qui décide du verdict. Deux tranches quand même : une minute de
-  # runner macOS se facture dix, et une troisième ne rognerait que sur la moitié rapide.
-  #
-  # `fail-fast: false` pour qu'une tranche rouge n'annule pas l'autre — on veut les deux
-  # verdicts, pas le premier.
-  e2e:
-    runs-on: macos-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        tranche: [1, 2]
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: pnpm/action-setup@v6
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 26
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      # `--with-deps` n'installe des paquets système que sur Linux ; ici il ne fait rien.
-      - run: pnpm exec playwright install chromium
-
-      - run: pnpm test:e2e --shard=${{ matrix.tranche }}/2
-        env:
-          CI: true
-
-      - uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          # Un nom par tranche : deux tranches qui téléversent sous le même nom se
-          # refusent l'une l'autre, et l'échec du téléversement masque celui des tests.
-          name: playwright-report-tranche-${{ matrix.tranche }}
-          # `test-results/` porte les captures réelle/attendue/diff produites par
-          # l'échec — c'est ce qu'on récupère pour committer la référence générée en
-          # CI. `playwright-report/` est le rapport HTML de navigation, utile en plus.
-          path: |
-            playwright-report/
-            test-results/
-
-  # Second job, sur Linux, dédié aux tests qui exigent une vraie base.
-  #
-  # Pourquoi un job séparé : les *service containers* de GitHub Actions n'existent que sur
-  # les runners Linux, or le job `build` doit rester sur macOS pour produire le `.app`. Les
-  # deux tournent en parallèle, donc la CI ne rallonge pas.
-  #
-  # Les tests concernés sont derrière la feature `db-tests` et non `#[ignore]` : sans la
-  # feature ils n'existent pas, ce que le job macOS démontre par un compte à zéro.
-  engine:
+  # Les tests sur base réelle sont derrière la feature `db-tests` et non `#[ignore]` : sans la
+  # feature ils n'existent pas.
+  rust:
+    needs: perimetre
+    if: needs.perimetre.outputs.rust == 'true'
     runs-on: ubuntu-latest
-    # **Une borne de temps, parce qu'une stalle ne doit pas se déguiser en travail.** Le 19 août 2026,
-    # `apt-get update` est resté pendu près d'une heure sur le miroir Ubuntu du runner : le job
-    # apparaissait « en cours », et rien ne distinguait cette panne d'une compilation lente. Vingt-cinq
-    # minutes suffisent largement — le job entier en prend huit quand le réseau répond.
-    timeout-minutes: 25
+    # **Une borne de temps, parce qu'une stalle ne doit pas se déguiser en travail.** Le 19 août
+    # 2026, `apt-get update` est resté pendu près d'une heure sur le miroir Ubuntu du runner : le
+    # job apparaissait « en cours », et rien ne distinguait cette panne d'une compilation lente.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-
-      # La crate dépend de `tauri`, qui exige la pile GTK/WebKit sur Linux — même pour une
-      # simple compilation de bibliothèque, `glib-sys` cherchant `glib-2.0.pc` par
-      # `pkg-config`. Sans ces paquets, le job échoue avant d'atteindre le moindre test.
-      #
-      # C'est du gaspillage assumé : installer WebKit pour tester un adaptateur PostgreSQL.
-      # La bonne forme serait d'extraire `config`, `secrets` et `engine` dans une crate
-      # sans `tauri` — le domaine n'a aucune raison de dépendre du toolkit graphique. À
-      # faire quand le coût de cette étape le justifiera.
-      #
-      # **`Acquire::Timeout` n'a pas suffi, et voici pourquoi.** Il borne chaque *étape* d'une connexion,
-      # pas la durée totale : un miroir qui répond puis distille les octets ne le déclenche jamais. Le
-      # 19 août 2026, `apt-get update` est resté pendu **vingt-cinq minutes** après avoir récupéré les
-      # fichiers `InRelease` — les options posées le matin même n'ont rien empêché, et seule la borne du
-      # job a rendu la main.
-      #
-      # Trois remèdes, du plus précis au plus grossier :
-      #
-      # 1. **le miroir Azure est écarté.** Les lignes `Ign:` du log montrent que c'est lui qui ne répond
-      #    pas ; `archive.ubuntu.com` est déjà celui vers lequel `apt` se rabat, en perdant du temps ;
-      # 2. **`timeout` autour de chaque appel** — la seule borne qui tienne vraiment, puisqu'elle ne
-      #    dépend pas de la bonne volonté du serveur ;
-      # 3. **trois tentatives**, parce qu'un miroir qui pend une fois répond souvent la suivante.
-      - run: |
-          sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' \
-            /etc/apt/sources.list /etc/apt/sources.list.d/*.list \
-            /etc/apt/sources.list.d/*.sources 2>/dev/null || true
-          apt_reessaye() {
-            for tentative in 1 2 3; do
-              if sudo timeout 240 apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=15 "$@"; then
-                return 0
-              fi
-              echo "::warning::apt-get $1 a échoué ou pendu (tentative $tentative/3)"
-              sleep 5
-            done
-            return 1
-          }
-          apt_reessaye update
-          apt_reessaye install --no-install-recommends -y \
-            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+      - uses: ./.github/actions/preparer
+        with:
+          rust: "true"
+          pile-linux: "true"
+          # Partagée avec le job `verifier` de `publication.yml`, qui compile la même crate pour
+          # la même cible : la chauffe hebdomadaire sert aux deux.
+          cache-rust: linux
 
       # **Le client PostgreSQL 17, et pas celui du runner.** L'export et l'import délèguent à
       # `pg_dump` et `psql` : sans eux, ces tests ne mesurent rien. Et la version compte — le
-      # runner ships `pg_dump` 16.15, le décor est un `postgres:17`, et un outil plus ancien
-      # que le serveur refuse de le dumper. C'est le verdict `ToolTooOld`, juste mais stérile
-      # ici : il ferait échouer toute la famille pour une raison qui n'est pas le code.
+      # runner ships `pg_dump` 16, le décor est un `postgres:17`, et un outil plus ancien que le
+      # serveur refuse de le dumper. C'est le verdict `ToolTooOld`, juste mais stérile ici : il
+      # ferait échouer toute la famille pour une raison qui n'est pas le code.
       #
       # Le dépôt PGDG est donc ajouté, et la **majeure est épinglée** sur celle de l'image de
-      # `pg-test.sh`. Les deux doivent bouger ensemble ; l'étape suivante le constate plutôt
-      # que d'attendre l'échec de dix tests.
+      # `pg-test.sh`. Les deux doivent bouger ensemble ; l'étape suivante le constate plutôt que
+      # d'attendre l'échec de dix tests.
       - name: le client PostgreSQL 17, pour les tests de dump
         run: |
           set -euo pipefail
@@ -451,22 +169,11 @@ jobs:
           echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
             https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
             | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
-          apt_reessaye() {
-            for tentative in 1 2 3; do
-              if sudo timeout 240 apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=15 "$@"; then
-                return 0
-              fi
-              echo "::warning::apt-get $1 a échoué ou pendu (tentative $tentative/3)"
-              sleep 5
-            done
-            return 1
-          }
-          apt_reessaye update
-          apt_reessaye install --no-install-recommends -y postgresql-client-17
+          bash scripts/apt-reessaye.sh postgresql-client-17
           echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
 
-      # Que le client trouvé soit bien le 17, et non celui de l'image du runner : `apt` peut
-      # avoir installé sans que le `PATH` change d'avis, et l'ordre décide.
+      # Que le client trouvé soit bien le 17, et non celui de l'image du runner : `apt` peut avoir
+      # installé sans que le `PATH` change d'avis, et l'ordre décide.
       - name: le pg_dump du PATH est bien celui du décor
         run: |
           set -euo pipefail
@@ -477,70 +184,76 @@ jobs:
             exit 1
           }
 
-      - run: rustup show
+      # Une fois, ici : la mise en forme ne dépend pas du système, et elle tournait sur macOS
+      # **et** sur Windows.
+      - run: cargo fmt --all --check
         working-directory: src-tauri
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-          # Clé distincte de celle du job macOS : les cibles diffèrent, et les mélanger
-          # ferait invalider un cache par l'autre.
-          key: engine
+      # Avec `db-tests`, comme `verifier-tout.sh` quand les décors sont là : sans la feature, le
+      # code des tests sur base réelle n'existe pas pour clippy, et ses avertissements passent.
+      - run: cargo clippy --all-targets --features db-tests -- -D warnings
+        working-directory: src-tauri
 
-      # Le décor PostgreSQL, **avec TLS** (`06f`), monté par le même script qu'en local. Le schéma
-      # de test garde sa composition connue, sur laquelle les tests assènent des valeurs exactes.
+      # `cargo run` sans `--bin` doit rester non ambigu : c'est ce que `tauri dev` appelle, et
+      # l'ajout du binaire `export-types` l'a cassé sans que la CI le voie — `tauri build` ne passe
+      # pas par ce chemin. Vérifié par `cargo metadata` plutôt qu'en lançant `cargo run` : l'app ne
+      # traite aucun argument, donc elle ouvrirait une fenêtre et bloquerait le runner.
+      - name: cargo run reste non ambigu (default-run)
+        working-directory: src-tauri
+        run: cargo metadata --format-version 1 --no-deps | python3 ../scripts/verifier-default-run.py
+
+      # `src/domain/*.ts`, projeté depuis les types Rust par ts-rs. Régénérer puis exiger un diff
+      # vide échoue si quelqu'un y a touché, ou si un type Rust a bougé sans que la projection suive.
+      - run: pnpm domain:check
+
+      # Les quatre décors, montés par les **mêmes scripts** qu'en local : une variante CI qu'on ne
+      # peut pas essayer localement finit par diverger de ce qu'on croit qu'elle fait.
       #
-      # **Ce n'est plus un service container**, et c'est `06f` qui l'a imposé : le décor a besoin d'un
-      # certificat dont le nom commun **ne correspond pas** à l'hôte joint, ce qui demande de passer
-      # `-c ssl_cert_file=…` à `postgres` — pas exprimable dans les options d'un service container.
-      # PostgreSQL rejoint donc MongoDB et MySQL : une seule façon de monter le décor, en local comme
-      # ici, plutôt que deux qui divergent.
-      # **Même raison que dans le job macOS** (défaut n° 111) : un `externalBin` déclaré est
-      # exigé par le script de construction de Tauri, donc par `cargo test`, même sur un
-      # système qui ne recevra jamais de bundle. Appelé directement et non par `pnpm` : ce job
-      # n'installe pas Node, n'ayant rien à faire du front.
-      - run: bash scripts/telecharger-proxy.sh
-
+      # PostgreSQL **avec TLS** (`06f`) : le décor a besoin d'un certificat dont le nom commun ne
+      # correspond pas à l'hôte joint, ce qui demande `-c ssl_cert_file=…` — pas exprimable dans les
+      # options d'un service container.
       - name: monter le décor PostgreSQL
         run: ./scripts/pg-test.sh demarrer
         env:
           DORABASE_TEST_PG_PORT: 5432
 
-      # Le décor MongoDB de `18`, monté par le **même script** qu'en local.
-      #
-      # **Pas un service container** non plus : GitHub n'y accepte que des options `docker run`, et
-      # `--replSet rs0` n'est pas exprimable. Or un `mongod` isolé ne sait pas ouvrir de transaction,
-      # donc `18f` n'y testerait que son refus. Le script porte aussi les deux attentes (serveur, puis
-      # élection du primaire) qui évitent un « not primary » intermittent.
+      # `--replSet rs0` n'est pas exprimable dans un service container non plus, or un `mongod`
+      # isolé ne sait pas ouvrir de transaction : `18f` n'y testerait que son refus.
       - name: monter le décor MongoDB
         run: ./scripts/mongo-test.sh demarrer
         env:
           DORABASE_TEST_MONGO_PORT: 27017
 
-      # Le décor MySQL de `16`, monté par le **même script** qu'en local. Il porte l'attente
-      # d'initialisation — MySQL crée son répertoire de données au premier démarrage, et trente
-      # secondes ne suffisent pas toujours — et le `--default-character-set=utf8mb4` sans lequel le
-      # décor entre en latin1 (défaut n° 59).
+      # Le script porte l'attente d'initialisation et le `--default-character-set=utf8mb4` sans
+      # lequel le décor entre en latin1 (défaut n° 59).
       - name: monter le décor MySQL
         run: ./scripts/mysql-test.sh demarrer
         env:
           DORABASE_TEST_MYSQL_PORT: 3306
 
-      # Le bastion SSH de `06e`, monté par le **même script** qu'en local. Le conteneur
-      # PostgreSQL est ici le *service container* de GitHub, dont le nom est engendré : le
-      # script le retrouve par son image. Une seule définition de décor pour les deux
-      # environnements, plutôt qu'une variante CI qu'on ne peut pas essayer localement — le
-      # défaut qui a fait échouer le garde `default-run`.
       - name: monter le bastion SSH
         run: ./scripts/bastion-test.sh demarrer "$RUNNER_TEMP/bastion"
 
-      - name: tests, avec base et bastion
+      # **Une seule exécution de la suite, et le contrôle des tests SSH lit son journal.** Les tests
+      # SSH se **sautent** quand le décor manque, ce qui les rendrait invisibles si le bastion
+      # échouait à démarrer sans casser le job. Ce contrôle relançait `cargo test … tunnel` une
+      # seconde fois pour lire leur sortie — 43 secondes pour une question que la première
+      # exécution peut déjà trancher : `--show-output` rend la sortie des tests réussis, où un test
+      # sauté écrit « décor SSH absent ».
+      - name: tests, avec base et bastion — et aucun test SSH sauté
         working-directory: src-tauri
         run: |
+          set -euo pipefail
           set -a
           . "$RUNNER_TEMP/bastion/bastion.env"
           set +a
-          cargo test --features db-tests
+          cargo test --features db-tests -- --show-output 2>&1 | tee "$RUNNER_TEMP/tests.log"
+          if grep -q "décor SSH absent" "$RUNNER_TEMP/tests.log"; then
+            grep "décor SSH absent" "$RUNNER_TEMP/tests.log"
+            echo "::error::des tests SSH ont été sautés alors que le bastion est censé tourner"
+            exit 1
+          fi
+          echo "$(grep -c '^test engine::tunnel::tests_ssh' "$RUNNER_TEMP/tests.log") tests SSH exécutés"
         env:
           DORABASE_TEST_PG: postgres://dorabase:dorabase-test@localhost:5432/dorabase_test
           DORABASE_TEST_PG_CERTS: /tmp/dorabase-test-pg-certs
@@ -548,25 +261,172 @@ jobs:
           DORABASE_TEST_MYSQL: mysql://dorabase:dorabase-test@localhost:3306/dorabase_test
           DORABASE_TEST_MYSQL_CA: /tmp/dorabase-test-mysql-ca.pem
 
-      # Les tests SSH se **sautent** quand le décor manque, ce qui les rendrait invisibles si
-      # le bastion échouait à démarrer sans casser le job. Cette étape refuse ce silence.
-      - name: vérifier que les tests SSH ont bien tourné
+  # **Le Rust sous Windows**, depuis le 31 août 2026.
+  #
+  # Il existe pour une raison précise : `src/dump/discover.rs` employait `std::os::unix` sans
+  # garde, et **le job Linux ne pouvait pas le voir** — `std::os::unix` existe là aussi. Le seul
+  # moyen d'attraper cette famille de défauts est de compiler et de tester pour Windows.
+  #
+  # **Rien d'autre ici.** Ni Node — il n'a rien à construire —, ni `cargo fmt`, que le job `rust`
+  # passe une fois pour tous, ni les gardes en Python, qui lisent des fichiers et non le système.
+  # L'installateur NSIS est construit par `paquet-windows`, quand la chaîne de paquet change.
+  windows:
+    needs: perimetre
+    if: needs.perimetre.outputs.windows == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/preparer
+        with:
+          node: "false"
+          rust: "true"
+      - run: cargo clippy --all-targets -- -D warnings
         working-directory: src-tauri
-        run: |
-          set -a
-          . "$RUNNER_TEMP/bastion/bastion.env"
-          set +a
-          sortie=$(cargo test --features db-tests tunnel -- --nocapture 2>&1)
-          if echo "$sortie" | grep -q "décor SSH absent"; then
-            echo "$sortie" | grep "décor SSH absent"
-            echo "::error::des tests SSH ont été sautés alors que le bastion est censé tourner"
-            exit 1
-          fi
-          echo "$sortie" | grep -c "^test engine::tunnel::tests_ssh" \
-            | xargs -I{} echo "{} tests SSH exécutés"
+      # `clippy --all-targets` **compile** les tests mais ne les exécute pas : un test qui échouait
+      # passait donc la CI en silence, jusqu'au 5 août 2026 — un `assert_eq!(1, 2)` laissait
+      # clippy vert.
+      - run: cargo test
+        working-directory: src-tauri
+
+  # **Playwright, seul sur macOS, quand le front change.**
+  #
+  # **Le job reste sur macOS**, et ce n'est pas un reste d'histoire : les captures de fidélité
+  # portent le suffixe de plateforme (`a1-accueil-darwin.png`). Sur Linux, Playwright chercherait
+  # des références `-linux` qui n'existent pas, et les *écrirait* — une suite verte qui ne compare
+  # rien.
+  #
+  # **Un seul job, et non plus deux tranches.** Le découpage (`--shard`) rendait le verdict plus
+  # tôt, mais chaque tranche payait sa propre mise en place et sa propre minute entamée, au
+  # décuple. Le temps de mur est ici le prix accepté de la facture.
+  e2e:
+    needs: perimetre
+    if: needs.perimetre.outputs.e2e == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/preparer
+
+      # `--with-deps` n'installe des paquets système que sur Linux ; ici il ne ferait rien.
+      - run: pnpm exec playwright install chromium
+
+      - run: pnpm test:e2e
         env:
-          DORABASE_TEST_PG: postgres://dorabase:dorabase-test@localhost:5432/dorabase_test
-          DORABASE_TEST_PG_CERTS: /tmp/dorabase-test-pg-certs
-          DORABASE_TEST_MONGO: mongodb://localhost:27017
-          DORABASE_TEST_MYSQL: mysql://dorabase:dorabase-test@localhost:3306/dorabase_test
-          DORABASE_TEST_MYSQL_CA: /tmp/dorabase-test-mysql-ca.pem
+          CI: true
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          # `test-results/` porte les captures réelle/attendue/diff produites par l'échec — c'est ce
+          # qu'on récupère pour committer la référence générée en CI. `playwright-report/` est le
+          # rapport HTML de navigation, utile en plus.
+          path: |
+            playwright-report/
+            test-results/
+
+  # **Le `.dmg` de la branche, quand la chaîne de paquet change ou qu'on le demande.**
+  #
+  # Ce job construisait à **chaque** push un bundle release — 3 min 18 de `tauri build` au décuple,
+  # plus la compilation release qui va avec —, pour une chaîne que 4 commits sur 57 touchaient
+  # (septembre-octobre 2026). Il tourne désormais quand une PR touche ce que seule cette chaîne
+  # lit — configuration du bundler, habillage du `.dmg`, icônes, sidecar, dépendances — et à la
+  # main, par « Run workflow » sur la branche.
+  #
+  # **La question « est-ce que ça se lance ? » ne se tranche qu'en lançant**, et Playwright ne
+  # pilote pas WKWebView : l'artefact sert à essayer une branche sans la compiler soi-même. Ce
+  # n'est **pas** une publication : mono-architecture, gardé sept jours, réservé aux comptes qui
+  # ont accès au dépôt. Les versions publiées sortent de `publication.yml`, en bundle universel.
+  paquet-macos:
+    needs: perimetre
+    if: needs.perimetre.outputs.paquet == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/preparer
+        with:
+          rust: "true"
+
+      # Le fond de la fenêtre du `.dmg` est un bitmap committé : aucune compilation ne le relit,
+      # aucune ne comparerait ses cotes à celles que `tauri.conf.json` déclare. `sips` et
+      # `tiffutil` n'existent que sur macOS — c'est la raison de sa place ici.
+      - run: ./scripts/verifier-fond-dmg.sh
+
+      - uses: ./.github/actions/cle-jetable
+
+      # `TAURI_BUNDLER_DMG_IGNORE_CI` : **sans elle, le `.dmg` sort avec la vue Finder par défaut.**
+      # Le bundler DMG de Tauri ajoute `--skip-jenkins` dès qu'il voit `CI` dans l'environnement, et
+      # ce drapeau saute l'AppleScript qui pose le fond, la taille de fenêtre et la position des
+      # deux icônes. Rien n'échoue, rien ne l'annonce — d'où l'étape « la fenêtre d'installation
+      # est dans le .dmg » plus bas, qui le constate.
+      - run: pnpm tauri build
+        env:
+          TAURI_BUNDLER_DMG_IGNORE_CI: true
+
+      # Que le binaire du proxy soit *embarqué* se prouve ici ; qu'il soit *trouvé* par l'app
+      # lancée depuis le Finder demande un œil humain. Sans cette étape, un `externalBin` retiré de
+      # `tauri.conf.json` laisserait la CI verte et casserait Cloud SQL chez l'utilisateur.
+      - name: le proxy Cloud SQL est bien dans le bundle
+        run: |
+          set -euo pipefail
+          app=src-tauri/target/release/bundle/macos/DoraBase.app
+          test -x "$app/Contents/MacOS/cloud-sql-proxy"
+          test -f "$app/Contents/Resources/licences/cloud-sql-proxy/LICENSE"
+          test -f "$app/Contents/Resources/licences/cloud-sql-proxy/VERSION"
+          # Le binaire embarqué doit porter la version du verrou, et non celle qu'un cache aurait
+          # laissée : c'est tout l'objet du verrou.
+          attendue=$(sed -n 's/^version *= *//p' src-tauri/cloud-sql-proxy.lock | head -1)
+          "$app/Contents/MacOS/cloud-sql-proxy" --version | grep -F "$attendue"
+
+      # L'habillage de la fenêtre du volume traverse une configuration déclarative, un script
+      # shell, un AppleScript et le Finder. Aucun de ces maillons ne rend d'erreur quand le fond
+      # n'arrive pas — le `.dmg` a l'air normal. Le script monte l'image et regarde.
+      - name: la fenêtre d'installation est dans le .dmg
+        run: ./scripts/verifier-dmg-monte.sh "$(ls src-tauri/target/release/bundle/dmg/*.dmg)"
+
+      # Le `.dmg` seul, et non le `.app` : `upload-artifact` réempaquette dans un zip qui ne garde
+      # ni les bits d'exécution ni les liens symboliques du bundle — un `.app` ainsi transporté ne
+      # se lance pas. Le `.dmg` est une image opaque, il traverse intact.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DoraBase-${{ github.sha }}-dmg
+          path: src-tauri/target/release/bundle/dmg/*.dmg
+          retention-days: 7
+          # Un artefact vide serait un piège : on le télécharge, il ne contient rien, et on cherche
+          # la cause du côté du bundle.
+          if-no-files-found: error
+
+  # **L'installateur Windows de la branche**, dans les mêmes conditions que le `.dmg`. Il n'est pas
+  # signé (pas de certificat Authenticode) : SmartScreen avertira au téléchargement.
+  paquet-windows:
+    needs: perimetre
+    if: needs.perimetre.outputs.paquet == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/preparer
+        with:
+          rust: "true"
+      - uses: ./.github/actions/cle-jetable
+      - run: pnpm tauri build
+
+      # Le proxy embarqué, vérifié dans le bundle plutôt que supposé. NSIS empaquette dans un
+      # installateur, donc c'est l'arborescence de `release/` qu'on regarde : c'est elle que le
+      # bundler copie.
+      - name: le proxy Cloud SQL porte bien son extension
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f src-tauri/target/release/cloud-sql-proxy.exe
+          attendue=$(sed -n 's/^version *= *//p' src-tauri/cloud-sql-proxy.lock | head -1)
+          src-tauri/target/release/cloud-sql-proxy.exe --version | grep -F "$attendue"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DoraBase-${{ github.sha }}-nsis
+          path: src-tauri/target/release/bundle/nsis/*.exe
+          retention-days: 7
+          if-no-files-found: error

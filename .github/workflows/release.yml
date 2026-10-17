@@ -29,9 +29,11 @@ permissions:
 
 jobs:
   relever-et-taguer:
-    runs-on: macos-latest
-    # Rien ne se compile ici : relever trois fichiers, committer, taguer, pousser. Une minute
-    # de marge est déjà large.
+    # **Linux, et non macOS** (#189) : rien ne se compile ici — relever trois fichiers, committer,
+    # taguer, pousser —, et une minute macOS s'y facturait dix. `scripts/version.sh` a quitté
+    # `sed -i ''`, la forme BSD, pour que ce soit possible.
+    runs-on: ubuntu-latest
+    # Une minute de marge est déjà large.
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7

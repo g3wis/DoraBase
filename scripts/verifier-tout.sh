@@ -34,7 +34,7 @@ etape "aucun sabotage résiduel" ./scripts/verifier-aucun-sabotage.sh
 # échouer l'analyseur : le dernier gagne, en silence. Une édition automatisée a un jour dupliqué le
 # job `engine`, et le premier avait avalé les étapes du job `build` — la construction macOS ne
 # tournait plus, et rien ne le disait.
-etape "ci.yml et publication.yml cohérents" python3 scripts/verifier-ci.py
+etape "CI cohérente (workflows, actions, périmètre)" python3 scripts/verifier-ci.py
 # Les trois fichiers qui portent le numéro de version — `package.json`, `Cargo.toml`,
 # `Cargo.lock` — ne se parlent pas. Relever deux sur trois laisse tout vert et publie un `.dmg`
 # dont le nom contredit son `Info.plist`. `scripts/version.sh` est le geste qui les relève.

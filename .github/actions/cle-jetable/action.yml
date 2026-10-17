@@ -1,0 +1,51 @@
+name: Clé de mise à jour jetable
+description: >-
+  Une paire minisign jetée à la fin du runner, posée dans l'environnement pour que `tauri build`
+  signe son archive de mise à jour sans le vrai secret. Pour la CI seulement : la publication
+  signe avec la vraie clé.
+
+# **Une clé de mise à jour jetable, et c'est délibéré.** Depuis `createUpdaterArtifacts`, tout
+# `tauri build` signe une archive de mise à jour — et **échoue** s'il trouve une clé publique dans
+# `tauri.conf.json` sans clé privée en face. Trois voies possibles :
+#
+#   - retirer la clé de la copie de travail, comme le fait `publication.yml` pour
+#     `signingIdentity` : la CI cesserait alors d'exercer le chemin qui produit l'archive, et sa
+#     première exécution serait une publication ;
+#   - donner le vrai secret au job : les PR venues d'un fork n'y ont pas accès, donc la CI
+#     deviendrait rouge chez tout contributeur extérieur ;
+#   - une paire jetée, régénérée à chaque tour. Le chemin complet est exercé, aucun secret n'est
+#     requis, et l'archive produite est signée par une clé que personne ne connaît — ce qui est
+#     exactement ce qu'on veut d'un artefact que rien ne propose en mise à jour.
+#
+# Sans mot de passe : celui d'une clé jetable ne protégerait rien de plus que sa durée de vie, qui
+# est celle du runner.
+#
+# **Trois formes mesurées plutôt que supposées**, les trois ayant échoué au premier essai :
+#   - `TAURI_SIGNING_PRIVATE_KEY` veut le **contenu** de la clé, pas son chemin : il décode sa
+#     valeur en base64 sans regarder si c'est un fichier ;
+#   - `TAURI_SIGNING_PRIVATE_KEY_PATH`, qui prend bien un chemin, n'est lu que par la commande
+#     `tauri signer`. Le **bundler** ne connaît que la première, et son message l'annonce sans
+#     dire que la seconde existe et ne s'applique pas ici ;
+#   - la variable de mot de passe doit être **posée même vide**. Absente, la CLI demande le mot de
+#     passe à l'invite — donc échoue sur un runner sans terminal, avec « incorrect updater private
+#     key password: Device not configured », qui ne dit pas du tout qu'il manque une variable.
+#
+# Tauri remarque que cette clé ne correspond pas à la publique de `tauri.conf.json` et le dit —
+# « does not match the public key », en **avertissement** et non en erreur. C'est exactement le
+# fait qu'on veut : l'archive est fabriquée et signée, et elle ne sera acceptée par aucune
+# installation.
+#
+# Elle vivait recopiée dans les deux jobs de construction de `ci.yml`, la seconde copie renvoyant
+# à la première pour le détail.
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        set -euo pipefail
+        pnpm tauri signer generate --write-keys "$RUNNER_TEMP/jetable.key" --password '' --force
+        {
+          echo "TAURI_SIGNING_PRIVATE_KEY=$(cat "$RUNNER_TEMP/jetable.key")"
+          echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD="
+        } >> "$GITHUB_ENV"

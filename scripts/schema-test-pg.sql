@@ -18,7 +18,7 @@
 --
 -- Local :
 --   docker exec -i dorabase-test-pg psql -U dorabase -d dorabase_test < scripts/schema-test-pg.sql
--- CI : voir le job `engine` de .github/workflows/ci.yml
+-- CI : voir le job `rust` de .github/workflows/ci.yml
 
 drop schema if exists introspection cascade;
 create schema introspection;
