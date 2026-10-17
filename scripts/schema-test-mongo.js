@@ -22,7 +22,7 @@
 //
 // Local :
 //   docker exec -i dorabase-test-mongo mongosh --quiet < scripts/schema-test-mongo.js
-// CI : voir le job `engine` de .github/workflows/ci.yml
+// CI : voir le job `rust` de .github/workflows/ci.yml
 
 db.getSiblingDB('atelier_ventes').dropDatabase()
 db.getSiblingDB('atelier_journal').dropDatabase()

@@ -1,0 +1,103 @@
+name: Préparer le runner
+description: >-
+  Node et pnpm, la toolchain Rust et son cache, le sidecar Cloud SQL, la pile GTK/WebKit de Linux.
+  Chaque job de ci.yml et de publication.yml remontait ces étapes à la main, et sept copies d'une
+  même mise en place finissent par ne plus se ressembler.
+
+# **Une action composite, pas un workflow réutilisable**, et c'est délibéré : ce qui se partage est
+# la *mise en place* d'un job, pas un job entier. Chaque appelant garde ses propres étapes, son
+# runner et ses gardes — c'est ce que `scripts/verifier-ci.py` lit — et ne délègue que ce qui était
+# recopié à l'identique.
+#
+# Le partage a un second effet, qui vaut autant que le premier : `publication.yml` ne tourne que
+# sur un tag, donc une mise en place qui ne vivrait que là ne serait exercée qu'en publiant. Celle-ci
+# est exercée par chaque PR.
+
+inputs:
+  node:
+    description: pnpm, Node et `pnpm install`. La version de pnpm vient de `packageManager`.
+    default: "true"
+  rust:
+    description: la toolchain épinglée dans `src-tauri/rust-toolchain.toml`, puis le sidecar.
+    default: "false"
+  cache-rust:
+    description: >-
+      Le cache de `target/`. Vide : une clé par job, celle de rust-cache. `aucun` : pas de cache.
+      Tout autre mot : une clé partagée entre jobs (`shared-key`).
+    default: ""
+  sauver-cache-rust:
+    description: >-
+      `false` quand le cache écrit ne serait relu par personne — un tag, notamment : un cache n'est
+      visible que de la référence qui l'a écrit et de la branche par défaut.
+    default: "true"
+  sidecar:
+    description: >-
+      `hote` : le proxy Cloud SQL de la machine. `tous` : les deux architectures macOS et leur
+      fusion, pour le bundle universel. Sans effet si `rust` est faux.
+    default: "hote"
+  pile-linux:
+    description: la pile GTK/WebKit que la crate exige pour compiler sous Linux, même sans bundle.
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    # La crate dépend de `tauri`, qui exige la pile GTK/WebKit sur Linux — même pour une simple
+    # compilation de bibliothèque, `glib-sys` cherchant `glib-2.0.pc` par `pkg-config`.
+    #
+    # C'est du gaspillage assumé : installer WebKit pour tester un adaptateur PostgreSQL. La bonne
+    # forme serait d'extraire `config`, `secrets` et `engine` dans une crate sans `tauri`.
+    - if: inputs.pile-linux == 'true'
+      shell: bash
+      run: >-
+        bash scripts/apt-reessaye.sh
+        libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+
+    # Pas de `version:` : l'action lit `packageManager` de package.json, qui reste la seule source
+    # de vérité sur la version de pnpm.
+    - if: inputs.node == 'true'
+      uses: pnpm/action-setup@v6
+
+    - if: inputs.node == 'true'
+      uses: actions/setup-node@v7
+      with:
+        node-version: 26
+        cache: pnpm
+
+    - if: inputs.node == 'true'
+      shell: bash
+      run: pnpm install --frozen-lockfile
+
+    # `working-directory` est **nécessaire** : `rust-toolchain.toml` vit dans `src-tauri/`, et
+    # rustup résout la toolchain au répertoire courant. Lancé depuis la racine, il en installerait
+    # une autre — le piège consigné dans AGENTS.md pour `rustup target add`.
+    - if: inputs.rust == 'true'
+      shell: bash
+      working-directory: src-tauri
+      run: rustup show
+
+    - if: inputs.rust == 'true' && inputs.cache-rust != 'aucun'
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: src-tauri
+        shared-key: ${{ inputs.cache-rust }}
+        save-if: ${{ inputs.sauver-cache-rust == 'true' }}
+
+    # **Avant toute commande cargo, et c'est structurel** (défaut n° 111). Déclarer un
+    # `externalBin` dans `tauri.conf.json` fait exiger le fichier par le script de construction de
+    # Tauri : sans lui, `cargo build`, `cargo test`, `cargo clippy` et `pnpm domain:check`
+    # échouent tous sur « resource path … doesn't exist ». Ce n'est donc pas une étape de
+    # packaging, c'est une dépendance de compilation — d'où sa place ici, avec la toolchain.
+    #
+    # Appelé directement et non par `pnpm proxy:embarquer` : un job qui ne fait que du Rust n'a
+    # pas à installer Node pour lancer un script bash. Sous Windows, le fichier porte l'extension
+    # `.exe`, et c'est le script qui la pose.
+    - if: inputs.rust == 'true' && inputs.sidecar == 'hote'
+      shell: bash
+      run: bash scripts/telecharger-proxy.sh
+
+    # Tauri ne fond rien : pour `--target universal-apple-darwin` il exige un fichier
+    # `cloud-sql-proxy-universal-apple-darwin` déjà universel. C'est `--tous` qui appelle `lipo`.
+    - if: inputs.rust == 'true' && inputs.sidecar == 'tous'
+      shell: bash
+      run: bash scripts/telecharger-proxy.sh --tous

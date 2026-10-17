@@ -38,10 +38,11 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   // **Playwright ne met qu'un seul worker sous `CI`**, et personne ne l'avait demandé : c'est
   // son défaut. Les 251 tests s'exécutaient donc en file indienne, six minutes, au milieu du
-  // job qui construit le bundle. Deux workers par tranche sur un runner à trois cœurs — le
-  // serveur Vite occupe le reste, et pousser à trois ne gagne que de la contention. Mesuré en
-  // local : 1 min 36 pour la suite entière à quatre workers, 1 min 48 et 1 min 12 pour les
-  // deux tranches à deux workers — et aucun test instable dans les trois exécutions.
+  // job qui construit le bundle. Deux workers sur un runner à trois cœurs — les serveurs Vite
+  // occupent le reste, et pousser à trois ne gagne que de la contention. Mesuré en local :
+  // 1 min 36 pour la suite entière à quatre workers, 1 min 48 et 1 min 12 pour deux moitiés à
+  // deux workers — et aucun test instable dans les trois exécutions. La CI ne découpe plus la
+  // suite depuis #189 : chaque tranche payait sa mise en place au décuple, sur macOS.
   workers: process.env.CI ? 2 : undefined,
   // `list` seul n'écrit rien sur disque : sans rapporteur `html`, l'artefact de CI
   // uploadé en cas d'échec serait vide — constaté en pratique, `playwright-report/`

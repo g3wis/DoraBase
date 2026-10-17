@@ -102,11 +102,13 @@ lettres plutôt que de rester muet.
 
 ### Essayer un commit, sans attendre une version
 
-Chaque commit poussé produit deux artefacts de CI, gardés **sept jours** : ouvrir le
-[job CI](https://github.com/g3wis/DoraBase/actions/workflows/ci.yml) du commit, section
-*Artifacts*, puis `DoraBase-<sha>-dmg` ou `DoraBase-<sha>-nsis`. Il faut un accès au dépôt, et
-le `.dmg` est **mono-architecture** — celle du runner GitHub. Pour installer, préférez une
-version publiée.
+Une branche peut produire deux artefacts de CI, gardés **sept jours** : `DoraBase-<sha>-dmg` et
+`DoraBase-<sha>-nsis`, dans la section *Artifacts* de l'exécution. Ils sont construits
+**automatiquement** quand une PR touche la chaîne de paquet — configuration Tauri, habillage du
+`.dmg`, icônes, sidecar, dépendances Rust —, et sinon **à la demande** :
+[Actions → CI → *Run workflow*](https://github.com/g3wis/DoraBase/actions/workflows/ci.yml), sur
+la branche, portée `paquets`. Il faut un accès au dépôt, et le `.dmg` est **mono-architecture** —
+celle du runner GitHub. Pour installer, préférez une version publiée.
 
 ---
 
@@ -127,7 +129,9 @@ branche de travail  ──PR──▶  main (CI verte)  ──version.sh──�
 ```
 
 1. **Le travail se fait sur une branche**, arrive dans `main` par PR, et `main` reste verte —
-   `ci.yml` tourne sur chaque push et chaque PR.
+   `ci.yml` tourne sur chaque PR, et seulement les jobs que ses fichiers concernent. Rien ne
+   retourne à la fusion : la publication rejoue les vérifications rapides avant de créer la
+   release.
 2. **Publier**, depuis `main` à jour et propre :
 
    ```bash

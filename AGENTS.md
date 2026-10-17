@@ -5105,8 +5105,8 @@ pas seulement les statistiques, c'est **tout ce qu'un autre test peut créer**, 
 
 ### La publication : un tag, et rien d'autre
 
-**Le tag est le déclencheur, le commit ne l'est pas.** `ci.yml` tourne sur chaque push et
-chaque PR ; `publication.yml` ne tourne que sur un tag `vX.Y.Z`, motif **ancré** sur les
+**Le tag est le déclencheur, le commit ne l'est pas.** `ci.yml` tourne sur chaque PR ;
+`publication.yml` ne tourne que sur un tag `vX.Y.Z`, motif **ancré** sur les
 trois nombres. Une release est un geste, pas un effet de bord d'un push — et un motif large
 (`v*`) accepterait `v1.2` ou `v0.1.0-essai`, dont le nom de bundle n'a été décidé par
 personne. Le format de version est fermé pour la même raison : un suffixe de pré-version
@@ -5311,7 +5311,8 @@ mais il est typé côté Tauri : une date mal formée ne rend pas le manifeste i
 rend *illisible* — donc coupe la mise à jour pour tout le monde. Un champ décoratif ne mérite
 pas ce mode de défaillance.
 
-**Une clé jetable en CI, régénérée à chaque tour.** Depuis `createUpdaterArtifacts`, tout
+**Une clé jetable en CI, régénérée à chaque tour** — l'action `.github/actions/cle-jetable`, que
+les deux jobs de bundle de `ci.yml` appellent. Depuis `createUpdaterArtifacts`, tout
 `tauri build` échoue s'il trouve une clé publique sans clé privée en face — donc `ci.yml` ne
 compilait plus. Retirer la clé de la copie de travail aurait fait cesser à la CI d'exercer le
 chemin qui produit l'archive, et sa première exécution aurait été une publication ; donner le
@@ -5406,36 +5407,111 @@ seule feature de fournisseur activée sur `rustls` reste `ring`, et l'`aws-lc-rs
 de `russh` — il y était déjà. Le jour où une dépendance activerait `aws_lc_rs` sur `rustls`, il
 faudra passer le plugin en `native-tls`.
 
-**Les vérifications rapides sont rejouées dans le job de publication** — sabotage, typecheck,
-lint, Vitest, `cargo test`. Le tag est censé être posé sur un `main` vert, et le script refuse
+**Les vérifications rapides sont rejouées avant de publier — sous Linux, et avant la release**
+— sabotage, typecheck, lint, Vitest, `cargo test`, dans le job `verifier` de `publication.yml`,
+que le job `release` attend. Le tag est censé être posé sur un `main` vert, et le script refuse
 de le poser ailleurs ; mais « censé » n'est pas une vérification, et une release est publique.
-Playwright et les tests sur base réelle restent dans `ci.yml` : ils demandent un serveur et
-quatre décors, et ce job n'a pas à les remonter une seconde fois.
+Depuis #189 c'est aussi **le seul juge de l'arbre fusionné** : rien ne tourne plus sur `main` à
+la fusion. Ces vérifications vivaient dans le job `macos`, au décuple — 6 min 40 de Vitest et de
+`cargo test` — et **après** la création de la release : un test rouge laissait une release
+publique sans aucun asset. Playwright et les tests sur base réelle restent dans `ci.yml` : ils
+demandent un serveur et quatre décors, et ce job n'a pas à les remonter une seconde fois.
 
-**Un artefact de CI n'est pas une version.** Chaque commit rend son `.dmg` en artefact, gardé
-sept jours — sans quoi essayer un commit demandait de le compiler soi-même, alors que
-« est-ce que ça se lance ? » ne se tranche qu'en lançant et que Playwright ne pilote pas
-WKWebView. Il est **mono-architecture** et réservé aux comptes qui ont accès au dépôt. Et
-c'est le `.dmg` seul qui est rendu, pas le `.app` : `upload-artifact` réempaquette dans un zip
-qui perd les bits d'exécution et les liens symboliques du bundle, et un `.app` ainsi
-transporté ne se lance pas. Le `.dmg` est une image opaque, il traverse intact.
+**Un artefact de CI n'est pas une version.** Une branche peut rendre son `.dmg` et son `.exe`,
+gardés sept jours — sans quoi l'essayer demandait de la compiler soi-même, alors que « est-ce
+que ça se lance ? » ne se tranche qu'en lançant et que Playwright ne pilote pas WKWebView. Ils
+sont construits quand une PR touche la chaîne de paquet, et sinon **à la main** (*Run workflow*
+sur la branche, portée `paquets`) — voir le paragraphe suivant. Le `.dmg` est
+**mono-architecture** et réservé aux comptes qui ont accès au dépôt. Et c'est le `.dmg` seul qui
+est rendu, pas le `.app` : `upload-artifact` réempaquette dans un zip qui perd les bits
+d'exécution et les liens symboliques du bundle, et un `.app` ainsi transporté ne se lance pas.
+Le `.dmg` est une image opaque, il traverse intact.
 
-**Une exécution de CI par commit, et Playwright à part.** `on: [push, pull_request]` faisait
-tourner la CI entière **deux fois** sur toute branche ayant une PR : deux exécutions du même
-arbre, lancées à la seconde près, pour un verdict identique. Le push est donc restreint à
-`main`, la PR décide partout ailleurs, et `workflow_dispatch` reste pour le cas qu'on perd —
-une branche poussée **sans** PR ne construit plus rien, donc n'a plus d'artefact `.dmg`.
-Quant aux 247 tests Playwright d'alors, ils prenaient six des quatorze minutes du job `build`, en
-**un seul worker** — le défaut de Playwright sous `CI`, que personne n'avait choisi — pendant
-que le bundle attendait derrière eux. Ils ont leur job, deux workers et deux tranches
-(`--shard`). Trois choses à ne pas rejouer : le job **reste sur macOS**, parce que les
-captures de fidélité portent le suffixe de plateforme (`-darwin.png`) et que sur Linux
-Playwright les **écrirait** au lieu de les comparer — une suite verte qui ne compare rien ;
-`fail-fast: false`, parce qu'on veut les deux verdicts et non le premier ; et un nom
-d'artefact par tranche, sans quoi le second téléversement échoue et masque l'échec des tests.
-`scripts/verifier-ci.py` tient les quatre — filtre de branches, `--shard`, `macos`, présence
-du job —, chacun vérifié par sabotage : aucun ne se remarquerait autrement qu'au chronomètre
-ou en comptant les exécutions.
+**Ce que coûte la CI est une contrainte de conception** (#189, 17 octobre 2026, rapporté à
+l'usage : « la CI de ce repo consomme bien trop de crédits »). Une minute macOS se facture dix
+minutes Linux, une minute Windows deux. Mesuré sur les exécutions du 7 octobre : **~232 minutes
+pondérées à chaque push de PR** — dont 110 pour le job macOS qui construisait le `.dmg` et 100
+pour Playwright —, **autant à la fusion**, qui rejouait tout sur `main`, et ~284 par publication.
+Estimé sur les 57 commits de septembre et d'octobre, le push moyen tombe à ~87 et la fusion à
+zéro. Huit décisions, et aucune ne se remarquerait défaite autrement qu'à la facture :
+
+- **plus aucun `push`** — ni à la fusion, ni sur une branche. C'est le successeur de l'arbitrage
+  du 25 août 2026, qui avait restreint le push à `main` parce que `[push, pull_request]`
+  faisait tourner la CI deux fois par PR : la fusion faisait exactement la même chose, un
+  second verdict identique au prix du premier, puisque la PR a vérifié le commit de fusion que
+  GitHub compose avec la base. **Ce qui se perd, et qu'il faut savoir** : si `main` avance entre
+  la dernière exécution d'une PR et sa fusion, l'arbre fusionné n'est jugé que par le `verifier`
+  de la publication — sans Playwright ni décors. Une file de fusion (*merge queue*) le
+  rattraperait, au prix d'une exécution par fusion : c'est ce qu'on vient de retirer ;
+- **un job `perimetre` décide de chaque autre job**, d'après le diff de la PR. La règle vit dans
+  `scripts/perimetre-ci.py` — premier motif qui correspond, du plus précis au plus large — et
+  rend cinq portées : `web`, `rust`, `windows`, `e2e`, `paquet`. Sur les 57 commits mesurés :
+  22 ne touchaient que le front (ni Rust ni Windows), 21 le front et Rust (pas de bundle),
+  7 que de la documentation (**rien ne tourne**), 4 la chaîne de paquet, 3 que Rust (pas de
+  Playwright). Deux choix tiennent tout le reste : **un fichier que rien ne classe fait tout
+  tourner**, parce que le défaut sûr est le coût d'avant et non un silence ; et **toucher la CI
+  fait tout tourner** — `.github/` et le script compris —, pour qu'une PR qui change un job
+  l'exerce. `verifier-ci.py` soumet la règle à une table de cas et exige que **chaque fichier
+  suivi** soit classé : sans ce second garde, un dossier ajouté demain tomberait dans le défaut
+  et ferait tourner Playwright sur chaque relecture, sans que rien ne le dise. Un filtre
+  `paths:` de workflow aurait demandé un fichier par famille de jobs, donc cinq fois la même
+  mise en place et cinq listes à tenir en phase ;
+- **ce qui ne dépend pas du système tourne sous Linux.** Le job `web` porte Vitest, `tsc`,
+  Biome, les jetons, `pnpm build` et les gardes en Python ; le job `rust` — l'ancien `engine` —
+  porte `cargo fmt`, `clippy` et `cargo test` avec les décors, et `domain:check`. macOS ne garde
+  que ce qui l'exige : Playwright, pour les captures `-darwin.png`, et le `.dmg`. **`cargo test`
+  sur macOS a été retiré**, et ce n'est pas un pari : le job Linux rejouait déjà toute la suite,
+  `db-tests` en plus, et ce que macOS a de propre côté Rust tient en trois lignes de
+  `menu/mod.rs`, que `tauri build` compile dans `paquet-macos` et dans la publication, et que
+  `verifier-tout.sh` compile sur chaque poste de développement ;
+- **Playwright en un seul job, sans tranches.** Le `--shard` du 26 août rendait le verdict plus
+  tôt, mais chaque tranche payait sa propre mise en place et sa propre minute entamée, au
+  décuple. Le temps de mur est le prix accepté. Le job reste **sur macOS** : sur Linux,
+  Playwright *écrirait* les références `-linux` au lieu de comparer les `-darwin`, et la suite
+  serait verte sans rien comparer ;
+- **les bundles quand la chaîne de paquet change, ou à la main** — tranché par le demandeur.
+  `paquet-macos` et `paquet-windows` construisaient en release à chaque push, pour une chaîne que
+  4 commits sur 57 touchaient. Une régression de bundle sur une PR qui ne la touche pas ne se
+  voit donc qu'à la publication ;
+- **la chauffe hebdomadaire** (`schedule`, le lundi). Un cache n'est visible que de la référence
+  qui l'a écrit et de la **branche par défaut** : depuis que rien ne tourne sur `main`, sans elle
+  chaque PR recompilerait Rust à froid — plus cher qu'une exécution par semaine. Elle ne lance
+  que `web`, `rust` et `windows`, revérifie `main` au passage, et garde le cache vivant : GitHub
+  évince ce que personne n'a lu depuis sept jours. Les bundles n'en profitent pas — release, deux
+  cibles —, et compilent à froid : c'est le prix de leur rareté ;
+- **un push par-dessus une exécution en cours l'annule** (`concurrency`). Une PR à quatre pushes
+  en une demi-heure payait quatre CI entières ;
+- **rien n'est sauvé depuis un tag.** Un cache écrit par un tag n'est visible que de ce tag : celui
+  de la publication macOS n'a jamais été relu, et sa sauvegarde coûtait 67 secondes de macOS. Le
+  job `macos` n'a plus de cache du tout, `windows` et `verifier` relisent celui de `main` sans
+  jamais écrire. Et `release.yml` tourne sur Linux — une minute macOS pour poser un tag :
+  `scripts/version.sh` a quitté `sed -i ''`, la forme BSD, pour un relèvement en Python qui exige
+  en plus que chaque motif corresponde exactement une fois.
+
+**Les mises en place communes sont une action composite, `.github/actions/preparer`** — Node et
+pnpm, la toolchain Rust et son cache, le sidecar Cloud SQL, la pile GTK/WebKit de Linux —, plus
+`.github/actions/cle-jetable` et `scripts/apt-reessaye.sh`, qui vivaient chacune recopiée deux
+fois. **Une action composite et non un workflow réutilisable** : ce qui se partage est la mise en
+place d'un job, pas un job entier, et chaque appelant garde ses étapes, son runner et ses gardes.
+Le partage a un second effet, qui vaut autant que le premier : `publication.yml` emploie la même
+action, donc **sa mise en place est exercée par chaque PR**, alors qu'elle ne tourne elle-même que
+sur un tag. Corollaire pour les gardes : `verifier-ci.py` lit ce qu'un job **demande** à l'action
+(`rust: "true"`, `sidecar: tous`, `sauver-cache-rust: "false"`) et, à part, ce que l'action **fait**
+de cette demande — les deux moitiés valent l'ancien garde qui cherchait `pnpm proxy:embarquer`
+dans les commandes du job. Deux d'entre eux sont restés verts sous sabotage au premier passage, et
+pour la même raison : le texte cherché survivait ailleurs. La phrase « décor SSH absent » est citée
+par le message d'erreur voisin du `grep` qu'on avait remplacé par `if false`, et
+`telecharger-proxy.sh` par l'étape `--tous` quand celle de l'hôte ne lançait plus rien. Les gardes
+visent désormais la commande (`grep -q "décor SSH absent"`, plus `--show-output`, sans lequel
+libtest garde pour lui la sortie des tests réussis — or un test sauté *réussit*) et l'étape par sa
+condition.
+
+**Ce qui reste à voir, et qu'aucun outil local ne dit** : la première exécution de chaque forme. La
+PR qui livre #189 touche `.github/`, donc fait tout tourner — c'est elle qui exerce `preparer` sur
+les trois systèmes, les deux bundles et la lecture du périmètre. La chauffe du lundi ne se voit
+qu'un lundi, et `publication.yml` qu'au prochain tag : son job `verifier` et la mise en place de son
+job `macos` (`sidecar: tous`, sans cache) n'auront jamais tourné avant. `actionlint` les a validés,
+et la mise en place est celle que la CI exerce ; le reste est une première.
 
 **La fenêtre du volume est habillée, et c'est une image plus des coordonnées.** Le `.dmg`
 s'ouvre sur un décor peint et une carte qui dit le geste — glisser l'application sur
@@ -5904,9 +5980,11 @@ pour Windows pour le voir.
 **Le job `windows` de la CI existe pour une famille de défauts que les deux autres ne peuvent pas
 voir.** `src/dump/discover.rs` employait `std::os::unix::fs::PermissionsExt` sans garde : le job
 Linux ne pouvait rien en dire, `std::os::unix` existant là aussi. C'était le **seul** défaut de
-compilation de tout le dépôt. Le job ne rejoue pas la moitié web — Vitest, Biome, `tsc`, les
-jetons et les projections ne dépendent pas de la plateforme — et ne lance pas Playwright, pour la
-raison des captures.
+compilation de tout le dépôt. Le job ne fait que `clippy` et `cargo test` : ni la moitié web —
+Vitest, Biome, `tsc`, les jetons et les projections ne dépendent pas de la plateforme —, ni
+`cargo fmt` ni les gardes en Python, que le job Linux passe une fois pour tous (#189), ni
+Playwright, pour la raison des captures. L'installateur NSIS est construit par `paquet-windows`,
+quand la chaîne de paquet change ou qu'on le demande.
 
 **Localement, compiler pour Windows depuis un Mac demande trois outils** : `cargo-xwin` (qui
 télécharge le CRT MSVC et le SDK Windows), le `clang-cl` de la formule `llvm` de Homebrew, et
@@ -6638,6 +6716,7 @@ pnpm lint           # Biome
 pnpm tokens:check   # garde-fou : échoue si tokens.css/ts ont été édités à la main
 pnpm dmg:fond       # régénère le fond de la fenêtre d'installation .dmg (Chromium + tiffutil)
 ./scripts/verifier-dmg-monte.sh <fichier.dmg>          # monte une image et regarde son habillage
+python3 scripts/perimetre-ci.py src/app/App.tsx      # ce qu'une PR changeant ces chemins lance en CI
 ./scripts/version.sh correctif|fonction|majeur|X.Y.Z   # relève les 3 fichiers, committe, tag
                                                        # ne pousse rien ; le README décrit le flux
 pnpm domain:check   # idem pour les projections ts-rs (exige un arbre git propre)

@@ -13,7 +13,10 @@ genre de panne que ce projet refuse — une vérification qui ne peut pas échou
 Lancé par `scripts/verifier-tout.sh`.
 """
 
+from __future__ import annotations
+
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -21,6 +24,7 @@ WORKFLOWS = Path(__file__).resolve().parent.parent / ".github" / "workflows"
 CI = WORKFLOWS / "ci.yml"
 PUBLICATION = WORKFLOWS / "publication.yml"
 RACINE = Path(__file__).resolve().parent.parent
+ACTIONS = RACINE / ".github" / "actions"
 
 
 def noms_de_jobs_dupliques(chemin: Path) -> list[str]:
@@ -155,98 +159,200 @@ def verifier_gh_nomme_son_depot(workflow: dict, fichier: str) -> None:
             raise SystemExit(1)
 
 
+def preparation_de(etapes: list) -> dict | None:
+    """Les entrées passées à `.github/actions/preparer`, ou `None` si le job ne s'en sert pas.
+
+    Depuis #189, la mise en place d'un job — Node, Rust, son cache, le sidecar — vit dans cette
+    action composite. Un garde qui cherchait `pnpm proxy:embarquer` dans les commandes d'un job
+    doit donc regarder ce que le job **demande** à l'action, et `verifier_actions` regarde ce que
+    l'action **fait** de cette demande. Les deux moitiés ensemble valent l'ancien garde.
+    """
+    for etape in etapes:
+        if str(etape.get("uses", "")) == "./.github/actions/preparer":
+            return {cle: str(valeur) for cle, valeur in (etape.get("with") or {}).items()}
+    return None
+
+
+def exiger(fragments, commandes: str, fichier: str, job: str) -> None:
+    for fragment, raison in fragments:
+        if fragment not in commandes:
+            print(f"{fichier} : le job « {job} » a perdu « {fragment} » — {raison}",
+                  file=sys.stderr)
+            raise SystemExit(1)
+
+
 def verifier_ci() -> None:
     workflow = charger(CI)
     jobs = workflow.get("jobs", {})
 
-    build = etapes_de(jobs, "build", 25, "ci.yml")
-    etapes_de(jobs, "engine", 11, "ci.yml")
-    e2e = etapes_de(jobs, "e2e", 6, "ci.yml")
-    windows = etapes_de(jobs, "windows", 13, "ci.yml")
+    etapes_de(jobs, "perimetre", 2, "ci.yml")
+    web = etapes_de(jobs, "web", 12, "ci.yml")
+    rust = etapes_de(jobs, "rust", 13, "ci.yml")
+    windows = etapes_de(jobs, "windows", 4, "ci.yml")
+    e2e = etapes_de(jobs, "e2e", 4, "ci.yml")
+    paquet_macos = etapes_de(jobs, "paquet-macos", 8, "ci.yml")
+    paquet_windows = etapes_de(jobs, "paquet-windows", 6, "ci.yml")
 
-    # **Le job Windows doit rester sur Windows, et compiler.**
+    # ── Les déclencheurs (#189) ──────────────────────────────────────────────────────────
     #
-    # Sa raison d'être est d'attraper ce que ni macOS ni Linux ne voient : `std::os::unix` sans
-    # garde compile parfaitement sur les deux. Déplacé sur un autre runner, il deviendrait un
-    # doublon coûteux du job Linux ; privé de `cargo test` ou de `tauri build`, il ne dirait plus
-    # que « ça compile », ce que `clippy` dit déjà.
-    if "windows" not in str(jobs["windows"].get("runs-on", "")):
-        print("ci.yml : le job « windows » a quitté un runner Windows — il ne verrait plus les "
-              "API propres à unix, qui compilent sur macOS comme sur Linux", file=sys.stderr)
-        raise SystemExit(1)
-
-    commandes_windows = commandes_de(windows)
-    for fragment, raison in (
-        ("pnpm proxy:embarquer",
-         "toute commande cargo échouerait sur l'`externalBin` absent (défaut n° 111)"),
-        ("verifier-conf-windows.py",
-         "le recouvrement de configuration pourrait perdre la fenêtre en silence"),
-        ("cargo clippy", "les avertissements propres à Windows repasseraient"),
-        ("cargo test", "clippy compile les tests sans les exécuter"),
-        ("tauri build", "rien ne dirait que le bundle NSIS se fabrique"),
-    ):
-        if fragment not in commandes_windows:
-            print(f"ci.yml : le job « windows » a perdu « {fragment} » — {raison}",
-                  file=sys.stderr)
-            raise SystemExit(1)
-
-    # **Une exécution par commit.** `on: [push, pull_request]` faisait tourner toute la CI deux
-    # fois sur chaque branche ayant une PR : deux verdicts identiques, à la seconde près. Le
-    # remède est un push restreint à `main`, et il se défait d'une ligne — d'où ce garde. Un
-    # `push:` sans filtre de branches, ou filtrant autre chose que `main`, rétablirait le
-    # doublon sans que personne ne le voie autrement qu'en comptant les exécutions.
+    # **Plus aucun `push`.** La fusion rejouait sur `main` exactement ce que la PR venait de
+    # vérifier — un second verdict identique, au prix du premier. Le remède tient en l'absence
+    # d'une clef, donc il se défait d'une ligne : d'où ce garde. Avant le 17 octobre 2026 il
+    # exigeait l'inverse, un `push` restreint à `main` ; c'est ce `push`-là qui est parti.
     sur = declencheurs(workflow)
-    # `on: [push, pull_request]` — la forme abrégée — rend une **liste**, où rien ne peut être
-    # filtré. C'est exactement la forme fautive, et la nommer valait mieux qu'une trace de pile
-    # sur `.get` : constaté par sabotage.
+    # `on: [push, pull_request]` — la forme abrégée — rend une **liste**. C'est exactement la
+    # forme fautive, et la nommer valait mieux qu'une trace de pile sur `.get`.
     if not isinstance(sur, dict):
-        print(f"ci.yml : `on:` est une liste ({sur!r}), donc sans filtre de branches",
-              file=sys.stderr)
-        print("  le push doit être restreint à `main`, sinon chaque commit à PR passe deux fois",
-              file=sys.stderr)
+        print(f"ci.yml : `on:` est une liste ({sur!r}) — un push y ferait tourner la CI deux "
+              "fois par PR", file=sys.stderr)
         raise SystemExit(1)
-    branches = (sur.get("push") or {}).get("branches")
-    if branches != ["main"]:
-        print(f"ci.yml : le push est filtré sur {branches!r}, attendu ['main']", file=sys.stderr)
-        print("  sans ce filtre, chaque commit d'une branche à PR fait tourner la CI deux fois",
-              file=sys.stderr)
+    if "push" in sur:
+        print("ci.yml : `push` est revenu dans les déclencheurs. La PR vérifie déjà le commit de\n"
+              "  fusion ; rejouer la CI au push (ou à la fusion sur `main`) paie deux fois le même\n"
+              "  verdict. Voir l'en-tête de ci.yml (#189).", file=sys.stderr)
         raise SystemExit(1)
     if "pull_request" not in sur:
         print("ci.yml : sans `pull_request`, plus rien ne vérifie une branche de travail",
               file=sys.stderr)
         raise SystemExit(1)
-
-    # **Playwright doit rester découpé, et rester sur macOS.** Les captures de fidélité portent
-    # le suffixe de plateforme (`-darwin.png`) : sur un runner Linux, Playwright ne les
-    # trouverait pas, les **écrirait**, et rendrait une suite verte qui ne compare rien. Quant au
-    # `--shard`, c'est lui qui tient le job sous les deux minutes ; retiré, il ne casse rien et
-    # ne se remarque qu'au chronomètre.
-    commandes_e2e = commandes_de(e2e)
-    if "test:e2e" not in commandes_e2e:
-        print("ci.yml : le job « e2e » ne lance plus Playwright", file=sys.stderr)
+    # **La chauffe hebdomadaire.** Un cache n'est visible que de la référence qui l'a écrit et de
+    # la branche par défaut : sans exécution sur `main`, chaque PR compilerait Rust à froid.
+    if not sur.get("schedule"):
+        print("ci.yml : la chauffe hebdomadaire (`schedule`) a disparu — plus rien n'écrit le\n"
+              "  cache Rust sur `main`, donc chaque PR recompilerait tout à froid", file=sys.stderr)
         raise SystemExit(1)
-    if "--shard=" not in commandes_e2e:
-        print("ci.yml : le job « e2e » ne découpe plus la suite — six minutes au lieu de deux",
+    # **Un push par-dessus une exécution en cours l'annule.** Sans `cancel-in-progress`, une PR
+    # à quatre pushes paie quatre CI entières.
+    concurrence = workflow.get("concurrency") or {}
+    if concurrence.get("cancel-in-progress") is not True or "pull_request.number" not in str(
+        concurrence.get("group", "")
+    ):
+        print("ci.yml : `concurrency` n'annule plus l'exécution précédente d'une même PR",
               file=sys.stderr)
         raise SystemExit(1)
-    if "macos" not in str(jobs["e2e"].get("runs-on", "")):
+
+    # ── Le périmètre : aucun runner cher sans lui ─────────────────────────────────────────
+    #
+    # **Chaque job décide de tourner d'après le job `perimetre`**, et le garde porte sur le
+    # **mécanisme** plutôt que sur une liste : tout job qui n'est pas `perimetre` doit en
+    # dépendre et lire sa propre portée. Un job ajouté demain sans condition tournerait à chaque
+    # PR — sur macOS, au décuple — et rien ne le dirait autrement qu'à la facture.
+    portees = set((jobs["perimetre"].get("outputs") or {}).keys())
+    attendues = {"web", "rust", "windows", "e2e", "paquet"}
+    if portees != attendues:
+        print(f"ci.yml : le job « perimetre » rend {sorted(portees)}, attendu "
+              f"{sorted(attendues)}", file=sys.stderr)
+        raise SystemExit(1)
+    for nom, job in jobs.items():
+        if nom == "perimetre":
+            continue
+        besoins = job.get("needs")
+        besoins = [besoins] if isinstance(besoins, str) else (besoins or [])
+        condition = str(job.get("if", ""))
+        if "perimetre" not in besoins or not re.search(
+            r"needs\.perimetre\.outputs\.[a-z0-9]+ == 'true'", condition
+        ):
+            print(f"ci.yml : le job « {nom} » ne dépend plus du périmètre — il tournerait à chaque\n"
+                  f"  PR, quoi qu'elle change. Ajouter `needs: perimetre` et un `if:` sur sa portée.",
+                  file=sys.stderr)
+            raise SystemExit(1)
+
+    # ── Ce que chaque job doit faire, et où ───────────────────────────────────────────────
+    def runner(nom: str) -> str:
+        return str(jobs[nom].get("runs-on", ""))
+
+    # **Ce qui ne dépend pas du système tourne sous Linux** — c'est l'économie la plus nette du
+    # ticket. Remonté sur macOS, chacun de ces jobs coûterait dix fois plus pour le même verdict.
+    for nom in ("perimetre", "web", "rust"):
+        if "ubuntu" not in runner(nom):
+            print(f"ci.yml : le job « {nom} » a quitté Linux — il ne dépend pas du système, et une\n"
+                  "  minute macOS se facture dix", file=sys.stderr)
+            raise SystemExit(1)
+
+    exiger((
+        ("verifier-aucun-sabotage.sh", "un marqueur de sabotage oublié passerait"),
+        ("verifier-ci.py", "plus rien n'imposerait ce garde-ci à une PR"),
+        ("verifier-version.py", "trois fichiers de version pourraient diverger"),
+        ("verifier-conf-windows.py",
+         "le recouvrement de configuration pourrait perdre la fenêtre en silence"),
+        ("pnpm typecheck", "TypeScript ne serait plus vérifié"),
+        ("pnpm lint", "Biome ne serait plus lancé"),
+        ("pnpm tokens:check", "les jetons engendrés pourraient être édités à la main"),
+        ("pnpm test", "Vitest ne tournerait plus"),
+        ("verifier-aucun-decor-de-version.sh",
+         "la version de décor pourrait partir dans le build livré"),
+    ), commandes_de(web), "ci.yml", "web")
+
+    exiger((
+        ("cargo fmt", "la mise en forme Rust n'est vérifiée qu'ici"),
+        ("cargo clippy", "les avertissements Rust repasseraient"),
+        ("cargo test --features db-tests", "les tests sur base réelle ne tourneraient plus"),
+        # Les deux moitiés d'un même contrôle, et chacune a son sabotage. **Le motif est la
+        # commande `grep -q`, pas la phrase** : le message d'erreur voisin la cite aussi, et un
+        # garde qui cherchait la phrase seule est resté vert quand le test était remplacé par
+        # `if false`. Et sans `--show-output`, libtest garde pour lui la sortie des tests
+        # réussis — or un test sauté *réussit* : le `grep` ne trouverait jamais rien.
+        ('grep -q "décor SSH absent"',
+         "des tests SSH sautés passeraient pour des tests verts"),
+        ("--show-output", "la sortie des tests sautés ne serait pas dans le journal que lit le "
+                          "contrôle SSH, qui serait vert sans rien lire"),
+        ("pnpm domain:check", "les projections TypeScript pourraient diverger des types Rust"),
+        ("verifier-default-run.py", "`cargo run` pourrait redevenir ambigu"),
+    ), commandes_de(rust), "ci.yml", "rust")
+
+    # **Le job Windows doit rester sur Windows, et compiler.** Sa raison d'être est d'attraper ce
+    # que ni macOS ni Linux ne voient : `std::os::unix` sans garde compile sur les deux.
+    if "windows" not in runner("windows"):
+        print("ci.yml : le job « windows » a quitté un runner Windows — il ne verrait plus les "
+              "API propres à unix, qui compilent sur macOS comme sur Linux", file=sys.stderr)
+        raise SystemExit(1)
+    exiger((
+        ("cargo clippy", "les avertissements propres à Windows repasseraient"),
+        ("cargo test", "clippy compile les tests sans les exécuter"),
+    ), commandes_de(windows), "ci.yml", "windows")
+    for nom, etapes in (("windows", windows), ("rust", rust), ("paquet-macos", paquet_macos),
+                        ("paquet-windows", paquet_windows)):
+        if (preparation_de(etapes) or {}).get("rust") != "true":
+            print(f"ci.yml : le job « {nom} » ne demande plus Rust à `preparer` — sans le sidecar\n"
+                  "  qu'elle pose, toute commande cargo échoue (défaut n° 111)", file=sys.stderr)
+            raise SystemExit(1)
+
+    # **Playwright doit rester sur macOS.** Les captures de fidélité portent le suffixe de
+    # plateforme (`-darwin.png`) : sur un autre runner, Playwright ne les trouverait pas, les
+    # **écrirait**, et rendrait une suite verte qui ne compare rien.
+    if "test:e2e" not in commandes_de(e2e):
+        print("ci.yml : le job « e2e » ne lance plus Playwright", file=sys.stderr)
+        raise SystemExit(1)
+    if "macos" not in runner("e2e"):
         print("ci.yml : le job « e2e » a quitté macOS — les captures `-darwin` seraient "
               "réécrites au lieu d'être comparées", file=sys.stderr)
         raise SystemExit(1)
 
-    # Le job macOS doit **construire** : c'est la raison de son existence, et c'est ce qui avait
-    # disparu.
-    commandes = commandes_de(build)
-    if "tauri build" not in commandes:
-        print("le job « build » ne construit plus le .app", file=sys.stderr)
-        raise SystemExit(1)
-
-    # Et il doit **rendre** ce qu'il construit. Un bundle jeté à la fin du job ne prouve que sa
-    # compilation ; c'est l'artefact qui permet d'essayer un commit sans le recompiler.
-    utilise = " ".join(str(e.get("uses", "")) for e in build)
-    if "actions/upload-artifact" not in utilise:
-        print("le job « build » ne publie plus le .dmg en artefact", file=sys.stderr)
-        raise SystemExit(1)
+    # **Les deux bundles** : construits, vérifiés, et **rendus**. Un bundle jeté à la fin du job
+    # ne prouve que sa compilation ; c'est l'artefact qui permet d'essayer une branche.
+    for nom, etapes, systeme in (("paquet-macos", paquet_macos, "macos"),
+                                 ("paquet-windows", paquet_windows, "windows")):
+        if systeme not in runner(nom):
+            print(f"ci.yml : le job « {nom} » a quitté {systeme}", file=sys.stderr)
+            raise SystemExit(1)
+        if "tauri build" not in commandes_de(etapes):
+            print(f"ci.yml : le job « {nom} » ne construit plus le bundle", file=sys.stderr)
+            raise SystemExit(1)
+        utilise = " ".join(str(e.get("uses", "")) for e in etapes)
+        if "actions/upload-artifact" not in utilise:
+            print(f"ci.yml : le job « {nom} » ne publie plus son bundle en artefact",
+                  file=sys.stderr)
+            raise SystemExit(1)
+        if "./.github/actions/cle-jetable" not in utilise:
+            print(f"ci.yml : le job « {nom} » n'a plus de clé de mise à jour jetable — "
+                  "`tauri build` échouerait sur une clé publique sans privée en face",
+                  file=sys.stderr)
+            raise SystemExit(1)
+    exiger((
+        ("verifier-fond-dmg.sh", "le fond du .dmg ne serait plus comparé à ses cotes"),
+        ("verifier-dmg-monte.sh",
+         "rien ne dirait que la fenêtre d'installation a bien été posée sur le volume"),
+    ), commandes_de(paquet_macos), "ci.yml", "paquet-macos")
 
     # **Sans `TAURI_BUNDLER_DMG_IGNORE_CI`, le `.dmg` sort dépouillé.** Le bundler DMG ajoute
     # `--skip-jenkins` dès qu'il voit `CI`, et ce drapeau saute l'AppleScript qui pose le fond,
@@ -255,7 +361,7 @@ def verifier_ci() -> None:
     # séparée, qui regarde l'étape et non son texte.
     if not any(
         "TAURI_BUNDLER_DMG_IGNORE_CI" in (etape.get("env") or {})
-        for etape in build
+        for etape in paquet_macos
         if "tauri build" in str(etape.get("run", ""))
     ):
         print("ci.yml : `tauri build` sans TAURI_BUNDLER_DMG_IGNORE_CI — le .dmg perdrait "
@@ -265,7 +371,146 @@ def verifier_ci() -> None:
 
     verifier_gh_nomme_son_depot(workflow, "ci.yml")
 
-    print(f"ci.yml cohérent — {len(jobs)} jobs, aucun doublon")
+    print(f"ci.yml cohérent — {len(jobs)} jobs, aucun doublon, aucun push, tous sous périmètre")
+
+
+def verifier_actions() -> None:
+    """Les deux actions composites que les workflows partagent (#189).
+
+    Elles portent ce que les jobs faisaient eux-mêmes, donc les gardes qui le vérifiaient dans
+    les jobs doivent le vérifier ici — sinon factoriser aurait fait sortir ces étapes du champ de
+    tout contrôle.
+    """
+    preparer = ACTIONS / "preparer" / "action.yml"
+    cle = ACTIONS / "cle-jetable" / "action.yml"
+    for chemin in (preparer, cle):
+        if not chemin.exists():
+            print(f"{chemin.relative_to(RACINE)} a disparu — les workflows l'appellent",
+                  file=sys.stderr)
+            raise SystemExit(1)
+
+    import yaml
+
+    etapes = (yaml.safe_load(preparer.read_text(encoding="utf-8")).get("runs") or {}).get(
+        "steps") or []
+    commandes = commandes_de(etapes)
+    # **Les deux façons de poser le sidecar, chacune à sa condition.** Un garde qui cherchait
+    # `telecharger-proxy.sh` dans toute l'action est resté vert quand l'étape de l'hôte ne
+    # lançait plus rien : celle de `--tous` le nomme aussi (vérifié par sabotage). Sans la
+    # première, toute commande cargo de `ci.yml` échoue (défaut n° 111) ; sans la seconde, le
+    # bundle universel de la publication échoue au *bundling*, après vingt minutes.
+    for sidecar, attendu in (("hote", "telecharger-proxy.sh"),
+                             ("tous", "telecharger-proxy.sh --tous")):
+        etape = next((e for e in etapes if f"inputs.sidecar == '{sidecar}'" in str(e.get("if"))),
+                     None)
+        lance = commandes_de([etape]) if etape else ""
+        if attendu not in lance or (sidecar == "hote" and "--tous" in lance):
+            print(f"preparer/action.yml : l'étape `sidecar: {sidecar}` ne lance plus "
+                  f"« {attendu} » — sans le sidecar, cargo échoue sur l'`externalBin` absent "
+                  "(défaut n° 111)", file=sys.stderr)
+            raise SystemExit(1)
+    for fragment, raison in (
+        ("rustup show", "la toolchain épinglée ne serait plus installée là où rustup la cherche"),
+        ("pnpm install --frozen-lockfile", "les dépendances pourraient dériver du verrou"),
+        ("apt-reessaye.sh", "un miroir apt pendu passerait pour du travail"),
+    ):
+        if fragment not in commandes:
+            print(f"preparer/action.yml : « {fragment} » a disparu — {raison}", file=sys.stderr)
+            raise SystemExit(1)
+    # `save-if` doit suivre l'entrée : sinon un tag réécrirait un cache que personne ne relira.
+    if not any("sauver-cache-rust" in str((e.get("with") or {}).get("save-if", ""))
+               for e in etapes):
+        print("preparer/action.yml : `save-if` ne suit plus `sauver-cache-rust` — la publication "
+              "sauverait des caches que personne ne relit", file=sys.stderr)
+        raise SystemExit(1)
+
+    etapes_cle = (yaml.safe_load(cle.read_text(encoding="utf-8")).get("runs") or {}).get(
+        "steps") or []
+    commandes_cle = commandes_de(etapes_cle)
+    # La variable de mot de passe doit être **posée même vide** : absente, la CLI la demande à
+    # l'invite et échoue sur un runner sans terminal.
+    for fragment in ("TAURI_SIGNING_PRIVATE_KEY=", "TAURI_SIGNING_PRIVATE_KEY_PASSWORD="):
+        if fragment not in commandes_cle:
+            print(f"cle-jetable/action.yml : « {fragment} » n'est plus posée", file=sys.stderr)
+            raise SystemExit(1)
+
+    print("actions composites cohérentes — preparer, cle-jetable")
+
+
+def verifier_perimetre() -> None:
+    """La règle de `scripts/perimetre-ci.py`, soumise à une table de cas (#189).
+
+    C'est elle qui décide des jobs chers : une erreur ici fait sauter Playwright à une PR qui
+    change le front, ou relance tout pour une faute de frappe dans `AGENTS.md`. Et aucune des deux
+    ne se voit — la première rend une CI verte, la seconde une facture.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("perimetre_ci", RACINE / "scripts" /
+                                                  "perimetre-ci.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    tout = set(module.PORTEES)
+
+    cas = (
+        (["AGENTS.md"], set()),
+        (["README.md", "CLAUDE.md", ".claude/skills/ticket/SKILL.md"], set()),
+        ([".github/workflows/ci.yml"], tout),
+        ([".github/actions/preparer/action.yml"], tout),
+        (["scripts/perimetre-ci.py"], tout),
+        (["src/app/App.tsx"], {"web", "e2e"}),
+        (["e2e/a1.spec.ts"], {"web", "e2e"}),
+        (["src/domain/config.ts"], {"web", "rust", "e2e"}),
+        (["src-tauri/src/lib.rs"], {"web", "rust", "windows"}),
+        (["src-tauri/tauri.conf.json"], {"web", "rust", "windows", "paquet"}),
+        (["src-tauri/Cargo.lock"], {"web", "rust", "windows", "paquet"}),
+        (["src-tauri/dmg/fond-dmg.png"], {"web", "paquet"}),
+        (["scripts/pg-test.sh"], {"web", "rust"}),
+        (["scripts/verifier-version.py"], {"web"}),
+        (["AGENTS.md", "src/app/App.tsx"], {"web", "e2e"}),
+        (["src/app/App.tsx", "src-tauri/src/lib.rs"], {"web", "rust", "windows", "e2e"}),
+        # **Le défaut sûr** : ce que rien ne classe fait tout tourner, plutôt que rien.
+        (["un-dossier-de-demain/fichier.txt"], tout),
+    )
+    for fichiers, attendu in cas:
+        obtenu = set(module.perimetre(fichiers))
+        if obtenu != attendu:
+            print(f"perimetre-ci.py : {fichiers} rend {sorted(obtenu)}, attendu {sorted(attendu)}",
+                  file=sys.stderr)
+            raise SystemExit(1)
+
+    for evenement, portee, attendu in (
+        ("schedule", "", {"web", "rust", "windows"}),
+        ("workflow_dispatch", "paquets", {"paquet"}),
+        ("workflow_dispatch", "tout", tout),
+    ):
+        obtenu = set(module.perimetre_de_l_evenement(evenement, portee))
+        if obtenu != attendu:
+            print(f"perimetre-ci.py : {evenement}/{portee or '-'} rend {sorted(obtenu)}, "
+                  f"attendu {sorted(attendu)}", file=sys.stderr)
+            raise SystemExit(1)
+    if module.perimetre_de_l_evenement("pull_request", "") is not None:
+        print("perimetre-ci.py : une PR ne lit plus son diff", file=sys.stderr)
+        raise SystemExit(1)
+
+    # **Chaque fichier suivi est classé**, hors CI elle-même. Le défaut sûr fait tout tourner :
+    # juste pour une PR, il deviendrait une facture permanente si un dossier entier y tombait —
+    # un `docs/` ajouté demain, par exemple, ferait tourner Playwright sur chaque relecture.
+    suivis = subprocess.run(["git", "ls-files"], cwd=RACINE, check=True, capture_output=True,
+                            text=True).stdout.splitlines()
+    non_classes = [
+        f for f in suivis
+        if set(module.portees_de(f)) == tout
+        and not f.startswith(".github/") and f != "scripts/perimetre-ci.py"
+    ]
+    if non_classes:
+        print("perimetre-ci.py : ces fichiers ne sont classés par aucune règle, donc font tout\n"
+              f"  tourner : {non_classes[:10]}\n"
+              "  Ajouter une règle dans REGLES — ou, si c'est de la documentation, l'y rattacher.",
+              file=sys.stderr)
+        raise SystemExit(1)
+
+    print(f"perimetre-ci.py cohérent — {len(cas)} cas, {len(suivis)} fichiers suivis tous classés")
 
 
 def verifier_publication() -> None:
@@ -281,8 +526,9 @@ def verifier_publication() -> None:
 
     workflow = charger(PUBLICATION)
     jobs = workflow.get("jobs", {})
+    etapes_verifier = etapes_de(jobs, "verifier", 8, "publication.yml")
     etapes_release = etapes_de(jobs, "release", 4, "publication.yml")
-    etapes = etapes_de(jobs, "macos", 29, "publication.yml")
+    etapes = etapes_de(jobs, "macos", 22, "publication.yml")
 
     sur = declencheurs(workflow)
     # **Le déclencheur, et rien d'autre que lui.** `on: push` sans filtre publierait une release
@@ -303,6 +549,57 @@ def verifier_publication() -> None:
     # minutes de construction pour découvrir qu'on ne peut pas créer la release.
     if (workflow.get("permissions") or {}).get("contents") != "write":
         print("publication.yml : il manque `permissions: contents: write`", file=sys.stderr)
+        raise SystemExit(1)
+
+    # ── Ce qui doit être vrai avant de publier quoi que ce soit (#189) ─────────────────────
+    #
+    # Les vérifications rapides tournaient dans le job `macos`, au décuple, et **après** la
+    # création de la release : un test rouge laissait une release publique sans asset. Elles
+    # vivent dans `verifier`, sous Linux, et `release` l'attend. Trois faits le tiennent.
+    if "ubuntu" not in str(jobs["verifier"].get("runs-on", "")):
+        print("publication.yml : le job « verifier » a quitté Linux — ses vérifications ne "
+              "dépendent pas du système, et une minute macOS se facture dix", file=sys.stderr)
+        raise SystemExit(1)
+    exiger((
+        ("verifier-version.py", "le tag et les fichiers pourraient dire deux numéros"),
+        ("verifier-aucun-sabotage.sh", "un marqueur de sabotage oublié partirait en release"),
+        ("verifier-conf-windows.py",
+         "le recouvrement de configuration pourrait perdre la fenêtre en silence"),
+        ("pnpm typecheck", "une release publique ne se pose pas sur du TypeScript non vérifié"),
+        ("pnpm lint", "Biome ne serait plus lancé avant de publier"),
+        ("pnpm test", "une release publique ne se pose pas sur des tests non joués"),
+        ("cargo test", "une release publique ne se pose pas sur des tests non joués"),
+    ), commandes_de(etapes_verifier), "publication.yml", "verifier")
+    if jobs["release"].get("needs") != "verifier":
+        print("publication.yml : le job « release » doit déclarer `needs: verifier` — sans "
+              "l'ordre, une release se créerait avant que les tests aient parlé, et un test "
+              "rouge laisserait une release publique sans asset", file=sys.stderr)
+        raise SystemExit(1)
+
+    # **Aucun cache écrit depuis un tag.** Un cache n'est visible que de la référence qui l'a
+    # écrit et de la branche par défaut : celui d'un tag n'est relu par personne, et le sauver
+    # coûtait 67 secondes de macOS par publication.
+    for nom, job in jobs.items():
+        for etape in job.get("steps") or []:
+            if "rust-cache" in str(etape.get("uses", "")):
+                print(f"publication.yml : le job « {nom} » appelle rust-cache directement — "
+                      "passer par `preparer`, avec `sauver-cache-rust: \"false\"`",
+                      file=sys.stderr)
+                raise SystemExit(1)
+        preparation = preparation_de(job.get("steps") or [])
+        if (preparation and preparation.get("rust") == "true"
+                and preparation.get("cache-rust") != "aucun"
+                and preparation.get("sauver-cache-rust") != "false"):
+            print(f"publication.yml : le job « {nom} » sauverait un cache Rust sous le tag, que "
+                  "personne ne relira", file=sys.stderr)
+            raise SystemExit(1)
+
+    # Le bundle universel demande le sidecar des deux architectures, fondu : sans lui, l'absence
+    # n'apparaît qu'au *bundling*, après la compilation des deux cibles.
+    if (preparation_de(etapes) or {}).get("sidecar") != "tous":
+        print("publication.yml : le job « macos » ne demande plus `sidecar: tous` — le bundle "
+              "universel échouerait au bundling, après vingt minutes de compilation",
+              file=sys.stderr)
         raise SystemExit(1)
 
     commandes = commandes_de(etapes)
@@ -370,15 +667,17 @@ def verifier_publication() -> None:
     # Il s'attache à une release que le job `release` a déjà créée, en parallèle du job
     # `macos` (voir plus haut, 2 septembre 2026). Deux faits le tiennent, et aucun ne se
     # remarquerait autrement qu'en regardant une release publiée :
-    windows = etapes_de(jobs, "windows", 16, "publication.yml")
+    windows = etapes_de(jobs, "windows", 12, "publication.yml")
     commandes_windows = commandes_de(windows)
 
-    # 1. Ce qu'il fait, et ce qu'il vérifie avant de publier.
+    # 1. Ce qu'il fait, et ce qu'il vérifie avant de publier. Le sidecar `.exe` est posé par
+    #    `preparer` quand on lui demande Rust : sans lui, toute commande cargo échouerait sur
+    #    l'`externalBin` absent (défaut n° 111).
+    if (preparation_de(windows) or {}).get("rust") != "true":
+        print("publication.yml : le job « windows » ne demande plus Rust à `preparer` — le "
+              "sidecar ne serait pas posé (défaut n° 111)", file=sys.stderr)
+        raise SystemExit(1)
     for fragment, raison in (
-        ("pnpm proxy:embarquer",
-         "toute commande cargo échouerait sur l'`externalBin` absent (défaut n° 111)"),
-        ("verifier-conf-windows.py",
-         "le recouvrement de configuration pourrait perdre la fenêtre en silence"),
         ("cargo test", "une release publique ne se pose pas sur des tests non joués"),
         ("tauri build", "rien ne construirait l'installateur"),
         ("verifier-aucun-decor-de-version.sh",
@@ -621,6 +920,8 @@ def verifier_playwright() -> None:
 
 def main() -> int:
     verifier_ci()
+    verifier_actions()
+    verifier_perimetre()
     verifier_publication()
     verifier_playwright()
     return 0
