@@ -16,7 +16,26 @@ export function rendreValeur(value: Value): ReactNode {
   // une valeur parfaitement différente — et la distinction est l'une des rares choses qu'un client de
   // bases doit absolument ne pas brouiller. Le seul genre à demander un élément, pour sa teinte.
   if (value.kind === 'null') return <span className={styles.nul}>NULL</span>
-  return texteDeValeur(value)
+  return surUneLigne(texteDeValeur(value))
+}
+
+/**
+ * Le texte d'une cellule, **sur une seule ligne quoi qu'il porte**.
+ *
+ * `white-space: nowrap` replie un saut de ligne en espace, mais WebKit — donc WKWebView, donc
+ * l'application — honore U+2028 et U+2029 comme des coupures **forcées** malgré lui. Une cellule
+ * qui en portait prenait trois lignes de haut, centrées sur la sienne, et son texte se superposait
+ * aux deux lignes voisines. Signalé à l'écran le 22 octobre 2026, sur une colonne `jsonb` :
+ * PostgreSQL n'échappe que les caractères de contrôle, pas ces deux-là, et la grille de `A5` reçoit
+ * le JSON en `text` (le repli `::text` du moteur) — le repliement du genre `json` ne s'y appliquait
+ * donc pas. Mesuré : Chromium ne coupe pas, WebKit coupe sur ces deux-là et sur aucun autre
+ * séparateur. Playwright pilotant Chromium, aucune capture ne pouvait le voir.
+ *
+ * **À l'affichage seulement**, comme le repliement du saut de ligne par la CSS : l'aperçu du survol
+ * et le presse-papiers gardent la valeur telle qu'elle est.
+ */
+function surUneLigne(texte: string): string {
+  return texte.replace(/[\u2028\u2029]/g, ' ')
 }
 
 /**
@@ -27,7 +46,8 @@ export function rendreValeur(value: Value): ReactNode {
  * L'aperçu du survol prolongé et « Copier la valeur » (`10f`) ont besoin d'une chaîne, là où la
  * grille a besoin d'un nœud. Deux fonctions parallèles auraient divergé au premier genre ajouté —
  * exactement ce qui a produit une cellule vide en ajoutant `decimal` (voir le garde ci-dessous).
- * `rendreValeur` délègue donc ici pour tout sauf `null`, dont la teinte demande un élément.
+ * `rendreValeur` délègue donc ici pour tout sauf `null`, dont la teinte demande un élément — et n'y
+ * retire que les séparateurs de ligne qu'une cellule ne sait pas neutraliser (`surUneLigne`).
  *
  * **C'est le texte affiché, pas la valeur brute.** Copier ce qu'on lit est la promesse la plus simple
  * à tenir et à vérifier : un JSON y est donc replié sur une ligne comme à l'écran, et un binaire y
@@ -116,7 +136,8 @@ function tailleBase64(base64: string): number {
  */
 export function apercuDeLaSaisie(saisie: Saisie): ReactNode {
   if (saisie.kind === 'null') return <span className={styles.nul}>NULL</span>
-  return saisie.texte
+  // Une saisie collée peut porter les mêmes séparateurs que la base : même cellule, même garde.
+  return surUneLigne(saisie.texte)
 }
 
 /**
