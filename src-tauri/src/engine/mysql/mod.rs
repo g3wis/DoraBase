@@ -1252,6 +1252,51 @@ mod tests_db {
     }
 
     #[tokio::test]
+    async fn un_with_qui_supprime_supprime_toutes_les_lignes_visees() {
+        // **Le pire cas de la limite ajoutée** : `delete … limit` est valide en MySQL, donc un
+        // `with … delete` limité ne levait aucune erreur — il effaçait cent lignes sur cent
+        // cinquante, et l'écran annonçait cent lignes touchées comme un succès.
+        let console = adaptateur().await;
+        for preparation in [
+            "drop table if exists dorabase_test.jetons_with",
+            "create table dorabase_test.jetons_with (valeur int)",
+            "insert into dorabase_test.jetons_with (valeur) \
+             with recursive n(i) as (select 1 union all select i + 1 from n where i < 150) \
+             select i from n",
+        ] {
+            console
+                .run_sql(preparation, RowLimit::OneHundred)
+                .await
+                .expect(preparation);
+        }
+
+        let suppression = console
+            .run_sql(
+                "with cible as (select valeur from dorabase_test.jetons_with) \
+                 delete from dorabase_test.jetons_with where valeur in (select valeur from cible)",
+                RowLimit::OneHundred,
+            )
+            .await
+            .expect("suppression");
+        assert_eq!(suppression.applied_limit, None, "{}", suppression.sql);
+        assert_eq!(suppression.affected, Some(150));
+
+        let restantes = console
+            .run_sql(
+                "select count(*) from dorabase_test.jetons_with",
+                RowLimit::OneHundred,
+            )
+            .await
+            .expect("compte");
+        assert_eq!(restantes.rows[0][0], Value::Int { value: 0 });
+
+        console
+            .run_sql("drop table dorabase_test.jetons_with", RowLimit::OneHundred)
+            .await
+            .expect("nettoyage");
+    }
+
+    #[tokio::test]
     async fn show_tables_n_est_pas_borne_car_ce_serait_une_erreur_de_syntaxe() {
         // **Le cas que PostgreSQL n'a pas** : `show` n'accepte pas de `limit`. La borner serait une
         // erreur de syntaxe, pas une protection.

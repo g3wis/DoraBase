@@ -809,6 +809,24 @@ mod tests_fichier {
     }
 
     #[tokio::test]
+    async fn un_with_qui_ecrit_n_est_pas_limite() {
+        // SQLite refuse `update … limit` tel qu'il est compilé ici : la limite collée à un `with`
+        // qui écrit faisait échouer la requête sur un `limit` que personne n'avait écrit.
+        let (_dossier, chemin) = decor();
+        let resultat = adaptateur(&chemin)
+            .await
+            .run_sql(
+                "with cible as (select min(id) as id from ateliers) \
+                 update ateliers set ville = 'Albi' where id in (select id from cible)",
+                RowLimit::OneHundred,
+            )
+            .await
+            .expect("un with … update doit s'exécuter");
+        assert_eq!(resultat.applied_limit, None, "{}", resultat.sql);
+        assert_eq!(resultat.affected, Some(1), "{resultat:?}");
+    }
+
+    #[tokio::test]
     async fn un_insert_copie_recree_la_ligne() {
         let (_dossier, chemin) = decor();
         let adaptateur = adaptateur(&chemin).await;

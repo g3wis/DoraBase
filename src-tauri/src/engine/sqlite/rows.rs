@@ -401,7 +401,11 @@ pub fn avec_limite(sql: &str, limite: RowLimit) -> (String, Option<u32>) {
     let rend_des_lignes = minuscules.starts_with("select")
         || minuscules.starts_with("with")
         || minuscules.starts_with("pragma");
-    if !rend_des_lignes || minuscules.contains(" limit ") || minuscules.ends_with(" limit") {
+    if !rend_des_lignes
+        || crate::engine::rows::with_qui_ecrit(nu)
+        || minuscules.contains(" limit ")
+        || minuscules.ends_with(" limit")
+    {
         return (nu.to_owned(), None);
     }
     (
@@ -816,6 +820,12 @@ mod tests {
         assert_eq!(
             avec_limite("delete from t where a = 1", RowLimit::OneThousand),
             ("delete from t where a = 1".to_owned(), None)
+        );
+        // Ni quand elle commence par `with` : c'est l'instruction qui suit les CTE qui écrit.
+        let sql = "with x as (select 1) update t set a = 1 where a in (select * from x)";
+        assert_eq!(
+            avec_limite(sql, RowLimit::OneThousand),
+            (sql.to_owned(), None)
         );
     }
 

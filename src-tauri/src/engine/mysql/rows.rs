@@ -459,8 +459,11 @@ pub fn avec_limite(sql: &str, limite: RowLimit) -> (String, Option<u32>) {
         || minuscules.starts_with("explain");
     // `show` et `describe` **n'acceptent pas de `limit`** : les borner serait une erreur de syntaxe.
     let accepte_une_limite = minuscules.starts_with("select") || minuscules.starts_with("with");
+    // **Un `with … delete` n'est pas une lecture**, et ici la limite n'échouerait même pas : MySQL
+    // accepte `delete … limit`, donc elle n'effacerait qu'une partie des lignes visées.
     if !rend_des_lignes
         || !accepte_une_limite
+        || crate::engine::rows::with_qui_ecrit(nu)
         || minuscules.contains(" limit ")
         || minuscules.ends_with(" limit")
     {
@@ -735,6 +738,12 @@ mod tests {
         assert_eq!(
             avec_limite("delete from t where a = 1", RowLimit::OneThousand),
             ("delete from t where a = 1".to_owned(), None)
+        );
+        // **Le cas où la limite ne casse rien et fait pire** : `delete … limit` est valide en MySQL.
+        let sql = "with x as (select 1) delete from t where a in (select * from x)";
+        assert_eq!(
+            avec_limite(sql, RowLimit::OneThousand),
+            (sql.to_owned(), None)
         );
     }
 
