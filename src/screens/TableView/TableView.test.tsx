@@ -5,7 +5,7 @@ import { Sprite } from '../../design/icons/Sprite'
 import type { DatabaseKey } from '../../domain/arbre'
 import type { ColumnInfo, RowWindow, Value } from '../../domain/engine'
 import { LanguageProvider } from '../../i18n/LanguageContext'
-import { estNumerique, rendreValeur } from './cellule'
+import { apercuDeLaSaisie, estNumerique, rendreValeur, texteDeValeur } from './cellule'
 import { TableView } from './TableView'
 import type { PasserelleLignes } from './useLignes'
 
@@ -295,6 +295,26 @@ describe('rendu d’une valeur', () => {
     const valeur = rendu({ kind: 'json', value: '{\n  "gift": true\n}' })
     expect(valeur.textContent).not.toContain('\n')
     expect(valeur).toHaveTextContent('{ "gift": true }')
+  })
+
+  it('ne laisse aucun séparateur de ligne Unicode dans une cellule', () => {
+    // WebKit coupe sur U+2028 et U+2029 malgré `white-space: nowrap`, et la cellule débordait sur
+    // ses deux voisines. Un JSON en genre `text` — c'est ainsi que la grille le reçoit de
+    // PostgreSQL — ne passe pas par le repliement du genre `json`.
+    const json = '[{"label": "votre\u2028texte"}, {"label": "un\u2029autre"}]'
+    expect(rendu({ kind: 'text', value: json }).textContent).toBe(
+      '[{"label": "votre texte"}, {"label": "un autre"}]',
+    )
+    const saisie = render(
+      <span>{apercuDeLaSaisie({ kind: 'texte', texte: 'collé\u2028ici' })}</span>,
+    )
+    expect(saisie.container.textContent).toBe('collé ici')
+  })
+
+  it('garde les séparateurs pour l’aperçu et le presse-papiers', () => {
+    // Le repliement est celui de l'affichage, comme celui du saut de ligne par la CSS : l'aperçu du
+    // survol, en `pre-wrap`, montre la valeur telle qu'elle est.
+    expect(texteDeValeur({ kind: 'text', value: 'votre\u2028texte' })).toBe('votre\u2028texte')
   })
 
   it('rend la taille d’un binaire, jamais son contenu', () => {
