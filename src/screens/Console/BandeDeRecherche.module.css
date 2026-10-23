@@ -1,0 +1,134 @@
+/*
+ * La bande de recherche de la console (#185), en tête de l'éditeur.
+ *
+ * **Aucun dessin nouveau** : la bande est une barre du chrome clair posée sur l'éditeur sombre,
+ * avec le fond de la bande d'outils du diagramme (`--bar`) ; le champ est celui du diagramme, cote
+ * pour cote ; les actions d'icône sont les carrés nus de la bande en tête de sidebar, survol
+ * compris ; les deux boutons à libellé sont des `Button` secondaires. Le filet bas est posé par
+ * `theme.ts` sur `.cm-panels-top`, que CodeMirror dessine sinon en gris littéral.
+ */
+
+.bande {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-6);
+  background: var(--bar);
+  color: var(--ink);
+  font-family: var(--font-ui);
+}
+
+.lignes {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--space-7);
+  min-width: 0;
+}
+
+/*
+ * 28 px : un carré d'action de 22 plus 3 de chaque côté, la cote de `SidebarToolbar`. Une ligne de
+ * bande mesure donc 34 px avec le rembourrage, `--h-bar`, la hauteur de la bande du diagramme.
+ */
+.groupe {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  height: 28px;
+}
+
+/* --- Le champ : celui du diagramme ------------------------------------- */
+
+.champ {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  box-sizing: border-box;
+  height: var(--h-btn-sm);
+  flex: 0 1 210px;
+  min-width: 96px;
+  margin-right: var(--space-1);
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-field);
+  background: var(--field);
+}
+
+.champ:focus-within {
+  box-shadow: var(--shadow-focus);
+}
+
+.icone {
+  flex: none;
+  color: var(--ink-4);
+}
+
+.saisie {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--text-dense);
+}
+
+.saisie:focus {
+  outline: none;
+}
+
+.compte {
+  flex: none;
+  font: var(--weight-semibold) var(--text-meta) / 1 var(--font-ui);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+/* --- Les actions d'icône : celles de la bande en tête de sidebar ------- */
+
+.bouton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+/* Le survol de `SidebarToolbar.bouton`, repris avec sa raison : une icône nue qui agit sans retour
+   au survol se lit comme une décoration. */
+.bouton:hover {
+  background: var(--hover-row);
+  color: var(--ink);
+}
+
+.bouton:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+/* L'encre de l'état désactivé d'un bouton (`--ink-4`, `Button.module.css`), sans son fond : un
+   carré nu n'en a pas. Et pas de survol — rien ne répondrait. */
+.bouton[aria-disabled="true"] {
+  color: var(--ink-4);
+  cursor: not-allowed;
+}
+
+.bouton[aria-disabled="true"]:hover {
+  background: none;
+}
+
+/* La croix reste en haut à droite quand les deux groupes passent l'un sous l'autre. */
+.bande > .bouton {
+  margin-top: 3px;
+}

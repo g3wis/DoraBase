@@ -3,6 +3,7 @@ import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { javascript } from '@codemirror/lang-javascript'
 import { PostgreSQL, sql } from '@codemirror/lang-sql'
 import { codeFolding, foldEffect, foldGutter, foldService } from '@codemirror/language'
+import { closeSearchPanel, openSearchPanel, search } from '@codemirror/search'
 import { EditorState } from '@codemirror/state'
 import {
   EditorView,
@@ -11,9 +12,11 @@ import {
   keymap,
   lineNumbers,
 } from '@codemirror/view'
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useT } from '../../i18n/LanguageContext'
 import type { Dialecte } from '../Workbench/onglets'
+import { BandeDeRecherche } from './BandeDeRecherche'
 import { type Catalogue, sourceDeCompletion } from './completion'
 import { repliDeLaProjection } from './projection'
 import { themeDuHandoff } from './theme'
@@ -41,6 +44,16 @@ export type CommandesEditeur = {
    * Cliquer la `…` déplie ; le texte, lui, n'a jamais bougé.
    */
   remplacerTexte: (texte: string, repli?: { de: number; a: number }) => void
+  /**
+   * Ouvre la bande de recherche (#185) et y place le focus, texte sélectionné.
+   *
+   * Un geste de l'écran et non une liaison de l'éditeur : `⌘F` doit répondre partout dans l'onglet
+   * — depuis la grille du résultat, la barre d'outils, ou rien de focalisé —, pas seulement quand le
+   * curseur est dans le texte. `ConsoleView` l'écoute, et c'est son **seul** chemin : une seconde
+   * liaison `Mod-f` dans CodeMirror lirait le modificateur du navigateur et non celui de
+   * `shell/plateforme`.
+   */
+  ouvrirLaRecherche: () => void
 }
 
 type SqlEditorProps = {
@@ -123,6 +136,19 @@ export function SqlEditor({
   const t = useT()
   const hote = useRef<HTMLDivElement>(null)
   const vue = useRef<EditorView | null>(null)
+  // Le panneau de recherche que CodeMirror a monté, et l'éditeur qui le porte — `null` bande fermée.
+  // L'élément est celui de CodeMirror ; son contenu est rendu par un portail, ce qui garde la bande
+  // dans l'arbre React (i18n, `Icon`, `Button`) sans la sortir du flux de l'éditeur.
+  const [bande, setBande] = useState<{ dom: HTMLElement; vue: EditorView } | null>(null)
+  // Les abonnés de la bande aux mises à jour de l'éditeur, appelés par le panneau à chaque
+  // transaction : le compte des occurrences suit la frappe dans le texte autant que dans le champ.
+  const ecouteurs = useRef(new Set<() => void>())
+  const abonner = useCallback((ecouteur: () => void) => {
+    ecouteurs.current.add(ecouteur)
+    return () => {
+      ecouteurs.current.delete(ecouteur)
+    }
+  }, [])
   // Les rappels sont lus par les extensions de CodeMirror, qui ne sont posées qu'une fois : les
   // garder dans une ref évite de reconstruire la vue quand l'appelant recrée ses fonctions.
   // Le dialecte est lu au montage comme `texteInitial` : changer de langue demande un remontage,
@@ -204,7 +230,28 @@ export function SqlEditor({
                   ...completionKeymap.filter((lien) => lien.key !== 'Tab'),
                 ]),
               ]),
+          // **`Échap` dans le texte ferme la bande de recherche**, après la liste d'autocomplétion
+          // (déclarée plus haut, elle passe d'abord). Bande fermée, `closeSearchPanel` rend `false`
+          // et la touche suit son cours.
+          keymap.of([{ key: 'Escape', run: closeSearchPanel }]),
           keymap.of([...defaultKeymap, ...historyKeymap]),
+          // La recherche (#185) : le moteur de `@codemirror/search`, notre bande. Voir
+          // `BandeDeRecherche` pour ce qui est pris et ce qui est laissé.
+          search({
+            top: true,
+            createPanel: (editeur) => {
+              const dom = document.createElement('div')
+              return {
+                dom,
+                top: true,
+                mount: () => setBande({ dom, vue: editeur }),
+                update: () => {
+                  for (const ecouteur of ecouteurs.current) ecouteur()
+                },
+                destroy: () => setBande(null),
+              }
+            },
+          }),
           // Le repli d'affichage des longues listes de colonnes (voir `remplacerTexte`). Le
           // marqueur par défaut de CodeMirror est repris à un détail près : ses libellés sont les
           // nôtres — « folded code » à la voix, dans un produit en français, nommerait mal.
@@ -275,6 +322,14 @@ export function SqlEditor({
           // l'historique par nature — `⌘Z` rend donc directement le texte d'avant.
           if (repli) editeur.dispatch({ effects: foldEffect.of({ from: repli.de, to: repli.a }) })
         },
+        ouvrirLaRecherche: () => {
+          // Bande fermée, `openSearchPanel` l'ouvre et la requête part de la sélection ; le focus
+          // est alors donné par la bande à son montage. Bande ouverte, il refocalise le champ s'il
+          // ne l'a pas — et s'il l'a, on sélectionne son texte, ce qu'un second `⌘F` fait partout.
+          openSearchPanel(editeur)
+          const champ = editeur.dom.querySelector<HTMLInputElement>('[main-field]')
+          if (champ !== null && champ === document.activeElement) champ.select()
+        },
       }
     }
 
@@ -287,5 +342,11 @@ export function SqlEditor({
 
   // L'hôte ne porte rien d'accessible : le nom vit sur `.cm-content`, posé par
   // `EditorView.contentAttributes` ci-dessus.
-  return <div ref={hote} className="cm-hote" data-testid="editeur-sql" />
+  return (
+    <>
+      <div ref={hote} className="cm-hote" data-testid="editeur-sql" />
+      {bande !== null &&
+        createPortal(<BandeDeRecherche vue={bande.vue} abonner={abonner} />, bande.dom)}
+    </>
+  )
 }
