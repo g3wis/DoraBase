@@ -2062,6 +2062,32 @@ mod tests_db {
     }
 
     #[tokio::test]
+    async fn un_with_qui_ecrit_s_execute_tel_qu_il_est_ecrit() {
+        // **`with` commence comme une lecture**, et la console lui collait sa limite : PostgreSQL
+        // répondait `syntax error at or near "limit"`, sur un `limit` que personne n'avait écrit.
+        let adaptateur = adaptateur().await;
+        table_temporaire(&adaptateur, "jetons_with").await;
+        adaptateur
+            .run_sql(
+                "insert into jetons_with (valeur) values (1), (2), (3)",
+                crate::engine::RowLimit::OneHundred,
+            )
+            .await
+            .expect("décor");
+
+        let issue = adaptateur
+            .run_sql(
+                "with seuil as (select 2 as valeur) \
+                 update jetons_with set valeur = 0 where valeur >= (select valeur from seuil)",
+                crate::engine::RowLimit::OneHundred,
+            )
+            .await
+            .expect("un with … update doit s'exécuter");
+        assert_eq!(issue.applied_limit, None, "{}", issue.sql);
+        assert_eq!(issue.affected, Some(2), "{issue:?}");
+    }
+
+    #[tokio::test]
     async fn une_instruction_refusee_abandonne_la_transaction_de_postgresql() {
         use crate::engine::OrdreDeTransaction;
         let adaptateur = adaptateur().await;

@@ -685,21 +685,22 @@ pub fn insert_de(
 /// La limite à ajouter à une requête libre, **ou rien** (`12c`).
 ///
 /// **Rien pour ce qui n'est pas une lecture.** Un `insert`, un `update`, un `create` ne rendent pas
-/// de lignes : leur coller un `limit` serait une erreur de syntaxe. Rien non plus pour une requête
-/// qui porte déjà une limite — l'utilisateur a dit ce qu'il voulait.
+/// de lignes : leur coller un `limit` serait une erreur de syntaxe. Un `with … update` non plus, bien
+/// qu'il commence comme une lecture — voir `with_qui_ecrit`. Rien non plus pour une requête qui porte
+/// déjà une limite — l'utilisateur a dit ce qu'il voulait.
 ///
-/// **La reconnaissance est syntaxique, donc approximative.** Elle lit le premier mot significatif et
-/// cherche un `limit` de premier niveau. Un `limit` dans une sous-requête suivi d'un `select` externe
-/// sans limite passerait pour limité : cas rare, et l'erreur va dans le sens le moins nuisible —
-/// aucune limite ajoutée, donc aucun mensonge sur les données. L'inverse, ajouter une limite à une
-/// requête qui en a une, produirait un SQL invalide.
+/// **La reconnaissance est syntaxique, donc approximative.** Elle lit le premier mot significatif —
+/// l'instruction principale, pour un `with` — et cherche un `limit` de premier niveau. Un `limit`
+/// dans une sous-requête suivi d'un `select` externe sans limite passerait pour limité : cas rare, et
+/// l'erreur va dans le sens le moins nuisible — aucune limite ajoutée, donc aucun mensonge sur les
+/// données. L'inverse, ajouter une limite à une requête qui en a une, produirait un SQL invalide.
 pub fn limite_a_ajouter(sql: &str, limite: crate::engine::RowLimit) -> Option<u32> {
     let nu = sans_commentaires(sql);
     let debut = nu.trim_start().to_ascii_lowercase();
     let lecture = ["select", "with", "table", "values", "show", "explain"]
         .iter()
         .any(|mot| debut.starts_with(mot));
-    if !lecture {
+    if !lecture || crate::engine::rows::with_qui_ecrit(&nu) {
         return None;
     }
     // `limit` ou `fetch first` : les deux formes du standard, et PostgreSQL accepte les deux.
@@ -1877,9 +1878,20 @@ mod tests_limite {
             "create table t (id int)",
             "truncate orders",
             "begin",
+            // **`with` ne dit pas qu'on lit** : c'est l'instruction qui suit les CTE qui le dit.
+            "with x as (select 1) update orders set status = 'x'",
+            "with x as (select 1) delete from orders where id in (select * from x)",
         ] {
             assert_eq!(limite_a_ajouter(sql, RowLimit::OneThousand), None, "{sql}");
         }
+        // Une écriture *dans* une CTE, lue au premier niveau, rend des lignes : elle reste limitée.
+        assert_eq!(
+            limite_a_ajouter(
+                "with r as (delete from orders returning *) select * from r",
+                RowLimit::OneThousand
+            ),
+            Some(1000)
+        );
     }
 
     #[test]

@@ -559,9 +559,156 @@ pub fn patch_inverse(avertissement: Option<String>, instructions: Option<String>
     }
 }
 
+/// Un `with` dont l'instruction principale **écrit** — `with … update`, `with … delete`,
+/// `with … insert`, `with … merge` —, ce qui interdit à la console de lui coller sa limite (#192).
+///
+/// **Le premier mot ne suffit pas.** `with` ouvre une lecture comme une écriture, et les quatre
+/// moteurs comptaient tout `with` pour une lecture. Sur PostgreSQL, la limite ajoutée à
+/// `with … update` est une erreur de syntaxe — `syntax error at or near "limit"`, sur un `limit` que
+/// personne n'a écrit. Sur MySQL c'est pire, et mesuré le 23 octobre 2026 : `delete … limit` y est
+/// valide, donc un `with … delete` visant mille lignes en effaçait cinq cents, sans erreur.
+///
+/// **L'instruction principale est le premier mot-clé hors parenthèses.** Les corps des CTE sont
+/// entre parenthèses, et ce qui reste au premier niveau — noms, `as`, `recursive`, `materialized`,
+/// listes de colonnes, clauses `search` et `cycle` — n'en contient aucun. Les chaînes, les
+/// identifiants cités et les commentaires sont sautés : une parenthèse écrite dans un littéral
+/// fausserait le compte.
+///
+/// Syntaxique, donc approximative : ni les chaînes à antislash de MySQL ni les `$$` de PostgreSQL ne
+/// sont lus. Quand elle se trompe, c'est vers le comportement d'avant — un `with` compté pour une
+/// lecture.
+pub fn with_qui_ecrit(sql: &str) -> bool {
+    let octets = sql.as_bytes();
+    let mut i = 0;
+    let mut profondeur = 0usize;
+    let mut premier_mot = true;
+    while i < octets.len() {
+        match octets[i] {
+            // Un guillemet doublé (`''`) se lit comme deux chaînes accolées, ce qui revient au même.
+            guillemet @ (b'\'' | b'"' | b'`') => {
+                i += 1;
+                while i < octets.len() && octets[i] != guillemet {
+                    i += 1;
+                }
+                i += 1;
+            }
+            b'-' if octets.get(i + 1) == Some(&b'-') => {
+                while i < octets.len() && octets[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            b'/' if octets.get(i + 1) == Some(&b'*') => {
+                i = sql[i + 2..]
+                    .find("*/")
+                    .map_or(octets.len(), |fin| i + 2 + fin + 2);
+            }
+            b'(' => {
+                profondeur += 1;
+                i += 1;
+            }
+            b')' => {
+                profondeur = profondeur.saturating_sub(1);
+                i += 1;
+            }
+            c if c.is_ascii_alphabetic() || c == b'_' => {
+                let debut = i;
+                while i < octets.len()
+                    && (octets[i].is_ascii_alphanumeric() || octets[i] == b'_' || octets[i] == b'$')
+                {
+                    i += 1;
+                }
+                if profondeur > 0 {
+                    continue;
+                }
+                let mot = sql[debut..i].to_ascii_lowercase();
+                if premier_mot {
+                    if mot != "with" {
+                        return false;
+                    }
+                    premier_mot = false;
+                    continue;
+                }
+                match mot.as_str() {
+                    "insert" | "update" | "delete" | "merge" => return true,
+                    "select" | "values" | "table" => return false,
+                    _ => {}
+                }
+            }
+            _ => i += 1,
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn un_with_qui_aboutit_a_une_ecriture_est_reconnu() {
+        // La forme qui a mordu : une CTE qui ne fait que porter une constante, puis un `update` dont
+        // le `set` contient lui-même un `select`, un `from` et un `where`.
+        let sql = "WITH filtre AS (\n    SELECT '^REF-(a|b)\\.(x|y)$' AS motif\n)\n\
+                   UPDATE boutique.commandes c\nSET lignes = (\n    SELECT coalesce(jsonb_agg(l), '[]')\n    \
+                   FROM jsonb_array_elements(c.lignes) AS l\n    WHERE NOT (l ->> 'sku' ~ (SELECT motif FROM filtre))\n)";
+        assert!(with_qui_ecrit(sql));
+        for sql in [
+            "with x as (select 1) delete from commandes where id in (select * from x)",
+            "with x as (select 1) insert into commandes (id) select * from x",
+            "with x as (select 1) merge into commandes using x on true when matched then delete",
+            "with recursive n(i) as (select 1 union all select i + 1 from n) update t set a = 1",
+        ] {
+            assert!(with_qui_ecrit(sql), "{sql}");
+        }
+    }
+
+    #[test]
+    fn un_with_qui_aboutit_a_une_lecture_n_ecrit_pas() {
+        for sql in [
+            "with x as (select 1) select * from x",
+            "WITH x AS MATERIALIZED (SELECT 1) SELECT * FROM x",
+            // **Écrire dans une CTE et lire au premier niveau rend des lignes** : la limite s'applique
+            // au `select` externe, et elle est valide.
+            "with retirees as (delete from commandes returning *) select * from retirees",
+            "with x as (select 1) select * from commandes for update",
+            "with x(a, b) as (values (1, 2)) table x",
+            "with recursive n(i) as (select 1 union all select i + 1 from n) \
+             search depth first by i set ordre select * from n",
+        ] {
+            assert!(!with_qui_ecrit(sql), "{sql}");
+        }
+    }
+
+    #[test]
+    fn ce_qui_n_est_pas_un_with_n_est_pas_concerne() {
+        // Les autres instructions sont l'affaire du premier mot, que chaque moteur lit déjà.
+        for sql in ["update commandes set a = 1", "select 1", "withdraw", ""] {
+            assert!(!with_qui_ecrit(sql), "{sql}");
+        }
+    }
+
+    #[test]
+    fn chaines_identifiants_et_commentaires_ne_trompent_pas_la_lecture() {
+        // Une parenthèse dans une chaîne ne descend d'aucun niveau ; sans les sauter, le `update`
+        // final serait vu en profondeur 1, et la limite repartirait.
+        assert!(with_qui_ecrit(
+            "with x as (select ')' as a, 'l''(' as b) update t set a = 1"
+        ));
+        // Un mot-clé cité est un nom, pas une instruction.
+        assert!(!with_qui_ecrit(
+            r#"with "update" as (select 1) select * from "update""#
+        ));
+        assert!(!with_qui_ecrit(
+            "with `delete` as (select 1) select * from `delete`"
+        ));
+        // Un commentaire n'est pas l'instruction principale, ni avant ni au milieu.
+        assert!(!with_qui_ecrit(
+            "-- update en attente\nwith x as (select 1) /* delete */ select * from x"
+        ));
+        assert!(with_qui_ecrit(
+            "/* lecture ? */ with x as (select 1) -- select\nupdate t set a = 1"
+        ));
+    }
 
     #[test]
     fn une_requete_de_lignes_porte_toujours_une_limite() {

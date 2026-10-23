@@ -284,7 +284,11 @@ pub fn avec_limite(sql: &str, limite: RowLimit) -> (String, Option<u32>) {
     let nu = sql.trim().trim_end_matches(';').trim();
     let minuscules = nu.to_lowercase();
     let rend_des_lignes = minuscules.starts_with("select") || minuscules.starts_with("with");
-    if !rend_des_lignes || minuscules.contains(" limit ") || minuscules.ends_with(" limit") {
+    if !rend_des_lignes
+        || crate::engine::rows::with_qui_ecrit(nu)
+        || minuscules.contains(" limit ")
+        || minuscules.ends_with(" limit")
+    {
         return (nu.to_owned(), None);
     }
     (
@@ -596,6 +600,11 @@ mod tests {
         assert_eq!(
             avec_limite("delete from t where a = 1", RowLimit::OneThousand),
             ("delete from t where a = 1".to_owned(), None)
+        );
+        let sql = "with x as (select 1) delete from t where a in (select * from x)";
+        assert_eq!(
+            avec_limite(sql, RowLimit::OneThousand),
+            (sql.to_owned(), None)
         );
     }
 
