@@ -234,3 +234,24 @@ test('le libellé de la bascule et les deux boutons tiennent dans leur boîte', 
   })
   expect(debordements).toEqual([])
 })
+
+test('la requête d’une instruction se copie au clic droit', async ({ page, context }) => {
+  // **Assemblée, et non dans sa vitrine** : le clic droit est refusé partout par `useClicDroit`,
+  // et c'est ici seulement qu'on voit que le menu de la carte passe quand même.
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  await page.getByRole('switch', { name: 'Transaction manuelle' }).click()
+  await page.locator('.cm-content').click()
+  await page.keyboard.insertText('select jour, commandes, ca_eur from ventes')
+  await page.getByRole('button', { name: /Exécuter/ }).click()
+
+  // La carte d'une lecture est un bouton : son texte ne se sélectionne pas, d'où le menu.
+  const carte = page.locator(panneau).getByRole('button', { name: /select jour/ })
+  await carte.click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Copier la requête' }).click()
+  await expect(page.getByRole('menu')).toHaveCount(0)
+  // **Ce que la carte montre, donc ce qui a été exécuté** — la limite ajoutée par DoraBase comprise :
+  // recoller la requête doit reproduire la réponse qu'on avait sous les yeux.
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+    'select jour, commandes, ca_eur from ventes\nlimit 1000',
+  )
+})

@@ -1367,7 +1367,12 @@ export function TableView({
             onSelect={(ligne) => {
               if (ligne.sorte === 'lue') setChoisie(String(ligne.rang))
             }}
-            empty={<span>{messageVide(t, loading, error, schema, table)}</span>}
+            // Une erreur de lecture se copie ; « aucune ligne » reste du chrome.
+            empty={
+              <span data-selectionnable={error ? true : undefined}>
+                {messageVide(t, loading, error, schema, table)}
+              </span>
+            }
           />
         </div>
       </div>

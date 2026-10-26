@@ -822,6 +822,8 @@ export function ExplorerSidebar({
                 className={styles.message}
                 style={{ paddingLeft: noeud.indent }}
                 data-depth={noeud.depth}
+                // Un échec de chargement se copie ; « chargement… » et « vide » restent du chrome.
+                data-selectionnable={noeud.id.endsWith(':echec') ? true : undefined}
               >
                 {noeud.label}
               </p>

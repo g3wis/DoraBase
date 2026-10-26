@@ -485,6 +485,10 @@ qu'il portait et que le rendu ne dit pas.
 - **Aucune correction automatique dans les champs.** macOS transformait `localhost` en
   `Localhost` et le nom qu'on tapait dans un champ de renommage. Les quatre attributs
   vivent dans `Field` et doivent être réemployés par toute saisie qui n'y passe pas.
+- **Un message d'erreur se sélectionne, donc se copie** (26 octobre 2026) — seule exception, avec
+  les saisies, au chrome non sélectionnable. Par la sélection et `⌘C`, **pas par un bouton** : un
+  bouton par message serait un pixel inventé sur vingt écrans. `[role="alert"]` est couvert par
+  `reset.css` ; toute autre erreur affichée porte `data-selectionnable`, et l'oublier est un défaut.
 - **Les colonnes s'ajustent à leur contenu, sous un plafond** (2 septembre 2026, `ajustement.ts`).
   `A5` donnait 130 px à toutes ses colonnes et la console 160 : deux valeurs faute de mieux, qui
   laissaient une colonne de booléens aussi large qu'une colonne de dates. Quatre points :

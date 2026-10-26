@@ -726,6 +726,47 @@ test('sans code ni tunnel, aucun encart de log dans A3', async ({ page }) => {
   await expect(page.locator('[class*=failureLog]')).toHaveCount(0)
 })
 
+// **Un message d'erreur se copie** : il est fait pour être recollé, et le chrome autour ne se
+// sélectionne pas (`reset.css`). La mesure est la sélection *obtenue au geste*, pas la propriété
+// déclarée — c'est elle que `⌘C` copie.
+test('le message de A3 se sélectionne, donc se copie', async ({ page }) => {
+  await provoquerUnEchec(page)
+  const message = page
+    .getByRole('dialog', { name: 'Connexion impossible' })
+    .locator('[class*=failureText]')
+  const texte = (await message.textContent()) ?? ''
+  expect(texte.length).toBeGreaterThan(0)
+
+  await message.click({ clickCount: 3 })
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.toString().trim()))
+    .toBe(texte.trim())
+
+  // Contrôle négatif : le titre de la même modale reste du chrome.
+  await page.evaluate(() => window.getSelection()?.removeAllRanges())
+  await page
+    .getByRole('dialog', { name: 'Connexion impossible' })
+    .getByText('Connexion impossible')
+    .click({ clickCount: 3 })
+  expect(await page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe('')
+})
+
+test('toute erreur annoncée en `role="alert"` se sélectionne, sans attribut à poser', async ({
+  page,
+}) => {
+  // La règle vaut pour les alertes à venir : c'est ce qui dispense de s'en souvenir à chacune.
+  const selection = await page.evaluate(() => {
+    const alerte = document.createElement('p')
+    alerte.setAttribute('role', 'alert')
+    alerte.textContent = 'relation « commandes » inexistante'
+    document.querySelector('[role=dialog]')?.append(alerte)
+    const valeur = getComputedStyle(alerte).userSelect || getComputedStyle(alerte).webkitUserSelect
+    alerte.remove()
+    return valeur
+  })
+  expect(selection).toBe('text')
+})
+
 test('esc ferme la sous-modale sans fermer A2', async ({ page }) => {
   await provoquerUnEchec(page)
   await page.keyboard.press('Escape')

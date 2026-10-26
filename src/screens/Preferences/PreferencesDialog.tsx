@@ -747,7 +747,11 @@ function MisesAJour({
             </p>
             {/* Une release sans notes est un cas normal du manifeste, et l'écran tient sans. */}
             <p className={styles.majNotes}>{etat.maj.notes ?? t('preferences.maj.sansNotes')}</p>
-            {echecInstallation !== null && <p className={styles.reserve}>{echecInstallation}</p>}
+            {echecInstallation !== null && (
+              <p data-selectionnable className={styles.reserve}>
+                {echecInstallation}
+              </p>
+            )}
             <Button variant="dark" size="md" onClick={lancer} disabled={installation}>
               {installation ? t('preferences.maj.installation') : t('preferences.maj.installer')}
             </Button>
