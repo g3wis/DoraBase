@@ -226,3 +226,37 @@ test('le compte des instructions est celui de la transaction', () => {
   expect(panneau).toBeInTheDocument()
   expect(screen.getAllByRole('listitem')).toHaveLength(3)
 })
+
+test('la requête d’une instruction se copie au clic droit, que la carte soit un bouton ou non', async () => {
+  // **Les deux sortes de carte** : celle qui a un résultat à montrer est un `<button>`, dont le texte
+  // ne se sélectionne pas — c'est elle que le menu existe pour rattraper.
+  const utilisateur = userEvent.setup()
+  const writeText = vi.fn().mockResolvedValue(undefined)
+  // `navigator.clipboard` n'a qu'un accesseur sous jsdom : il faut redéfinir la propriété.
+  Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+  monter(
+    {
+      open: true,
+      statements: [
+        instruction({ sql: 'update commandes set statut = 1' }),
+        instruction({ sql: 'select * from commandes', displayable: true, returned: 12 }),
+      ],
+    },
+    { onAfficher: () => {} },
+  )
+
+  await utilisateur.pointer({
+    keys: '[MouseRight]',
+    target: screen.getByRole('button', { name: /select \* from commandes/ }),
+  })
+  await utilisateur.click(screen.getByRole('menuitem', { name: 'Copier la requête' }))
+  expect(writeText).toHaveBeenLastCalledWith('select * from commandes')
+
+  // La carte d'écriture n'est pas un bouton : visée par son élément de liste, le premier.
+  await utilisateur.pointer({
+    keys: '[MouseRight]',
+    target: screen.getAllByRole('listitem')[0] as HTMLElement,
+  })
+  await utilisateur.click(screen.getByRole('menuitem', { name: 'Copier la requête' }))
+  expect(writeText).toHaveBeenLastCalledWith('update commandes set statut = 1')
+})

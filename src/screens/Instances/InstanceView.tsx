@@ -292,7 +292,10 @@ export function InstanceView({
       <div className={styles.contenu}>
         {!ouverte ? (
           <div className={styles.etat}>
-            <p className={styles.message}>
+            <p
+              className={styles.message}
+              data-selectionnable={etat.kind === 'offline' ? true : undefined}
+            >
               {etat.kind === 'connecting'
                 ? t('instances.state.connecting')
                 : etat.kind === 'offline'

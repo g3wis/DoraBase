@@ -51,7 +51,9 @@ export function RenameReportDialog({ rapport, onClose }: RenameReportDialogProps
       }
     >
       <div className={styles.corps} role="status">
-        <p className={styles.refus}>{rapport.refus}</p>
+        <p data-selectionnable className={styles.refus}>
+          {rapport.refus}
+        </p>
         {/* **Le fait qui rassure, dit aussi fort que celui qui inquiète** — la règle de `08j` : un
             refus de renommage laisse tout en place. */}
         <p>

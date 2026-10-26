@@ -103,7 +103,9 @@ export function DumpDialogs({ sens, arbre, onClose, commandes = pont }: DumpDial
         }
       >
         <div className={styles.body}>
-          <p className={styles.echec}>{erreur}</p>
+          <p data-selectionnable className={styles.echec}>
+            {erreur}
+          </p>
         </div>
       </Modal>
     )

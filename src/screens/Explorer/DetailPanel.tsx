@@ -100,7 +100,9 @@ export function DetailPanel({
   if (error)
     return (
       <aside className={styles.root}>
-        <p className={styles.vide}>{error}</p>
+        <p data-selectionnable className={styles.vide}>
+          {error}
+        </p>
       </aside>
     )
   if (loading)

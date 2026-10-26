@@ -81,17 +81,26 @@ body {
 }
 
 /*
- * Ce qui reste sélectionnable : **ce qui s'édite**, et rien d'autre.
+ * Ce qui reste sélectionnable : **ce qui s'édite, et les messages d'erreur**.
  *
  * `input`, `textarea` et `[contenteditable]` couvrent toute saisie, dont l'éditeur CodeMirror de
  * `12b` — un `contenteditable`, qui deviendrait inutilisable sans caret ni sélection.
  * `[data-selectionnable]` est la porte de sortie explicite, pour le cas qui viendra et qu'aucun des
  * trois ne couvre : le déclarer sur un élément est alors un geste visible en revue.
  *
+ * **Un message d’erreur se copie** (26 octobre 2026). Il est fait pour être recollé — dans une
+ * recherche, un ticket, un message à qui administre le serveur —, et le recopier à la main est le
+ * moment où un `SQLSTATE` ou un nom d'hôte se déforme. Contrairement aux blocs de données, il n'a
+ * pas de bouton de copie, et ne doit pas en avoir : un bouton par message serait un pixel inventé
+ * sur vingt écrans. Glisser puis `⌘C` suffit — le menu Édition est reconstruit, le menu contextuel
+ * natif ne l'est pas (`useClicDroit`). `[role="alert"]` couvre d'office toute erreur annoncée ;
+ * celles qui ne s'annoncent pas — un échec qui remplace un panneau, un verdict qui raconte —
+ * portent `data-selectionnable`. Une erreur qu'on ne peut pas copier est un défaut.
+ *
  * `:where()` pour une spécificité nulle : ces règles ne doivent jamais l'emporter sur une décision
  * locale, seulement rattraper celle posée sur `body`.
  */
-:where(input, textarea, [contenteditable], [data-selectionnable]) {
+:where(input, textarea, [contenteditable], [data-selectionnable], [role="alert"]) {
   -webkit-user-select: text;
   user-select: text;
   cursor: auto;

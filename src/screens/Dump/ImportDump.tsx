@@ -198,7 +198,11 @@ export function ImportDump({
           <p className={styles.progression}>{t('dump.import.running')}</p>
         )}
         {etat.phase === 'fini' && <p className={styles.progression}>{t('dump.import.done')}</p>}
-        {etat.phase === 'echoue' && <p className={styles.echec}>{etat.message}</p>}
+        {etat.phase === 'echoue' && (
+          <p data-selectionnable className={styles.echec}>
+            {etat.message}
+          </p>
+        )}
       </div>
     </Modal>
   )

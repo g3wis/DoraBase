@@ -459,7 +459,9 @@ export function NewConnection({
               </button>
             )}
             {enregistrement.phase === 'refuse' && (
-              <span className={styles.testFail}>{enregistrement.message}</span>
+              <span data-selectionnable className={styles.testFail}>
+                {enregistrement.message}
+              </span>
             )}
             {!engineImplemented && (
               // Un moteur sans adaptateur est **sélectionnable et le dit**. Le masquer ferait

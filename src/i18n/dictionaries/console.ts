@@ -106,6 +106,8 @@ export const consoleFr: Dictionnaire = {
     // **Le verbe du bouton**, ajouté au nom accessible de la carte : sans lui, celle-ci s'annoncerait
     // « #2 12 lignes rendues 4 ms select … », ce qui décrit sans dire ce qu'un clic fera.
     afficher: 'Afficher ce résultat dans la grille',
+    copierLaRequete: 'Copier la requête',
+    actionsSur: (p) => `Actions sur l’instruction ${p.rang}`,
     valider: 'Valider',
     annuler: 'Annuler',
     enCours: 'Validation…',
@@ -323,6 +325,8 @@ export const consoleEn: Dictionnaire = {
     touchees: (p) => `${p.n} row${Number(p.n) > 1 ? 's' : ''} affected`,
     refusee: 'refused',
     afficher: 'Show this result in the grid',
+    copierLaRequete: 'Copy query',
+    actionsSur: (p) => `Actions on statement ${p.rang}`,
     valider: 'Commit',
     annuler: 'Roll back',
     enCours: 'Committing…',

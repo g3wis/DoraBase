@@ -143,7 +143,11 @@ export function ExportProjects({
           </>
         )}
 
-        {avancement.phase === 'echoue' && <p className={styles.echec}>{avancement.message}</p>}
+        {avancement.phase === 'echoue' && (
+          <p data-selectionnable className={styles.echec}>
+            {avancement.message}
+          </p>
+        )}
       </div>
     </Modal>
   )

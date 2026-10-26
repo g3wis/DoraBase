@@ -305,7 +305,9 @@ export function SchemaManager({
             {t('schemas.footer.save')}
           </Button>
           {enregistrement.erreur !== undefined && (
-            <span className={styles.echec}>{enregistrement.erreur}</span>
+            <span data-selectionnable className={styles.echec}>
+              {enregistrement.erreur}
+            </span>
           )}
         </div>
       }
@@ -322,7 +324,11 @@ export function SchemaManager({
 
       <div className={styles.corps}>
         {lecture.phase === 'chargement' && <p className={styles.message}>{t('schemas.loading')}</p>}
-        {lecture.phase === 'echouee' && <p className={styles.echec}>{lecture.message}</p>}
+        {lecture.phase === 'echouee' && (
+          <p data-selectionnable className={styles.echec}>
+            {lecture.message}
+          </p>
+        )}
 
         {lecture.phase === 'prete' && (
           <>
@@ -404,7 +410,11 @@ export function SchemaManager({
         {creation.fait !== undefined && (
           <p className={styles.fait}>{t('schemas.create.done', { name: creation.fait })}</p>
         )}
-        {creation.erreur !== undefined && <p className={styles.echec}>{creation.erreur}</p>}
+        {creation.erreur !== undefined && (
+          <p data-selectionnable className={styles.echec}>
+            {creation.erreur}
+          </p>
+        )}
       </div>
     </Modal>
   )

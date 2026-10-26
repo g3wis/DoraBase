@@ -53,7 +53,9 @@ export function StructureView({
   if (error)
     return (
       <div className={styles.root}>
-        <p className={styles.vide}>{error}</p>
+        <p data-selectionnable className={styles.vide}>
+          {error}
+        </p>
       </div>
     )
   if (loading)

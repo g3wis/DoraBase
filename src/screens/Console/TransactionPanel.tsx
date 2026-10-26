@@ -1,8 +1,10 @@
+import { useState } from 'react'
 import { Icon } from '../../design/icons/Icon'
 import type { TransactionState, TransactionStatement } from '../../domain/engine'
 import { useT } from '../../i18n/LanguageContext'
 import { Badge } from '../../ui/Badge/Badge'
 import { cx } from '../../ui/cx'
+import { MenuContextuel } from '../../ui/MenuContextuel/MenuContextuel'
 import { SqlColore } from '../TableView/SqlColore'
 import styles from './TransactionPanel.module.css'
 
@@ -189,6 +191,13 @@ function Instruction({
   // cœur : il est faux pour une écriture — son compte de lignes touchées *est* sa réponse, et un
   // clic ne ferait que vider la grille — et faux pour un refus, dont le message est juste dessous.
   const choisissable = instruction.displayable && onAfficher !== undefined
+  /**
+   * **La requête se copie au clic droit**, sur toute la carte. Elle ne peut pas se sélectionner :
+   * une carte qui a un résultat à montrer est un `<button>`, dont le texte ne se sélectionne pas, et
+   * un glisser y deviendrait un clic. Le menu vaut pour les deux sortes de carte, pour qu'un même
+   * geste ne marche pas sur l'une et rate sur l'autre. C'est le geste de « Copier le nom » (#162).
+   */
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
 
   const contenu = (
     <>
@@ -208,12 +217,38 @@ function Instruction({
       {/* Pas de `role="alert"` : cette ligne n'annonce rien, elle **raconte** ce qui s'est passé, et
           une région d'alerte par instruction reparlerait à chaque rendu du panneau. Le refus d'une
           validation, lui, en porte un : celui-là est la réponse à un geste. */}
-      {instruction.error !== null && <p className={styles.echec}>{instruction.error}</p>}
+      {instruction.error !== null && (
+        <p data-selectionnable className={styles.echec}>
+          {instruction.error}
+        </p>
+      )}
     </>
   )
 
   return (
-    <li className={cx(styles.instruction, refusee && styles.refusee)}>
+    <li
+      className={cx(styles.instruction, refusee && styles.refusee)}
+      onContextMenu={(evenement) => {
+        evenement.preventDefault()
+        setMenu({ x: evenement.clientX, y: evenement.clientY })
+      }}
+    >
+      {menu !== null && (
+        <MenuContextuel
+          x={menu.x}
+          y={menu.y}
+          label={t('console.transaction.actionsSur', { rang })}
+          entrees={[
+            {
+              libelle: t('console.transaction.copierLaRequete'),
+              icone: 'copy',
+              // Muet, comme les autres copies du produit.
+              onClick: () => void navigator.clipboard?.writeText(instruction.sql),
+            },
+          ]}
+          onFermer={() => setMenu(null)}
+        />
+      )}
       {choisissable ? (
         // **Un bouton, et la carte entière** : la cible est ce qu'on lit — le SQL et sa réponse —,
         // et une petite action « Afficher » à côté aurait demandé de viser 60 px après en avoir lu

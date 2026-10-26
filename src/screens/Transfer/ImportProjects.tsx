@@ -124,7 +124,11 @@ export function ImportProjects({
         {fichier === null && <p className={styles.explication}>{t('transfer.import.what')}</p>}
         {fichier !== null && <p className={styles.chemin}>{fichier}</p>}
 
-        {erreur !== null && <p className={styles.echec}>{erreur}</p>}
+        {erreur !== null && (
+          <p data-selectionnable className={styles.echec}>
+            {erreur}
+          </p>
+        )}
 
         {rapport !== null && rapport.secrets === 'embedded' && (
           <p className={styles.avertissement}>{t('transfer.import.carriesPasswords')}</p>
@@ -312,7 +316,9 @@ function Ligne({
           </span>
         )}
         {sort.verdict.kind === 'rejected' && (
-          <span className={styles.refus}>{sort.verdict.reason}</span>
+          <span data-selectionnable className={styles.refus}>
+            {sort.verdict.reason}
+          </span>
         )}
       </div>
     </div>

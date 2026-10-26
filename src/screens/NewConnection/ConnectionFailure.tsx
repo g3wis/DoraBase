@@ -48,7 +48,9 @@ export function ConnectionFailure({ message, code, viaTunnel, onClose }: Connect
       }
     >
       <div className={styles.failureBody}>
-        <p className={styles.failureText}>{message}</p>
+        <p data-selectionnable className={styles.failureText}>
+          {message}
+        </p>
 
         {/* Affiché *et* copiable, donc c'est le point du produit le plus exposé à une fuite de
             secret — d'où le contrôle par sentinelle côté Rust (`08d`), et le fait que rien ne
