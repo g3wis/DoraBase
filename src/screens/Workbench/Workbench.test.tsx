@@ -2877,6 +2877,52 @@ describe('le gestionnaire de schémas', () => {
     await waitFor(() => expect(vus.crees).toEqual(['reporting']))
     expect(vus.enregistres).toEqual([])
   })
+
+  // --- Les publications d'une base (#195) ---
+
+  it('« Publications » ouvre un onglet sur la connexion cliquée, et l’ouvre avant de lire', async () => {
+    const utilisateur = userEvent.setup()
+    const lues: DatabaseKey[] = []
+    const passerelle = passerelleQuiExigeLOuverture()
+    monter({
+      passerelle,
+      passerellePublications: {
+        listPublications: vi.fn(async (cle: DatabaseKey) => {
+          lues.push(cle)
+          return [
+            {
+              name: 'atelier_cdc',
+              owner: 'atelier',
+              allTables: true,
+              insert: true,
+              update: true,
+              delete: true,
+              truncate: true,
+              viaRoot: false,
+            },
+          ]
+        }),
+      },
+    })
+    await ouvrirLesEnvironnements(utilisateur)
+
+    await utilisateur.click(screen.getByRole('button', { name: 'Actions de analytics' }))
+    await utilisateur.click(screen.getByRole('button', { name: 'Publications' }))
+
+    expect(screen.getByRole('tab', { name: /publications/ })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    /* **La lecture attend l'ouverture** : la ligne de la base n'a jamais été dépliée, donc la
+       connexion est fermée quand l'onglet paraît. La vue lit quand l'état passe à « connectée », et
+       c'est l'écran qui l'a ouverte — sans quoi le tableau resterait sur « pas encore ouverte ». */
+    expect(await screen.findByRole('rowheader', { name: 'atelier_cdc' })).toBeInTheDocument()
+    expect(vi.mocked(passerelle.openDatabase).mock.calls.map(([cle]) => cle)).toEqual([
+      { connection: ANALYTICS },
+    ])
+    // L'identifiant vient du nœud cliqué, pas de la première connexion du décor.
+    expect(lues).toEqual([{ connection: ANALYTICS }])
+  })
 })
 
 /**

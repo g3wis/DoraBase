@@ -5,6 +5,7 @@ import { explorerEn, explorerFr } from './explorer'
 import { instancesEn, instancesFr } from './instances'
 import { newConnectionEn, newConnectionFr } from './newConnection'
 import { preferencesEn, preferencesFr } from './preferences'
+import { publicationsEn, publicationsFr } from './publications'
 import { schemasEn, schemasFr } from './schemas'
 import { shellEn, shellFr } from './shell'
 import { structureEn, structureFr } from './structure'
@@ -31,6 +32,7 @@ export const DICTIONNAIRES = {
     shell: shellFr,
     dump: dumpFr,
     schemas: schemasFr,
+    publications: publicationsFr,
     instances: instancesFr,
     transfer: transferFr,
     ui: uiFr,
@@ -47,6 +49,7 @@ export const DICTIONNAIRES = {
     shell: shellEn,
     dump: dumpEn,
     schemas: schemasEn,
+    publications: publicationsEn,
     instances: instancesEn,
     transfer: transferEn,
     ui: uiEn,

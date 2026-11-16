@@ -307,6 +307,12 @@ impl PostgresAdapter {
         admin::executer(&self.client, action).await
     }
 
+    /// Les publications de la base (#195). Voir `introspect::publications` pour la lecture, et
+    /// `AnyEngine::publications` pour le refus des quatre autres moteurs.
+    pub async fn publications(&self) -> Result<Vec<crate::engine::PublicationInfo>, EngineError> {
+        introspect::publications(&self.client).await
+    }
+
     pub async fn create_schema(&self, name: &str) -> Result<(), EngineError> {
         let nom = name.trim();
         if nom.is_empty() {
@@ -906,7 +912,7 @@ mod tests {
 mod tests_db {
     use super::*;
     use crate::config::SslMode;
-    use crate::engine::RelationCardinality;
+    use crate::engine::{PublicationInfo, RelationCardinality};
 
     /// L'adresse de la base de test, **jamais codée en dur** : le port diffère entre le
     /// conteneur local (55432, choisi pour ne croiser aucun autre projet de la machine) et
@@ -2666,6 +2672,108 @@ mod tests_db {
             .batch_execute("drop schema \"API-33 essai\"")
             .await
             .expect("le décor doit se retirer");
+    }
+
+    /// Les publications se relisent avec ce qu'elles déclarent (#195).
+    ///
+    /// **Trois formes qui ne se confondent pas** (règle n° 5) : une publication `for all tables`
+    /// aux quatre opérations, une qui ne publie que les insertions, et une qui ne publie que les
+    /// mises à jour, par la racine de partition. Chaque paire de colonnes voisines y diffère au
+    /// moins une fois : échanger `pubupdate` et `pubdelete` dans la projection fait tomber le test,
+    /// ce qu'un décor où les deux allaient toujours ensemble laissait passer — vérifié par sabotage.
+    ///
+    /// **L'ordre de création n'est pas l'ordre des noms**, et c'est voulu : sans `order by`, la
+    /// lecture rend l'ordre du tas, donc celui de création — et le test tomberait.
+    ///
+    /// Les noms portent le numéro du ticket : le décor est partagé par des tests parallèles, et
+    /// aucun autre ne les nomme. Ils sont retirés **avant** comme après, pour qu'un essai interrompu
+    /// ne fasse pas échouer le suivant sur « existe déjà ». `create publication` sous un `wal_level`
+    /// qui n'est pas `logical` réussit avec un avertissement, ce qui est le cas du décor.
+    #[tokio::test]
+    async fn les_publications_se_relisent_avec_ce_qu_elles_declarent() {
+        let (variante, _) = variante_de_test();
+        let adaptateur = adaptateur().await;
+        let retirer = "drop publication if exists pub_195_toutes, pub_195_insertions, \
+                       pub_195_racine";
+        adaptateur
+            .client
+            .batch_execute(retirer)
+            .await
+            .expect("décor");
+        adaptateur
+            .client
+            .batch_execute(
+                "create publication pub_195_toutes for all tables;
+                 create publication pub_195_insertions with (publish = 'insert');
+                 create publication pub_195_racine
+                   with (publish = 'update', publish_via_partition_root = true);",
+            )
+            .await
+            .expect("le décor doit se poser");
+
+        let lues = adaptateur.publications().await;
+        adaptateur
+            .client
+            .batch_execute(retirer)
+            .await
+            .expect("décor");
+        let lues = lues.expect("la lecture doit aboutir");
+
+        let notres: Vec<_> = lues
+            .iter()
+            .filter(|p| p.name.starts_with("pub_195_"))
+            .collect();
+        let noms: Vec<_> = notres.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(
+            noms,
+            ["pub_195_insertions", "pub_195_racine", "pub_195_toutes"],
+            "dans l'ordre des noms, non de création : {lues:?}"
+        );
+
+        let proprietaire = variante.username.clone();
+        assert_eq!(
+            *notres[0],
+            PublicationInfo {
+                name: "pub_195_insertions".into(),
+                owner: proprietaire.clone(),
+                all_tables: false,
+                insert: true,
+                update: false,
+                delete: false,
+                // Le décor est un PostgreSQL 17 : les deux colonnes récentes existent, donc elles
+                // sont lues — un `None` ici voudrait dire que la clé du `jsonb` est mal nommée.
+                truncate: Some(false),
+                via_root: Some(false),
+            }
+        );
+        assert_eq!(
+            *notres[1],
+            PublicationInfo {
+                name: "pub_195_racine".into(),
+                owner: proprietaire.clone(),
+                all_tables: false,
+                insert: false,
+                // `update` sans `delete` : sur un décor où les deux vont toujours ensemble, lire
+                // l'une pour l'autre passerait.
+                update: true,
+                delete: false,
+                truncate: Some(false),
+                via_root: Some(true),
+            }
+        );
+        assert_eq!(
+            *notres[2],
+            PublicationInfo {
+                name: "pub_195_toutes".into(),
+                owner: proprietaire,
+                all_tables: true,
+                insert: true,
+                update: true,
+                delete: true,
+                truncate: Some(true),
+                via_root: Some(false),
+            }
+        );
     }
 
     /// Un nom vide est refusé **avant** le serveur (`API-33`).

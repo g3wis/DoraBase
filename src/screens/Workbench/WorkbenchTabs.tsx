@@ -65,6 +65,20 @@ export function WorkbenchTabs({
         label: onglet.instance,
       }
     }
+    /* **Les publications d'une base** (#195) : `network`, une boîte qui en alimente deux — ce
+       qu'une publication est pour ses abonnés —, et l'encre neutre du diagramme, pour sa raison :
+       ce n'est pas une nature d'objet de la bande, c'est une façon de regarder une base. Le
+       libellé est le mot de PostgreSQL, le même dans les deux langues, et la barre de titre dit de
+       quelle base il s'agit, comme pour une console. */
+    if (onglet.sorte === 'publications') {
+      return {
+        id: idOnglet(onglet),
+        icon: 'network' as const,
+        iconColor: 'var(--ink-2)',
+        accentColor: 'var(--accent)',
+        label: 'publications',
+      }
+    }
     if (onglet.sorte === 'diagramme') {
       return {
         id: idOnglet(onglet),

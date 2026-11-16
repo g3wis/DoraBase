@@ -92,6 +92,21 @@ export type OngletDiagramme = {
 }
 
 /**
+ * Les publications de réplication logique d'une base PostgreSQL (#195).
+ *
+ * **Un onglet, comme le diagramme**, et pour sa raison : une liste qu'on lit en regardant ailleurs
+ * — une table, une console — ne doit pas se refermer quand on clique à côté, ce qu'une modale
+ * aurait fait. Tranché à l'entretien du ticket.
+ *
+ * **Il ne porte que la base** : une publication appartient à une base, pas à un schéma — même une
+ * publication `for tables in schema` vit dans `pg_publication`, catalogue de la base entière.
+ */
+export type OngletPublications = {
+  sorte: 'publications'
+  key: DatabaseKey
+}
+
+/**
  * Une instance managée ouverte dans un onglet (`API-32`).
  *
  * **Le seul onglet qui ne porte pas de `DatabaseKey`**, et c'est ce qui le définit : il ne parle
@@ -117,7 +132,12 @@ export type OngletInstance = {
  * pour un seul écran. Le diagramme de schéma est le troisième membre, et il y entre pour la même
  * raison : c'est un contenu du centre, qui se ferme et se réordonne comme les autres.
  */
-export type Onglet = OngletTable | OngletConsole | OngletDiagramme | OngletInstance
+export type Onglet =
+  | OngletTable
+  | OngletConsole
+  | OngletDiagramme
+  | OngletPublications
+  | OngletInstance
 
 /**
  * L'identité d'un onglet, **dérivée de la base et de ce qu'il ouvre**.
@@ -138,7 +158,7 @@ export function idOnglet(onglet: Onglet): string {
   // renommage exigeait (`26`) est partie avec les noms.
   const coordonnees = onglet.key.connection
   switch (onglet.sorte) {
-    // `instance` est traité au-dessus : ce `switch` ne voit que les trois sortes qui portent une
+    // `instance` est traité au-dessus : ce `switch` ne voit que les sortes qui portent une
     // `DatabaseKey`, et le compilateur le sait par rétrécissement.
     case 'table':
       return `${coordonnees}::${onglet.schema}.${onglet.table}`
@@ -146,6 +166,10 @@ export function idOnglet(onglet: Onglet): string {
       // Le préfixe sépare cet espace de celui des tables : un schéma nommé `diagramme` et une table
       // nommée `x` ne peuvent pas produire la même chaîne, `::diagramme/` n'étant pas `::diagramme.`.
       return `${coordonnees}::diagramme/${onglet.schema}`
+    case 'publications':
+      // **Un nom réservé, sans schéma ni table** : `::publications` ne peut pas sortir des autres
+      // bras, qui portent tous un `.`, un `/` ou un `:` après leur préfixe.
+      return `${coordonnees}::publications`
     case 'console':
       // Une console persistée est identifiée par son nom ; un brouillon, par son numéro. Les deux
       // espaces ne se croisent pas : le préfixe les sépare.
@@ -250,6 +274,21 @@ export function ouvrirConsole(
  */
 export function ouvrirDiagramme(etat: EtatOnglets, key: DatabaseKey, schema: string): EtatOnglets {
   const onglet: OngletDiagramme = { sorte: 'diagramme', key, schema }
+  const id = idOnglet(onglet)
+  if (etat.onglets.some((existant) => idOnglet(existant) === id)) {
+    return { onglets: etat.onglets, actif: id }
+  }
+  return { onglets: [...etat.onglets, onglet], actif: id }
+}
+
+/**
+ * Ouvre les publications d'une base, ou **active l'onglet qui les montre déjà** (#195).
+ *
+ * Comme `ouvrirDiagramme` : deux onglets sur la même liste montreraient la même lecture, avec deux
+ * relevés qui divergeraient.
+ */
+export function ouvrirPublications(etat: EtatOnglets, key: DatabaseKey): EtatOnglets {
+  const onglet: OngletPublications = { sorte: 'publications', key }
   const id = idOnglet(onglet)
   if (etat.onglets.some((existant) => idOnglet(existant) === id)) {
     return { onglets: etat.onglets, actif: id }

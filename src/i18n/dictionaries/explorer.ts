@@ -223,6 +223,7 @@ export const explorerFr: Dictionnaire = {
       edit: 'Modifier…',
       openDiagram: 'Diagramme du schéma',
       manageSchemas: 'Gérer les schémas…',
+      publications: 'Publications',
       copyName: 'Copier le nom',
       moveTo: 'Déplacer vers…',
     },
@@ -239,6 +240,9 @@ export const explorerFr: Dictionnaire = {
       diagramUnavailable: 'Cet écran n’ouvre pas d’onglet.',
       schemasUnavailable: 'Cet écran n’est pas relié au gestionnaire de schémas.',
       schemasPostgresOnly: 'Seul PostgreSQL est géré pour l’instant.',
+      // **Pas « pour l’instant »**, à la différence des schémas : les autres moteurs n’ont pas
+      // d’objet « publication » (#195), et rien ne viendra le leur donner.
+      publicationsPostgresOnly: 'Les publications sont un objet de PostgreSQL.',
       exportUnavailable: 'Cet écran n’est pas relié à l’export.',
       moveUnavailable: 'Cet écran n’est pas relié au déplacement.',
     },
@@ -475,6 +479,7 @@ export const explorerEn: Dictionnaire = {
       edit: 'Edit…',
       openDiagram: 'Schema diagram',
       manageSchemas: 'Manage schemas…',
+      publications: 'Publications',
       copyName: 'Copy name',
       moveTo: 'Move to…',
     },
@@ -491,6 +496,7 @@ export const explorerEn: Dictionnaire = {
       diagramUnavailable: 'This screen does not open tabs.',
       schemasUnavailable: 'This screen is not wired to the schema manager.',
       schemasPostgresOnly: 'Only PostgreSQL is supported for now.',
+      publicationsPostgresOnly: 'Publications are a PostgreSQL object.',
       exportUnavailable: 'This screen is not wired to export.',
       moveUnavailable: 'This screen is not wired to moving.',
     },

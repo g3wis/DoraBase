@@ -14,8 +14,8 @@ use tokio_postgres::Client;
 
 use crate::engine::{
     ColumnInfo, ConstraintInfo, EngineError, Identity, IndexInfo, KeyKind, ObjectCounts,
-    ObjectKind, Relation, RelationCardinality, RelationDirection, SchemaInfo, TableDetail,
-    TableSummary, TriggerInfo,
+    ObjectKind, PublicationInfo, Relation, RelationCardinality, RelationDirection, SchemaInfo,
+    TableDetail, TableSummary, TriggerInfo,
 };
 
 use super::error::traduire;
@@ -148,6 +148,57 @@ pub async fn schemas(client: &Client) -> Result<Vec<SchemaInfo>, EngineError> {
                     functions: compteur(ligne, "functions")?,
                     indexes: compteur(ligne, "indexes")?,
                 },
+            })
+        })
+        .collect()
+}
+
+/// Les publications de la base (#195), dans l'ordre de leur nom.
+///
+/// # `to_jsonb(p)` plutôt qu'un test de version
+///
+/// `pubtruncate` n'existe qu'à partir de PostgreSQL 11, `pubviaroot` qu'à partir de 13 : les
+/// nommer dans la projection ferait échouer la lecture entière sur un serveur plus ancien — « la
+/// colonne n'existe pas », pour une vue qui n'a rien demandé d'autre. Lire la ligne en `jsonb` et
+/// y prendre la clé rend `null` quand le catalogue ne la porte pas, ce qui est exactement
+/// l'absence que `PublicationInfo` dit. L'autre issue — lire `server_version_num`, puis composer
+/// l'une de trois requêtes — aurait fait vivre trois textes dont deux ne tournent sur aucun décor.
+///
+/// Les trois opérations de PostgreSQL 10 sont nommées directement : un serveur antérieur n'a pas
+/// de `pg_publication` du tout, et l'erreur du moteur le dira mieux qu'un `null`.
+///
+/// `order by` explicite : sans lui, l'ordre est celui du tas — celui de création en apparence, et
+/// faux dès qu'un `alter publication` réécrit la ligne ailleurs.
+const REQUETE_PUBLICATIONS: &str = "
+select p.pubname::text                           as name,
+       pg_get_userbyid(p.pubowner)::text         as owner,
+       p.puballtables                            as all_tables,
+       p.pubinsert                               as ins,
+       p.pubupdate                               as upd,
+       p.pubdelete                               as del,
+       (to_jsonb(p) ->> 'pubtruncate')::boolean  as trunc,
+       (to_jsonb(p) ->> 'pubviaroot')::boolean   as via_root
+  from pg_publication p
+ order by p.pubname";
+
+pub async fn publications(client: &Client) -> Result<Vec<PublicationInfo>, EngineError> {
+    let lignes = client
+        .query(REQUETE_PUBLICATIONS, &[])
+        .await
+        .map_err(|erreur| traduire(&erreur))?;
+
+    lignes
+        .iter()
+        .map(|ligne| {
+            Ok(PublicationInfo {
+                name: ligne.try_get("name").map_err(|e| traduire(&e))?,
+                owner: ligne.try_get("owner").map_err(|e| traduire(&e))?,
+                all_tables: ligne.try_get("all_tables").map_err(|e| traduire(&e))?,
+                insert: ligne.try_get("ins").map_err(|e| traduire(&e))?,
+                update: ligne.try_get("upd").map_err(|e| traduire(&e))?,
+                delete: ligne.try_get("del").map_err(|e| traduire(&e))?,
+                truncate: ligne.try_get("trunc").map_err(|e| traduire(&e))?,
+                via_root: ligne.try_get("via_root").map_err(|e| traduire(&e))?,
             })
         })
         .collect()

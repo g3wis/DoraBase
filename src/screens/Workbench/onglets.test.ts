@@ -10,6 +10,7 @@ import {
   ongletActif,
   ouvrir,
   ouvrirConsole,
+  ouvrirPublications,
   reordonner,
   viseeParLId,
 } from './onglets'
@@ -50,6 +51,9 @@ function libelle(onglet: Onglet): string {
       return `console ${onglet.numero}`
     case 'diagramme':
       return onglet.schema
+    // #195 : le cinquième membre, réclamé ici par le compilateur comme le quatrième.
+    case 'publications':
+      return 'publications'
     case 'table':
       return onglet.table
   }
@@ -227,5 +231,46 @@ describe('le dialecte d’une console (`13a`)', () => {
     // même suite, sans quoi la bande afficherait deux « console 1 ».
     const etat = ouvrirConsole(ouvrirConsole(AUCUN_ONGLET, analytics, 'mongo'), analytics)
     expect(etat.onglets.map(libelle)).toEqual(['console 1', 'console 2'])
+  })
+})
+
+/*
+ * **Les publications d'une base** (#195) : un onglet par base, réactivé plutôt que dupliqué, et dont
+ * l'identité ne croise celle d'aucun autre onglet de la même base.
+ */
+describe('les publications d’une base (#195)', () => {
+  it('rouvrir les publications d’une base active l’onglet existant sans le dupliquer', () => {
+    const etat = ouvrirPublications(
+      ouvrir(ouvrirPublications(AUCUN_ONGLET, analytics), orders),
+      analytics,
+    )
+
+    expect(etat.onglets).toHaveLength(2)
+    expect(ongletActif(etat)).toEqual({ sorte: 'publications', key: analytics })
+  })
+
+  it('deux bases ont deux onglets de publications', () => {
+    const autre = { connection: 'c0000000000000a2' }
+    const etat = ouvrirPublications(ouvrirPublications(AUCUN_ONGLET, analytics), autre)
+
+    expect(etat.onglets.map(idOnglet)).toEqual([
+      'c0000000000000a1::publications',
+      'c0000000000000a2::publications',
+    ])
+  })
+
+  it('n’a pas l’identité d’une table, ni d’une console, ni d’un diagramme', () => {
+    // **Une table nommée `publications` dans un schéma nommé de même** : la chaîne la plus proche
+    // qu'un autre bras puisse produire, et elle porte un `.`.
+    const table = { ...orders, schema: 'publications', table: 'publications' }
+    const etat = ouvrirPublications(ouvrir(AUCUN_ONGLET, table), analytics)
+
+    expect(etat.onglets).toHaveLength(2)
+    expect(new Set(etat.onglets.map(idOnglet)).size).toBe(2)
+  })
+
+  it('est visé par le retrait de sa base', () => {
+    const id = idOnglet({ sorte: 'publications', key: analytics })
+    expect(viseeParLId({ connexions: new Set([analytics.connection]) }, id)).toBe(true)
   })
 })

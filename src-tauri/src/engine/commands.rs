@@ -289,7 +289,9 @@ mod tests {
 // --- Le câblage de `09b` : ouverture et introspection ------------------------------------
 
 use crate::engine::registry::{ConnectionRegistry, ConnectionState, Reprise};
-use crate::engine::{RowQuery, RowWindow, SchemaInfo, TableDetail, TableSummary, Value};
+use crate::engine::{
+    PublicationInfo, RowQuery, RowWindow, SchemaInfo, TableDetail, TableSummary, Value,
+};
 
 /// Désigne une connexion : son identifiant stable, **et rien d'autre** (#165). Le type vit dans le
 /// contrat (`config::requetes`), réexporté ici pour les vingt commandes qui le prennent.
@@ -464,6 +466,28 @@ pub async fn list_schemas(
     registry
         .avec(&key.cle(), Reprise::Rejouable, |adaptateur| {
             Box::pin(adaptateur.schemas())
+        })
+        .await
+}
+
+/// Les publications de réplication logique d'une base ouverte. **PostgreSQL seulement** (#195).
+///
+/// **Une lecture, donc rejouée** : relire `pg_publication` sur une connexion rouverte ne peut rien
+/// écrire deux fois. Elle passe par `avec`, donc une connexion morte au registre est rouverte avant
+/// la lecture — l'étage du bas d'`API-81` —, et une connexion perdue pendant la lecture en sort
+/// retirée.
+///
+/// **Pas de refus en lecture seule** : lire le catalogue n'écrit rien, et une session en lecture
+/// seule (#168) le lit comme une autre. Le refus des quatre autres moteurs est dans
+/// `AnyEngine::publications`.
+#[tauri::command]
+pub async fn list_publications(
+    key: DatabaseKey,
+    registry: tauri::State<'_, ConnectionRegistry>,
+) -> Result<Vec<PublicationInfo>, EngineError> {
+    registry
+        .avec(&key.cle(), Reprise::Rejouable, |adaptateur| {
+            Box::pin(adaptateur.publications())
         })
         .await
 }

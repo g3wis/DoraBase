@@ -183,6 +183,39 @@ pub struct SchemaInfo {
     pub system: bool,
 }
 
+/// Une publication de réplication logique d'une base PostgreSQL (#195).
+///
+/// **Ce que la publication déclare, et rien de ce qu'elle publie.** Les tables et les schémas
+/// qu'elle couvre — avec leurs listes de colonnes et leurs filtres de lignes — sont hors du
+/// périmètre du ticket, tranché à l'entretien : ce type ne porte que la publication elle-même.
+///
+/// **PostgreSQL seulement**, et c'est pourquoi rien ici n'est facultatif « pour les autres
+/// moteurs » : les quatre autres refusent la lecture (`AnyEngine::publications`) plutôt que de
+/// rendre une liste vide, qui se lirait comme « cette base n'a aucune publication ».
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "engine.ts")]
+pub struct PublicationInfo {
+    pub name: String,
+    /// Le rôle propriétaire, par `pg_get_userbyid` — la règle du propriétaire d'un schéma
+    /// (`API-33`) : elle n'exige pas le droit de lire le catalogue des rôles.
+    pub owner: String,
+    /// `FOR ALL TABLES` : la publication couvre toute table de la base, y compris celles qui
+    /// n'existent pas encore.
+    pub all_tables: bool,
+    pub insert: bool,
+    pub update: bool,
+    pub delete: bool,
+    /// `None` quand le serveur ne connaît pas l'opération — avant PostgreSQL 11.
+    ///
+    /// **Une absence dite, jamais un `false` deviné** : un serveur qui ne sait pas publier un
+    /// `truncate` n'a pas *choisi* de ne pas le publier, et l'écran ne doit pas dire qu'il l'a
+    /// fait.
+    pub truncate: Option<bool>,
+    /// `publish_via_partition_root`. `None` avant PostgreSQL 13, pour la même raison.
+    pub via_root: Option<bool>,
+}
+
 /// Une ligne du tableau d'objets de `A4` : « Nom, Lignes, Taille, Col., Clé primaire,
 /// Dernier ANALYZE, Commentaire ».
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

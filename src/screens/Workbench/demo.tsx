@@ -38,6 +38,7 @@ import { NewInstance } from '../Instances/NewInstance'
 import { NewConnection } from '../NewConnection/NewConnection'
 import { PreferencesDialog } from '../Preferences/PreferencesDialog'
 import { jetonsDe, PREFERENCES_PAR_DEFAUT, themeApplique } from '../Preferences/preferences'
+import type { PasserellePublications } from '../Publications/publicationsCommands'
 import type { PasserelleLignes } from '../TableView/useLignes'
 import { type DemandeDeTransfert, TransferDialogs } from '../Transfer/TransferDialogs'
 import type { PasserelleArbre } from './useArbre'
@@ -1001,6 +1002,47 @@ const INSTANCES_DEMO: ManagedInstance[] = [
  * pont ne répond pas en Chromium, et un texte d'une autre forme ne prouverait rien de l'encart ni de
  * son défilement. C'est l'arbitrage du SQL prévu de `11c`, appliqué ici.
  */
+/**
+ * Les publications de la base `analytics` (#195), **trois formes qui se distinguent** : toutes les
+ * tables aux quatre opérations, une liste désignée qui ne publie que les insertions, et une qui ne
+ * publie rien — `publish = ''` existe, et la colonne doit savoir le dire. La démo ne lit rien : ce
+ * que la lecture vaut contre un vrai serveur, c'est le test Rust qui le mesure.
+ */
+const PASSERELLE_PUBLICATIONS_DEMO: PasserellePublications = {
+  listPublications: async () => [
+    {
+      name: 'atelier_cdc',
+      owner: 'atelier',
+      allTables: true,
+      insert: true,
+      update: true,
+      delete: true,
+      truncate: true,
+      viaRoot: false,
+    },
+    {
+      name: 'commandes_vers_entrepot',
+      owner: 'atelier',
+      allTables: false,
+      insert: true,
+      update: false,
+      delete: false,
+      truncate: false,
+      viaRoot: true,
+    },
+    {
+      name: 'en_pause',
+      owner: 'replication',
+      allTables: false,
+      insert: false,
+      update: false,
+      delete: false,
+      truncate: false,
+      viaRoot: false,
+    },
+  ],
+}
+
 const PASSERELLE_INSTANCES_DEMO: PasserelleInstances = {
   openInstance: async () => ({
     kind: 'connected',
@@ -1653,6 +1695,7 @@ export function WorkbenchDemo() {
            pilote pas. */
         instances={INSTANCES_DEMO}
         passerelleInstances={PASSERELLE_INSTANCES_DEMO}
+        passerellePublications={PASSERELLE_PUBLICATIONS_DEMO}
         onDeclareInstance={() => setInstanceOuverte({})}
         onEditInstance={(instance) => setInstanceOuverte({ instance })}
         onOpenPreferences={() => setPreferencesOuvertes(true)}

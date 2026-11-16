@@ -97,6 +97,7 @@ function Piloté({
   onOpenPreferences,
   onOpenDiagram,
   onManageSchemas,
+  onOpenPublications,
   onMove,
   onRecolorDatabase,
   onSetDatabaseIcon,
@@ -123,6 +124,7 @@ function Piloté({
   onOpenPreferences?: () => void
   onOpenDiagram?: ExplorerSidebarProps['onOpenDiagram']
   onManageSchemas?: ExplorerSidebarProps['onManageSchemas']
+  onOpenPublications?: ExplorerSidebarProps['onOpenPublications']
   onMove?: ExplorerSidebarProps['onMove']
   onRecolorDatabase?: ExplorerSidebarProps['onRecolorDatabase']
   onSetDatabaseIcon?: ExplorerSidebarProps['onSetDatabaseIcon']
@@ -157,6 +159,7 @@ function Piloté({
           onOpenPreferences={onOpenPreferences}
           onOpenDiagram={onOpenDiagram}
           onManageSchemas={onManageSchemas}
+          onOpenPublications={onOpenPublications}
           onMove={onMove}
           onRecolorDatabase={onRecolorDatabase}
           onSetDatabaseIcon={onSetDatabaseIcon}
@@ -1681,6 +1684,35 @@ describe('renommer une connexion depuis sa ligne (`26`)', () => {
     expect(entree).toHaveAttribute('title', 'Cet écran n’est pas relié au gestionnaire de schémas.')
   })
 
+  // --- Les publications (#195) ---
+
+  test('« Publications » part du menu de la connexion, avec son identifiant', async () => {
+    const vues: unknown[] = []
+    render(<Piloté initial={TOUT_DEPLIE} onOpenPublications={(...args) => vues.push(args)} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Actions de analytics' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Publications' }))
+
+    expect(vues).toEqual([[ANALYTICS]])
+  })
+
+  test('hors PostgreSQL, « Publications » reste, désactivée — et sans promettre un « pas encore »', async () => {
+    render(<Piloté initial={TOUT_DEPLIE} onOpenPublications={vi.fn()} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Actions de shop' }))
+    const entree = screen.getByRole('button', { name: 'Publications' })
+    expect(entree).toBeDisabled()
+    // **Une autre raison que celle des schémas** : MySQL n'aura jamais de publication, et une
+    // phrase en « pour l'instant » ferait attendre ce qui ne viendra pas.
+    expect(entree).toHaveAttribute('title', 'Les publications sont un objet de PostgreSQL.')
+  })
+
+  test('sans écran relié, « Publications » dit que rien n’ouvre d’onglet', async () => {
+    render(<Piloté initial={TOUT_DEPLIE} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Actions de analytics' }))
+    const entree = screen.getByRole('button', { name: 'Publications' })
+    expect(entree).toBeDisabled()
+    expect(entree).toHaveAttribute('title', 'Cet écran n’ouvre pas d’onglet.')
+  })
+
   test('le renommage d’une connexion ne branche pas celui d’un dossier', async () => {
     render(<Piloté initial={TOUT_DEPLIE} onRenameDatabase={vi.fn()} />)
     // Deux commandes, deux disponibilités : sans `onRenameFolder`, l'entrée du dossier se désactive
@@ -1710,6 +1742,8 @@ describe('le clic droit ouvre le même menu, au pointeur (`26`)', () => {
       // **« Gérer les schémas… » en seconde position** (`API-33`) : les deux gestes qui *ouvrent*
       // quelque chose d'abord, ceux qui configurent ensuite.
       'Gérer les schémas…',
+      // #195 : elle ouvre un onglet, donc avant ce qui règle la ligne.
+      'Publications',
       'Renommer…',
       'Modifier…',
       // #179 : le geste du dossier, sous le même nom, après la paire « Renommer » / « Modifier ».
