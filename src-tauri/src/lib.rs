@@ -89,6 +89,7 @@ pub fn run() {
             engine::commands::list_schemas,
             engine::commands::list_objects,
             engine::commands::create_schema,
+            engine::commands::list_publications,
             engine::commands::describe_table,
             engine::commands::describe_tables,
             engine::commands::read_rows,

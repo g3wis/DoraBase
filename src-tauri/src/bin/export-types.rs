@@ -23,9 +23,9 @@ use dorabase_lib::dump::DumpAvailability;
 use dorabase_lib::engine::commands::{ConnectionRequest, ConnectionTest};
 use dorabase_lib::engine::registry::ConnectionState;
 use dorabase_lib::engine::{
-    ApplyOutcome, ConnectionProbe, EngineError, ExportFormat, PendingUpdate, QueryResult, RowQuery,
-    RowWindow, SchemaInfo, TableDetail, TableSummary, TransactionMode, TransactionState,
-    UpdatePlan,
+    ApplyOutcome, ConnectionProbe, EngineError, ExportFormat, PendingUpdate, PublicationInfo,
+    QueryResult, RowQuery, RowWindow, SchemaInfo, TableDetail, TableSummary, TransactionMode,
+    TransactionState, UpdatePlan,
 };
 use dorabase_lib::instances::commands::{DeleteInstanceResult, SaveInstanceRequest};
 use dorabase_lib::instances::{
@@ -102,6 +102,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ConnectionProbe::export_all(&config)?;
     EngineError::export_all(&config)?;
     SchemaInfo::export_all(&config)?;
+    // Les publications d'une base PostgreSQL (#195) : la seule chose que `list_publications` rend.
+    PublicationInfo::export_all(&config)?;
     TableSummary::export_all(&config)?;
     TableDetail::export_all(&config)?;
     RowQuery::export_all(&config)?;

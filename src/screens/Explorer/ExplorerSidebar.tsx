@@ -119,6 +119,11 @@ export type ExplorerSidebarProps = {
   /** Ouvre le gestionnaire de schémas d'une connexion (`API-33`). */
   onManageSchemas?: (connection: ConnectionId) => void
   /**
+   * Ouvre les publications d'une base PostgreSQL, depuis le menu de sa ligne (#195). Absent,
+   * l'entrée est désactivée avec sa raison.
+   */
+  onOpenPublications?: (connection: ConnectionId) => void
+  /**
    * Renomme une connexion depuis sa ligne (`26`), **sur place**. Rejette avec le refus du cœur.
    * Depuis #166 il n'y a plus de réserve à rapporter : le nom n'est dans aucune identité.
    */
@@ -238,6 +243,7 @@ export function ExplorerSidebar({
   onOpenDiagram,
   onEditDatabase,
   onManageSchemas,
+  onOpenPublications,
   onRenameDatabase,
   onRecolorDatabase,
   onSetDatabaseIcon,
@@ -428,6 +434,7 @@ export function ExplorerSidebar({
       onAddDatabase,
       onEditDatabase,
       onManageSchemas,
+      onOpenPublications,
       renommageDisponible:
         noeud.kind === 'folder' ? onRenameFolder !== undefined : onRenameDatabase !== undefined,
       creerUnDossier,
@@ -1053,6 +1060,7 @@ type Cablage = {
   onAddDatabase: ExplorerSidebarProps['onAddDatabase']
   onEditDatabase: ExplorerSidebarProps['onEditDatabase']
   onManageSchemas: ExplorerSidebarProps['onManageSchemas']
+  onOpenPublications: ExplorerSidebarProps['onOpenPublications']
   /**
    * Un booléen et non la fonction : ce menu n'appelle pas le renommage, il **passe la ligne en
    * édition** — c'est le champ de saisie qui appellera. Il n'a donc besoin que de savoir si l'action
@@ -1292,6 +1300,21 @@ function entreesDe(noeud: Noeud, c: Cablage): readonly EntreeDeMenu[] | undefine
         : RAISONS.schemasHorsPostgres,
     },
     {
+      /* **« Publications » en troisième position** (#195) : elle ouvre un onglet, comme les deux
+         d'avant ouvrent une console et une modale ; ce qui règle la ligne vient après. Hors
+         PostgreSQL, l'entrée reste et se désactive avec sa raison — et la raison n'est pas « pas
+         encore » : les autres moteurs n'ont pas d'objet « publication ». */
+      libelle: t('explorer.sidebar.menu.publications'),
+      icone: 'network',
+      onClick:
+        c.onOpenPublications && estPostgres ? () => c.onOpenPublications?.(connection) : undefined,
+      raison: estPostgres
+        ? c.onOpenPublications
+          ? undefined
+          : RAISONS.diagrammeIndisponible
+        : RAISONS.publicationsHorsPostgres,
+    },
+    {
       /* **« Renommer… » et « Modifier… » sont deux entrées** (`26`) : le nom se corrige sur place,
          les autres réglages se relisent ensemble dans un formulaire. */
       libelle: t('explorer.sidebar.menu.rename'),
@@ -1374,6 +1397,7 @@ function raisons(t: ReturnType<typeof useT>) {
     diagrammeIndisponible: t('explorer.sidebar.raisons.diagramUnavailable'),
     schemasIndisponible: t('explorer.sidebar.raisons.schemasUnavailable'),
     schemasHorsPostgres: t('explorer.sidebar.raisons.schemasPostgresOnly'),
+    publicationsHorsPostgres: t('explorer.sidebar.raisons.publicationsPostgresOnly'),
     exportIndisponible: t('explorer.sidebar.raisons.exportUnavailable'),
     deplacementIndisponible: t('explorer.sidebar.raisons.moveUnavailable'),
   }

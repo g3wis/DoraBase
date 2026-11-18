@@ -60,9 +60,9 @@ use std::future::Future;
 pub use error::{ConnectionProbe, EngineError};
 pub use export::ExportFormat;
 pub use introspection::{
-    ColumnInfo, ConstraintInfo, Identity, IndexInfo, KeyKind, ObjectCounts, ObjectKind, Relation,
-    RelationCardinality, RelationDirection, RowCount, SchemaInfo, TableDetail, TableSummary,
-    TriggerInfo, TypeCategory,
+    ColumnInfo, ConstraintInfo, Identity, IndexInfo, KeyKind, ObjectCounts, ObjectKind,
+    PublicationInfo, Relation, RelationCardinality, RelationDirection, RowCount, SchemaInfo,
+    TableDetail, TableSummary, TriggerInfo, TypeCategory,
 };
 pub use rows::{
     ApplyOutcome, Filter, FilterOperator, Modulo, PendingDelete, PendingInsert, PendingInsertValue,
@@ -343,6 +343,14 @@ const REFUS_CREATION_DE_SCHEMA: &str =
      base du serveur (MySQL, MongoDB), le fichier lui-même (SQLite) ou un jeu de données facturé à \
      part (BigQuery).";
 
+/// Le refus des quatre moteurs sans publication — voir `AnyEngine::publications` (#195).
+///
+/// Comme celui de la création de schéma, il ne se lit que par un chemin qui contourne l'écran :
+/// l'entrée de menu qui ouvre l'onglet est désactivée avec sa raison hors PostgreSQL.
+const REFUS_PUBLICATIONS: &str =
+    "les publications sont un objet de PostgreSQL : MongoDB, MySQL, SQLite et BigQuery n'en ont \
+     pas, et DoraBase ne lit donc les publications que d'une base PostgreSQL.";
+
 fn nom_du_moteur(moteur: crate::config::Engine) -> &'static str {
     // **Le nom vit sur le type** depuis `API-32`, où `config` a eu besoin de le dire aussi. Cette
     // fonction reste : elle est appelée six fois ici, et la remplacer partout n'apprendrait rien.
@@ -579,6 +587,29 @@ impl AnyEngine {
         }
     }
 
+    /// Les publications de réplication logique de la base. **PostgreSQL seulement** (#195).
+    ///
+    /// # Pourquoi les autres refusent, plutôt que de rendre une liste vide
+    ///
+    /// Une liste vide se lirait comme « cette base n'a aucune publication », ce qui est une
+    /// affirmation sur une base qui ne connaît pas la notion. Le refus dit la vraie réponse : la
+    /// question ne se pose pas pour ce moteur.
+    ///
+    /// # Pas une entrée du contrat de moteur
+    ///
+    /// Pour la raison de `table_details` et de `create_schema` : l'inscrire au contrat aurait
+    /// obligé quatre adaptateurs à déclarer une méthode qu'ils ne peuvent que refuser. **Le
+    /// `match` reste exhaustif**, sans bras attrape-tout — la leçon du défaut n° 16 : un sixième
+    /// moteur fera échouer la compilation ici, et son auteur choisira.
+    pub async fn publications(&self) -> Result<Vec<PublicationInfo>, EngineError> {
+        match self {
+            Self::Postgres(adaptateur) => adaptateur.publications().await,
+            Self::MongoDb(_) | Self::Sqlite(_) | Self::MySql(_) | Self::BigQuery(_) => {
+                Err(EngineError::local(REFUS_PUBLICATIONS.to_owned()))
+            }
+        }
+    }
+
     pub async fn run_sql(&self, sql: &str, limite: RowLimit) -> Result<QueryResult, EngineError> {
         match self {
             Self::Postgres(adaptateur) => adaptateur.run_sql(sql, limite).await,
@@ -774,6 +805,40 @@ mod tests_refus {
             erreur.message
         );
         assert!(erreur.message.contains("projet GCP"), "{}", erreur.message);
+    }
+
+    /// Les publications sont refusées hors PostgreSQL, **sans rien lire** (#195).
+    ///
+    /// SQLite est le seul des quatre moteurs qui s'ouvre sans décor : un fichier neuf. Le refus est
+    /// local — aucun `SQLSTATE` — et nomme PostgreSQL : une liste vide aurait dit « aucune
+    /// publication » d'une base qui ne connaît pas la notion.
+    #[tokio::test]
+    async fn les_publications_sont_refusees_hors_postgresql() {
+        let dossier = tempfile::tempdir().expect("répertoire temporaire");
+        let chemin = dossier.path().join("atelier.db");
+        rusqlite::Connection::open(&chemin).expect("fichier");
+        let mut variante = variante_injoignable();
+        variante.default_database = chemin.to_string_lossy().into_owned();
+
+        let Ok(adaptateur) = AnyEngine::connect_via(
+            Engine::Sqlite,
+            &variante,
+            None,
+            &crate::engine::proxy::ContexteDeProxy::pour_les_tests(),
+        )
+        .await
+        else {
+            panic!("un fichier SQLite neuf doit s'ouvrir");
+        };
+
+        let reponse = adaptateur.publications().await;
+        adaptateur.close().await;
+        let refus = reponse.expect_err("SQLite n'a pas de publication");
+        assert!(refus.message.contains("PostgreSQL"), "{refus:?}");
+        assert!(
+            refus.code.is_none(),
+            "refusé sans rien demander au moteur : {refus:?}"
+        );
     }
 
     /// Une variante que rien ne peut joindre : le port 1 est réservé et personne n'y écoute.

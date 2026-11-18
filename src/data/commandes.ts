@@ -39,6 +39,7 @@ import type {
   ApplyOutcome,
   ConnectionState,
   ExportFormat,
+  PublicationInfo,
   QueryResult,
   RowLimit,
   RowQuery,
@@ -426,6 +427,15 @@ export async function deleteFolder(request: DeleteFolderRequest): Promise<Delete
  */
 export async function createSchema(key: DatabaseKey, name: string): Promise<void> {
   return appeler<void>('create_schema', { key, name })
+}
+
+/**
+ * Les publications de réplication logique d'une base ouverte (#195). **PostgreSQL seulement** : les
+ * quatre autres moteurs refusent avec leur raison, et l'entrée de menu qui y mène est déjà
+ * désactivée hors PostgreSQL.
+ */
+export async function listPublications(key: DatabaseKey): Promise<PublicationInfo[]> {
+  return appeler<PublicationInfo[]>('list_publications', { key })
 }
 
 /**

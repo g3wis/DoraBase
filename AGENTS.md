@@ -2103,6 +2103,82 @@ illisibles, et le total est ce qui dit si un schéma est vide. Et les deux planc
 qui rend la section repliée mesurable par Playwright — mais un vrai `pg_catalog` porte des milliers
 de fonctions, et la colonne « objets » n'a jamais affiché cinq chiffres.
 
+### Les publications d'une base PostgreSQL (16 novembre 2026, #195)
+
+Rien du produit ne montrait les publications de réplication logique d'une base : il fallait écrire
+`select * from pg_publication` dans une console. Demandé : « ajoute un moyen de visualiser les
+publications d'une base postgres ». Une entrée « Publications » du menu d'une base de données ouvre
+désormais un onglet **en lecture seule** qui les liste. Trois points tranchés à l'entretien du
+ticket, à ne pas rejouer : **un onglet** — comme le diagramme, et non une modale ni un palier de
+l'arbre ; **chaque publication telle qu'elle se déclare** — nom, propriétaire, portée, opérations
+publiées, publication via la racine de partition ; et **pas d'écriture**. Neuf décisions à ne pas
+défaire :
+
+- **les tables et les schémas que publie chaque publication sont hors du périmètre**, et c'est le
+  demandeur qui l'a tranché. La colonne « tables » dit donc la *forme* — « toutes les tables »
+  (`FOR ALL TABLES`, tables à venir comprises) ou « tables désignées » — sans prétendre les lister.
+  Les abonnements (`pg_subscription`), les slots de réplication et tout geste d'écriture en sont
+  sortis aussi ; chacun ferait son propre ticket ;
+- **l'entrée est en troisième position**, après « Gérer les schémas… » : elle *ouvre* quelque chose,
+  comme les deux d'avant, et ce qui règle la ligne vient ensuite. **Hors PostgreSQL elle reste et
+  se désactive avec sa raison** — et cette raison n'est pas le « pour l'instant » des schémas : les
+  autres moteurs n'ont pas d'objet « publication », et une phrase en « pas encore » ferait attendre
+  ce qui ne viendra pas ;
+- **les quatre autres moteurs refusent la lecture, ils ne rendent pas une liste vide**
+  (`AnyEngine::publications`). Une liste vide dirait « cette base n'a aucune publication » d'une
+  base qui ne connaît pas la notion. Pas une entrée du contrat de moteur, pour la raison de
+  `create_schema` et de `table_details`, et **le `match` reste exhaustif** (défaut n° 16) ;
+- **`to_jsonb(p) ->> 'pubtruncate'` plutôt qu'un test de version.** `pubtruncate` n'existe qu'à
+  partir de PostgreSQL 11, `pubviaroot` qu'à partir de 13 : les nommer dans la projection ferait
+  échouer toute la lecture sur un serveur plus ancien, sur « la colonne n'existe pas ». La clé
+  absente d'un `jsonb` rend `null`, ce qui est exactement l'absence que `PublicationInfo` porte —
+  là où trois requêtes choisies par `server_version_num` auraient fait vivre deux textes qu'aucun
+  décor n'exécute ;
+- **une absence se dit, elle ne devient pas « non »** : `viaRoot` à `null` s'affiche en tiret, avec
+  sa raison en infobulle — un serveur qui ne connaît pas le réglage n'a pas *choisi* de ne pas
+  l'activer. `truncate` à `null`, lui, n'est simplement pas listé parmi les opérations : un tel
+  serveur ne publie pas de `truncate`, donc le taire est exact. Et une publication qui ne publie
+  rien (`publish = ''`) le dit — « aucune » —, un tiret se lisant comme une valeur inconnue ;
+- **les opérations s'écrivent dans les mots de PostgreSQL**, `insert update delete truncate`, dans
+  l'ordre de l'option `publish` : c'est ce qu'on écrit pour les régler, et ce qu'on reconnaît en
+  les relisant. Quatre colonnes de booléens auraient pris la largeur de toute la barre ;
+- **une lecture, donc rejouée, et sans refus en lecture seule.** `list_publications` passe par
+  `avec` en `Reprise::Rejouable` — une connexion morte au registre est rouverte avant (`API-81`) —,
+  et ne consulte pas la lecture seule effective (#168) : lire le catalogue n'écrit rien ;
+- **la vue attend la connexion, et c'est l'écran qui l'ouvre.** L'entrée est atteignable dès que le
+  dossier est déplié, donc sur une connexion fermée : le menu appelle `assurerLOuverture`, et la vue
+  ne lit qu'à l'état « connectée ». Une connexion qui se ferme fait oublier ce qui a été demandé —
+  sans quoi une lecture échouée pendant la coupure resterait affichée, rien ne venant la relire —,
+  le « déjà demandé » vivant dans une ref pour la raison d'`InstanceView`. Le rafraîchissement est
+  **à la demande**, et l'âge du relevé est dit par `ageLisible`, réemployé et non recopié ;
+- **aucune maquette, donc rien de dessiné** : la barre a les cotes d'une section d'instance (36 px,
+  `--bar`), le tableau est `DataTable`, l'onglet porte `network` — une boîte qui en alimente deux,
+  ce qu'une publication est pour ses abonnés — en encre neutre, comme le diagramme, et le libellé
+  `publications`, le mot de PostgreSQL dans les deux langues ; la barre de titre dit de quelle base
+  il s'agit, comme pour une console. **« Rafraîchir » est un bouton secondaire à libellé, et non le
+  carré nu de l'instance** : celui-ci porte un survol `--hover-row` que la liste des survols permis
+  ne nomme pas, et en poser un second exemplaire aurait été en inventer un.
+
+**Deux choses apprises en le vérifiant, et les deux par sabotage** (règle n° 1) :
+
+- **le premier décor du test Rust laissait `update` et `delete` aller ensemble** — trois
+  publications, et dans chacune les deux valaient la même chose. Échanger les deux colonnes de la
+  projection serait passé : la règle n° 5, au mot près. Le décor en a désormais une qui publie
+  `update` sans `delete` ;
+- **un sabotage qui ne lance aucun test est vert pour rien**, et c'est une quatrième forme du
+  « sabotage qui ne s'applique pas » des dossiers : le script passait `fichier -t motif` en **un
+  seul** argument à Vitest, qui n'a trouvé aucun fichier de ce nom, n'a rien exécuté — et rien
+  n'a échoué. **Vérifier que le sabotage a eu lieu ne suffit pas, il faut vérifier que le test a
+  tourné** : un compte de tests exécutés à zéro est un résultat, pas un succès.
+
+Et un piège de lecture : la première colonne d'un `DataTable` est un `<th scope="row">`, qui n'a pas
+le rôle `cell` — un test qui compte les cellules d'une ligne perd le nom de la ligne qu'il compare.
+
+**Ce qui reste à voir à l'œil** : l'onglet sous WKWebView et en « Nuit » — même réserve que les dix
+écrans. Et un serveur **antérieur à PostgreSQL 13** : le chemin `to_jsonb` qui rend `null` n'a
+tourné que contre le décor, un PostgreSQL 17 où les deux clés existent ; le tiret et son infobulle
+ne sont mesurés que par Vitest, sur une réponse simulée.
+
 ### La transaction d'une console : automatique ou manuelle (9 septembre 2026, `API-38`)
 
 La console exécutait toujours à découvert : chaque requête partait telle quelle, et c'était

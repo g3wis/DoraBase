@@ -286,6 +286,41 @@ value: string | null,
 expected: string | null, };
 
 /**
+ * Une publication de réplication logique d'une base PostgreSQL (#195).
+ *
+ * **Ce que la publication déclare, et rien de ce qu'elle publie.** Les tables et les schémas
+ * qu'elle couvre — avec leurs listes de colonnes et leurs filtres de lignes — sont hors du
+ * périmètre du ticket, tranché à l'entretien : ce type ne porte que la publication elle-même.
+ *
+ * **PostgreSQL seulement**, et c'est pourquoi rien ici n'est facultatif « pour les autres
+ * moteurs » : les quatre autres refusent la lecture (`AnyEngine::publications`) plutôt que de
+ * rendre une liste vide, qui se lirait comme « cette base n'a aucune publication ».
+ */
+export type PublicationInfo = { name: string, 
+/**
+ * Le rôle propriétaire, par `pg_get_userbyid` — la règle du propriétaire d'un schéma
+ * (`API-33`) : elle n'exige pas le droit de lire le catalogue des rôles.
+ */
+owner: string, 
+/**
+ * `FOR ALL TABLES` : la publication couvre toute table de la base, y compris celles qui
+ * n'existent pas encore.
+ */
+allTables: boolean, insert: boolean, update: boolean, delete: boolean, 
+/**
+ * `None` quand le serveur ne connaît pas l'opération — avant PostgreSQL 11.
+ *
+ * **Une absence dite, jamais un `false` deviné** : un serveur qui ne sait pas publier un
+ * `truncate` n'a pas *choisi* de ne pas le publier, et l'écran ne doit pas dire qu'il l'a
+ * fait.
+ */
+truncate: boolean | null, 
+/**
+ * `publish_via_partition_root`. `None` avant PostgreSQL 13, pour la même raison.
+ */
+viaRoot: boolean | null, };
+
+/**
  * Le résultat d'une requête libre de la console (`12c`).
  *
  * **Distinct de `RowWindow`**, qui décrit une fenêtre de lecture d'une table connue : ici les

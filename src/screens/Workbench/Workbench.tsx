@@ -65,6 +65,11 @@ import { ObjectTable } from '../Explorer/ObjectTable'
 import { InstancesPanel } from '../Instances/InstancesPanel'
 import { InstanceView } from '../Instances/InstanceView'
 import { PASSERELLE_INSTANCES, type PasserelleInstances } from '../Instances/instanceCommands'
+import { PublicationsView } from '../Publications/PublicationsView'
+import {
+  PASSERELLE_PUBLICATIONS,
+  type PasserellePublications,
+} from '../Publications/publicationsCommands'
 import { SchemaManager } from '../SchemaManager/SchemaManager'
 import { PASSERELLE_SCHEMAS, type PasserelleSchemas } from '../SchemaManager/schemaCommands'
 import { DdlPanel } from '../Structure/DdlPanel'
@@ -96,6 +101,7 @@ import {
   ouvrirConsole,
   ouvrirDiagramme,
   ouvrirInstance,
+  ouvrirPublications,
   renommerLaConsole,
   reordonner,
   sansLOngletDInstance,
@@ -210,6 +216,8 @@ type WorkbenchProps = {
    * la même liste des deux côtés, plutôt que deux voies vers la même lecture.
    */
   passerelleSchemas?: PasserelleSchemas
+  /** La lecture des publications d'une base PostgreSQL (#195). Injectable, comme les autres. */
+  passerellePublications?: PasserellePublications
   /**
    * Règle ce que les entiers d'une colonne veulent dire (`API-75`).
    *
@@ -294,6 +302,7 @@ export function Workbench({
   passerelleExport = PASSERELLE_EXPORT,
   passerelleTransaction = PASSERELLE_TRANSACTION,
   passerelleSchemas = PASSERELLE_SCHEMAS,
+  passerellePublications = PASSERELLE_PUBLICATIONS,
   instances = [],
   passerelleInstances = PASSERELLE_INSTANCES,
   onDeclareInstance,
@@ -451,6 +460,11 @@ export function Workbench({
    * son propre onglet.
    */
   const instanceActive = actif?.sorte === 'instance' ? actif : null
+  /**
+   * Les publications dont l'onglet est au premier plan (#195). Comme le diagramme, elles ne passent
+   * **pas** par `contexte` : l'onglet sait de quelle base il parle.
+   */
+  const publications = actif?.sorte === 'publications' ? actif : null
 
   /**
    * L'état de la connexion d'administration de chaque instance, par identifiant.
@@ -557,11 +571,13 @@ export function Workbench({
         // l'annoncer, sans quoi elle indiquerait la dernière ligne cliquée dans l'arbre.
         diagramme
         ? { connection: diagramme.key.connection }
-        : selection?.connection
-          ? { connection: selection.connection }
-          : selection?.folder
-            ? { folder: selection.folder }
-            : null
+        : publications
+          ? { connection: publications.key.connection }
+          : selection?.connection
+            ? { connection: selection.connection }
+            : selection?.folder
+              ? { folder: selection.folder }
+              : null
 
   /**
    * Il n'y a rien à montrer : aucun onglet ouvert, et aucun schéma en vue.
@@ -1402,6 +1418,16 @@ export function Workbench({
             )
           }
         />
+      ) : publications ? (
+        // Les publications de la base (#195). **Une instance par base** : changer d'onglet remet le
+        // relevé à zéro, comme la `key` du diagramme.
+        <PublicationsView
+          key={idOnglet(publications)}
+          cle={publications.key}
+          etat={etatDeBase(publications.key.connection)}
+          passerelle={passerellePublications}
+          onOuvrir={() => void assurerLOuverture(publications.key)}
+        />
       ) : structureActive && table ? (
         // La structure de la table ouverte (`14a` → `14c`). **Aucune lecture nouvelle** : `detail`
         // est celui que la sidebar et le panneau droit lisent déjà.
@@ -1701,6 +1727,13 @@ export function Workbench({
                   /* **Le gestionnaire de schémas part du menu de la connexion** (`API-33`) : le
                      geste part du palier qui connaît son contexte. */
                   onManageSchemas={setSchemasAGerer}
+                  /* **Ouvrir les publications ouvre la connexion** (#195), comme le diagramme : la
+                     vue attend une connexion ouverte pour lire, et l'entrée de menu est atteignable
+                     dès que le dossier est déplié, donc sur une connexion encore fermée. */
+                  onOpenPublications={(connection) => {
+                    void assurerLOuverture({ connection })
+                    setEtatOnglets((etat) => ouvrirPublications(etat, { connection }))
+                  }}
                   onRenameDatabase={onRenameDatabase}
                   onRecolorDatabase={onRecolorDatabase}
                   onSetDatabaseIcon={onSetDatabaseIcon}
@@ -1934,11 +1967,12 @@ export function Workbench({
                   />
                 }
               />
-            ) : consoleActive || diagramme || instanceActive ? (
-              // **Une console occupe toute la largeur ; un diagramme aussi, et une instance de
-              // même.** Le panneau droit n'a rien à y montrer — il proposerait la ligne sélectionnée
-              // d'une grille qui n'existe pas —, et ces trois-là profitent de la largeur qu'on leur
-              // laisse : une matrice de rôles × bases plus que tout le reste.
+            ) : consoleActive || diagramme || publications || instanceActive ? (
+              // **Une console occupe toute la largeur ; un diagramme aussi, une instance de même,
+              // et les publications d'une base (#195).** Le panneau droit n'a rien à y montrer — il
+              // proposerait la ligne sélectionnée d'une grille qui n'existe pas —, et ces quatre-là
+              // profitent de la largeur qu'on leur laisse : une matrice de rôles × bases plus que
+              // tout le reste.
               centre
             ) : (
               <SplitPane
